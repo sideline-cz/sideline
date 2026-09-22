@@ -32,6 +32,7 @@ const makeEntry = (
     yes_count: 2,
     no_count: 0,
     maybe_count: 0,
+    coming_later_count: 0,
     my_response: Option.some('yes'),
     my_response_actual: Option.some('yes'),
     my_message: Option.none(),
