@@ -8,9 +8,11 @@ import { SqlClient } from 'effect/unstable/sql';
 // Defaulting to an empty object is what makes this a no-op on deploy — every existing team keeps
 // resolving every event type to the same scalar it used before.
 //
-// The CHECK only pins the top-level shape. Key and range validation (0..14, known event types)
-// lives in `TeamSettingsApi`, which is the trust boundary; the constraint exists so a malformed
-// write can never make the `->>` lookup in the reminder query misbehave.
+// The CHECK only pins the TOP-LEVEL shape — it says nothing about the values. Key and range
+// validation (0..14, known event types) lives in `TeamSettingsApi`, which is the trust boundary.
+// Because neither constrains a value written by direct SQL, the reminder query gates its `::int`
+// cast on `jsonb_typeof(...) = 'number'` rather than trusting this constraint: that query spans
+// every team, so a raising cast there would stop reminders for all of them.
 export default Effect.flatMap(
   Effect.service(SqlClient.SqlClient),
   (sql) => sql`

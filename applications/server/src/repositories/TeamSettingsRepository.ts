@@ -398,7 +398,17 @@ const make = Effect.gen(function* () {
           AND ts.rsvp_reminders_enabled = TRUE
           AND DATE((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)
               + COALESCE(
-                  (ts.rsvp_reminder_days_before_overrides ->> e.event_type)::int,
+                  -- The jsonb_typeof gate is not belt-and-braces: this query spans EVERY team, so
+                  -- one non-numeric value in one team's map would make the ::int cast raise and
+                  -- take the reminder cron down for all of them, not just that team. The API
+                  -- validates on write and the column CHECK pins the top-level shape, but neither
+                  -- constrains a value reached by direct SQL. Degrading to the team-wide default
+                  -- keeps the blast radius at one event type of one team.
+                  CASE
+                    WHEN jsonb_typeof(ts.rsvp_reminder_days_before_overrides -> e.event_type)
+                         = 'number'
+                    THEN (ts.rsvp_reminder_days_before_overrides ->> e.event_type)::int
+                  END,
                   ts.rsvp_reminder_days_before
                 )
               = DATE(e.start_at AT TIME ZONE ts.timezone)
