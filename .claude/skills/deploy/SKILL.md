@@ -52,9 +52,11 @@ Follow in order; stop and report on any failure.
    | Skew | What happens | Verdict |
    |------|--------------|---------|
    | old bot + new server | bot bundles `Schema.Literals(['yes','no','maybe'])`, server sends `coming_later` → the WHOLE RPC result fails to decode, personal cards stop rendering | read failure, no data lost — but avoid it: tag bot FIRST |
-   | new bot + old server | old server still projects `coming_later → maybe`, but the bot reads `my_response_actual` (`OptionFromOptionalKey`) and falls back only when absent | defended by design — this is why bot goes first |
+   | new bot + old server | old server still projects `coming_later → maybe`; the bot read a transitional `my_response_actual` (`OptionFromOptionalKey`) carrying the true value and fell back to `my_response` only when absent | defended by design — this is why bot goes first |
    | new web + old server | web reads the projected `'maybe'` for a member who actually stored `coming_later`, so `EventRsvpPanel` treats the mandatory note as optional and a Save writes `response = 'maybe'` — a silent downgrade of the stored answer, with no `_actual` field on `EventRsvpDetail` to defend it | **write corruption — web MUST go last** |
    | old web + new server | old web bundles the 3-literal union and fails to decode the RSVP panel | read failure, accepted cost of putting web last |
+
+   **Retiring a transitional shield field** (the `my_response_actual` row above) is itself a wire change with the SAME asymmetry, and the gate is deployment state, not merge state. The release that removed the projection must be live on EVERY class — `production` included — before the shield can be deleted, because `production` is promoted by hand and lags `stable` by an arbitrary number of releases. Check the ops repo's promote history (`git log apps/sideline-<app>/production.yaml` in `sideline-cz/ops`), not `git tag --contains`: a tag existing means `stable` has it, not production. If the shield is removed while production still runs the projecting server, the bot-first order that protected the original rollout now delivers exactly the write corruption the shield existed to prevent.
 4. Watch `.github/workflows/release.yaml` (one run per tag) to success (`gh run watch`). Every app's run must be green.
 5. Verify **stable** picked it up: the bot auto-merges a render PR on `sideline-cz/ops` targeting `env/stable` — confirm the merged PR / new commit on `env/stable` references the `vX.Y.Z` digests:
    ```bash

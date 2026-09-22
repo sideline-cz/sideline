@@ -4,8 +4,7 @@
 //
 // Same `Schema.OptionFromOptionalKey(Schema.String)` contract as EventInfo/EventDetail
 // (packages/domain/test/api/EventApi.test.ts) — never a plain string with a `''`
-// fallback. Precedent in this very class: `my_response_actual` uses the identical
-// shape for the identical rolling-deploy reason (doc comment at EventRpcModels.ts:207).
+// fallback.
 
 import { describe, expect, it } from '@effect/vitest';
 import { Option, Schema } from 'effect';
@@ -28,7 +27,6 @@ const baseWire = {
   all_day: true,
   my_response: null,
   my_message: null,
-  // my_response_actual intentionally omitted — OptionFromOptionalKey, absent is valid.
 };
 
 describe('UpcomingEventForUserEntry — start_date/end_date (PR 3b)', () => {
@@ -84,8 +82,7 @@ describe('UpcomingEventForUserEntry — start_date/end_date (PR 3b)', () => {
 // non-attending response, distinct from `coming_later`. The server-side
 // coming_later -> maybe wire projection is removed, so both DTOs must widen
 // to decode `coming_later` on their response-carrying fields, and
-// `coming_later_count`/`my_response_actual` must default sanely when absent
-// (rolling-deploy skew).
+// `coming_later_count` must default sanely when absent (rolling-deploy skew).
 // ---------------------------------------------------------------------------
 
 describe('UpcomingEventForUserEntry — coming_later widening (rsvp-maybe-restore)', () => {
@@ -110,19 +107,6 @@ describe('UpcomingEventForUserEntry — coming_later widening (rsvp-maybe-restor
     });
     expect(result.maybe_count).toBe(2);
     expect(result.coming_later_count).toBe(4);
-  });
-
-  it('my_response_actual decodes to Option.none() when the key is absent', () => {
-    const result = Schema.decodeUnknownSync(UpcomingEventForUserEntry)(baseWire);
-    expect(result.my_response_actual).toStrictEqual(Option.none());
-  });
-
-  it('my_response_actual decodes "coming_later" when present', () => {
-    const result = Schema.decodeUnknownSync(UpcomingEventForUserEntry)({
-      ...baseWire,
-      my_response_actual: 'coming_later',
-    });
-    expect(result.my_response_actual).toStrictEqual(Option.some('coming_later'));
   });
 });
 

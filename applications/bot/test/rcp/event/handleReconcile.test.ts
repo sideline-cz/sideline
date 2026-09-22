@@ -46,7 +46,6 @@ const makeUpcomingEvent = (myResponse: 'yes' | 'no' | 'maybe' | null) => ({
   start_date: Option.none(),
   end_date: Option.none(),
   my_response: Option.fromNullishOr(myResponse),
-  my_response_actual: Option.fromNullishOr(myResponse),
   my_message: Option.none(),
   yes_count: 5,
   no_count: 1,

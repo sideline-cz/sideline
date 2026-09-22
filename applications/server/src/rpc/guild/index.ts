@@ -1650,7 +1650,6 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 maybe_count: Schema.Number,
                 coming_later_count: Schema.Number,
                 my_response: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
-                my_response_actual: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
                 my_message: Schema.OptionFromNullOr(Schema.String),
                 all_day: Schema.Boolean,
                 status: Schema.String,
@@ -1677,7 +1676,6 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     COALESCE(SUM(CASE WHEN er.response = 'maybe' THEN 1 ELSE 0 END), 0)::int AS maybe_count,
                     COALESCE(SUM(CASE WHEN er.response = 'coming_later' THEN 1 ELSE 0 END), 0)::int AS coming_later_count,
                     my_rsvp.response AS my_response,
-                    my_rsvp.response AS my_response_actual,
                     my_rsvp.message AS my_message,
                     (e.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
                         AS start_date,
@@ -1738,7 +1736,6 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       maybe_count: row.maybe_count,
                       coming_later_count: row.coming_later_count,
                       my_response: row.my_response,
-                      my_response_actual: row.my_response_actual,
                       my_message: row.my_message,
                       all_day: row.all_day,
                       status: row.status,

@@ -28,7 +28,6 @@ const makeEntry = (
     maybe_count: 0,
     coming_later_count: 0,
     my_response: Option.none(),
-    my_response_actual: Option.none(),
     my_message: Option.none(),
     all_day: false,
     status: 'active',
@@ -324,9 +323,7 @@ describe('buildUpcomingEventEmbed', () => {
   // canonical gradient order: yes -> coming_later -> maybe -> no. `maybe`
   // ("Nevím") now instant-submits (like yes/no); `coming_later` keeps its
   // `:v`-marked modal-trigger custom_id, now at index 1. Highlight styling is
-  // driven by `myActualResponse` (falls back to `my_response` when
-  // `my_response_actual` is absent — rolling-deploy safety), per the plan's
-  // "row 1's style highlight" note.
+  // driven by `my_response`, per the plan's "row 1's style highlight" note.
   // ---------------------------------------------------------------------------
 
   describe('RSVP buttons', () => {
@@ -355,28 +352,22 @@ describe('buildUpcomingEventEmbed', () => {
       expect(rsvpButtons.every((b) => !b.disabled)).toBe(true);
     });
 
-    it('yes button uses success style when my_response_actual is yes', () => {
-      const entry = makeEntry({
-        my_response: Option.some('yes'),
-        my_response_actual: Option.some('yes'),
-      });
+    it('yes button uses success style when my_response is yes', () => {
+      const entry = makeEntry({ my_response: Option.some('yes') });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const yesButton = components[0].components[0] as { style: number };
       expect(yesButton.style).toBe(3); // success/green
     });
 
-    it('no button uses danger style when my_response_actual is no', () => {
-      const entry = makeEntry({
-        my_response: Option.some('no'),
-        my_response_actual: Option.some('no'),
-      });
+    it('no button uses danger style when my_response is no', () => {
+      const entry = makeEntry({ my_response: Option.some('no') });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const noButton = components[0].components[3] as { style: number };
       expect(noButton.style).toBe(4); // danger/red
     });
 
     it('all rsvp buttons use secondary style when my_response is none', () => {
-      const entry = makeEntry({ my_response: Option.none(), my_response_actual: Option.none() });
+      const entry = makeEntry({ my_response: Option.none() });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const rsvpButtons = components[0].components as ReadonlyArray<{ style: number }>;
       expect(rsvpButtons.every((b) => b.style === 2)).toBe(true);
@@ -394,11 +385,8 @@ describe('buildUpcomingEventEmbed', () => {
         ['no', 3],
       ] as const
     ).forEach(([response, expectedIndex]) => {
-      it(`exactly one row-1 button is highlighted for my_response_actual = ${response} (index ${expectedIndex})`, () => {
-        const entry = makeEntry({
-          my_response: Option.some(response),
-          my_response_actual: Option.some(response),
-        });
+      it(`exactly one row-1 button is highlighted for my_response = ${response} (index ${expectedIndex})`, () => {
+        const entry = makeEntry({ my_response: Option.some(response) });
         const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
         const rsvpButtons = components[0].components as ReadonlyArray<{ style: number }>;
         const highlightedIndices = rsvpButtons
@@ -407,25 +395,6 @@ describe('buildUpcomingEventEmbed', () => {
         expect(highlightedIndices).toHaveLength(1);
         expect(highlightedIndices[0]).toBe(expectedIndex);
       });
-    });
-
-    // The cases above set `my_response` and `my_response_actual` to the SAME value, so they
-    // would all still pass if row 1 were highlighted from the projected `my_response`. This is
-    // the only case that pins the distinction: it is the new-bot/old-server skew, where the
-    // server still projects `coming_later` down to `maybe` on `my_response`. Highlighting from
-    // the projected value would light up "Nevím" for a member who actually answered
-    // "Přijdu později".
-    it('highlights from my_response_actual, not the projected my_response, when they disagree', () => {
-      const entry = makeEntry({
-        my_response: Option.some('maybe'),
-        my_response_actual: Option.some('coming_later'),
-      });
-      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const rsvpButtons = components[0].components as ReadonlyArray<{ style: number }>;
-      const highlightedIndices = rsvpButtons
-        .map((b, i) => (b.style !== 2 ? i : -1))
-        .filter((i) => i !== -1);
-      expect(highlightedIndices).toEqual([1]);
     });
 
     it('rsvp button custom_ids encode event_id, team_id in gradient order yes/coming_later/maybe/no', () => {
@@ -592,7 +561,6 @@ describe('buildUpcomingEventEmbed', () => {
         event_id: 'ev-42',
         team_id: 'tm-7',
         my_response: Option.some('maybe'),
-        my_response_actual: Option.some('maybe'),
         my_message: Option.some('Already responded with a note'),
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
@@ -629,20 +597,11 @@ describe('buildUpcomingEventEmbed', () => {
       expect(clearBtn.style).toBe(4);
     });
 
-    // -----------------------------------------------------------------------
-    // my_response_actual — row 2's edit/clear buttons must be built from the
-    // TRUE (unprojected) response, not the legacy-projected `my_response`
-    // (which downgrades `coming_later` to `maybe`). Building them from the
-    // projected value would let "Clear message" silently rewrite a stored
-    // `coming_later` RSVP to `maybe` and bypass the mandatory-comment guard.
-    // -----------------------------------------------------------------------
-
-    it('edit button custom_id encodes the true coming_later response, not the projected maybe', () => {
+    it('edit button custom_id encodes the coming_later response', () => {
       const entry = makeEntry({
         event_id: 'ev-42',
         team_id: 'tm-7',
-        my_response: Option.some('maybe'),
-        my_response_actual: Option.some('coming_later'),
+        my_response: Option.some('coming_later'),
         my_message: Option.some('Running late'),
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
@@ -651,12 +610,11 @@ describe('buildUpcomingEventEmbed', () => {
       expect(editBtn?.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later');
     });
 
-    it('does not render a clear-message button when the true response is coming_later', () => {
+    it('does not render a clear-message button when the response is coming_later', () => {
       const entry = makeEntry({
         event_id: 'ev-42',
         team_id: 'tm-7',
-        my_response: Option.some('maybe'),
-        my_response_actual: Option.some('coming_later'),
+        my_response: Option.some('coming_later'),
         my_message: Option.some('Running late'),
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
@@ -664,12 +622,11 @@ describe('buildUpcomingEventEmbed', () => {
       expect(secondRow.some((b) => b.custom_id.startsWith('u-clear-msg:'))).toBe(false);
     });
 
-    it('does not render a clear-message button when the true response is maybe (its note is mandatory too)', () => {
+    it('does not render a clear-message button when the response is maybe (its note is mandatory too)', () => {
       const entry = makeEntry({
         event_id: 'ev-42',
         team_id: 'tm-7',
         my_response: Option.some('maybe'),
-        my_response_actual: Option.some('maybe'),
         my_message: Option.some('Not sure yet'),
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
@@ -677,12 +634,11 @@ describe('buildUpcomingEventEmbed', () => {
       expect(secondRow.some((b) => b.custom_id.startsWith('u-clear-msg:'))).toBe(false);
     });
 
-    it('falls back to the legacy my_response when my_response_actual is absent (rolling-deploy safety)', () => {
+    it('renders edit and clear buttons encoding a yes response', () => {
       const entry = makeEntry({
         event_id: 'ev-42',
         team_id: 'tm-7',
         my_response: Option.some('yes'),
-        my_response_actual: Option.none(),
         my_message: Option.some('See you there'),
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
@@ -695,7 +651,7 @@ describe('buildUpcomingEventEmbed', () => {
 
     // -----------------------------------------------------------------------
     // Regression: row 1's third button (`...:coming_later`) and row 2's edit
-    // button (`...:{my_response_actual}`) render the SAME string whenever the
+    // button (`...:{my_response}`) render the SAME string whenever the
     // true response is coming_later — coming_later mandates a comment, so
     // my_message is always Some and row 2's edit button ALWAYS renders
     // alongside it. Discord rejects a message with two components sharing a
@@ -703,7 +659,7 @@ describe('buildUpcomingEventEmbed', () => {
     // voted "Coming later". Guarded by a `:v` marker on row 1's id only.
     // -----------------------------------------------------------------------
 
-    // Table: all FOUR my_response_actual values x my_message present/absent —
+    // Table: all FOUR my_response values x my_message present/absent —
     // 8 cases, each built with two REAL 36-character UUIDs (the longest id,
     // row 1's coming_later `:v`-marked button, is 98 of Discord's 100-char
     // budget — 2 characters of headroom). Discord error 50035 rejects the
@@ -724,12 +680,11 @@ describe('buildUpcomingEventEmbed', () => {
         ['no', false],
       ] as const
     ).forEach(([response, hasMessage]) => {
-      it(`every custom_id across both action rows is unique and <=100 chars — my_response_actual=${response}, my_message ${hasMessage ? 'present' : 'absent'}`, () => {
+      it(`every custom_id across both action rows is unique and <=100 chars — my_response=${response}, my_message ${hasMessage ? 'present' : 'absent'}`, () => {
         const entry = makeEntry({
           event_id: eventId,
           team_id: teamId,
           my_response: Option.some(response),
-          my_response_actual: Option.some(response),
           my_message: hasMessage ? Option.some('Running late') : Option.none(),
         });
         const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
