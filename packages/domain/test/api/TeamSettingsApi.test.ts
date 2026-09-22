@@ -202,6 +202,53 @@ describe('UpdateTeamSettingsRequest — rsvpReminderDaysBefore validation', () =
 });
 
 // ---------------------------------------------------------------------------
+// UpdateTeamSettingsRequest — rsvpReminderDaysBeforeOverrides
+// ---------------------------------------------------------------------------
+
+describe('UpdateTeamSettingsRequest — rsvpReminderDaysBeforeOverrides validation', () => {
+  const decode = (overrides: unknown) =>
+    Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+      rsvpReminderDaysBeforeOverrides: overrides,
+    }).rsvpReminderDaysBeforeOverrides;
+
+  it('accepts an empty map, which is every type on the team-wide default', () => {
+    expect(decode({})).toStrictEqual(Option.some({}));
+  });
+
+  it('accepts a partial map — an absent type falls back, it is not required', () => {
+    expect(decode({ tournament: 3 })).toStrictEqual(Option.some({ tournament: 3 }));
+  });
+
+  it('accepts every known event type at once', () => {
+    const all = { training: 1, match: 2, tournament: 3, meeting: 4, social: 5, other: 6 };
+    expect(decode(all)).toStrictEqual(Option.some(all));
+  });
+
+  it.each([[0], [14]])('accepts the boundary value %i', (days) => {
+    expect(decode({ training: days })).toStrictEqual(Option.some({ training: days }));
+  });
+
+  it.each([[-1], [15], [1.5]])('rejects the out-of-range value %s', (days) => {
+    expect(() => decode({ training: days })).toThrow();
+  });
+
+  // Unknown keys are DROPPED rather than rejected, so a web bundle that learns a new event type
+  // before the server does cannot make the whole settings payload undecodable. The point of the
+  // test is that the junk never survives into what gets stored.
+  it('drops an unrecognised event type instead of storing it', () => {
+    expect(decode({ nope: 3, training: 2 })).toStrictEqual(Option.some({ training: 2 }));
+  });
+
+  it('omitting the field entirely yields None, which leaves the stored map untouched', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+    });
+    expect(Option.isNone(result.rsvpReminderDaysBeforeOverrides)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // UpdateTeamSettingsRequest — claimRequestDaysBefore validation
 // ---------------------------------------------------------------------------
 

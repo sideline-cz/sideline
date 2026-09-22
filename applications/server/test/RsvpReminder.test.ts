@@ -188,6 +188,7 @@ let teamSettingsStore: {
   event_horizon_days: number;
   rsvp_reminders_enabled: boolean;
   rsvp_reminder_days_before: number;
+  rsvp_reminder_days_before_overrides: Record<string, number>;
   claim_request_days_before: number;
   rsvp_reminder_time: string;
   reminders_channel_id: Option.Option<string>;
@@ -208,6 +209,7 @@ const resetStores = () => {
     event_horizon_days: 30,
     rsvp_reminders_enabled: true,
     rsvp_reminder_days_before: 1,
+    rsvp_reminder_days_before_overrides: {},
     claim_request_days_before: 3,
     rsvp_reminder_time: '18:00',
     reminders_channel_id: Option.none(),
@@ -561,6 +563,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         min_players_threshold: teamSettingsStore.min_players_threshold,
         rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
         rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
+        rsvp_reminder_days_before_overrides: teamSettingsStore.rsvp_reminder_days_before_overrides,
         claim_request_days_before: teamSettingsStore.claim_request_days_before,
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
@@ -593,6 +596,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         min_players_threshold: teamSettingsStore.min_players_threshold,
         rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
         rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
+        rsvp_reminder_days_before_overrides: teamSettingsStore.rsvp_reminder_days_before_overrides,
         claim_request_days_before: teamSettingsStore.claim_request_days_before,
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
@@ -622,6 +626,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     event_horizon_days: number;
     min_players_threshold: number;
     rsvp_reminder_days_before?: number;
+    rsvp_reminder_days_before_overrides?: Record<string, number>;
     claim_request_days_before?: number;
     rsvp_reminder_time?: string;
     reminders_channel_id?: Option.Option<string>;
@@ -635,6 +640,9 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
       rsvp_reminder_days_before:
         input.rsvp_reminder_days_before ?? teamSettingsStore.rsvp_reminder_days_before,
+      rsvp_reminder_days_before_overrides:
+        input.rsvp_reminder_days_before_overrides ??
+        teamSettingsStore.rsvp_reminder_days_before_overrides,
       claim_request_days_before:
         input.claim_request_days_before ?? teamSettingsStore.claim_request_days_before,
       rsvp_reminder_time: input.rsvp_reminder_time ?? teamSettingsStore.rsvp_reminder_time,
@@ -664,6 +672,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     eventHorizonDays: number;
     minPlayersThreshold: number;
     rsvpReminderDaysBefore?: number;
+    rsvpReminderDaysBeforeOverrides?: Record<string, number>;
     claimRequestDaysBefore?: number;
     rsvpReminderTime?: string;
     remindersChannelId?: Option.Option<string>;
@@ -675,6 +684,8 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     teamSettingsStore.event_horizon_days = input.eventHorizonDays;
     if (input.rsvpReminderDaysBefore !== undefined)
       teamSettingsStore.rsvp_reminder_days_before = input.rsvpReminderDaysBefore;
+    if (input.rsvpReminderDaysBeforeOverrides !== undefined)
+      teamSettingsStore.rsvp_reminder_days_before_overrides = input.rsvpReminderDaysBeforeOverrides;
     if (input.claimRequestDaysBefore !== undefined)
       teamSettingsStore.claim_request_days_before = input.claimRequestDaysBefore;
     if (input.rsvpReminderTime !== undefined)
@@ -692,6 +703,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       min_players_threshold: input.minPlayersThreshold,
       rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
       rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
+      rsvp_reminder_days_before_overrides: teamSettingsStore.rsvp_reminder_days_before_overrides,
       claim_request_days_before: teamSettingsStore.claim_request_days_before,
       rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
       reminders_channel_id: teamSettingsStore.reminders_channel_id,
@@ -1238,6 +1250,52 @@ describe('RSVP Reminder Features', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.rsvpReminderDaysBefore).toBe(3);
+    });
+
+    const patchSettings = (payload: Record<string, unknown>) =>
+      handler(
+        new Request(SETTINGS_URL, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ eventHorizonDays: 30, ...payload }),
+        }),
+      );
+
+    it('PATCH round-trips rsvpReminderDaysBeforeOverrides', async () => {
+      const response = await patchSettings({
+        rsvpReminderDaysBeforeOverrides: { tournament: 3, social: 0 },
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json()).rsvpReminderDaysBeforeOverrides).toEqual({
+        tournament: 3,
+        social: 0,
+      });
+    });
+
+    // Omitting the key must leave the stored map alone, the same contract every other optional
+    // field in this payload follows — otherwise saving an unrelated setting would wipe the
+    // team's per-event-type lead times.
+    it('PATCH without rsvpReminderDaysBeforeOverrides preserves the stored map', async () => {
+      await patchSettings({ rsvpReminderDaysBeforeOverrides: { tournament: 5 } });
+      const response = await patchSettings({ rsvpReminderTime: '09:30' });
+      expect(response.status).toBe(200);
+      expect((await response.json()).rsvpReminderDaysBeforeOverrides).toEqual({ tournament: 5 });
+    });
+
+    it('PATCH rejects an override above the 14-day maximum', async () => {
+      expect(
+        (await patchSettings({ rsvpReminderDaysBeforeOverrides: { tournament: 15 } })).status,
+      ).not.toBe(200);
+    });
+
+    it('PATCH can clear every override with an empty map', async () => {
+      await patchSettings({ rsvpReminderDaysBeforeOverrides: { tournament: 5 } });
+      const response = await patchSettings({ rsvpReminderDaysBeforeOverrides: {} });
+      expect(response.status).toBe(200);
+      expect((await response.json()).rsvpReminderDaysBeforeOverrides).toEqual({});
     });
 
     it('PATCH updates rsvpReminderTime', async () => {

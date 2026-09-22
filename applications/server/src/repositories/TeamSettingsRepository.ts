@@ -1,4 +1,12 @@
-import { ChannelSyncEvent, Discord, Event, GroupModel, Team, TeamMember } from '@sideline/domain';
+import {
+  ChannelSyncEvent,
+  Discord,
+  Event,
+  GroupModel,
+  Team,
+  TeamMember,
+  TeamSettings as TeamSettingsModel,
+} from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -10,12 +18,20 @@ import {
   DEFAULT_ROLE_FORMAT,
 } from '~/utils/applyDiscordFormat.js';
 
+/** `team_settings.rsvp_reminder_days_before_overrides`. Both directions go through TEXT — the
+ * SELECTs cast `::text` and the writes bind a JSON string cast back with `::jsonb` — so the
+ * round-trip never depends on how the driver happens to marshal a jsonb column. */
+const ReminderOverridesFromJson = Schema.fromJsonString(
+  TeamSettingsModel.RsvpReminderDaysBeforeOverrides,
+);
+
 class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   team_id: Team.TeamId,
   event_horizon_days: Schema.Number,
   min_players_threshold: Schema.Number,
   rsvp_reminders_enabled: Schema.Boolean,
   rsvp_reminder_days_before: Schema.Number,
+  rsvp_reminder_days_before_overrides: ReminderOverridesFromJson,
   rsvp_reminder_time: Schema.String,
   reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   timezone: Schema.String,
@@ -77,6 +93,7 @@ const TeamSettingsUpsertInput = Schema.Struct({
   min_players_threshold: Schema.Number,
   rsvp_reminders_enabled: Schema.Boolean,
   rsvp_reminder_days_before: Schema.Number,
+  rsvp_reminder_days_before_overrides: ReminderOverridesFromJson,
   rsvp_reminder_time: Schema.String,
   reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   timezone: Schema.String,
@@ -161,7 +178,9 @@ const make = Effect.gen(function* () {
       SELECT team_id, event_horizon_days,
              min_players_threshold,
              rsvp_reminders_enabled,
-             rsvp_reminder_days_before, TO_CHAR(rsvp_reminder_time, 'HH24:MI') AS rsvp_reminder_time,
+             rsvp_reminder_days_before,
+             rsvp_reminder_days_before_overrides::text AS rsvp_reminder_days_before_overrides,
+             TO_CHAR(rsvp_reminder_time, 'HH24:MI') AS rsvp_reminder_time,
              reminders_channel_id, timezone,
              discord_channel_late_rsvp,
              create_discord_channel_on_group, create_discord_channel_on_roster,
@@ -221,7 +240,9 @@ const make = Effect.gen(function* () {
       INSERT INTO team_settings (team_id, event_horizon_days,
                                  min_players_threshold,
                                  rsvp_reminders_enabled,
-                                 rsvp_reminder_days_before, rsvp_reminder_time,
+                                 rsvp_reminder_days_before,
+                                 rsvp_reminder_days_before_overrides,
+                                 rsvp_reminder_time,
                                  reminders_channel_id, timezone,
                                  discord_channel_late_rsvp,
                                  create_discord_channel_on_group, create_discord_channel_on_roster,
@@ -245,7 +266,9 @@ const make = Effect.gen(function* () {
       VALUES (${input.team_id}, ${input.event_horizon_days},
               ${input.min_players_threshold},
               ${input.rsvp_reminders_enabled},
-              ${input.rsvp_reminder_days_before}, ${input.rsvp_reminder_time},
+              ${input.rsvp_reminder_days_before},
+              ${input.rsvp_reminder_days_before_overrides}::jsonb,
+              ${input.rsvp_reminder_time},
               ${input.reminders_channel_id}, ${input.timezone},
               ${input.discord_channel_late_rsvp},
               ${input.create_discord_channel_on_group}, ${input.create_discord_channel_on_roster},
@@ -271,6 +294,7 @@ const make = Effect.gen(function* () {
         min_players_threshold = ${input.min_players_threshold},
         rsvp_reminders_enabled = ${input.rsvp_reminders_enabled},
         rsvp_reminder_days_before = ${input.rsvp_reminder_days_before},
+        rsvp_reminder_days_before_overrides = ${input.rsvp_reminder_days_before_overrides}::jsonb,
         rsvp_reminder_time = ${input.rsvp_reminder_time},
         reminders_channel_id = ${input.reminders_channel_id},
         timezone = ${input.timezone},
@@ -298,7 +322,9 @@ const make = Effect.gen(function* () {
       RETURNING team_id, event_horizon_days,
                 min_players_threshold,
                 rsvp_reminders_enabled,
-                rsvp_reminder_days_before, TO_CHAR(rsvp_reminder_time, 'HH24:MI') AS rsvp_reminder_time,
+                rsvp_reminder_days_before,
+                rsvp_reminder_days_before_overrides::text AS rsvp_reminder_days_before_overrides,
+                TO_CHAR(rsvp_reminder_time, 'HH24:MI') AS rsvp_reminder_time,
                 reminders_channel_id, timezone,
                 discord_channel_late_rsvp,
                 create_discord_channel_on_group, create_discord_channel_on_roster,
@@ -371,7 +397,20 @@ const make = Effect.gen(function* () {
           AND e.reminder_sent_at IS NULL
           AND ts.rsvp_reminders_enabled = TRUE
           AND DATE((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)
-              + ts.rsvp_reminder_days_before
+              + COALESCE(
+                  -- The jsonb_typeof gate is not belt-and-braces: this query spans EVERY team, so
+                  -- one non-numeric value in one team's map would make the ::int cast raise and
+                  -- take the reminder cron down for all of them, not just that team. The API
+                  -- validates on write and the column CHECK pins the top-level shape, but neither
+                  -- constrains a value reached by direct SQL. Degrading to the team-wide default
+                  -- keeps the blast radius at one event type of one team.
+                  CASE
+                    WHEN jsonb_typeof(ts.rsvp_reminder_days_before_overrides -> e.event_type)
+                         = 'number'
+                    THEN (ts.rsvp_reminder_days_before_overrides ->> e.event_type)::int
+                  END,
+                  ts.rsvp_reminder_days_before
+                )
               = DATE(e.start_at AT TIME ZONE ts.timezone)
           AND ((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)::time
               BETWEEN ts.rsvp_reminder_time
@@ -436,6 +475,8 @@ const make = Effect.gen(function* () {
     minPlayersThreshold,
     rsvpRemindersEnabled = true,
     rsvpReminderDaysBefore = 1,
+    // `{}` keeps every event type on the scalar default — the pre-override behaviour.
+    rsvpReminderDaysBeforeOverrides = {},
     rsvpReminderTime = '18:00',
     remindersChannelId = Option.none(),
     timezone = 'Europe/Prague',
@@ -467,6 +508,7 @@ const make = Effect.gen(function* () {
     minPlayersThreshold: number;
     rsvpRemindersEnabled?: boolean;
     rsvpReminderDaysBefore?: number;
+    rsvpReminderDaysBeforeOverrides?: TeamSettingsModel.RsvpReminderDaysBeforeOverrides;
     rsvpReminderTime?: string;
     remindersChannelId?: Option.Option<Discord.Snowflake>;
     timezone?: string;
@@ -497,6 +539,7 @@ const make = Effect.gen(function* () {
       min_players_threshold: minPlayersThreshold,
       rsvp_reminders_enabled: rsvpRemindersEnabled,
       rsvp_reminder_days_before: rsvpReminderDaysBefore,
+      rsvp_reminder_days_before_overrides: rsvpReminderDaysBeforeOverrides,
       rsvp_reminder_time: rsvpReminderTime,
       reminders_channel_id: remindersChannelId,
       timezone,

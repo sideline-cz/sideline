@@ -1,4 +1,4 @@
-import type { ChannelSyncEvent, TeamSettingsApi } from '@sideline/domain';
+import type { ChannelSyncEvent, Event, TeamSettingsApi } from '@sideline/domain';
 import { Option } from 'effect';
 import {
   channelToOption,
@@ -7,6 +7,30 @@ import {
   isFormatValid,
   selectValue,
 } from './shared';
+
+/**
+ * The event types that can carry their own reminder lead time. Kept as flat `string` fields on the
+ * form rather than a nested map because `useCardForm` compares with `!==` over primitives — a
+ * nested object would be a fresh reference every render and so read as permanently dirty.
+ *
+ * An empty string means "no override": that type falls back to `rsvpReminderDaysBefore`.
+ */
+export const REMINDER_OVERRIDE_EVENT_TYPES = [
+  'training',
+  'match',
+  'tournament',
+  'meeting',
+  'social',
+  'other',
+] as const satisfies ReadonlyArray<Event.EventType>;
+
+type ReminderOverrideFields = {
+  [K in Event.EventType as `reminderDaysBefore_${K}`]: string;
+};
+
+export const reminderOverrideField = <K extends Event.EventType>(
+  eventType: K,
+): `reminderDaysBefore_${K}` => `reminderDaysBefore_${eventType}`;
 
 /**
  * Every field the team-settings Save button owns — the single source for both
@@ -40,11 +64,22 @@ export type SettingsFormValues = {
   createDiscordChannelOnRoster: boolean;
   roleFormat: string;
   channelFormat: string;
-};
+} & ReminderOverrideFields;
+
+const overrideFieldsFrom = (
+  overrides: TeamSettingsApi.TeamSettingsInfo['rsvpReminderDaysBeforeOverrides'],
+): ReminderOverrideFields =>
+  Object.fromEntries(
+    REMINDER_OVERRIDE_EVENT_TYPES.map((eventType) => [
+      reminderOverrideField(eventType),
+      overrides[eventType] === undefined ? '' : String(overrides[eventType]),
+    ]),
+  ) as ReminderOverrideFields;
 
 export const settingsFormFrom = (
   settings: TeamSettingsApi.TeamSettingsInfo,
 ): SettingsFormValues => ({
+  ...overrideFieldsFrom(settings.rsvpReminderDaysBeforeOverrides),
   horizonDays: String(settings.eventHorizonDays),
   minPlayersThreshold: String(settings.minPlayersThreshold),
   rsvpRemindersEnabled: settings.rsvpRemindersEnabled,
@@ -126,6 +161,16 @@ export const findInvalidSettingsField = (values: SettingsFormValues): string | u
     ],
     [outside(int(values.rulesQuizIntervalDays), 1, 90), 'teamSettings_rulesQuizInterval'],
     [!HH_MM.test(normaliseTime(values.rulesQuizTime)), 'teamSettings_rulesQuizTime'],
+    // Per-event-type overrides. Blank is the valid "no override" value here, unlike every other
+    // number field above where blank is the bug being guarded against.
+    ...REMINDER_OVERRIDE_EVENT_TYPES.map(
+      (eventType) =>
+        [
+          values[reminderOverrideField(eventType)].trim() !== '' &&
+            outside(int(values[reminderOverrideField(eventType)]), 0, 14),
+          'teamSettings_rsvpReminderDaysBeforeOverrides',
+        ] as const,
+    ),
   ];
 
   return checks.find(([invalid]) => invalid)?.[1];
@@ -138,6 +183,16 @@ export const findInvalidSettingsField = (values: SettingsFormValues): string | u
 export const settingsRequestFrom = (
   values: SettingsFormValues,
 ): TeamSettingsApi.UpdateTeamSettingsRequest => ({
+  // Blank means "no override", so the key is omitted entirely rather than sent as 0 — the server
+  // falls back to `rsvpReminderDaysBefore` for any type missing from the map.
+  rsvpReminderDaysBeforeOverrides: Option.some(
+    Object.fromEntries(
+      REMINDER_OVERRIDE_EVENT_TYPES.flatMap((eventType) => {
+        const raw = values[reminderOverrideField(eventType)].trim();
+        return raw === '' ? [] : [[eventType, Number.parseInt(raw, 10)] as const];
+      }),
+    ),
+  ),
   eventHorizonDays: Option.some(Number.parseInt(values.horizonDays, 10)),
   minPlayersThreshold: Option.some(Number.parseInt(values.minPlayersThreshold, 10)),
   rsvpRemindersEnabled: Option.some(values.rsvpRemindersEnabled),

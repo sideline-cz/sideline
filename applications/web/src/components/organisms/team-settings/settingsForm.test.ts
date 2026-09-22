@@ -44,6 +44,13 @@ const BASE: SettingsFormValues = {
   roleFormat: '{emoji} {name}',
   channelFormat: '{emoji}│{name}',
   requireCompleteProfile: false,
+  // Blank = no override, so the whole feature is off in the baseline.
+  reminderDaysBefore_training: '',
+  reminderDaysBefore_match: '',
+  reminderDaysBefore_tournament: '',
+  reminderDaysBefore_meeting: '',
+  reminderDaysBefore_social: '',
+  reminderDaysBefore_other: '',
 };
 
 /**
@@ -77,6 +84,12 @@ const EDITED: SettingsFormValues = {
   roleFormat: '{name}',
   channelFormat: '{name}',
   requireCompleteProfile: true,
+  reminderDaysBefore_training: '1',
+  reminderDaysBefore_match: '2',
+  reminderDaysBefore_tournament: '7',
+  reminderDaysBefore_meeting: '0',
+  reminderDaysBefore_social: '5',
+  reminderDaysBefore_other: '14',
 };
 
 const FIELDS = Object.keys(BASE) as ReadonlyArray<keyof SettingsFormValues>;
@@ -206,5 +219,62 @@ describe('findInvalidSettingsField', () => {
 
   it('accepts the last minute before the wrap guard', () => {
     expect(findInvalidSettingsField({ ...BASE, rsvpReminderTime: '23:54' })).toBeUndefined();
+  });
+
+  // Blank is the one number field where empty is meaningful rather than a half-typed value: it
+  // means "this type has no override", so it must NOT be reported as invalid.
+  it('accepts a blank per-event-type override', () => {
+    expect(
+      findInvalidSettingsField({ ...BASE, reminderDaysBefore_tournament: '' }),
+    ).toBeUndefined();
+  });
+
+  it.each([['15'], ['-1']])('rejects a per-event-type override of %s', (raw) => {
+    expect(findInvalidSettingsField({ ...BASE, reminderDaysBefore_tournament: raw })).toBe(
+      'teamSettings_rsvpReminderDaysBeforeOverrides',
+    );
+  });
+
+  it('accepts the bounds of a per-event-type override', () => {
+    expect(
+      findInvalidSettingsField({ ...BASE, reminderDaysBefore_tournament: '0' }),
+    ).toBeUndefined();
+    expect(
+      findInvalidSettingsField({ ...BASE, reminderDaysBefore_tournament: '14' }),
+    ).toBeUndefined();
+  });
+});
+
+describe('rsvpReminderDaysBeforeOverrides payload', () => {
+  it('omits every event type while the boxes are blank', () => {
+    expect(settingsRequestFrom(BASE).rsvpReminderDaysBeforeOverrides).toStrictEqual(
+      Option.some({}),
+    );
+  });
+
+  // The key must be ABSENT, not sent as 0 — the server falls back to the team-wide value only for
+  // types missing from the map, so a 0 here would silently mean "remind on the day of the event".
+  it('sends only the types that were filled in', () => {
+    expect(
+      settingsRequestFrom({ ...BASE, reminderDaysBefore_tournament: '3' })
+        .rsvpReminderDaysBeforeOverrides,
+    ).toStrictEqual(Option.some({ tournament: 3 }));
+  });
+
+  // Matches the sibling `rsvpReminderDaysBefore` field, which also parses with `parseInt`: a
+  // fractional entry truncates rather than being rejected, so it can never reach the server as a
+  // non-integer the schema would refuse.
+  it('truncates a fractional entry the way the team-wide field does', () => {
+    expect(
+      settingsRequestFrom({ ...BASE, reminderDaysBefore_social: '1.5' })
+        .rsvpReminderDaysBeforeOverrides,
+    ).toStrictEqual(Option.some({ social: 1 }));
+  });
+
+  it('keeps an explicit 0, which is not the same as blank', () => {
+    expect(
+      settingsRequestFrom({ ...BASE, reminderDaysBefore_match: '0' })
+        .rsvpReminderDaysBeforeOverrides,
+    ).toStrictEqual(Option.some({ match: 0 }));
   });
 });

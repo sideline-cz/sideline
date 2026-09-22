@@ -11,6 +11,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Team, User } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -104,6 +105,7 @@ const upsertSettingsWithReminder = (
     timezone: string;
     remindersChannelId?: Option.Option<Discord.Snowflake>;
     enabled?: boolean;
+    overrides?: Record<string, number>;
   },
 ) =>
   TeamSettingsRepository.asEffect().pipe(
@@ -114,6 +116,7 @@ const upsertSettingsWithReminder = (
         minPlayersThreshold: 5,
         rsvpRemindersEnabled: opts.enabled ?? true,
         rsvpReminderDaysBefore: opts.daysBefore,
+        rsvpReminderDaysBeforeOverrides: opts.overrides ?? {},
         rsvpReminderTime: opts.time,
         timezone: opts.timezone,
         remindersChannelId: opts.remindersChannelId ?? Option.none(),
@@ -122,12 +125,17 @@ const upsertSettingsWithReminder = (
   );
 
 /** Create a minimal active event. */
-const createEvent = (teamId: Team.TeamId, createdBy: string, startAt: string) =>
+const createEvent = (
+  teamId: Team.TeamId,
+  createdBy: string,
+  startAt: string,
+  eventType: 'training' | 'match' | 'tournament' | 'meeting' | 'social' | 'other' = 'training',
+) =>
   EventsRepository.asEffect().pipe(
     Effect.andThen((repo) =>
       repo.insertEvent({
         teamId,
-        eventType: 'training',
+        eventType,
         title: 'Test Training',
         description: Option.none(),
         startAt: DateTime.fromDateUnsafe(new Date(startAt)),
@@ -472,6 +480,271 @@ describe('TeamSettingsRepository — _findEventsForReminder with pinned now', ()
       Effect.tap(({ events }) =>
         Effect.sync(() => {
           expect((events as unknown[]).length).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Tests — per-event-type lead time
+//
+// `rsvp_reminder_days_before_overrides` is a PARTIAL map: an event type present in it uses its own
+// lead time, one absent from it falls back to the scalar `rsvp_reminder_days_before`. Every case
+// below pins the same 18:00 Europe/Prague send window, so the only thing under test is which day
+// the event has to start on for the reminder to fire.
+// ---------------------------------------------------------------------------
+
+describe('TeamSettingsRepository — per-event-type reminder lead time', () => {
+  const NOW = '2026-04-26T16:00:00Z'; // 18:00 CEST, inside the send window
+
+  /** Seeds a team whose tournaments lead by 3 days while everything else leads by 1. */
+  const seedTeamWithTournamentOverride = (n: string) =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          `10000000000000${n}`,
+          `owner${n}`,
+          `${n}${n}${n}${n}${n}${n}${n}${n}${n}` as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) =>
+        upsertSettingsWithReminder(seed.team.id, {
+          daysBefore: 1,
+          time: '18:00',
+          timezone: 'Europe/Prague',
+          overrides: { tournament: 3 },
+        }),
+      ),
+    );
+
+  it.effect('fires for an overridden type on the OVERRIDE day, not the default day', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithTournamentOverride('0201').pipe(Effect.map((r) => r.seed)),
+      ),
+      // 3 days out — the tournament override.
+      Effect.tap(({ seed }) =>
+        createEvent(seed.team.id, seed.memberId, '2026-04-29T16:00:00Z', 'tournament'),
+      ),
+      Effect.bind('events', () => findEventsNeedingReminderAt(NOW)),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('stays silent for an overridden type on the team-wide default day', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithTournamentOverride('0202').pipe(Effect.map((r) => r.seed)),
+      ),
+      // 1 day out — what the team-wide default would have fired on.
+      Effect.tap(({ seed }) =>
+        createEvent(seed.team.id, seed.memberId, '2026-04-27T16:00:00Z', 'tournament'),
+      ),
+      Effect.bind('events', () => findEventsNeedingReminderAt(NOW)),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('a type absent from the map still falls back to the team-wide default', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithTournamentOverride('0203').pipe(Effect.map((r) => r.seed)),
+      ),
+      // Training is not in the override map, so it keeps the 1-day default.
+      Effect.tap(({ seed }) =>
+        createEvent(seed.team.id, seed.memberId, '2026-04-27T16:00:00Z', 'training'),
+      ),
+      Effect.bind('events', () => findEventsNeedingReminderAt(NOW)),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect("a type absent from the map does NOT borrow another type's override", () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithTournamentOverride('0204').pipe(Effect.map((r) => r.seed)),
+      ),
+      // 3 days out is the TOURNAMENT lead time; a training must not fire on it.
+      Effect.tap(({ seed }) =>
+        createEvent(seed.team.id, seed.memberId, '2026-04-29T16:00:00Z', 'training'),
+      ),
+      Effect.bind('events', () => findEventsNeedingReminderAt(NOW)),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // The backwards-compatibility guarantee: `{}` is the column default, so every team that predates
+  // this feature must behave exactly as it did before.
+  it.effect('an empty override map reproduces the old single-value behaviour', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '100000000000000205',
+          'owner205',
+          '205205205205205205' as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) =>
+        upsertSettingsWithReminder(seed.team.id, {
+          daysBefore: 2,
+          time: '18:00',
+          timezone: 'Europe/Prague',
+        }),
+      ),
+      Effect.tap(({ seed }) =>
+        createEvent(seed.team.id, seed.memberId, '2026-04-28T16:00:00Z', 'tournament'),
+      ),
+      Effect.bind('events', () => findEventsNeedingReminderAt(NOW)),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // 0 is a real lead time (remind on the morning of the event), not "unset" — the web form sends
+  // an absent key for "no override", so a stored 0 must be honoured rather than falling back.
+  it.effect('honours an override of 0 instead of treating it as unset', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '100000000000000206',
+          'owner206',
+          '206206206206206206' as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) =>
+        upsertSettingsWithReminder(seed.team.id, {
+          daysBefore: 5,
+          time: '18:00',
+          timezone: 'Europe/Prague',
+          overrides: { social: 0 },
+        }),
+      ),
+      // Same day as `now` — only a 0-day lead time can match this.
+      Effect.tap(({ seed }) =>
+        createEvent(seed.team.id, seed.memberId, '2026-04-26T19:00:00Z', 'social'),
+      ),
+      Effect.bind('events', () => findEventsNeedingReminderAt(NOW)),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+// A value the API can never write, reached here by direct SQL the way a manual fix or a restore
+// could. The point is the blast radius: this query spans every team, so a raising `::int` cast
+// would stop reminders for ALL of them. The guard degrades it to the team-wide default instead.
+describe('TeamSettingsRepository — malformed override values do not break the cron', () => {
+  const NOW = '2026-04-26T16:00:00Z';
+
+  const corruptOverrides = (teamId: Team.TeamId, json: string) =>
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.flatMap(
+        (sql) =>
+          sql`UPDATE team_settings SET rsvp_reminder_days_before_overrides = ${json}::jsonb WHERE team_id = ${teamId}`,
+      ),
+    );
+
+  it.effect('falls back to the team-wide default when a value is not a number', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '100000000000000207',
+          'owner207',
+          '207207207207207207' as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) =>
+        upsertSettingsWithReminder(seed.team.id, {
+          daysBefore: 1,
+          time: '18:00',
+          timezone: 'Europe/Prague',
+        }),
+      ),
+      Effect.tap(({ seed }) => corruptOverrides(seed.team.id, '{"training":"soon"}')),
+      // 1 day out — the team-wide default, which is what the garbage must fall back to.
+      Effect.tap(({ seed }) =>
+        createEvent(seed.team.id, seed.memberId, '2026-04-27T16:00:00Z', 'training'),
+      ),
+      Effect.bind('events', () => findEventsNeedingReminderAt(NOW)),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // The cross-tenant part: a healthy team in the same sweep must still get its reminder.
+  it.effect('still serves other teams in the same sweep', () =>
+    Effect.Do.pipe(
+      Effect.bind('bad', () =>
+        seedTeamWithMember(
+          '100000000000000208',
+          'owner208',
+          '208208208208208208' as Discord.Snowflake,
+        ),
+      ),
+      Effect.bind('good', () =>
+        seedTeamWithMember(
+          '100000000000000209',
+          'owner209',
+          '209209209209209209' as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ bad, good }) =>
+        Effect.all([
+          upsertSettingsWithReminder(bad.team.id, {
+            daysBefore: 1,
+            time: '18:00',
+            timezone: 'Europe/Prague',
+          }),
+          upsertSettingsWithReminder(good.team.id, {
+            daysBefore: 1,
+            time: '18:00',
+            timezone: 'Europe/Prague',
+            overrides: { tournament: 3 },
+          }),
+        ]),
+      ),
+      Effect.tap(({ bad }) => corruptOverrides(bad.team.id, '{"tournament":[1,2]}')),
+      Effect.tap(({ good }) =>
+        createEvent(good.team.id, good.memberId, '2026-04-29T16:00:00Z', 'tournament'),
+      ),
+      Effect.bind('events', () => findEventsNeedingReminderAt(NOW)),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(1);
         }),
       ),
       Effect.provide(TestLayer),
