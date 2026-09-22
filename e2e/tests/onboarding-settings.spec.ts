@@ -11,7 +11,7 @@
 import { expect, test } from '../fixtures/api-mocks.js';
 import { TEAM_ID } from '../fixtures/mock-data.js';
 
-const SETTINGS_URL = `/teams/${TEAM_ID}/settings`;
+const SETTINGS_URL = `/teams/${TEAM_ID}/settings?tab=onboarding`;
 
 // ---------------------------------------------------------------------------
 // Mock data helpers
@@ -243,8 +243,9 @@ test.describe('Onboarding Settings Card', () => {
     const trainingOption = page.getByRole('option', { name: /# training/i });
     await trainingOption.click();
 
-    // Click save button for the onboarding section (last save button in DOM order).
-    const saveButton = page.locator('button').filter({ hasText: /save/i }).last();
+    // Click Save in the shared save bar (only the onboarding row is dirty here).
+    const saveBar = page.getByRole('region', { name: /unsaved changes/i });
+    const saveButton = saveBar.getByRole('button', { name: /save/i });
     await saveButton.click();
 
     // Assert the PATCH request body contains the new rulesChannelId

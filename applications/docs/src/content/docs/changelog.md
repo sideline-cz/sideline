@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — Team settings redesigned into tabs
+
+**Team settings** is no longer one long scrolling page. It's now six tabs: **General**, **Discord**, **Onboarding**, **Email**, **Finance**, and **Automation** — the last two only show up if you have the right permission. The tab is part of the URL, so you can bookmark or share a link straight to, say, **Team settings → Finance**, and the back button moves between tabs correctly.
+
+- All the separate **Save** buttons are gone. Instead, a single save bar sticks to the bottom of the page whenever you have unsaved changes anywhere on it, with one row per changed section — each with its own **Save** and **Discard**.
+- Switching tabs does not lose your edits — a change you make on one tab is still there (and still unsaved) if you switch to another tab and back.
+- Trying to leave the page with unsaved changes now asks you to confirm first, so an accidental back-button tap can't silently drop your edits.
+- Nothing about what any individual setting does, or what gets saved, has changed — this is a navigation and layout change only.
+
 ## 2026-09-22 — Redesigned event detail page
 
 The event page (web) has a cleaner layout — nothing about RSVPing or editing an event has functionally changed, but a few things moved:

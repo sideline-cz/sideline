@@ -11,11 +11,12 @@ export interface CardForm<T> {
   /**
    * Adopt a new set of values wholesale.
    *
-   * Only needed where the server normalises what it stores, so the saved
-   * config differs from what was typed — `EmailForwardingCard` sends an empty
-   * IMAP folder and gets back `INBOX`, which would otherwise read as dirty for
-   * ever. Cards whose baseline arrives from a router-invalidated prop and who
-   * send values unchanged never need this.
+   * Two callers. The save bar's Discard (`useSaveBarEntry`'s `onDiscard`, see
+   * `applications/web/AGENTS.md` §`SaveBar`) resets a form to its saved
+   * baseline — every entry uses this. And a card whose server normalises what
+   * it stores resets to the normalised values, so the saved config and what
+   * was typed stop disagreeing: `EmailForwardingCard` sends an empty IMAP
+   * folder and gets back `INBOX`, which would otherwise read as dirty for ever.
    */
   readonly reset: (next: T) => void;
 }
@@ -25,16 +26,19 @@ export const isFormDirty = <T extends Record<string, Primitive>>(baseline: T, va
   (Object.keys(baseline) as ReadonlyArray<keyof T>).some((key) => values[key] !== baseline[key]);
 
 /**
- * One form object per Save button.
+ * One form object per save state — i.e. per request payload.
  *
  * `isDirty` is *derived* from the same object the request payload is built
- * from, so a field cannot be edited-but-untracked (its own Save button stays
- * disabled) or tracked-but-unsent. Both used to be hand-written lists that
- * agreed only by discipline, and twice they stopped agreeing — most recently
- * the rules-quiz fields, compared in the welcome card's flag while the
- * settings handler was the one sending them. The result was a section you
- * could edit but not save, whose only enabled button silently discarded the
- * edit.
+ * from, so a field cannot be edited-but-untracked or tracked-but-unsent. Note
+ * what edited-but-untracked costs now that the buttons live in the save bar:
+ * the form never registers an entry, so there is no row at all — quieter than
+ * the disabled button this used to produce.
+ *
+ * Both used to be hand-written lists that agreed only by discipline, and twice
+ * they stopped agreeing — most recently the rules-quiz fields, compared in the
+ * welcome card's flag while the settings handler was the one sending them. The
+ * result was a section you could edit but not save, whose only enabled button
+ * silently discarded the edit.
  *
  * `baseline` is the saved state as the page currently knows it, recomputed
  * from props on every render: after a save the loader is invalidated, fresh

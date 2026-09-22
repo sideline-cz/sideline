@@ -13,7 +13,7 @@ import { useFormatDate } from '~/hooks/useFormatDate';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 import { getOnboardingErrorMessage } from './onboardingError';
-import { SaveRow } from './SaveRow';
+import { useSaveBarEntry } from './SaveBar';
 import { NONE_VALUE, textChannelOptions } from './shared';
 import { onboardingFormFrom, onboardingRequestFrom } from './teamInfoForm';
 import { useCardForm } from './useCardForm';
@@ -67,8 +67,24 @@ export function OnboardingCard({
     setSaving(false);
     if (Option.isSome(result)) {
       onRefresh();
+      return true;
     }
+    return false;
   }, [teamInfo.teamId, values, run, onRefresh]);
+
+  useSaveBarEntry({
+    id: 'onboarding',
+    label: tr('teamSettings_onboardingTitle'),
+    tab: 'onboarding',
+    dirty: form.isDirty,
+    saving,
+    disabled: !isCommunityEnabled,
+    disabledReason: !isCommunityEnabled
+      ? tr('teamSettings_onboardingCommunityWarning', { learnHow: '' }).trim()
+      : undefined,
+    onSave: handleSave,
+    onDiscard: () => form.reset(onboardingFormFrom(teamInfo)),
+  });
 
   const handleRetry = React.useCallback(async () => {
     setRetrying(true);
@@ -256,13 +272,6 @@ export function OnboardingCard({
                   </ToggleGroup>
                 </fieldset>
               </div>
-
-              <SaveRow
-                onSave={handleSave}
-                saving={saving}
-                dirty={form.isDirty}
-                disabled={!isCommunityEnabled}
-              />
             </div>
           </fieldset>
         </div>

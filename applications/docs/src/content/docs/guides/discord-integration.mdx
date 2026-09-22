@@ -18,7 +18,7 @@ Sideline is Discord-first. Once the bot is installed, most day-to-day interactio
 
 ## Installing the bot
 
-See [Quick start for Admins](/quick-start/admins/#steps) for the full install flow. In short: admin → Team settings → Discord integration → **Install bot** → pick your Discord server → grant permissions.
+See [Quick start for Admins](/quick-start/admins/#steps) for the full install flow. In short: admin → Team settings → **Discord** tab → **Install bot** → pick your Discord server → grant permissions.
 
 ## Channels
 
@@ -31,7 +31,7 @@ You link Discord channels to Sideline for specific purposes:
 - **Achievement channel** (optional) — where the bot posts a congratulatory embed when a member earns an achievement. Select **None** to disable achievement notifications entirely. Teams that had a welcome channel configured before this setting was introduced default to posting to that welcome channel; you can change or clear the setting at any time.
 - **Weekly challenge channel** (optional) — where the bot posts the weekly challenge announcement every Monday at 09:00 in your team's timezone. The embed shows the challenge title, kind (**Házecí** for throwing, **Sportovní** for sport), and the week date range. When no channel is set the bot skips the team — enabling this feature is opt-in.
 
-Change channel links at any time from **Team settings → Discord integration**.
+Change channel links at any time from Team settings — the reminders and late-RSVP channels live in the **Discord** tab, while the welcome, system log, and achievement channels live in the **Onboarding** tab.
 
 Events themselves don't post to any of the channels above — see [Personal event channels](#personal-event-channels) below for where members see and RSVP to events in Discord.
 
@@ -69,7 +69,7 @@ The bot responds to the following slash commands inside your linked Discord serv
 
 ## Welcome message
 
-When a new member joins your Discord server via a Sideline invite, the bot can post a welcome embed to the **welcome channel** you configure in Team settings.
+When a new member joins your Discord server via a Sideline invite, the bot can post a welcome embed to the **welcome channel** you configure in **Team settings → Onboarding**.
 
 The embed content comes from your **welcome message template**. Write any text and use these placeholders — the bot replaces them with real values at join time:
 
@@ -100,7 +100,7 @@ Anyone who joins your linked Discord server becomes a Sideline team member autom
 
 ### Require a complete profile
 
-By default, a member with an unfinished profile can still do everything: RSVP, claim a training, join a carpool. If your team wants to make sure everyone finishes their profile first, turn on **Require a complete profile** in **Team settings → General Settings**.
+By default, a member with an unfinished profile can still do everything: RSVP, claim a training, join a carpool. If your team wants to make sure everyone finishes their profile first, turn on **Require a complete profile** in **Team settings → General**.
 
 With this setting on, a member with an unfinished profile is blocked from:
 
@@ -115,7 +115,7 @@ Whenever a blocked action is attempted, the bot replies with a short explanation
 A member who joins your Discord server with this setting on also gets a temporary **"Sideline Unverified"** Discord role and can see a read-only **#start-here** channel with a pinned card carrying the same button. Both disappear automatically the moment they finish their profile — nothing to clean up manually.
 
 <Aside type="note" title="Off by default">
-  This setting starts off for every team, so nothing changes for your members unless you turn it on from **Team settings → General Settings**.
+  This setting starts off for every team, so nothing changes for your members unless you turn it on from **Team settings → General**.
 </Aside>
 
 ---
@@ -160,7 +160,7 @@ On the day of the training, if the training has been claimed, the bot posts a **
 </Aside>
 
 <Aside type="note" title="Configuring the lead time">
-  The number of days before a training the claim-board message is posted defaults to **3**. Captains can change this in **Team settings → Coach assignment → Days before training** (range 0–30). Setting it to **0** posts the message on the day of the training. If the value is higher than the team's event horizon, the message may never appear because the training is not yet generated when the cron runs.
+  The number of days before a training the claim-board message is posted defaults to **3**. Captains can change this in **Team settings → General → Coach assignment → Days before training** (range 0–30). Setting it to **0** posts the message on the day of the training. If the value is higher than the team's event horizon, the message may never appear because the training is not yet generated when the cron runs.
 </Aside>
 
 ## Event roster attendance
@@ -229,7 +229,7 @@ If multiple rosters have drifted out of sync at once — for example after a Dis
 
 When Sideline creates a Discord channel for a roster (on creation or reactivation), it can place that channel inside a Discord category you choose.
 
-Set the **Roster category** dropdown in **Team settings → Discord integration → Roster category**. The setting accepts any category channel in your Discord server, or **None** (the default) to place roster channels at the guild root without a category.
+Set the **Roster category** dropdown in **Team settings → Discord → Roster category**. The setting accepts any category channel in your Discord server, or **None** (the default) to place roster channels at the guild root without a category.
 
 When a roster channel is created and a category is configured, the bot passes `parent_id` to Discord. If the configured category has been deleted or is otherwise unreachable, the bot falls back to guild-root placement automatically — no manual intervention is needed.
 
@@ -239,7 +239,7 @@ When a roster channel is created and a category is configured, the bot passes `p
 
 ## Personal event channels
 
-This is where events actually live in Discord: when the **Personal events category** is configured in **Team settings → Discord integration**, the bot creates a private text channel under that category for each eligible member, and posts every one of the member's upcoming events there with RSVP buttons. Events in a member's personal channel are sorted soonest-first (nearest the input box). When a new personal channel is created, the bot immediately backfills all of the member's existing upcoming events into it, so the channel is never empty after provisioning.
+This is where events actually live in Discord: when the **Personal events category** is configured in **Team settings → Discord**, the bot creates a private text channel under that category for each eligible member, and posts every one of the member's upcoming events there with RSVP buttons. Events in a member's personal channel are sorted soonest-first (nearest the input box). When a new personal channel is created, the bot immediately backfills all of the member's existing upcoming events into it, so the channel is never empty after provisioning.
 
 ### Going list and Attendees button
 
@@ -265,11 +265,11 @@ When the bot posts a new upcoming event to a personal channel and the member has
 
 ### Restricting personal channels to a group
 
-By default all active team members receive a personal channel. To limit personal channels to a specific subset of members, set the **Personal events group** in **Team settings → Discord integration**. Only members who belong to that group (or any of its descendant groups) will receive a personal channel. Members outside the group don't get a personal channel and can still see and RSVP to events via `/event list` or the web app. If a member's personal channel already exists and they later fall outside the configured group, the bot automatically deletes their personal channel.
+By default all active team members receive a personal channel. To limit personal channels to a specific subset of members, set the **Personal events group** in **Team settings → Discord**. Only members who belong to that group (or any of its descendant groups) will receive a personal channel. Members outside the group don't get a personal channel and can still see and RSVP to events via `/event list` or the web app. If a member's personal channel already exists and they later fall outside the configured group, the bot automatically deletes their personal channel.
 
 ### Custom channel name format
 
-The default channel name is `events-{discord_id}` (e.g. `events-123456789`). Captains can change this by setting the **Personal channel name format** in **Team settings → Discord integration**. The format must include at least one of the following placeholders:
+The default channel name is `events-{discord_id}` (e.g. `events-123456789`). Captains can change this by setting the **Personal channel name format** in **Team settings → Discord**. The format must include at least one of the following placeholders:
 
 | Placeholder | Replaced with |
 |---|---|
@@ -286,7 +286,7 @@ For a member who has split their channel into three (see [Splitting your channel
 
 ## Channel cleanup modes
 
-When a **group is deleted** or a **roster is deactivated**, its linked Discord channel needs to go somewhere. Pick a strategy per team in **Team settings → Discord integration**:
+When a **group is deleted** or a **roster is deactivated**, its linked Discord channel needs to go somewhere. Pick a strategy per team in **Team settings → Discord**:
 
 - **Do nothing** — keep the channel (only the role and the group/roster link are removed).
 - **Delete** — delete the Discord channel and role.

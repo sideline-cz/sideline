@@ -112,7 +112,7 @@ No. RSVPs are always the player's own action — we don't want captains to fake 
 
 ### How far in advance are recurring events posted?
 
-By default, the next 4 weeks. Change it from **Team settings → Events → Scheduling window**.
+By default, the next 4 weeks. Change it from **Team settings → General → Event generation horizon**.
 
 ### Can I move an event to a different time without editing the whole series?
 
@@ -138,7 +138,7 @@ Yes. One Discord account can be in any number of teams. The dashboard aggregates
 
 ### My Fio bank connection stopped importing payments — what do I do?
 
-The most common cause is an expired token: Fio tokens last at most 180 days and only renew when someone signs in to Fio Internetbanking or Smartbanking. Open the bank connection card on your team's settings page — it explains exactly what's wrong (an expired/invalid token, a temporary Fio outage Sideline is already retrying, a token still "activating" if you just created it, or the token reading a different account, see below) and what to do next. Click **Test the connection** on the card for an immediate answer instead of waiting for the next hourly check. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio) for the full setup and troubleshooting steps.
+The most common cause is an expired token: Fio tokens last at most 180 days and only renew when someone signs in to Fio Internetbanking or Smartbanking. Open the bank connection card on your team's settings page (**Finance** tab) — it explains exactly what's wrong (an expired/invalid token, a temporary Fio outage Sideline is already retrying, a token still "activating" if you just created it, or the token reading a different account, see below) and what to do next. Click **Test the connection** on the card for an immediate answer instead of waiting for the next hourly check. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio) for the full setup and troubleshooting steps.
 
 ### What does "the token belongs to a different account" mean in the connection test?
 

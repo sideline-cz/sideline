@@ -33,6 +33,7 @@ import {
   imapSecretPayload,
   validateEmailForwarding,
 } from './emailForwardingForm';
+import { useSaveBarEntry } from './SaveBar';
 import { textChannelOptions as buildTextChannelOptions, NONE_VALUE } from './shared';
 import { useCardForm } from './useCardForm';
 
@@ -150,8 +151,22 @@ export function EmailForwardingCard({
     return !hasEmailForwardingErrors(next);
   };
 
-  const handleSave = async () => {
-    if (!runValidation()) return;
+  // Single source for "reset local state to match a saved config" — called
+  // from both the post-save path and discard, so the two can never drift
+  // apart the way a hand-mirrored reset list did twice in this directory.
+  const resetLocalState = React.useCallback(
+    (cfg: EmailForwardingApi.EmailForwardingConfigView | null) => {
+      form.reset(emailForwardingFormFrom(cfg));
+      setMonitoredAddresses(cfg ? [...cfg.monitoredAddresses] : []);
+      setImapSecret('');
+      setReplacingSecret(false);
+      setErrors({});
+    },
+    [form],
+  );
+
+  const handleSave = async (): Promise<boolean> => {
+    if (!runValidation()) return false;
     setSaving(true);
 
     const result = await ApiClient.asEffect().pipe(
@@ -174,13 +189,11 @@ export function EmailForwardingCard({
       // Adopt what the server stored, not what was typed: it normalises an
       // empty folder to INBOX, which would otherwise read as dirty for ever.
       setConfig(cfg);
-      form.reset(emailForwardingFormFrom(cfg));
-      setMonitoredAddresses([...cfg.monitoredAddresses]);
-      setImapSecret('');
-      setReplacingSecret(false);
-      setErrors({});
+      resetLocalState(cfg);
       onRefresh();
+      return true;
     }
+    return false;
   };
 
   const handleRegenerate = React.useCallback(async () => {
@@ -212,6 +225,17 @@ export function EmailForwardingCard({
 
   // Derived IMAP validation state for the Save button.
   const imapHasErrors = imapEnabled && hasEmailForwardingErrors(errors);
+
+  useSaveBarEntry({
+    id: 'email',
+    label: tr('team_email_forwarding_title'),
+    tab: 'email',
+    dirty: hasChanges,
+    saving,
+    disabled: hasInvalidSender || imapHasErrors,
+    onSave: handleSave,
+    onDiscard: () => resetLocalState(config),
+  });
 
   // IMAP sync status
   const imapSyncStatus = React.useMemo(() => {
@@ -652,18 +676,6 @@ export function EmailForwardingCard({
                 </div>
               </div>
             </fieldset>
-
-            <div className='flex items-center gap-3'>
-              <Button
-                onClick={handleSave}
-                disabled={saving || !hasChanges || hasInvalidSender || imapHasErrors}
-              >
-                {saving ? tr('profile_saving') : tr('profile_saveChanges')}
-              </Button>
-              {hasChanges && (
-                <p className='text-sm text-muted-foreground'>{tr('teamSettings_unsavedChanges')}</p>
-              )}
-            </div>
           </div>
         </CardContent>
       </Card>
