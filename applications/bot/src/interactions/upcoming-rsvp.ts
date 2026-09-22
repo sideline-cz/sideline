@@ -7,7 +7,7 @@ import {
 } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import { DiscordREST } from 'dfx/DiscordREST';
+import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData, ModalSubmitData } from 'dfx/Interactions/index';
 import * as Discord from 'dfx/types';
@@ -29,6 +29,43 @@ const decodeSnowflake = Schema.decodeUnknownSync(DiscordSchemas.Snowflake);
 const decodeEventId = Schema.decodeUnknownSync(Event.EventId);
 const decodeTeamId = Schema.decodeUnknownSync(Team.TeamId);
 const decodeRsvpResponse = Schema.decodeUnknownSync(EventRsvp.RsvpResponse);
+
+/**
+ * Send a NEW ephemeral message instead of editing the card the button sits on.
+ *
+ * Every handler in this file defers with `DEFERRED_UPDATE_MESSAGE`, because the normal
+ * path rewrites the member's event card in place. Under that deferral
+ * `updateOriginalWebhookMessage` edits THAT CARD — it does not create an ephemeral. So a
+ * rejection routed through it replaces the event embed and its RSVP buttons with the error
+ * text, which for a recoverable rejection is the wrong shape twice over: the member loses
+ * the card until the bot next re-renders it, and the copy tells them to tap a button that
+ * is no longer there.
+ *
+ * `executeWebhook` on the interaction token posts a followup instead, so the card survives
+ * untouched and the member can act on the advice. Same call the `/event list` followups
+ * already use (`rest/events/sendUpcomingEventFollowups.ts`).
+ *
+ * Use this for any rejection the member can fix and retry. The pre-existing terminal arms
+ * (`GuildNotFound`, `RpcClientError`) deliberately keep editing the card — there is nothing
+ * to retry there, and the error belongs where the member is looking.
+ */
+const replyEphemeral = (
+  rest: DiscordRestService,
+  interaction: { readonly application_id: Discord.Snowflake; readonly token: string },
+  payload: {
+    readonly content: string;
+    readonly components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
+  },
+) =>
+  rest
+    .executeWebhook(interaction.application_id, interaction.token, {
+      payload: {
+        content: payload.content,
+        components: payload.components,
+        flags: Discord.MessageFlags.Ephemeral,
+      },
+    })
+    .pipe(Effect.asVoid);
 
 /**
  * Re-render a member's personal event message after they interact with it.
@@ -210,14 +247,14 @@ export const UpcomingRsvpButton = Ix.messageComponent(
         ),
         // Task 8: profile-gate arm — see the comment on rsvp.ts's RsvpButton.
         Effect.catchTag('RsvpProfileIncomplete', () =>
-          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
-            payload: {
-              content: m.bot_verify_blocked_rsvp(
-                { response: localizeRsvpResponse(response, locale) },
-                { locale },
-              ),
-              components: [UI.row([buildVerifyButton(locale)])],
-            },
+          // A followup, NOT an edit — see `replyEphemeral`. Editing would delete the very
+          // RSVP button this copy tells the member to tap again.
+          replyEphemeral(rest, interaction, {
+            content: m.bot_verify_blocked_rsvp(
+              { response: localizeRsvpResponse(response, locale) },
+              { locale },
+            ),
+            components: [UI.row([buildVerifyButton(locale)])],
           }),
         ),
         Effect.catchTag('GuildNotFound', () =>
@@ -392,14 +429,14 @@ export const UpcomingClearMessageButton = Ix.messageComponent(
         ),
         // Task 8: profile-gate arm — see the comment on rsvp.ts's RsvpButton.
         Effect.catchTag('RsvpProfileIncomplete', () =>
-          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
-            payload: {
-              content: m.bot_verify_blocked_rsvp(
-                { response: localizeRsvpResponse(response, locale) },
-                { locale },
-              ),
-              components: [UI.row([buildVerifyButton(locale)])],
-            },
+          // A followup, NOT an edit — see `replyEphemeral`. Editing would delete the very
+          // RSVP button this copy tells the member to tap again.
+          replyEphemeral(rest, interaction, {
+            content: m.bot_verify_blocked_rsvp(
+              { response: localizeRsvpResponse(response, locale) },
+              { locale },
+            ),
+            components: [UI.row([buildVerifyButton(locale)])],
           }),
         ),
         Effect.catchTag('GuildNotFound', () =>
@@ -569,14 +606,14 @@ export const UpcomingRsvpModal = Ix.modalSubmit(
         ),
         // Task 8: profile-gate arm — see the comment on rsvp.ts's RsvpButton.
         Effect.catchTag('RsvpProfileIncomplete', () =>
-          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
-            payload: {
-              content: m.bot_verify_blocked_rsvp(
-                { response: localizeRsvpResponse(response, locale) },
-                { locale },
-              ),
-              components: [UI.row([buildVerifyButton(locale)])],
-            },
+          // A followup, NOT an edit — see `replyEphemeral`. Editing would delete the very
+          // RSVP button this copy tells the member to tap again.
+          replyEphemeral(rest, interaction, {
+            content: m.bot_verify_blocked_rsvp(
+              { response: localizeRsvpResponse(response, locale) },
+              { locale },
+            ),
+            components: [UI.row([buildVerifyButton(locale)])],
           }),
         ),
         Effect.catchTag('GuildNotFound', () =>

@@ -109,13 +109,21 @@ const makeModalInteraction = (
 
 const makeRestStub = () => {
   const updateOriginalWebhookMessage = vi.fn(() => Effect.succeed(undefined));
+  // `executeWebhook` is the FOLLOWUP call. Distinguishing the two is the whole point of
+  // these stubs: under a `DEFERRED_UPDATE_MESSAGE` deferral (everything in
+  // `upcoming-rsvp.ts`) `updateOriginalWebhookMessage` edits the member's event card in
+  // place, while `executeWebhook` posts a separate ephemeral and leaves the card alone.
+  // Asserting only on message CONTENT cannot tell those apart — and did not, which is how
+  // the card-clobbering blocked-RSVP reply reached production.
+  const executeWebhook = vi.fn(() => Effect.succeed({ id: 'followup-1' }));
   const rest = new Proxy({} as DiscordRestService, {
     get: (_target, prop: string) => {
       if (prop === 'updateOriginalWebhookMessage') return updateOriginalWebhookMessage;
+      if (prop === 'executeWebhook') return executeWebhook;
       return () => Effect.succeed(undefined);
     },
   }) as unknown as DiscordRestService;
-  return { layer: Layer.succeed(DiscordREST, rest), updateOriginalWebhookMessage };
+  return { layer: Layer.succeed(DiscordREST, rest), updateOriginalWebhookMessage, executeWebhook };
 };
 
 const makeRpcLayer = (
@@ -282,15 +290,25 @@ describe('upcoming-rsvp.ts — UpcomingRsvpButton blocked by RsvpProfileIncomple
     expect(submitRsvp).toHaveBeenCalledTimes(1);
     expect(getAllUpcoming).not.toHaveBeenCalled();
 
-    const call = restStub.updateOriginalWebhookMessage.mock.calls[0] as unknown as [
+    // THE REGRESSION GUARD. This handler defers with `DEFERRED_UPDATE_MESSAGE`, so
+    // `updateOriginalWebhookMessage` would edit the member's personal event card — replacing
+    // the event embed and its RSVP buttons with this error. That shipped once: the block
+    // copy says "come back and tap Ano again" while having just deleted the Ano button.
+    // The reply must be a followup, and the card must be untouched.
+    expect(restStub.updateOriginalWebhookMessage).not.toHaveBeenCalled();
+    expect(restStub.executeWebhook).toHaveBeenCalledTimes(1);
+
+    const call = restStub.executeWebhook.mock.calls[0] as unknown as [
       unknown,
       unknown,
-      { payload: { content: string; components?: unknown } },
+      { payload: { content: string; components?: unknown; flags?: number } },
     ];
     const { payload } = call[2];
     expect(payload.content).toBe(
       m.bot_verify_blocked_rsvp({ response: m.rsvp_yes({}, { locale: 'en' }) }, { locale: 'en' }),
     );
+    // Ephemeral, so the block is visible to this member and nobody else.
+    expect(payload.flags).toBe(DiscordTypes.MessageFlags.Ephemeral);
     const buttons = findButtonRow(payload.components);
     expect(buttons).toContainEqual(expect.objectContaining({ custom_id: 'profile-verify' }));
   });
