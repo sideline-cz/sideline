@@ -235,6 +235,8 @@ Build stages:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Yes | — | OTLP HTTP endpoint for telemetry export |
 | `OTEL_SERVICE_NAME` | Yes | — | Service name reported to the telemetry backend (e.g. `sideline-bot`) |
 | `WEB_URL` | No | — | Public base URL of the web frontend (e.g. `https://sideline.example.com`). When set, the bot includes a deep-link to `/teams/{teamId}/challenges` in weekly challenge embeds. In production this is set to `${SERVICE_URL_PROXY}` via `docker-compose.yaml`. |
+| `GITHUB_REPORT_TOKEN` | No | — | Fine-grained GitHub PAT with **Issues: read & write** on `GITHUB_REPORT_REPO`, used by `/report` to file issues. Absent = the command replies "not set up"; the bot still boots. |
+| `GITHUB_REPORT_REPO` | No | `sideline-cz/sideline` | `owner/repo` that `/report` files issues against. |
 
 ### 3.3 Proxy (runtime environment, from `docker-compose.yaml`)
 

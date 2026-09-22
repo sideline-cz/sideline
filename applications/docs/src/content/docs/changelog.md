@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — New: file a bug report or feature request from Discord
+
+The new `/report type:<bug|feature>` command (Czech: `/nahlasit`) lets anyone file a bug report or feature request without leaving Discord — it works in a server channel or in a DM with the bot. Fill in a short title and description in the modal that pops up, and Sideline opens a GitHub issue for it, labelled so the team can triage it. You get a reply with a link to the created issue once it's filed.
+
 ## 2026-09-22 — Fix: clearing your RSVP note on the web didn't stick
 
 If you'd added a note to your RSVP (for example your ETA on **Coming later**) and later cleared the text box and clicked **Save note** from the web app, your old note came right back — the web app never actually told the server to remove it. Clearing the note field and saving now removes it, as expected. This only affected the web app; clearing a note from Discord already worked. **Coming later** still requires a non-blank note, so it can't be cleared while that response is selected.
