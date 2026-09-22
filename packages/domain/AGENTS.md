@@ -78,6 +78,27 @@ export class User extends Model.Class<User>('User')({
 
   The `RsvpResponse` case ran this full lifecycle and is now COMPLETE: `LegacyRsvpResponse` is deleted, the wire DTOs (`EventRsvpApi.ts` `RsvpEntry.response` / `EventRsvpDetail.myResponse`, `EventRpcModels.ts` `UpcomingEventForUserEntry.my_response`) carry the full `RsvpResponse`, and `'maybe'` now means a first-class non-attending "Nevím" response rather than a legacy alias for `'coming_later'`. Do not cite it as a live example of a pinned DTO — cite it as the worked example of Release B. This is the second instance of the pattern in the repo (first: the channel-by-type / global-events removals in git history) — it will recur whenever a stored enum grows.
 
+### Request Payloads Are `Schema.Struct`, NEVER `Schema.Class`
+
+An `HttpApiEndpoint`'s `payload:` MUST be a `Schema.Struct` (or a schema built from one). A `Schema.Class` there produces a **silent, request-less failure** that reads as a server fault and is not one.
+
+The HTTP API client **encodes the payload before it issues the request**, and a Class schema does not accept the plain object literal every call site passes:
+
+```
+Error: Expected UpdateMemberEventPreferences, got {"showAttendeeList":false,...}
+```
+
+The effect therefore fails during encoding, the caller's `Effect.mapError(() => ClientError.make(...))` replaces it with a generic message, and **no network request is ever made**. The user sees a save-failed toast with an **empty Network tab** and a `ClientError` in the console whose stack starts at `e.make`. That exact triple — generic toast, no request, `ClientError` — means check the payload schema, not the server.
+
+Rules:
+
+1. **Payloads are Structs. Success/error schemas may stay `Schema.Class`** — responses are decoded, not encoded, so a Class is fine there (and is the established idiom for DTOs with behaviour). A single endpoint routinely has a Class success and a Struct payload; that asymmetry is correct, not an oversight.
+2. **Export the companion type** next to a Struct payload (`export type X = Schema.Schema.Type<typeof X>`), since a Struct gives no class to reference in handler signatures.
+3. **A payload Struct must never carry response-only fields.** Keep the PATCH payload a separate schema from the response even when the field lists nearly match — that is what stops a client asserting a server-owned capability.
+4. **Unit tests do not cover this.** Web component tests mock the API client, so encoding never runs; server integration tests invoke the handler with an already-decoded payload. The only guard is a domain-level test that calls `Schema.encodeSync(<Payload>)` on a **plain object literal** — it passes for a Struct and throws for a Class. Reference: `packages/domain/test/api/TeamApiPayloads.test.ts`.
+
+This reached production once (`TeamApi.UpdateMemberEventPreferences`, the only Class among 81 payloads, fixed in PR #701): members could open the preferences card but every Save failed with no request leaving the browser.
+
 ### Query-String Boolean Helper
 
 HTTP query strings carry every value as a string, so booleans must be defined with an explicit string-to-boolean transform — never `Schema.Boolean` alone (it accepts the literal JS boolean only). Use this exact helper, defined once per API file that needs it:
