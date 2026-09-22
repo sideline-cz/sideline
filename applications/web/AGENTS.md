@@ -90,6 +90,8 @@ a[role="button"],
 
 `[role="radio"]` stays inflated on purpose — `ToggleGroup` items are labelled text buttons meant to be large. When adding a new small control (a `RadioGroup` dot, an icon-only toggle), add its role to the `:not(...)` list **and** the `::after` selector list in the same edit; adding it to only one leaves it either deformed or untappable. Check the result under devtools touch emulation — with a mouse the whole block is inert and the breakage is invisible.
 
+**There is no `collapsible` primitive in `components/ui/`. Build an inline disclosure as `useState` plus a `<Button aria-expanded={open} aria-controls='<id>'>` and render the panel with that `id` only while open — never `<details>`/`<summary>`.** The block above matches `button`, `a[role="button"]` and `[role="radio"]`; a `<summary>` matches none of them, so a native disclosure ships a sub-44px touch target that no lint rule and no desktop review will catch. Reference: `components/organisms/EventRsvpPanel.tsx` (`summaryOpen` → `aria-controls='rsvp-responses-panel'`).
+
 ### Date Inputs — `DatePicker`
 
 For any user-editable calendar date (event date, activity-log date, fee due date, expense spent-at date), use `<DatePicker>` from `~/components/ui/date-picker` — never the native `<input type='date'>`. The component is a Popover + Calendar combo that uses `date-fns` for locale-aware display and emits a canonical `YYYY-MM-DD` string via `onChange`.
@@ -419,6 +421,25 @@ function MyForm({ onSuccess }: { onSuccess: () => void }) {
   />
   ```
 
+### Forms That Outlive a `router.invalidate()` — `values:` and the `resetOptions` Merge Trap
+
+TanStack Router renders page components **without a `key`**, so `router.invalidate()` refetches loader data and re-renders the page with new props but never remounts it. `useForm`'s `defaultValues` are read once at mount, so after any invalidate they still hold the pre-refetch data.
+
+**A form on a page that can be re-rendered by `router.invalidate()` while the form is open MUST use `values:`, never `defaultValues:`.** RHF deep-compares `values` on every render (`if (props.values && !deepEqual(props.values, _values.current)) control._reset(...)`) and only touches its internal defaults when they actually changed. Pair it with `resetOptions: { keepDirtyValues: true }` so a background refetch does not overwrite fields the user is currently editing. Build the object with `React.useMemo` keyed on the loader data and keep it in a variable — the discard handler resets to it explicitly. Reference: `components/pages/EventDetailPage.tsx` (`formValues` + `useForm`), whose own RSVP submit and three organism `onRefresh` callbacks each fire an invalidate.
+
+**Every explicit `form.reset()` on a form that declares `resetOptions` MUST pass the inverse flags explicitly.** RHF's public `reset` merges the form-level options into every call — `reset = (formValues, keepStateOptions) => _reset(..., { ..._options.resetOptions, ...keepStateOptions })` (verified in `react-hook-form@7.86.0`). A bare `form.reset()` on a form declared with `resetOptions: { keepDirtyValues: true }` therefore **keeps** the dirty values, so a "Discard changes" button preserves the exact edits it exists to throw away and they reappear when the user reopens the form. It type-checks, it throws nothing, and the only symptom is the wrong values on screen.
+
+```typescript
+// ✓ Good — the override is REQUIRED, not redundant
+const handleDiscard = React.useCallback(() => {
+  form.reset(formValues, { keepDirtyValues: false });
+  setEditing(false);
+}, [form, formValues]);
+
+// ✗ Bad — inherits `keepDirtyValues: true` from the form; Discard discards nothing
+form.reset();
+```
+
 ### Dirty-State UX for Edit Forms
 
 An **edit** form (pre-filled from existing data, distinct from a create form) MUST surface dirty state from React Hook Form's `formState` rather than tracking a manual `changed` boolean. This gates the submit button, shows per-field "changed" markers, and resets the baseline on a confirmed save so the form returns to a clean state in place (no navigation away). Reference: `applications/web/src/components/pages/PlayerDetailPage.tsx` (member edit card + `DirtyFieldLabel`).
@@ -446,7 +467,7 @@ Rules:
 1. **Gate the submit button on `!form.formState.isDirty || hasErrors || form.formState.isSubmitting`.** A pristine, error-free, or in-flight edit form has a disabled Save button. Do not track a separate `submitting`/`changed` state — `formState` is the single source of truth.
 2. **The page's `onSave` prop returns `Promise<boolean>` (`true` = persisted), and the form re-baselines only on `true` via `form.reset(form.getValues())`.** Capture the submitted values with `form.getValues()` BEFORE awaiting, then `form.reset(submittedValues)` after success so the dirty diff is recomputed against what was actually saved. Never navigate away on save — the cleaned form stays in place. The route-level handler returns `true` after a successful mutation and calls `router.invalidate()`; it returns `false` on failure (see `members.$memberId.tsx`).
 3. **Mark each changed field at its label**, not just globally, via a small `DirtyFieldLabel({ label, dirty })` helper reading `Boolean(form.formState.dirtyFields.<field>)`. Render the visual dot with `aria-hidden='true'` and pair it with an `<span className='sr-only'>{tr('form_fieldChanged')}</span>` so the change is announced to screen readers.
-4. **Show the dirty-field count + a Cancel (reset) control only while `form.formState.isDirty`.** Cancel is a `type='button'` that calls `form.reset()` (no args — reverts to the original `defaultValues`); the count uses an ICU-pluralized key (`tr('members_unsavedChanges', { count: dirtyFieldCount })`).
+4. **Show the dirty-field count + a Cancel (reset) control only while `form.formState.isDirty`.** Cancel is a `type='button'` that calls `form.reset()` (no args — reverts to the original `defaultValues`). If the form declares `resetOptions`, call `form.reset(values, { keepDirtyValues: false })` instead — see "Forms That Outlive a `router.invalidate()`" above for why the no-arg form silently keeps the edits. The count uses an ICU-pluralized key (`tr('members_unsavedChanges', { count: dirtyFieldCount })`).
 
 ### Pages With Several Independent Save Buttons — `useCardForm`
 

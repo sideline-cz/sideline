@@ -441,6 +441,9 @@ describe('EventRsvpPanel', () => {
       }),
     });
 
+    // The response list lives behind the "Responses" disclosure, closed by default.
+    fireEvent.click(screen.getByRole('button', { name: 'Responses' }));
+
     const maybeRow = screen.getByText('Nevím Nora').closest('li');
     const comingLaterRow = screen.getByText('Later Larry').closest('li');
     expect(maybeRow).not.toBeNull();
@@ -552,5 +555,118 @@ describe('EventRsvpPanel', () => {
     expect(ids.length).toBe(1);
     expect(document.getElementById(ids[0])).not.toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+  // -------------------------------------------------------------------------
+  // Redesign (c3): answers + counts stay above the fold, the response lists move
+  // behind a disclosure that is CLOSED by default.
+  // -------------------------------------------------------------------------
+
+  it('the response list is hidden on first render', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        rsvps: [makeRsvpEntry()],
+        yesCount: 1,
+      }),
+    });
+
+    expect(screen.queryByText('Alice')).toBeNull();
+  });
+
+  it('clicking the Responses toggle reveals the response list', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        rsvps: [makeRsvpEntry()],
+        yesCount: 1,
+      }),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Responses/ }));
+
+    expect(screen.getByText('Alice')).not.toBeNull();
+  });
+
+  it('the disclosure toggle tracks its state in aria-expanded', () => {
+    renderPanel();
+    const toggle = screen.getByRole('button', { name: /Responses/ });
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('the disclosure aria-controls points at the element it reveals', () => {
+    renderPanel();
+    const toggle = screen.getByRole('button', { name: /Responses/ });
+    const controlledId = toggle.getAttribute('aria-controls');
+    expect(controlledId).not.toBeNull();
+
+    // Closed: the referenced region is not in the DOM yet.
+    expect(document.getElementById(controlledId as string)).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(document.getElementById(controlledId as string)).not.toBeNull();
+  });
+
+  it('non-responders live inside the same disclosure as the responses', () => {
+    renderPanel({
+      eventDetail: makeEventDetail({ canEdit: true }),
+      nonResponders: [
+        {
+          teamMemberId: 'm-9',
+          memberName: Option.none(),
+          username: Option.none(),
+          displayName: 'Zoe',
+        },
+      ],
+    });
+
+    expect(screen.queryByText('Zoe')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Responses/ }));
+
+    expect(screen.getByText('Zoe')).not.toBeNull();
+  });
+
+  it('the count strip is visible without opening the disclosure', () => {
+    renderPanel({ rsvpDetail: makeRsvpDetail({ yesCount: 3 }) });
+
+    expect(screen.getByText('3 going')).not.toBeNull();
+  });
+
+  it('DOM order is answer buttons -> count strip -> note field -> disclosure toggle', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({ myResponse: Option.some('yes'), yesCount: 3 }),
+    });
+
+    const yesButton = screen.getByRole('button', { name: 'Yes' });
+    const countStrip = screen.getByText('3 going');
+    const note = screen.getByLabelText(/Message/);
+    const toggle = screen.getByRole('button', { name: /Responses/ });
+
+    const precedes = (a: Element, b: Element) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+    expect(precedes(yesButton, countStrip)).toBe(true);
+    expect(precedes(countStrip, note)).toBe(true);
+    expect(precedes(note, toggle)).toBe(true);
+  });
+
+  it('the below-minimum warning does not compete with the note error for role="alert"', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({ yesCount: 1, minPlayersThreshold: 5 }),
+    });
+
+    // The standing below-min notice is role="status", so it must not be an alert.
+    expect(screen.getByText('Only 1 confirmed, need 5.')).not.toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // Picking a note-requiring response raises the ONE real alert in the panel.
+    fireEvent.click(screen.getByRole('button', { name: 'Coming later' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
+
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
 });
