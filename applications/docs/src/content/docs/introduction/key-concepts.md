@@ -49,6 +49,10 @@ A milestone badge earned automatically when a member's activity stats cross a th
 
 A link captains share so new people can join the team. Expires after first use (by default) and can be scoped to a specific group or role.
 
+## Complete profile
+
+A member's name, date of birth, and gender. Finished either through the web onboarding form or with `/complete` in Discord — including for a member who joined straight from a plain Discord server invite, without ever visiting the web app. Teams can turn on **Require a complete profile** to block RSVPing, claiming a training, or taking a carpool seat until a member's profile is finished; off by default. See [Onboarding through Discord](/guides/discord-integration/#onboarding-through-discord).
+
 ## Fee
 
 A named charge defined at the team level — for example, a membership subscription, a kit levy, or a tournament entry fee. Each fee has a default amount, a currency, and an optional due date. Admins or Treasurers create fees and assign them to individual members.

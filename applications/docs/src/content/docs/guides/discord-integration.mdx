@@ -14,6 +14,7 @@ Sideline is Discord-first. Once the bot is installed, most day-to-day interactio
 - **Syncs roles** — group membership on Sideline is mirrored to Discord roles so channel access matches reality.
 - **Cleans up** old event posts according to your chosen cleanup mode.
 - **Welcomes new members** — when someone joins via an invite, the bot posts a welcome embed and logs the join to a private captain channel.
+- **Onboards members entirely in Discord** — anyone who joins your linked Discord server is automatically a Sideline team member, even without ever clicking a Sideline invite link. They can finish their profile with `/complete` without leaving Discord. See [Onboarding through Discord](#onboarding-through-discord) below.
 
 ## Installing the bot
 
@@ -60,7 +61,7 @@ The bot responds to the following slash commands inside your linked Discord serv
 - `/training result` — get a private deep-link to the training result editor for a recent training event. Use the autocomplete to pick an event from the past 2 days. Only visible to members with the **Manage Events** Discord permission (captains and admins by default). Czech sub-command name: `/training výsledek`.
 - `/training generate` — get a private deep-link to the **team generator** for a recent training event. The generator assigns RSVP-yes attendees to balanced teams based on Elo ratings, team size, and gender mix. Use the autocomplete to pick an event from the past 2 days, then follow the link to the web app to generate and post teams to Discord. Only visible to members with the **Manage Events** Discord permission. Czech sub-command name: `/training generovat`.
 - `/sudo` — team admins only (requires `team:manage`, checked when you run the command — the command itself stays visible to all members). Toggles a shared **Sideline Sudo** Discord role that carries the Administrator permission: running it grants you the role and posts an audit entry with a **Leave sudo** button to your team's system log channel; running it again removes the role and closes that audit entry, showing when the session started, when it ended, and how long it lasted. Any admin can click **Leave sudo** to end someone else's session the same way. There is no automatic expiry — step down by re-running `/sudo` or clicking **Leave sudo**.
-- `/complete gender:<male|female|other>` — complete your profile from Discord instead of the web onboarding form (Czech: `/dokoncit`). Picking a gender opens a pop-up form asking for your **name** (required), **date of birth** (`YYYY-MM-DD`, required), and **jersey number** (optional, 0–99). The reply is always **ephemeral** (visible only to you). Run it again any time to update these details.
+- `/complete` — complete your profile from Discord instead of the web onboarding form (Czech: `/dokoncit`). Opens a pop-up form asking for your **name** (required), **date of birth** (required — write it as `2005-08-24` or `24. 8. 2005`), **gender** (required, pick from a dropdown), and **jersey number** (optional, 0–99). The reply is always **ephemeral** (visible only to you). Run it again any time to update these details. You can also reach this same form by tapping the **Finish my profile** button wherever it appears — see [Onboarding through Discord](#onboarding-through-discord) below.
 
 <Aside type="note" title="Where commands show up">
   Slash commands only appear in channels where the bot has permission to reply. If `/events` doesn't autocomplete, check the bot's channel permissions.
@@ -90,6 +91,32 @@ The embed colour matches the group's colour (or the Sideline default blurple if 
 ### System log
 
 Set a **system log channel** to receive a private embed for every join. The log shows the member mention, invite code used, inviter (if known), and group (if the invite was group-scoped). Keep this channel visible only to captains and admins.
+
+---
+
+## Onboarding through Discord
+
+Anyone who joins your linked Discord server becomes a Sideline team member automatically — this works even for someone who joins through a plain Discord invite that never went through Sideline (for example, one a captain pasted directly into another chat). No web sign-up, no OAuth login, no separate "accept" step. What's still missing at that point is their **profile** — name, date of birth, and gender — which they can fill in without ever leaving Discord using `/complete` (see [Slash commands](#slash-commands) above).
+
+### Require a complete profile
+
+By default, a member with an unfinished profile can still do everything: RSVP, claim a training, join a carpool. If your team wants to make sure everyone finishes their profile first, turn on **Require a complete profile** in **Team settings → General Settings**.
+
+With this setting on, a member with an unfinished profile is blocked from:
+
+- RSVPing to an event
+- Claiming a training as coach
+- Reserving a carpool seat, or adding a car to a carpool
+
+They're never blocked from *backing out* of something — leaving a carpool, removing a car, or releasing a claimed training always works, regardless of profile status.
+
+Whenever a blocked action is attempted, the bot replies with a short explanation and a **Finish my profile** button that opens the same form as `/complete`. There's no need to remember a command — tap the button, fill in the three fields, and try the original action again.
+
+A member who joins your Discord server with this setting on also gets a temporary **"Sideline Unverified"** Discord role and can see a read-only **#start-here** channel with a pinned card carrying the same button. Both disappear automatically the moment they finish their profile — nothing to clean up manually.
+
+<Aside type="note" title="Off by default">
+  This setting starts off for every team, so nothing changes for your members unless you turn it on from **Team settings → General Settings**.
+</Aside>
 
 ---
 

@@ -192,6 +192,8 @@ membersStore.set(TEST_CAPTAIN_MEMBER_ID, {
   active: true,
   role_names: ['Captain'],
   permissions: CAPTAIN_PERMISSIONS as any,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 } as MembershipWithRole);
 membersStore.set(TEST_PLAYER_MEMBER_ID, {
   id: TEST_PLAYER_MEMBER_ID,
@@ -200,6 +202,8 @@ membersStore.set(TEST_PLAYER_MEMBER_ID, {
   active: true,
   role_names: ['Player'],
   permissions: PLAYER_PERMISSIONS as any,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 } as MembershipWithRole);
 membersStore.set(TEST_TREASURER_MEMBER_ID, {
   id: TEST_TREASURER_MEMBER_ID,
@@ -208,6 +212,8 @@ membersStore.set(TEST_TREASURER_MEMBER_ID, {
   active: true,
   role_names: ['Treasurer'],
   permissions: TREASURER_PERMISSIONS as any,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 } as MembershipWithRole);
 
 // Maps each TeamMemberId to its team_id — used for team-membership validation in bulkInsert

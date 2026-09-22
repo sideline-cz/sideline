@@ -170,6 +170,8 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
           active: true,
           role_names: ['Captain'],
           permissions: ['carpool:manage'] as string[],
+          is_profile_complete: true,
+          require_complete_profile: Option.none(),
         }),
       );
     }
@@ -182,6 +184,8 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
           active: true,
           role_names: ['Player'],
           permissions: [] as string[],
+          is_profile_complete: true,
+          require_complete_profile: Option.none(),
         }),
       );
     }
@@ -194,6 +198,8 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
           active: true,
           role_names: ['Player'],
           permissions: [] as string[],
+          is_profile_complete: true,
+          require_complete_profile: Option.none(),
         }),
       );
     }

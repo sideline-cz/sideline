@@ -42,6 +42,7 @@ import {
   PollVotersButtonReg,
 } from './poll.js';
 import { ProfileCompleteModal } from './profile-complete.js';
+import { ProfileVerifyButton } from './profile-verify.js';
 import { ReportModal } from './report.js';
 import { RosterApproveButton, RosterDeclineButton } from './roster-approval.js';
 import { RsvpAddMessageButton, RsvpButton, RsvpClearMessageButton, RsvpModal } from './rsvp.js';
@@ -107,4 +108,5 @@ export const interactionBuilder = Ix.builder
   .add(PollRemoveSelectSubmitReg)
   .add(SudoLeaveButtonReg)
   .add(ProfileCompleteModal)
+  .add(ProfileVerifyButton)
   .add(ReportModal);

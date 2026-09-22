@@ -144,6 +144,8 @@ membersStore.set(TEST_MEMBER_ID, {
   active: true,
   role_names: ['Player'],
   permissions: PLAYER_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 membersStore.set(TEST_ADMIN_MEMBER_ID, {
   id: TEST_ADMIN_MEMBER_ID,
@@ -152,6 +154,8 @@ membersStore.set(TEST_ADMIN_MEMBER_ID, {
   active: true,
   role_names: ['Admin'],
   permissions: ADMIN_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 
 type UserLike = {
@@ -353,6 +357,8 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
       active: input.active,
       role_names: ['Player'],
       permissions: PLAYER_PERMISSIONS,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     };
     membersStore.set(id, member);
     return Effect.succeed({
@@ -1171,6 +1177,8 @@ describe('Members API', () => {
         active: true,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       const response = await handler(
         new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}`, {
@@ -1190,6 +1198,8 @@ describe('Members API', () => {
         active: true,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       // Seed the member's roster membership explicitly so the cleanup assertion below is
       // unconditional (no silent skip if the roster-membership tests haven't run yet).
@@ -1224,6 +1234,8 @@ describe('Members API', () => {
         active: true,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       // Seed the member's group membership — TEST_GROUP_ID has TEST_GROUP_ANCESTOR_ID as an
       // ancestor (see groupAncestorsStore), so deactivation must emit member-removed for both.
@@ -1259,6 +1271,8 @@ describe('Members API', () => {
         active: true,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       const response = await handler(
         new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}`, {
@@ -1277,6 +1291,8 @@ describe('Members API', () => {
         active: true,
         role_names: ['Admin'],
         permissions: ADMIN_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       const response = await handler(
         new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_ADMIN_MEMBER_ID}`, {
@@ -1299,6 +1315,8 @@ describe('Members API', () => {
         active: false,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       const response = await handler(
         new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}`, {
@@ -1317,6 +1335,8 @@ describe('Members API', () => {
         active: true,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
     });
   });
@@ -1339,6 +1359,8 @@ describe('Members API', () => {
         active: false,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       const response = await handler(
         new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/reactivate`, {
@@ -1373,6 +1395,8 @@ describe('Members API', () => {
         active: false,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       const response = await handler(
         new Request(
@@ -1406,6 +1430,8 @@ describe('Members API', () => {
         active: false,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       resetChannelSyncCalls();
       const response = await handler(
@@ -1803,6 +1829,8 @@ describe('Rosters API', () => {
         active: true,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       const response = await handler(
         new Request(`http://localhost/teams/${TEST_TEAM_ID}/rosters/${TEST_ROSTER_ID}/members`, {
@@ -1860,6 +1888,8 @@ describe('Rosters API', () => {
         active: true,
         role_names: ['Player'],
         permissions: PLAYER_PERMISSIONS,
+        is_profile_complete: true,
+        require_complete_profile: Option.none(),
       });
       const response = await handler(
         new Request(
@@ -1911,6 +1941,8 @@ describe('GET /teams/:teamId/members/:memberId/rosters', () => {
       active: true,
       role_names: ['Player'],
       permissions: PLAYER_PERMISSIONS,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     });
     // Create a second roster the member is NOT on.
     const otherRosterId = '00000000-0000-0000-0000-000000000031' as RosterModel.RosterId;
@@ -1956,6 +1988,8 @@ describe('GET /teams/:teamId/members/:memberId/rosters', () => {
       active: true,
       role_names: [],
       permissions: [],
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     });
     const response = await handler(
       new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/rosters`, {
@@ -1971,6 +2005,8 @@ describe('GET /teams/:teamId/members/:memberId/rosters', () => {
       active: true,
       role_names: ['Player'],
       permissions: PLAYER_PERMISSIONS,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     });
   });
 });

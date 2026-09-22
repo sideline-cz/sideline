@@ -92,10 +92,10 @@ Each usability test session will follow this structure:
 | Welcome and consent signing | 5 minutes |
 | Background questionnaire | 5 minutes |
 | Pre-test briefing and think-aloud practice | 5 minutes |
-| Task execution (13 tasks) | 45–55 minutes |
+| Task execution (14 tasks) | 50–60 minutes |
 | Post-test SUS questionnaire | 5 minutes |
 | Debrief interview | 10 minutes |
-| **Total** | **~80 minutes** |
+| **Total** | **~85 minutes** |
 
 ### 3.3 Roles
 
@@ -139,6 +139,7 @@ The following setup steps must be completed before each participant's session be
 5. Confirm the Sideline bot is online and responding in the test server.
 6. Prepare a test Discord account for the participant if they do not wish to use their personal account.
 7. Verify that the iCal calendar subscription endpoint is accessible.
+8. For Task N: turn on the team's "Require a complete profile" setting, ensure the participant's test-server profile is still incomplete, and have a training event with an open RSVP already posted in the test channel.
 
 ### 4.4 Screen and Audio Recording
 
@@ -435,6 +436,31 @@ The teammate's profile now shows a variable symbol. The participant can locate a
 
 ---
 
+### Task N — Finish Your Profile Without Leaving Discord
+
+**Description:**
+You have just joined your team's Discord server directly — you never visited the Sideline website. You want to sign up for an upcoming training, but the team requires a complete profile first.
+
+**Steps:**
+1. In the Discord test server, attempt to RSVP "Yes" to the training event posted in the channel.
+2. Notice the bot's reply explaining that your profile is not finished yet, with a "Finish my profile" button.
+3. Click the button (or alternatively run the `/complete` slash command directly).
+4. Fill in the modal: name, date of birth, jersey number (optional), and gender.
+5. Submit the modal and confirm the bot's success message.
+6. Return to the training event and RSVP "Yes" again.
+
+**Expected Result:**
+The first RSVP attempt is blocked with a clear, non-technical explanation and a one-tap way to fix it. After completing the profile modal, the participant is not automatically returned to the RSVP — they retap the same button, and it now succeeds.
+
+**Success Criteria:**
+- Participant understands why the RSVP was blocked without facilitator help.
+- Participant locates and uses the "Finish my profile" button (or `/complete`) without being told the command name.
+- Participant successfully re-attempts and completes the RSVP after finishing their profile.
+
+**Notes for facilitator:** This task only applies when the test team has the "Require a complete profile" team setting turned on (off by default) — confirm it is enabled before the session. It specifically probes whether participants notice the lack of an automatic resume (the RSVP is not retried for them) and whether that reads as broken or as an acceptable extra tap; capture this as a qualitative note (see §6.2) rather than a hard pass/fail, since deliberately not auto-resuming was a design choice, not an oversight.
+
+---
+
 ## 6. Data Collection Methods
 
 ### 6.1 Quantitative Measures
@@ -548,10 +574,10 @@ Each individual test session is structured as follows:
 | 0:00 – 0:05 | Welcome, introduce the purpose of the session, obtain signed consent |
 | 0:05 – 0:10 | Administer background questionnaire |
 | 0:10 – 0:15 | Explain think-aloud protocol; conduct practice task (e.g., "find the settings in a web browser") |
-| 0:15 – 1:10 | Task execution (Tasks A–M, approximately 3–5 minutes per task) |
-| 1:10 – 1:15 | Administer SUS questionnaire |
-| 1:15 – 1:25 | Debrief interview |
-| 1:25 – 1:30 | Thank participant, answer any questions about the platform, confirm data handling |
+| 0:15 – 1:15 | Task execution (Tasks A–N, approximately 3–5 minutes per task) |
+| 1:15 – 1:20 | Administer SUS questionnaire |
+| 1:20 – 1:30 | Debrief interview |
+| 1:30 – 1:35 | Thank participant, answer any questions about the platform, confirm data handling |
 
 ### 9.3 Pilot Test
 

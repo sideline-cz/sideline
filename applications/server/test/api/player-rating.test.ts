@@ -154,6 +154,8 @@ const membersStore = new Map<TeamMember.TeamMemberId, MembershipWithRole>([
       active: true,
       role_names: ['Player'],
       permissions: PLAYER_PERMISSIONS,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     } as MembershipWithRole,
   ],
   [
@@ -165,6 +167,8 @@ const membersStore = new Map<TeamMember.TeamMemberId, MembershipWithRole>([
       active: true,
       role_names: ['Captain'],
       permissions: CAPTAIN_PERMISSIONS,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     } as MembershipWithRole,
   ],
   // TEST_MEMBER_A and TEST_MEMBER_B: roster members with no separate users,

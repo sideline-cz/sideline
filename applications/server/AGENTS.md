@@ -373,6 +373,12 @@ The RPC payload includes `invite_code: Option<Snowflake-like string>` — this i
 
 The server is the only renderer of welcome templates. The bot receives a fully-substituted, sanitized string and embeds it as-is.
 
+`WelcomeMeta` also carries three **top-level** verification fields — `profile_complete`, `profile_gate_enabled`, `verify_locale` — and they must stay top-level, never nested inside `welcome`:
+
+1. **`welcome` is `Option.none()` for exactly the cohort the profile gate must reach.** `buildWelcomeMeta` only produces a `welcome` when `resolveInviteContext` resolves a Sideline-minted per-acceptance code or a recent `invite_acceptances` row; a member who walked in through a plain captain-made Discord invite gets `welcome: None` and no welcome embed at all. Nesting these three fields under `welcome` would hide them from that cohort and silently disable the join-time unverified role/channel for it — the main path this feature exists for.
+2. **`profile_gate_enabled` is the only field here that costs a query** (`deps.teamSettings.findByTeamId`). It is skipped — hardcoded `false` — when `payload.source` is `Some('reconcile')`, because `Guild/ReconcileMembers` runs `registerMemberWithReconcile` for every member of a guild at `concurrency: 5` and **discards** `welcomeMeta`. Never remove that `isReconcile` short-circuit, and never add a second per-member query to this builder without the same guard. `profile_complete` and `verify_locale` are free (already-loaded `users` / `teams` rows) and stay populated on the reconcile path.
+3. **`buildWelcomeMeta` takes the `user` row as its own parameter** so `profile_complete` reads the row the handler already bound. Do not re-read the user inside the builder.
+
 Rules that keep a group binding from silently never reaching Discord again:
 
 1. **Every group-add writes `group_members` AND emits `member_added` for the group and its active ancestors.** There are exactly two exceptions, both because the member is not a guild member the emit could target, or already holds the role:
@@ -1112,20 +1118,28 @@ Rules:
 3. Derive booleans in an `Effect.let` **after** the `Effect.bind` that performs the upsert, never before — the write must not be conditional on the derived state.
 4. When two consumers of "did this change?" want different answers (e.g. a wide ephemeral hint vs. a narrow notification gate), give them two named booleans instead of overloading one — don't let a single flag's meaning drift to satisfy a new caller.
 
-## RSVP Has Two Write Surfaces — Apply Side Effects to Both
+## RSVP, Claim and Carpool Have Five Gated Writers — Apply Side Effects and Guards to All
 
-An RSVP response is written through **exactly two** handlers, and any per-response side effect MUST be added to **both** or it silently applies on only one surface:
+An RSVP response, a training claim, and a carpool seat/car are each written through their own small, fixed set of handlers, and any per-response side effect — or precondition, like the profile-completeness gate below — MUST be added to **every one of them** or it silently applies on only some surfaces:
 
-| Surface | Handler | RSVP write |
+| Surface | Handler | Write |
 |---------|---------|-----------|
 | Web HTTP | `submitRsvp` (`src/api/event-rsvp.ts`) | `rsvps.upsertRsvp(...)` |
 | Discord button | `Event/SubmitRsvp` (`src/rpc/event/index.ts`) | `svc.rsvps.upsertRsvp(...)` |
+| Discord button | `Event/ClaimTraining` (`src/rpc/event/index.ts`) | `svc.events.claimTraining(...)` |
+| Discord button | `Carpool/ReserveSeat` (`src/rpc/carpool/index.ts`) | `carpools.reserveSeat(...)` |
+| Discord modal | `Carpool/AddCar` (`src/rpc/carpool/index.ts`) | `carpools.addCar(...)` |
 
-Reference: the consecutive missed-RSVP streak reset (`team_members.missed_rsvps`). Both handlers call `members.resetMissedRsvps(membership.id)` in a best-effort `Effect.tap` after the upsert, wrapped in `Effect.catchCause((cause) => Effect.logWarning('Failed to reset missed RSVPs, continuing', cause))` so a reset failure never fails the RSVP write.
+Reference: the consecutive missed-RSVP streak reset (`team_members.missed_rsvps`). Both RSVP handlers call `members.resetMissedRsvps(membership.id)` in a best-effort `Effect.tap` after the upsert, wrapped in `Effect.catchCause((cause) => Effect.logWarning('Failed to reset missed RSVPs, continuing', cause))` so a reset failure never fails the RSVP write.
+
+**The profile-completeness gate** (`.work-plans/discord-full-onboarding.md`) is the newest guard shared across all five writers: `src/utils/requireCompleteProfile.ts` is a pure predicate over `PROFILE_GATE_ENABLED` (the global incident lever, `env.ts`, defaults **on**), `team_settings.require_complete_profile` (the per-team opt-in, defaults **off**), and `users.is_profile_complete`. Every call site reads both booleans off the member/membership lookup it already runs (`TeamMemberLookup` in `rpc/event/index.ts`, `MembershipWithRole` in `TeamMembersRepository.ts`) — **never add a query for this**. It is deliberately **not** wired into carpool's shared `resolveMember`, which would also gate the un-blocking actions (`Carpool/LeaveCarpool`, `Carpool/RemoveCar`, `Event/UnclaimTraining`) and trap an already-in-progress member. It is also deliberately **not** on `Carpool/AssignSeat` — that is the car owner acting on someone else, not the target acting on themselves; `Carpool/AssignSeat` calls `carpools.reserveSeat(...)` too, which is why `test/gatedWriters.test.ts` expects **2** `reserveSeat(` call sites and only **1** gated one.
 
 Rules:
-1. **Any new per-response side effect (counter reset, streak update, derived flag) goes in BOTH handlers.** Grep `upsertRsvp` before shipping — two call sites in `src/` is the invariant. A side effect on only the web path leaves Discord RSVPs (the majority) unhandled.
-2. **Side effects that are not part of the RSVP's own correctness are best-effort** — `Effect.tap` after the upsert, wrapped in `Effect.catchCause(... logWarning)`. The same rule already governs roster provisioning (`provisioning.onRsvp`) on both surfaces.
+1. **Any new per-response side effect (counter reset, streak update, derived flag) goes in every handler above.** `test/gatedWriters.test.ts` does NOT check side-effect parity — it walks `src/` (skipping `repositories/`) and asserts only two things per writer: the exact call-site count and the exact file list, and that every file holding a call site also contains the literal `requireCompleteProfile`. So it catches a **sixth or moved writer**, never a side effect you added to one handler and forgot in another. For a side effect, the check is still yours to write.
+2. **Side effects that are not part of the write's own correctness are best-effort** — `Effect.tap` after the write, wrapped in `Effect.catchCause(... logWarning)`. The same rule already governs roster provisioning (`provisioning.onRsvp`) on both RSVP surfaces.
+3. **A new gated writer must call `requireCompleteProfile` immediately after its member/membership bind**, before any other precondition, so an incomplete profile reports as itself rather than as some unrelated domain error — and must be added to `test/gatedWriters.test.ts`'s `GATED_WRITERS` table. This is why `Event/SubmitRsvp` binds `member` **above** `event` and the deadline tap: reordering a precondition to fit the gate is expected, and it changes the error vocabulary on purpose (a non-member of a deleted or closed event now gets `RsvpMemberNotFound`, not `RsvpEventNotFound` / `RsvpDeadlinePassed`).
+4. **Never move the gate into a shared member-resolution helper.** Each of the five writers taps it individually and carpool's `resolveMember` stays clean, because a helper-level gate would also block the actions that UNDO the blocked state — `Carpool/LeaveCarpool`, `Carpool/RemoveCar`, `Event/UnclaimTraining` — and leave a member stuck in a carpool or a claimed training they cannot get out of.
+5. **A sixth gated writer must read its two booleans off a lookup it already performs**, adding the columns to that SELECT (`u.is_profile_complete` + a `LEFT JOIN team_settings ts ON ts.team_id = tm.team_id` for `ts.require_complete_profile`, decoded as `Schema.OptionFromNullOr(Schema.Boolean)`; `None` = no settings row = gate off). Do NOT call `TeamSettingsRepository.findByTeamId` from a write handler — that is one extra round trip on a hot path, and the whole design premise is that the gate is free.
 
 ## Idempotent Counter Increment Folded Into the `active`→`started` Status Flip
 
@@ -2475,3 +2489,19 @@ Rules:
 2. **Tests override with `Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set([...])) } as any)`**, never by stubbing the env var. The `as any` is required because the `ServiceMap.Service` tag carries a private brand (same reason as the mock-repo cast in "HttpApi Mock-Layer Cascade").
 3. **Wrap in a service ONLY the consumers that must be test-injectable.** The per-request resolution helper `toCurrentUser` (`src/utils/toCurrentUser.ts`) still reads `globalAdminDiscordIds` directly from `env.ts` — only the allowlist-management API handlers in `src/api/global-admin.ts` (which list/grant/revoke admins and must run against a controlled allowlist in `test/GlobalAdmin.test.ts`) depend on `GlobalAdminAllowlist`. Do not route every read through the service; that would force every `toCurrentUser` call site to provide the layer.
 4. **Adding this service to `ApiLive` triggers the test-layer cascade** — see "HttpApi Mock-Layer Cascade" footgun: every `ApiLive`-providing test must `Layer.provide(GlobalAdminAllowlist.Default)` (or a `Layer.succeed` override) in the same PR.
+
+## Boolean Env Flags: The Falsy Set Encodes the Default, So Never Copy a Parser Blindly
+
+`src/env.ts` has three hand-rolled boolean env parsers, and they do NOT all default the same way. Copying one to make the next is the footgun:
+
+| Variable | `createEnv` default | Unset/unrecognised resolves to | Real off switch |
+|----------|--------------------|--------------------------------|-----------------|
+| `DISCORD_JOIN_ENFORCEMENT_ENABLED` | `''` | **disabled** | the variable itself |
+| `AI_CHAT_ENABLED` | `''` | **disabled** | the variable itself |
+| `PROFILE_GATE_ENABLED` | `'true'` | **enabled** | `team_settings.require_complete_profile` (`NOT NULL DEFAULT false`) |
+
+Rules:
+
+1. **`PROFILE_GATE_ENABLED` defaults ON, deliberately.** It is a global incident lever to kill the profile gate for every team at once; no team is affected until its captain flips the per-team column. Do not "align" it with the two flags above.
+2. **`PROFILE_GATE_FALSY` must never contain `''`.** `parseDiscordJoinEnforcementEnabled` puts `''` in its falsy set because its safe direction is disabled. `parseProfileGateEnabled`'s safe direction is enabled, so `''` must fall through to the unrecognised-value branch (which warns and returns `true`). Adding `''` to the falsy set makes an unset variable read as `false` and silently inverts the default with no test failure anywhere except `test/env.profileGate.test.ts`.
+3. **A new boolean flag states its safe direction first, then builds the truthy/falsy sets to match** — and gets a `test/env.<flag>.test.ts` asserting the unset, empty-string, and unrecognised-value cases explicitly. `test/env.profileGate.test.ts` is the reference.

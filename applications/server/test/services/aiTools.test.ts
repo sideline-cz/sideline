@@ -186,6 +186,8 @@ const buildMembership = (overrides: MembershipOverrides = {}): MembershipWithRol
     active: true,
     role_names: ['Player'],
     permissions: overrides.permissions ?? [],
+    is_profile_complete: true,
+    require_complete_profile: Option.none(),
   });
 
 const buildCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({

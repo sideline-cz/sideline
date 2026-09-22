@@ -277,6 +277,8 @@ const buildMembership = (
     active: true,
     role_names: ['Admin'],
     permissions: overrides.permissions ?? ADMIN_PERMISSIONS,
+    is_profile_complete: true,
+    require_complete_profile: Option.none(),
   });
 
 const buildCtx = (overrides: Partial<ToolContext> = {}): ToolContext => ({

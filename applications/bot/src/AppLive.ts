@@ -22,6 +22,7 @@ import {
 import { InviteCache } from '~/services/InviteCache.js';
 import { OnboardingRoleCache } from '~/services/OnboardingRoleCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
+import { VerificationChannelCache } from '~/services/VerificationChannelCache.js';
 
 const SyncLive = Layer.mergeAll(
   AchievementSyncService.Default,
@@ -43,6 +44,7 @@ const SyncLive = Layer.mergeAll(
   Layer.provideMerge(ChannelReorderSemaphore.Live),
   Layer.provideMerge(InviteCache.Default),
   Layer.provideMerge(OnboardingRoleCache.Default),
+  Layer.provideMerge(VerificationChannelCache.Default),
   Layer.provideMerge(SyncRpc.Default),
   Layer.provide(DiscordIxLive),
 );

@@ -232,6 +232,8 @@ const membersStore = new Map<string, MembershipWithRole>([
       active: true,
       role_names: ['Coach'],
       permissions: COACH_PERMISSIONS as any,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     } as MembershipWithRole,
   ],
 ]);

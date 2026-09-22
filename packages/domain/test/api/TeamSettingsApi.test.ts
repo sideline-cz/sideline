@@ -478,6 +478,7 @@ describe('TeamSettingsInfo discordEventsChannelId (transitional)', () => {
     eventHorizonDays: 30,
     minPlayersThreshold: 5,
     rsvpRemindersEnabled: true,
+    requireCompleteProfile: false,
     rsvpReminderDaysBefore: 1,
     maxMissedRsvps: 3,
     claimRequestDaysBefore: 1,

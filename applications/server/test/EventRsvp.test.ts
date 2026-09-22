@@ -174,6 +174,8 @@ membersStore.set(TEST_MEMBER_ID, {
   active: true,
   role_names: ['Player'],
   permissions: PLAYER_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 membersStore.set(TEST_ADMIN_MEMBER_ID, {
   id: TEST_ADMIN_MEMBER_ID,
@@ -182,6 +184,8 @@ membersStore.set(TEST_ADMIN_MEMBER_ID, {
   active: true,
   role_names: ['Admin'],
   permissions: ADMIN_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 
 // --- In-memory events ---
@@ -1881,6 +1885,8 @@ const MOCK_MEMBER_LOOKUP_ROW = {
   nickname: null,
   display_name: null,
   username: null,
+  is_profile_complete: true,
+  require_complete_profile: null,
 };
 
 const MockSqlClientLayer = Layer.succeed(
@@ -2196,6 +2202,166 @@ const makeSubmitRsvp = (params: {
       ),
     ),
   );
+
+// ============================================================
+// Task 2 (`.work-plans/discord-full-onboarding.md`) — bind `member` before `event` and the
+// deadline tap in `Event/SubmitRsvp`.
+//
+// Today the handler binds `event` first, taps the deadline check, and only THEN binds `member`.
+// The profile gate (Task 3) reads off the `member` bind, so with the current order a
+// profile-incomplete member on a closed event would report `RsvpDeadlinePassed` and never see the
+// Verify button. This block pins the required reorder — hoist `member` above `event` and the
+// deadline tap — and its one deliberate, stated behaviour change: a NON-MEMBER submitting an RSVP
+// now fails `RsvpMemberNotFound` where they previously failed `RsvpEventNotFound` (deleted event)
+// or `RsvpDeadlinePassed` (closed event). That is strictly more accurate — "you are not on this
+// team's roster" beats "the deadline passed" for someone who was never eligible to RSVP at all.
+//
+// `RsvpMemberNotFound` is produced by the `SqlSchema.findOne(...)` member lookup failing with
+// `NoSuchElementError` — i.e. the mocked `SqlClient` returning zero rows for the member query.
+// `MockSqlClientLayer` (used by every other RPC case in this file) always returns
+// `MOCK_MEMBER_LOOKUP_ROW` regardless of the caller, so a dedicated "non-member" SQL mock is
+// needed here; it is otherwise byte-identical to `MockSqlClientLayer`.
+// ============================================================
+
+const RPC_TEST_EVENT_CLOSED_ID = '00000000-0000-0000-0000-000000000071' as Event.EventId;
+const RPC_BOGUS_EVENT_ID = '00000000-0000-0000-0000-0000000000ff' as Event.EventId;
+
+const seedRpcClosedEvent = () => {
+  rpcEventsStore.set(RPC_TEST_EVENT_CLOSED_ID, {
+    id: RPC_TEST_EVENT_CLOSED_ID,
+    team_id: RPC_TEST_TEAM_ID,
+    training_type_id: Option.none(),
+    event_type: 'training' as Event.EventType,
+    title: 'Past Training (closed)',
+    description: Option.none(),
+    start_at: DateTime.makeUnsafe('2020-01-01T10:00:00Z'),
+    end_at: Option.none(),
+    location: Option.none(),
+    status: 'active' as Event.EventStatus,
+    created_by: RPC_TEST_MEMBER_ID,
+    training_type_name: Option.none(),
+    created_by_name: Option.none(),
+    series_id: Option.none(),
+    series_modified: false,
+    discord_target_channel_id: Option.none(),
+    owner_group_id: Option.none(),
+    owner_group_name: Option.none(),
+    member_group_id: Option.none(),
+    member_group_name: Option.none(),
+    reminder_sent_at: Option.none(),
+  });
+};
+
+// Byte-identical to `MockSqlClientLayer` above, except the member-lookup query returns ZERO rows —
+// i.e. the caller is not a member of the team. Used only by this describe block.
+const MockNonMemberSqlClientLayer = Layer.succeed(
+  SqlClient.SqlClient,
+  Object.assign(
+    function mockSql(_strings: TemplateStringsArray, ..._args: unknown[]) {
+      return Effect.succeed([]);
+    },
+    {
+      safe: undefined as any,
+      withoutTransforms: function (this: any) {
+        return this;
+      },
+      reserve: Effect.die(new Error('reserve not implemented')),
+      withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | any, R> =>
+        effect,
+      reactive: () => Effect.succeed([] as never[]),
+      reactiveMailbox: () => Effect.die(new Error('reactiveMailbox not implemented')),
+      unsafe: (_sql: string, _params?: ReadonlyArray<unknown>) => Effect.succeed([] as never[]),
+      literal: (_sql: string) => ({ _tag: 'Fragment' as const, segments: [] }),
+      in: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      insert: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      update: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      updateValues: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      and: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      or: (..._args: unknown[]) => Effect.succeed([] as never[]),
+    },
+  ) as unknown as SqlClient.SqlClient,
+);
+
+const RpcTestLayerNonMember = EventsRpcLive.pipe(
+  Layer.provide(MockRpcEventsRepositoryLayer),
+  Layer.provide(MockRpcEventRsvpsRepositoryLayer),
+  Layer.provide(MockRpcTeamSettingsRepositoryLayer),
+  Layer.provide(MockRpcEventSyncEventsRepositoryLayer),
+  Layer.provide(MockRpcTeamMembersRepositoryLayer),
+  Layer.provide(MockRpcGroupsRepositoryLayer),
+  Layer.provide(MockRpcTeamsRepositoryLayer),
+  Layer.provide(MockRpcTrainingTypesRepositoryLayer),
+  Layer.provide(MockRpcChannelEventDividersRepositoryLayer),
+  Layer.provide(MockDiscordChannelMappingRepositoryLayer),
+  Layer.provide(MockNonMemberSqlClientLayer),
+  Layer.provide(MockEventRosterLayers),
+);
+
+describe('Event/SubmitRsvp RPC — member bound before event/deadline (Task 2 reorder)', () => {
+  beforeEach(() => {
+    resetRpcStores();
+  });
+
+  itEffect.effect(
+    'non-member on a closed event → RsvpMemberNotFound (was RsvpDeadlinePassed before the reorder)',
+    () => {
+      seedRpcClosedEvent();
+      return makeSubmitRsvp({ event_id: RPC_TEST_EVENT_CLOSED_ID, response: 'yes' }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Failure');
+            if (result._tag === 'Failure') {
+              expect((result.failure as { _tag: string })._tag).toBe('RsvpMemberNotFound');
+            }
+          }),
+        ),
+        Effect.provide(RpcTestLayerNonMember),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'non-member on a deleted event → RsvpMemberNotFound (was RsvpEventNotFound before the reorder)',
+    () =>
+      makeSubmitRsvp({ event_id: RPC_BOGUS_EVENT_ID, response: 'yes' }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Failure');
+            if (result._tag === 'Failure') {
+              expect((result.failure as { _tag: string })._tag).toBe('RsvpMemberNotFound');
+            }
+          }),
+        ),
+        Effect.provide(RpcTestLayerNonMember),
+        Effect.asVoid,
+      ),
+  );
+
+  itEffect.effect(
+    'member on a closed event → RsvpDeadlinePassed, unchanged — proves the reorder did not swallow the deadline check',
+    () => {
+      seedRpcClosedEvent();
+      return makeSubmitRsvp({ event_id: RPC_TEST_EVENT_CLOSED_ID, response: 'yes' }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Failure');
+            if (result._tag === 'Failure') {
+              expect((result.failure as { _tag: string })._tag).toBe('RsvpDeadlinePassed');
+            }
+          }),
+        ),
+        // The default `RpcTestLayer`'s SQL mock always resolves the member lookup
+        // (`MOCK_MEMBER_LOOKUP_ROW`), i.e. the caller IS a member.
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+});
 
 describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
   beforeEach(() => {

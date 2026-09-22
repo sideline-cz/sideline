@@ -56,6 +56,8 @@ const makeRealMembership = (
   active: true,
   role_names: ['Captain'],
   permissions: [...permissions],
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 
 // ---------------------------------------------------------------------------

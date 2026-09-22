@@ -6,6 +6,7 @@ import {
   type GroupModel,
   GuildRpcGroup,
   GuildRpcModels,
+  type Onboarding,
   type PersonalEventChannel,
   type Team,
   TeamMember,
@@ -97,6 +98,15 @@ type WelcomeMeta = {
   readonly system_log_channel_id: Option.Option<Discord.Snowflake>;
   readonly welcome: Option.Option<WelcomeDetail>;
   readonly invite_code: Option.Option<string>;
+  // Task 4 (`.work-plans/discord-full-onboarding.md`) — TOP-LEVEL, not inside `WelcomeDetail`.
+  // That is the whole point: `resolveInviteContext` only resolves from a Sideline-minted
+  // per-acceptance code or a recent `invite_acceptances` row, so a member joining through a
+  // plain, captain-made Discord invite gets `welcome: None` and NO welcome message today — see
+  // "One finding that shapes the join-time surface" in the plan. These three fields let the bot
+  // act on a join with no welcome embed at all.
+  readonly profile_complete: boolean;
+  readonly profile_gate_enabled: boolean;
+  readonly verify_locale: Onboarding.OnboardingLocale;
 };
 
 /**
@@ -334,64 +344,97 @@ export const GuildsRpcLive = Effect.Do.pipe(
         readonly welcome_channel_id: Option.Option<Discord.Snowflake>;
         readonly system_log_channel_id: Option.Option<Discord.Snowflake>;
         readonly welcome_message_template: Option.Option<string>;
+        readonly onboarding_locale: Onboarding.OnboardingLocale;
       },
+      user: { readonly is_profile_complete: boolean },
       payload: RegisterMemberPayload,
       inviteContext: Option.Option<InviteContext>,
     ): Effect.Effect<WelcomeMeta> => {
-      const noWelcome: WelcomeMeta = {
-        system_log_channel_id: team.system_log_channel_id,
-        welcome: Option.none(),
-        invite_code: payload.invite_code,
-      };
-      return Option.match(inviteContext, {
-        onNone: () => Effect.succeed(noWelcome),
-        onSome: (ctx) => {
-          const renderedMessage = Option.map(team.welcome_message_template, (template) =>
-            sanitizeRendered(
-              applyTemplate(template, {
-                memberMention: `<@${payload.discord_id}>`,
-                memberName: Option.getOrElse(payload.display_name, () => payload.username),
-                inviterMention: Option.match(ctx.inviter_discord_id, {
-                  onNone: () => '',
-                  onSome: (id) => `<@${id}>`,
-                }),
-                inviterName: ctx.inviter_username,
-                groupName: Option.getOrElse(ctx.group_name, () => ''),
-                teamName: ctx.team_name,
+      // Task 4 (`.work-plans/discord-full-onboarding.md`) — `profile_gate_enabled` is the only
+      // field here that costs a query (`deps.teamSettings.findByTeamId`). Skip it entirely when
+      // this call came from `Guild/ReconcileMembers` (`payload.source === Some('reconcile')`):
+      // that path calls `registerMemberWithReconcile` for every member of a guild at
+      // `concurrency: 5` and DISCARDS the `welcomeMeta` result (see `:795-815`), so the query
+      // would be pure waste on the largest fan-out in the server. `profile_complete` and
+      // `verify_locale` are free (already-loaded rows) and stay populated on that path.
+      const isReconcile = Option.isSome(payload.source) && payload.source.value === 'reconcile';
+      const fetchProfileGateEnabled: Effect.Effect<boolean> = isReconcile
+        ? Effect.succeed(false)
+        : deps.teamSettings.findByTeamId(team.id).pipe(
+            Effect.map((row) =>
+              Option.match(row, {
+                onNone: () => false,
+                onSome: (s) => s.require_complete_profile,
               }),
             ),
           );
-          const fetchGroupColor = Option.match(ctx.group_id, {
-            onNone: () => Effect.succeed(Option.none<number>()),
-            onSome: (groupId) =>
-              deps.groups
-                .findGroupById(groupId)
-                .pipe(
-                  Effect.map(
-                    Option.flatMap((g) =>
-                      Option.fromNullishOr(sanitizeHexColor(Option.getOrNull(g.color))),
-                    ),
-                  ),
+
+      return Effect.Do.pipe(
+        Effect.bind('profileGateEnabled', () => fetchProfileGateEnabled),
+        Effect.bind('result', ({ profileGateEnabled }) => {
+          const noWelcome: WelcomeMeta = {
+            system_log_channel_id: team.system_log_channel_id,
+            welcome: Option.none(),
+            invite_code: payload.invite_code,
+            profile_complete: user.is_profile_complete,
+            profile_gate_enabled: profileGateEnabled,
+            verify_locale: team.onboarding_locale,
+          };
+          return Option.match(inviteContext, {
+            onNone: () => Effect.succeed(noWelcome),
+            onSome: (ctx) => {
+              const renderedMessage = Option.map(team.welcome_message_template, (template) =>
+                sanitizeRendered(
+                  applyTemplate(template, {
+                    memberMention: `<@${payload.discord_id}>`,
+                    memberName: Option.getOrElse(payload.display_name, () => payload.username),
+                    inviterMention: Option.match(ctx.inviter_discord_id, {
+                      onNone: () => '',
+                      onSome: (id) => `<@${id}>`,
+                    }),
+                    inviterName: ctx.inviter_username,
+                    groupName: Option.getOrElse(ctx.group_name, () => ''),
+                    teamName: ctx.team_name,
+                  }),
                 ),
+              );
+              const fetchGroupColor = Option.match(ctx.group_id, {
+                onNone: () => Effect.succeed(Option.none<number>()),
+                onSome: (groupId) =>
+                  deps.groups
+                    .findGroupById(groupId)
+                    .pipe(
+                      Effect.map(
+                        Option.flatMap((g) =>
+                          Option.fromNullishOr(sanitizeHexColor(Option.getOrNull(g.color))),
+                        ),
+                      ),
+                    ),
+              });
+              return Effect.Do.pipe(
+                Effect.bind('group_color_int', () => fetchGroupColor),
+                Effect.map(
+                  ({ group_color_int }): WelcomeMeta => ({
+                    system_log_channel_id: team.system_log_channel_id,
+                    invite_code: payload.invite_code,
+                    profile_complete: user.is_profile_complete,
+                    profile_gate_enabled: profileGateEnabled,
+                    verify_locale: team.onboarding_locale,
+                    welcome: Option.some<WelcomeDetail>({
+                      welcome_channel_id: team.welcome_channel_id,
+                      welcome_message_rendered: renderedMessage,
+                      group_name: ctx.group_name,
+                      group_color_int,
+                      inviter_discord_id: ctx.inviter_discord_id,
+                    }),
+                  }),
+                ),
+              );
+            },
           });
-          return Effect.Do.pipe(
-            Effect.bind('group_color_int', () => fetchGroupColor),
-            Effect.map(
-              ({ group_color_int }): WelcomeMeta => ({
-                system_log_channel_id: team.system_log_channel_id,
-                invite_code: payload.invite_code,
-                welcome: Option.some<WelcomeDetail>({
-                  welcome_channel_id: team.welcome_channel_id,
-                  welcome_message_rendered: renderedMessage,
-                  group_name: ctx.group_name,
-                  group_color_int,
-                  inviter_discord_id: ctx.inviter_discord_id,
-                }),
-              }),
-            ),
-          );
-        },
-      });
+        }),
+        Effect.map(({ result }) => result),
+      );
     };
 
     type RegisterMemberOutcome = {
@@ -560,8 +603,8 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 Effect.bind('reconcile', ({ newMember, boundGroupIds }) =>
                   observeGuildMembership(team, newMember, payload, options, boundGroupIds),
                 ),
-                Effect.bind('welcomeMeta', ({ inviteContext }) =>
-                  buildWelcomeMeta(team, payload, inviteContext),
+                Effect.bind('welcomeMeta', ({ user, inviteContext }) =>
+                  buildWelcomeMeta(team, user, payload, inviteContext),
                 ),
                 Effect.map(
                   ({ welcomeMeta, reconcile }): RegisterMemberOutcome => ({

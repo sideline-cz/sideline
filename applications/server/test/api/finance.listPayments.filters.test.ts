@@ -166,6 +166,8 @@ const membersStore = new Map<TeamMember.TeamMemberId, MembershipWithRole>([
       active: true,
       role_names: ['Treasurer'],
       permissions: TREASURER_PERMISSIONS as any,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     } as MembershipWithRole,
   ],
   [
@@ -177,6 +179,8 @@ const membersStore = new Map<TeamMember.TeamMemberId, MembershipWithRole>([
       active: true,
       role_names: ['Player'],
       permissions: PLAYER_PERMISSIONS as any,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     } as MembershipWithRole,
   ],
 ]);

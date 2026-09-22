@@ -18,6 +18,7 @@ import {
   ClaimNotClaimer,
   ClaimNotOwnerGroupMember,
   ClaimNotTraining,
+  ClaimProfileIncomplete,
   CreateEventForbidden,
   CreateEventInvalidDate,
   CreateEventNotMember,
@@ -44,6 +45,7 @@ import {
   RsvpMemberNotFound,
   RsvpMessageRequired,
   RsvpNotGroupMember,
+  RsvpProfileIncomplete,
   RsvpReminderSummary,
   SetAutoApproveResult,
   SubmitRsvpResult,
@@ -97,6 +99,7 @@ export const EventRpcGroup = RpcGroup.make(
       RsvpEventNotFound,
       RsvpNotGroupMember,
       RsvpMessageRequired,
+      RsvpProfileIncomplete,
     ]),
   }),
   // Lean read for the "edit message" modal prefill: a MODAL response cannot be
@@ -202,6 +205,7 @@ export const EventRpcGroup = RpcGroup.make(
       ClaimEventInactive,
       ClaimNotOwnerGroupMember,
       ClaimAlreadyClaimed,
+      ClaimProfileIncomplete,
     ]),
   }),
   Rpc.make('UnclaimTraining', {

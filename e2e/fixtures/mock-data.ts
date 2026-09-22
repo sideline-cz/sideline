@@ -350,6 +350,7 @@ export const mockTeamSettings = {
   eventHorizonDays: 30,
   minPlayersThreshold: 10,
   rsvpRemindersEnabled: true,
+  requireCompleteProfile: false,
   rsvpReminderDaysBefore: 1,
   maxMissedRsvps: 4,
   claimRequestDaysBefore: 3,

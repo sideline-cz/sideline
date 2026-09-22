@@ -451,6 +451,9 @@ export function EventDetailPage({
         Effect.catchTag('EventRsvpMessageRequired', () =>
           Effect.fail(ClientError.make(tr('rsvp_messageRequired'))),
         ),
+        Effect.catchTag('EventRsvpProfileIncomplete', () =>
+          Effect.fail(ClientError.make(tr('rsvp_profileIncomplete'))),
+        ),
         Effect.mapError(() => ClientError.make(tr('rsvp_submitFailed'))),
         Effect.tap(() => Effect.sync(() => router.invalidate())),
       ),

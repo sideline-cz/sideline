@@ -501,6 +501,7 @@ Returns the team's current settings.
 | `eventHorizonDays` | `integer` | No | How many days ahead to generate events from active series |
 | `minPlayersThreshold` | `integer` | No | Minimum players for an event to show a warning |
 | `rsvpRemindersEnabled` | `boolean` | No | Whether RSVP reminders are enabled for this team |
+| `requireCompleteProfile` | `boolean` | No | Captain's opt-in for the profile-completeness gate: when `true`, a member with an incomplete profile (missing name/birth date/gender) is blocked from RSVPing, claiming a training, or reserving/adding a carpool car (see `RsvpProfileIncomplete`/`ClaimProfileIncomplete`/`CarpoolProfileIncomplete` below). Default `false`; also short-circuited server-wide by the `PROFILE_GATE_ENABLED` env var (see `docs/deployment.md`) |
 | `rsvpReminderDaysBefore` | `integer` | No | Days before an event the RSVP reminder is sent |
 | `maxMissedRsvps` | `integer` | No | Consecutive missed-RSVP threshold; built-in Players whose `missed_rsvps` counter reaches this value stop receiving reminder DMs and are excluded from the non-responder list (range 1–50; default 4) |
 | `claimRequestDaysBefore` | `integer` | No | Days before a training the coach claim-board message is posted (0 = on the training day; range 0–30) |
@@ -555,6 +556,7 @@ Updates the team's settings. All fields are optional; only provided fields are c
 | `eventHorizonDays` | `integer` | No | 1–365 | Days ahead to generate scheduled events |
 | `minPlayersThreshold` | `integer` | No | 0–100 | Minimum player threshold |
 | `rsvpRemindersEnabled` | `boolean` | No | — | Enable or disable RSVP reminders |
+| `requireCompleteProfile` | `boolean` | No | — | Enable or disable the profile-completeness gate for this team (default `false`) |
 | `rsvpReminderDaysBefore` | `integer` | No | 0–14 | Days before the event the reminder fires |
 | `maxMissedRsvps` | `integer` | No | 1–50 | Consecutive missed-RSVP threshold above which a Player stops receiving reminders (default 4) |
 | `claimRequestDaysBefore` | `integer` | No | 0–30 | Days before a training the coach claim-board message is posted; 0 posts on the training day |
@@ -2235,6 +2237,7 @@ Submits or updates the authenticated user's RSVP for an event.
 | `EventRsvpEventNotFound` | 404 | Event does not exist |
 | `RsvpDeadlinePassed` | 400 | The RSVP deadline has passed |
 | `EventRsvpMessageRequired` | 400 | `response` is `"coming_later"` or `"maybe"` and no non-blank message is present (submitted or previously stored) |
+| `EventRsvpProfileIncomplete` | 403 | The team has `requireCompleteProfile` on (and the `PROFILE_GATE_ENABLED` env var is not disabled) and the authenticated user's profile (name/birth date/gender) is incomplete. Checked before membership resolves the event or the deadline, so this always reports ahead of `RsvpDeadlinePassed`/`RsvpEventNotFound` for an incomplete-profile member |
 
 ---
 
@@ -7377,7 +7380,7 @@ Handles Discord guild lifecycle events.
 | `Guild/IsGuildRegistered` | `guild_id` | Checks whether a guild is registered; returns `boolean` |
 | `Guild/SyncGuildChannels` | `guild_id`, `channels[]` | Syncs the channel list for a guild |
 | `Guild/ReconcileMembers` | `guild_id`, `members[]` | Reconciles the server member list with the database. Deliberately does not emit group-channel-role `member_added` events per member — that only happens on the `Guild/RegisterMember` path below (see `docs/discord-bot.md`'s `GUILD_MEMBER_ADD` section for why, and the accepted gap it leaves for members first observed here). |
-| `Guild/RegisterMember` | `guild_id`, `discord_id`, `username`, `avatar`, `roles[]` | Registers a new member who joined the server. When called from the `GUILD_MEMBER_ADD` gateway handler (payload `source: 'member_add'`), also grants Discord channel roles for every group the member already belongs to (plus active ancestors) whose role they don't already hold, independent of any invite — see `docs/discord-bot.md` for detail. |
+| `Guild/RegisterMember` | `guild_id`, `discord_id`, `username`, `avatar`, `roles[]` | Registers a new member who joined the server. When called from the `GUILD_MEMBER_ADD` gateway handler (payload `source: 'member_add'`), also grants Discord channel roles for every group the member already belongs to (plus active ancestors) whose role they don't already hold, independent of any invite — see `docs/discord-bot.md` for detail. The response's `WelcomeMeta` (when present) additionally carries top-level `profile_complete`, `profile_gate_enabled` (the team's `require_complete_profile`, skipped/`false` on the `Guild/ReconcileMembers` path since that caller discards the result), and `verify_locale` (`teams.onboarding_locale`) — present regardless of whether a `welcome` block is set, since a member who joined through a plain (non-Sideline-minted) Discord invite gets `welcome: None` and needs these fields to drive the unverified-role/verify-channel flow on a join with no welcome embed at all. |
 | `Guild/RemoveMember` | `guild_id`, `discord_id` | Deactivates a member who left the Discord guild (triggered by `GUILD_MEMBER_REMOVE`). Resolves the team by `guild_id` and the user by `discord_id`. No-op when the member is not found or is already inactive. Protected: the last active `team:manage` holder is never deactivated (logs a warning and skips). On success, runs `deactivateMemberAndCascade` in a per-team advisory-locked transaction: emits `member_removed` channel-sync events for all rosters and groups (including ancestor groups), deactivates the `team_members` row, and hard-deletes all group and roster memberships. |
 | `Guild/GetGuildsNeedingPersonalProvisioning` | `limit` → `Snowflake[]` | Returns guild IDs where `discord_personal_events_category_id` is set in team settings and at least one active member has no personal channel row or no Discord channel ID yet |
 | `Guild/GetPersonalEventsCategory` | `guild_id` → `Snowflake \| null` | Returns the team's configured personal-events category channel ID, or null if the feature is not enabled |
@@ -7411,7 +7414,7 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/MarkEventFailed` | `id`, `error` | Marks an outbox event as failed |
 | `Event/SaveDiscordMessageId` | `event_id`, `discord_channel_id`, `discord_message_id` | Stores the Discord message ID for an event embed |
 | `Event/GetDiscordMessageId` | `event_id` → `EventDiscordMessage \| null` | Retrieves the stored Discord message for an event |
-| `Event/SubmitRsvp` | `event_id`, `team_id`, `discord_user_id`, `response`, `message` → `SubmitRsvpResult` | Submits an RSVP from the bot; `"coming_later"` and `"maybe"` both require a non-blank `message`, or `RsvpMessageRequired` is returned; result includes late-RSVP flag and optional notification channel |
+| `Event/SubmitRsvp` | `event_id`, `team_id`, `discord_user_id`, `response`, `message` → `SubmitRsvpResult` | Submits an RSVP from the bot; `"coming_later"` and `"maybe"` both require a non-blank `message`, or `RsvpMessageRequired` is returned; result includes late-RSVP flag and optional notification channel. Binds and profile-gate-checks the member (`RsvpProfileIncomplete`) before resolving the event or the deadline — a non-member now fails `RsvpMemberNotFound` where it previously fell through to `RsvpEventNotFound`/`RsvpDeadlinePassed` |
 | `Event/GetRsvpMessage` | `event_id`, `team_id`, `discord_user_id` → `string \| null` | Lean read for the "Add/Edit message" modal prefill: returns the member's stored RSVP note, or `null` if none. Called synchronously before opening the modal (a `MODAL` response cannot be deferred), so the bot falls back to an empty modal on `RpcClientError` |
 | `Event/GetRsvpCounts` | `event_id` → `RsvpCountsResult` | Returns yes/no/maybe counts for an event; `maybeCount` counts only `"maybe"` responses (`coming_later` is not included and has no count field on this result) |
 | `Event/GetEventEmbedInfo` | `event_id` → `EventEmbedInfo \| null` | Retrieves info needed to render the Discord embed |
@@ -7426,7 +7429,7 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/SaveChannelDivider` | `discord_channel_id`, `discord_message_id` | Persists or updates the divider message ID |
 | `Event/DeleteChannelDivider` | `discord_channel_id` | Removes the stored divider message ID |
 | `Event/GetYesAttendeesForEmbed` | `event_id`, `limit`, `member_group_id` → `RsvpAttendeeEntry[]` | Returns up to `limit` attending (`"yes"` or `"coming_later"`) RSVPs filtered to a member group (including descendants); `"maybe"` is not attendance and is excluded |
-| `Event/ClaimTraining` | `event_id`, `team_id`, `discord_user_id` → `EventClaimInfo` | Claims an unclaimed training for the invoking user; errors: `ClaimEventNotFound`, `ClaimNotTraining`, `ClaimEventInactive`, `ClaimNotOwnerGroupMember`, `ClaimAlreadyClaimed` |
+| `Event/ClaimTraining` | `event_id`, `team_id`, `discord_user_id` → `EventClaimInfo` | Claims an unclaimed training for the invoking user; errors: `ClaimEventNotFound`, `ClaimNotTraining`, `ClaimEventInactive`, `ClaimNotOwnerGroupMember`, `ClaimAlreadyClaimed`, `ClaimProfileIncomplete` (profile-completeness gate, checked immediately after the member bind) |
 | `Event/UnclaimTraining` | `event_id`, `team_id`, `discord_user_id` → `EventClaimInfo` | Unclaims a previously claimed training; errors: `ClaimEventNotFound`, `ClaimEventInactive`, `ClaimNotClaimer` |
 | `Event/SaveClaimDiscordMessageId` | `event_id`, `channel_id`, `message_id` | Stores the claim-board message ID after posting |
 | `Event/SaveClaimThreadId` | `event_id`, `thread_id` | Stores the thread ID created from the claim-board message |
@@ -7680,6 +7683,7 @@ The following table consolidates all error tags across all API groups.
 | `EventSeriesCancelled` | 400 | Event Series | Attempted to update an already-cancelled series |
 | `RsvpDeadlinePassed` | 400 | Event RSVP | RSVP deadline has passed for this event |
 | `EventRsvpMessageRequired` | 400 | Event RSVP | Submitted `"coming_later"` or `"maybe"` without a non-blank message |
+| `EventRsvpProfileIncomplete` | 403 | Event RSVP | Team has `requireCompleteProfile` on and the actor's profile is incomplete |
 | `AgeThresholdSelfRequired` | 400 | Age Threshold | `requiredGroupId` equals the rule's target `groupId` |
 | `RoleNameAlreadyTaken` | 409 | Role | A role with this name already exists |
 | `GroupNameAlreadyTaken` | 409 | Group | A group with this name already exists |

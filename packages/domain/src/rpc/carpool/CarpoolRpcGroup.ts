@@ -19,6 +19,7 @@ import {
   CarpoolNotMember,
   CarpoolOwnerCannotLeave,
   CarpoolOwnerCannotReserve,
+  CarpoolProfileIncomplete,
   CarpoolTargetNotInCar,
   CarpoolTargetNotMember,
   CarpoolView,
@@ -74,6 +75,7 @@ export const CarpoolRpcGroup = RpcGroup.make(
       CarpoolNotFound,
       CarpoolAlreadyOwnsCar,
       CarpoolAlreadyInAnotherCar,
+      CarpoolProfileIncomplete,
     ]),
   }),
   Rpc.make('ReserveSeat', {
@@ -91,6 +93,7 @@ export const CarpoolRpcGroup = RpcGroup.make(
       CarpoolAlreadyInThisCar,
       CarpoolAlreadyInAnotherCar,
       CarpoolOwnerCannotReserve,
+      CarpoolProfileIncomplete,
     ]),
   }),
   Rpc.make('AssignSeat', {

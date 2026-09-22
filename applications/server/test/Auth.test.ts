@@ -927,6 +927,25 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
     members_backfilled_at: Option.none(),
   };
 
+  // `MembershipWithDiscordState` and `MembershipWithRole` are genuinely different shapes — the
+  // first carries the Discord-join columns, the second the profile-gate ones — so the two
+  // fixtures above cannot stand in for a `findMembershipByIds` mock on their own. Project them
+  // rather than reaching for `as unknown as`, which would silently swallow any future divergence
+  // between the two. The one remaining cast is unavoidable: `MembershipWithRole` is a
+  // `Schema.Class`, which a bare object literal cannot satisfy nominally — the same pattern as
+  // `test/api/activity-logs.test.ts`. Unlike a double cast, it still shape-checks every field.
+  const asMembershipWithRole = (m: MembershipWithDiscordState): MembershipWithRole =>
+    ({
+      id: m.id,
+      team_id: m.team_id,
+      user_id: m.user_id,
+      active: m.active,
+      role_names: m.role_names,
+      permissions: m.permissions,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
+    }) as MembershipWithRole;
+
   // Track addMember / reactivateMember calls in autoJoinTeams tests
   let autoJoinAddMemberCalled = false;
   let autoJoinReactivateCalled = false;
@@ -1327,7 +1346,10 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
         _teamId: Team.TeamId,
         _userId: Auth.UserId,
         options?: { includeInactive?: boolean },
-      ) => (options?.includeInactive === true ? Option.some(inactiveMembershipB) : Option.none()),
+      ) =>
+        options?.includeInactive === true
+          ? Option.some(asMembershipWithRole(inactiveMembershipB))
+          : Option.none(),
       teamsToReturn: [{ ...teamA, id: AUTH_TEAM_ID_B, guild_id: AUTH_GUILD_B, name: 'Team B' }],
       profileComplete: true,
       guildIds: [AUTH_GUILD_B],
@@ -1368,7 +1390,10 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
         _teamId: Team.TeamId,
         _userId: Auth.UserId,
         options?: { includeInactive?: boolean },
-      ) => (options?.includeInactive === true ? Option.some(activeMembershipA) : Option.none()),
+      ) =>
+        options?.includeInactive === true
+          ? Option.some(asMembershipWithRole(activeMembershipA))
+          : Option.none(),
       teamsToReturn: [teamA],
       profileComplete: true,
       guildIds: [AUTH_GUILD_A],

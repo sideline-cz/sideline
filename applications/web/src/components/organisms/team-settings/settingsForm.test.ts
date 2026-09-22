@@ -43,6 +43,7 @@ const BASE: SettingsFormValues = {
   createDiscordChannelOnRoster: false,
   roleFormat: '{emoji} {name}',
   channelFormat: '{emoji}│{name}',
+  requireCompleteProfile: false,
 };
 
 /**
@@ -75,6 +76,7 @@ const EDITED: SettingsFormValues = {
   createDiscordChannelOnRoster: true,
   roleFormat: '{name}',
   channelFormat: '{name}',
+  requireCompleteProfile: true,
 };
 
 const FIELDS = Object.keys(BASE) as ReadonlyArray<keyof SettingsFormValues>;
@@ -110,6 +112,13 @@ describe('SettingsFormValues', () => {
   it('is clean when nothing has been touched', () => {
     expect(isFormDirty(BASE, { ...BASE })).toBe(false);
   });
+
+  // Task 5 — dedicated dirty-check for the new setting, matching how this file already asserts
+  // `rsvpRemindersEnabled` is picked up by the generic per-field loop above.
+  it('requireCompleteProfile dirty check: toggling it enables Save', () => {
+    expect(isFormDirty(BASE, { ...BASE, requireCompleteProfile: true })).toBe(true);
+    expect(isFormDirty(BASE, { ...BASE, requireCompleteProfile: false })).toBe(false);
+  });
 });
 
 describe('settingsRequestFrom', () => {
@@ -133,6 +142,16 @@ describe('settingsRequestFrom', () => {
   it('trims the seconds some browsers append to a time input', () => {
     const request = settingsRequestFrom({ ...BASE, rulesQuizTime: '22:35:00' });
     expect(request.rulesQuizTime).toStrictEqual(Option.some('22:35'));
+  });
+
+  // Task 5 (`.work-plans/discord-full-onboarding.md`) — the profile-gate opt-in
+  // (`team_settings.require_complete_profile`). Same shape as `rsvpRemindersEnabled` above: a
+  // plain boolean on the form, sent as `Option.some(<value>)` on every save (unlike the
+  // select/channel fields, a checkbox is never "untouched").
+  it('requireCompleteProfile round-trips: seed false, toggle to true, Option.some(true) in the payload', () => {
+    expect(BASE.requireCompleteProfile).toBe(false);
+    const request = settingsRequestFrom({ ...BASE, requireCompleteProfile: true });
+    expect(request.requireCompleteProfile).toStrictEqual(Option.some(true));
   });
 });
 

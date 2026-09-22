@@ -311,6 +311,8 @@ const MOCK_MEMBER_LOOKUP_ROW = {
   nickname: null,
   display_name: null,
   username: null,
+  is_profile_complete: true,
+  require_complete_profile: null,
 };
 
 const MockSqlClientLayer = Layer.succeed(

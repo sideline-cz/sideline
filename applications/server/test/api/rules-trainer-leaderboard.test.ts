@@ -124,6 +124,8 @@ const managerMembership = new MembershipWithRole({
   active: true,
   role_names: ['Captain'],
   permissions: MANAGER_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 
 const playerMembership = new MembershipWithRole({
@@ -133,6 +135,8 @@ const playerMembership = new MembershipWithRole({
   active: true,
   role_names: ['Player'],
   permissions: PLAYER_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 
 describe('buildRulesLeaderboardResponse — visibility rule', () => {

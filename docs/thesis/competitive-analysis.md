@@ -401,6 +401,7 @@ The following SWOT analysis evaluates Sideline's strategic position in the sport
 | S8 | Recurring event series with rolling-horizon generation is more robust than competitor implementations |
 | S9 | iCal calendar subscription enables integration with any standards-compliant calendar client |
 | S10 | Free to use (self-hosted) or low-cost (managed), with no per-team subscription fees |
+| S11 | A member can be fully onboarded — joining the team and completing their profile — without ever leaving Discord or visiting the web app, narrowing the "ease of onboarding" gap with mainstream mobile-first competitors while staying Discord-native |
 
 ### Weaknesses
 

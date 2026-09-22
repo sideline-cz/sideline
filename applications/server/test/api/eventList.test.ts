@@ -158,6 +158,8 @@ const membersStore = new Map<string, MembershipWithRole>([
       active: true,
       role_names: ['Player'],
       permissions: PLAYER_PERMISSIONS,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     },
   ],
   [
@@ -169,6 +171,8 @@ const membersStore = new Map<string, MembershipWithRole>([
       active: true,
       role_names: ['Admin'],
       permissions: ADMIN_PERMISSIONS,
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     },
   ],
 ]);

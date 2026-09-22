@@ -12,6 +12,7 @@ import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData, ModalSubmitData } from 'dfx/Interactions/index';
 import * as Discord from 'dfx/types';
 import { Effect, Metric, Option, Schema } from 'effect';
+import { buildVerifyButton } from '~/interactions/profile-verify.js';
 import { guildLocale, type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { formatNameWithMention } from '~/rest/utils.js';
@@ -51,7 +52,7 @@ const withBackstop =
       ),
     );
 
-const localizeRsvpResponse = (response: EventRsvp.RsvpResponse, locale: Locale): string => {
+export const localizeRsvpResponse = (response: EventRsvp.RsvpResponse, locale: Locale): string => {
   switch (response) {
     case 'yes':
       return m.rsvp_yes({}, { locale });
@@ -304,6 +305,20 @@ export const RsvpButton = Ix.messageComponent(
             content: m.bot_rsvp_event_not_found({}, { locale }),
           }),
         ),
+        // Task 8: distinguish "your profile isn't done yet" (a 20-second fix, with
+        // the verify button inline) from every other RSVP failure. No resume — the
+        // copy itself tells the member to re-tap this same button afterwards (R2).
+        Effect.catchTag('RsvpProfileIncomplete', () =>
+          Effect.succeed({
+            _tag: 'error' as const,
+            hasMessage: false,
+            content: m.bot_verify_blocked_rsvp(
+              { response: localizeRsvpResponse(response, locale) },
+              { locale },
+            ),
+            components: [UI.row([buildVerifyButton(locale)])],
+          }),
+        ),
         Effect.flatMap((result) =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload:
@@ -320,7 +335,10 @@ export const RsvpButton = Ix.messageComponent(
                       ),
                     ],
                   }
-                : { content: result.content },
+                : {
+                    content: result.content,
+                    ...('components' in result ? { components: result.components } : {}),
+                  },
           }),
         ),
         Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (error) =>
@@ -508,6 +526,17 @@ export const RsvpClearMessageButton = Ix.messageComponent(
             content: m.bot_rsvp_event_not_found({}, { locale }),
           }),
         ),
+        // Task 8: same profile-gate arm as RsvpButton/RsvpModal — see the comment there.
+        Effect.catchTag('RsvpProfileIncomplete', () =>
+          Effect.succeed({
+            _tag: 'error' as const,
+            content: m.bot_verify_blocked_rsvp(
+              { response: localizeRsvpResponse(response, locale) },
+              { locale },
+            ),
+            components: [UI.row([buildVerifyButton(locale)])],
+          }),
+        ),
         Effect.flatMap((result) =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload:
@@ -518,7 +547,10 @@ export const RsvpClearMessageButton = Ix.messageComponent(
                       buildMessageActionRow(parts[1], parts[2], response, locale, false),
                     ],
                   }
-                : { content: result.content },
+                : {
+                    content: result.content,
+                    ...('components' in result ? { components: result.components } : {}),
+                  },
           }),
         ),
         Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (error) =>
@@ -645,6 +677,19 @@ export const RsvpModal = Ix.modalSubmit(
             content: m.bot_rsvp_event_not_found({}, { locale }),
           }),
         ),
+        // Task 8: same profile-gate arm as RsvpButton/RsvpClearMessageButton — see the
+        // comment on RsvpButton.
+        Effect.catchTag('RsvpProfileIncomplete', () =>
+          Effect.succeed({
+            _tag: 'error' as const,
+            hasMessage: false,
+            content: m.bot_verify_blocked_rsvp(
+              { response: localizeRsvpResponse(response, locale) },
+              { locale },
+            ),
+            components: [UI.row([buildVerifyButton(locale)])],
+          }),
+        ),
         Effect.flatMap((result) =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload:
@@ -661,7 +706,10 @@ export const RsvpModal = Ix.modalSubmit(
                       ),
                     ],
                   }
-                : { content: result.content },
+                : {
+                    content: result.content,
+                    ...('components' in result ? { components: result.components } : {}),
+                  },
           }),
         ),
         Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (error) =>

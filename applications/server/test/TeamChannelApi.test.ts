@@ -166,6 +166,8 @@ membersStore.set(TEST_MEMBER_ID, {
   active: true,
   role_names: ['Player'],
   permissions: ['roster:view', 'member:view'],
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 membersStore.set(TEST_ADMIN_MEMBER_ID, {
   id: TEST_ADMIN_MEMBER_ID,
@@ -174,6 +176,8 @@ membersStore.set(TEST_ADMIN_MEMBER_ID, {
   active: true,
   role_names: ['Admin'],
   permissions: ADMIN_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 
 // ---------------------------------------------------------------------------

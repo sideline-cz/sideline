@@ -56,6 +56,13 @@ export class RsvpMessageRequired extends Schema.TaggedErrorClass<RsvpMessageRequ
   {},
 ) {}
 
+// The request is well-formed; the actor just hasn't finished onboarding yet. 403, matching the
+// `Forbidden` family (AGENTS.md → "HTTP API Error Tags"), not 400.
+export class RsvpProfileIncomplete extends Schema.TaggedErrorClass<RsvpProfileIncomplete>()(
+  'EventRsvpProfileIncomplete',
+  {},
+) {}
+
 export class NonResponderEntry extends Schema.Class<NonResponderEntry>('NonResponderEntry')({
   teamMemberId: TeamMemberId,
   memberName: Schema.OptionFromNullOr(Schema.String),
@@ -89,6 +96,7 @@ export class EventRsvpApiGroup extends HttpApiGroup.make('eventRsvp')
         EventNotFound.pipe(HttpApiSchema.status(404)),
         RsvpDeadlinePassed.pipe(HttpApiSchema.status(400)),
         RsvpMessageRequired.pipe(HttpApiSchema.status(400)),
+        RsvpProfileIncomplete.pipe(HttpApiSchema.status(403)),
       ],
       payload: SubmitRsvpRequest,
       params: { teamId: TeamId, eventId: EventId },

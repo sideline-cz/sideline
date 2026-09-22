@@ -6,18 +6,24 @@ import {
   Team,
 } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData, ModalSubmitData } from 'dfx/Interactions/index';
 import * as Discord from 'dfx/types';
 import { Effect, Metric, Option, Schema } from 'effect';
+import { buildVerifyButton } from '~/interactions/profile-verify.js';
 import { type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
 import { YES_EMBED_LIMIT } from '~/rest/utils.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
-import { postRsvpDiscordUpdates, rsvpAddMessageButtonEffect } from './rsvp.js';
+import {
+  localizeRsvpResponse,
+  postRsvpDiscordUpdates,
+  rsvpAddMessageButtonEffect,
+} from './rsvp.js';
 
 const decodeSnowflake = Schema.decodeUnknownSync(DiscordSchemas.Snowflake);
 const decodeEventId = Schema.decodeUnknownSync(Event.EventId);
@@ -202,6 +208,18 @@ export const UpcomingRsvpButton = Ix.messageComponent(
             payload: { content: m.bot_rsvp_event_not_found({}, { locale }) },
           }),
         ),
+        // Task 8: profile-gate arm — see the comment on rsvp.ts's RsvpButton.
+        Effect.catchTag('RsvpProfileIncomplete', () =>
+          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+            payload: {
+              content: m.bot_verify_blocked_rsvp(
+                { response: localizeRsvpResponse(response, locale) },
+                { locale },
+              ),
+              components: [UI.row([buildVerifyButton(locale)])],
+            },
+          }),
+        ),
         Effect.catchTag('GuildNotFound', () =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload: { content: m.bot_event_not_member({}, { locale }) },
@@ -372,6 +390,18 @@ export const UpcomingClearMessageButton = Ix.messageComponent(
             payload: { content: m.bot_rsvp_event_not_found({}, { locale }) },
           }),
         ),
+        // Task 8: profile-gate arm — see the comment on rsvp.ts's RsvpButton.
+        Effect.catchTag('RsvpProfileIncomplete', () =>
+          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+            payload: {
+              content: m.bot_verify_blocked_rsvp(
+                { response: localizeRsvpResponse(response, locale) },
+                { locale },
+              ),
+              components: [UI.row([buildVerifyButton(locale)])],
+            },
+          }),
+        ),
         Effect.catchTag('GuildNotFound', () =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload: { content: m.bot_event_not_member({}, { locale }) },
@@ -535,6 +565,18 @@ export const UpcomingRsvpModal = Ix.modalSubmit(
         Effect.catchTag('RsvpEventNotFound', () =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload: { content: m.bot_rsvp_event_not_found({}, { locale }) },
+          }),
+        ),
+        // Task 8: profile-gate arm — see the comment on rsvp.ts's RsvpButton.
+        Effect.catchTag('RsvpProfileIncomplete', () =>
+          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+            payload: {
+              content: m.bot_verify_blocked_rsvp(
+                { response: localizeRsvpResponse(response, locale) },
+                { locale },
+              ),
+              components: [UI.row([buildVerifyButton(locale)])],
+            },
           }),
         ),
         Effect.catchTag('GuildNotFound', () =>
