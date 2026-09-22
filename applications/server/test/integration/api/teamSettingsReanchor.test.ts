@@ -316,8 +316,8 @@ const seedSeries = (
         startDate: DateTime.makeUnsafe('2026-01-06T00:00:00Z'),
         endDate: Option.none(),
         createdBy,
-        // Fix 1 (`.work-plans/timezone-migration-deploy-window.md`): `insertEventSeries` now
-        // writes this explicitly rather than relying on the DB column default. Defaults `false`
+        // Fix 1 (`.work-plans/series-time-conversion.md`): `insertEventSeries` writes this
+        // explicitly rather than relying on the DB column default. Defaults `false`
         // here to preserve every existing caller's behavior — tests that need a `TRUE` row
         // still go through `markSeriesTimesAreTeamLocal` afterwards, matching Release N's own
         // create handler, which does not have a "start `TRUE` then flip" path either.
@@ -328,12 +328,12 @@ const seedSeries = (
   );
 
 /**
- * Release N (`.work-plans/timezone-migration-deploy-window.md` §N.1/§N.2): patches
- * `event_series.times_are_team_local` via raw SQL, bypassing the repository — Release N's
- * `insertEventSeries` never names this column (it relies on the DB column default, which is
- * FALSE this release), so this is the ONLY way to seed a TRUE-marked row here, mirroring
- * `seedEvent`'s established "insert via repo, then patch the column the repo does not expose"
- * pattern.
+ * Release N (`.work-plans/series-time-conversion.md`): patches
+ * `event_series.times_are_team_local` via raw SQL, bypassing the repository — this predates
+ * `insertEventSeries` writing the column explicitly (AGENTS.md rule 6), and is kept as the
+ * established "insert via repo, then patch the column" pattern for seeding a `TRUE`-marked row
+ * without threading `timesAreTeamLocal` through every `seedSeries` call site, mirroring
+ * `seedEvent`'s equivalent pattern for columns the repo does not expose at all.
  */
 const markSeriesTimesAreTeamLocal = (seriesId: string, timesAreTeamLocal: boolean) =>
   SqlClient.SqlClient.asEffect().pipe(
@@ -656,16 +656,18 @@ describe('team-settings timezone change marks re-anchored events personal-messag
 // otherwise they keep their old instant while the series regenerates new occurrences in the
 // new zone, splitting the team's calendar in two.
 //
-// Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2 item 5, §N.c): this
-// re-anchor is gated on `es.times_are_team_local` — a FALSE series stores an absolute UTC
-// time-of-day, so a team timezone change must be a no-op for it, exactly as it was before
-// #650. Every test below EXCEPT the new FALSE-dialect one explicitly marks its series TRUE
-// (via `markSeriesTimesAreTeamLocal`, since Release N's `insertEventSeries` never writes the
-// column itself — see that helper's doc comment) so they keep testing what they always tested
-// — `series_modified`/cancelled/past guards, and the re-anchor formula itself — rather than
-// incidentally passing (or, for the first test, incidentally FAILING) because of the new FALSE
-// default. Expected to FAIL until `team-settings.ts`'s re-anchor `UPDATE` gets `AND
-// es.times_are_team_local` added to its `WHERE`.
+// (`.work-plans/series-time-conversion.md`, which documents the two-release split as a whole;
+// the Release N plan it supersedes was never committed to the tree): this re-anchor is gated on
+// `es.times_are_team_local` — a FALSE series stores an absolute UTC time-of-day, so a team
+// timezone change must be a no-op for it, exactly as it was before #650. That gate is in
+// place in `team-settings.ts`'s re-anchor `UPDATE`, and this suite pins it.
+//
+// Every test below EXCEPT the FALSE-dialect one explicitly marks its series TRUE (via
+// `markSeriesTimesAreTeamLocal` — see that helper's doc comment for why it patches the column
+// rather than threading `timesAreTeamLocal` through every `seedSeries` call site) so they keep
+// testing what they always tested — `series_modified`/cancelled/past guards, and the re-anchor
+// formula itself — rather than incidentally passing or failing because of whatever dialect the
+// row happened to be seeded with.
 describe('team-settings timezone change re-anchors materialized SERIES events', () => {
   it.effect(
     'changing Europe/Prague → Asia/Tokyo re-anchors a future, active, unmodified series ' +
@@ -848,8 +850,9 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
           startTime: '18:00:00',
           endTime: '20:00:00',
         });
-        // No `markSeriesTimesAreTeamLocal` call — `times_are_team_local` defaults FALSE
-        // (Release N's DB column default; `insertEventSeries` never names the column itself).
+        // No `markSeriesTimesAreTeamLocal` call — `seedSeries` defaults `timesAreTeamLocal` to
+        // `false` (see that helper's own comment), so `insertEventSeries` writes `FALSE`
+        // explicitly here; the row is not merely unconverted.
         // Sentinel year 2099, not a realistic near-future date: this is a NEGATIVE case proving
         // `es.times_are_team_local` still blocks the re-anchor UPDATE. A rotted-into-the-past
         // date would ALSO leave the row untouched, but for the wrong reason (`e.start_at >=

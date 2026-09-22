@@ -342,15 +342,23 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                         // otherwise already-materialized events keep the old instant while the
                         // series regenerates new ones in the new zone, splitting the team's
                         // calendar in two. Structurally the same recomputation as the
-                        // conversion migration's Statement B (`1792100000`, Release N+1), run
-                        // here instead of waiting for an operator to re-run a migration for
-                        // every timezone edit.
+                        // conversion migration's Statement B (`1792100000`, shipped in
+                        // Release N+1), run here instead of waiting for an operator to
+                        // re-run a migration for every timezone edit.
                         //
                         // A FALSE (UTC-dialect, pre-#650) series stores an absolute UTC
                         // time-of-day, so a team timezone change is a no-op for it — exactly
                         // as it was before #650 — hence `AND es.times_are_team_local`
-                        // (Release N, `.work-plans/timezone-migration-deploy-window.md`
-                        // §N.2 item 5).
+                        // (Release N; `.work-plans/series-time-conversion.md`).
+                        //
+                        // Date expression deliberately differs from the migration's Statement
+                        // B (`AT TIME ZONE oldTz` here vs. `AT TIME ZONE 'UTC'` there): this
+                        // call only ever sees already-`TRUE` (team-local-dialect) series, so it
+                        // recovers the occurrence date in the OLD team zone, while Statement B
+                        // only ever sees series it just converted FROM `FALSE` (UTC-dialect),
+                        // so it recovers the date in UTC. Do not align the two — see
+                        // `1792100000_series_time_is_team_local.ts`'s doc comment,
+                        // "Dialect-recovery principle".
                         //
                         // Guards otherwise mirror Statement B's exactly: `series_id IS NOT
                         // NULL` (only series-generated events have one — the join to

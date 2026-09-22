@@ -1,6 +1,16 @@
 # Deferred Series-Time Conversion — `1792100000_series_time_is_team_local`
 
-> **Status: reviewed, blocker-free, NOT yet implemented.** This plan went through one adversarial
+> **Status: IMPLEMENTED.** The migration and its 31-case integration suite are in
+> `packages/migrations/src/before/1792100000_series_time_is_team_local.ts` and
+> `applications/server/test/integration/migrations/seriesTimeIsTeamLocal.test.ts`. Blocker 1 is
+> fixed and verified both ways (test B15 fails with the drop/recreate bracket removed, passes with
+> it in place); one sub-claim of the Blocker 1 analysis was disproven in the process and is struck
+> through in §Blocker 1 below. The "DROP INDEX never executes" finding recorded in commit
+> `65a1a9ef` was an artefact of a stale `packages/migrations/dist` — these tests import the
+> COMPILED migration, so the package must be rebuilt after every edit; see `AGENTS.md` →
+> Integration Tests → Prerequisites.
+>
+> The original review notes follow. This plan went through one adversarial
 > review that returned BLOCK with two blockers, both verified by executing SQL against
 > `postgres:17`, plus eight further findings. All are applied below:
 >
@@ -184,8 +194,16 @@ honestly; a `FALSE` cancelled series that is later reactivated would otherwise b
 >   though the final state is unique**.
 > - A moved `active` event collides with a `cancelled` sibling that B deliberately skips — the
 >   partial index has no status predicate.
-> - A backward shift **succeeded with rows in ascending physical order and failed on identical
->   data in descending order**. Heap layout decides.
+> - ~~A backward shift **succeeded with rows in ascending physical order and failed on identical
+>   data in descending order**. Heap layout decides.~~ **WITHDRAWN — this is wrong.** Heap layout
+>   does not decide: the planner drives Statement B from an Index Scan on `idx_events_series_date`
+>   itself, so rows are visited in ascending `(series_id, date)` order whatever order they were
+>   inserted in. **Shift DIRECTION decides.** Under ascending visiting order a backward shift is
+>   always safe — each row vacates its slot before the row above claims it — while a forward shift
+>   walks each row into its successor's still-live slot. Only west-of-UTC series whose converted
+>   clock rolls the date forward can collide. A fixture built on the withdrawn claim (a
+>   positive-offset zone, e.g. `Europe/Prague`) passes with the bracket removed and guards nothing;
+>   test B15 uses `America/New_York` for this reason.
 >
 > `MigrateBefore` runs inside boot (`applications/server/src/run.ts:297`), so one such series means
 > the new container never starts — for every team, mid-deploy, on a forward-only release. This is
@@ -541,7 +559,11 @@ The split works.
 
 If the running production image is **older** than Release N (does not contain
 `src/utils/seriesTimeDialect.ts`), it treats every `start_time` as UTC and will misread every
-converted row, and Statement C will mislabel every series it creates. **Check both, not just one:**
+converted row. (The original wording here also warned that "Statement C will mislabel every series
+it creates" — Statement C was cut, and the column `DEFAULT` is deliberately left `FALSE`, so that
+half no longer applies: such an image creates rows that land on `DEFAULT FALSE` while genuinely
+storing UTC-dialect times, which is self-consistent. The misreading of already-converted `TRUE`
+rows is the whole risk, and it is enough.) **Check both, not just one:**
 
 1. `SELECT max(migration_id) FROM effect_sql_migrations;` on production — must be ≥ `1791700000`.
 2. The currently-promoted digest (`majnet deploy progress`, or `apps/server/production.yaml`) must

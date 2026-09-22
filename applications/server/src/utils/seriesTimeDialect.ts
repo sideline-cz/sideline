@@ -20,11 +20,13 @@ import { resolveOccurrenceInstant } from '~/utils/seriesOccurrence.js';
  * not leak into this legacy branch — `DateTime.makeUnsafe` accepts `HH:MM:SSZ` and `HH:MMZ`
  * equally, so no normalisation is needed here in the first place.
  *
- * Release N ships no migration that converts rows to `TRUE` (see
- * `1791700000_add_series_times_team_local_flag.ts`), so in practice almost every row reaching
- * this function today takes the `FALSE` branch. The `TRUE` branch is nonetheless already
- * correct — both for a create that explicitly declares `timesAreTeamLocal: true`, and,
- * unchanged, once `1792100000` starts converting rows at Release N+1.
+ * Release N's `1791700000_add_series_times_team_local_flag.ts` shipped no conversion, so in
+ * that release almost every row reaching this function took the `FALSE` branch. Release N+1's
+ * `1792100000_series_time_is_team_local.ts` has since converted every row that was `FALSE` at
+ * the time it ran, so today most rows reaching this function take the `TRUE` branch instead.
+ * The `FALSE` branch is not a transitional artefact of that gap, though — it is permanent: a
+ * create can still explicitly declare `timesAreTeamLocal: false`, and any such row is genuinely
+ * UTC-semantics, so this branch must never be deleted.
  */
 export const resolveSeriesOccurrenceInstant = (
   dateStr: string,

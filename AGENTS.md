@@ -350,6 +350,15 @@ pnpm test:integration        # Run integration tests (needs Docker)
 - Docker must be running
 - Run `pnpm build` first (migrations package must be compiled)
 
+**Rebuild after EVERY migration edit, or you are testing the old SQL.** Integration tests deep-import migrations as `@sideline/migrations/before/<id>_<name>`, which resolves through `applications/server/node_modules/@sideline/migrations` → `packages/migrations/dist` → the compiled `dist/dist/esm/before/<id>_<name>.js`. `src/` is never loaded by these tests. Edit a migration, re-run the suite without rebuilding, and the assertions run against the previous compile — a green suite proves nothing and a red one blames SQL you already changed.
+
+Two traps make this hard to spot:
+
+1. **`packages/migrations/dist/src/` is a copy of the TypeScript source, not build output.** Diffing `dist/src` against `src` always matches, even when the compiled JS is stale. The only honest check is `grep` against `dist/dist/esm/before/<id>_<name>.js`.
+2. **The symlink is dead until the first build**, so on a fresh worktree the import fails outright rather than resolving to something stale — which trains you to build once and then forget.
+
+This cost a full session on `1792100000_series_time_is_team_local`: a `DROP INDEX` the source plainly contained was absent from Postgres's `log_statement=all` output, and the missing statement was read as an Effect/module-resolution mystery. The `dist` being loaded simply predated the line. When a statement you can see in `src` does not appear in the database's own log, rebuild before investigating anything else.
+
 **Structure:**
 ```
 applications/server/test/integration/

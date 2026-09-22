@@ -11,27 +11,32 @@
 //   - Blocker 1: `idx_events_series_date` (a non-deferrable unique index on
 //     `(series_id, (start_at AT TIME ZONE 'UTC')::date)`,
 //     `1741800000_event_datetime_columns.ts:24`) makes Statement B's `UPDATE`
-//     abort mid-statement, DEPENDING ON PHYSICAL ROW ORDER, for any series
-//     whose occurrences shift UTC day. The migration must bracket Statement B
-//     with `DROP INDEX` / `CREATE UNIQUE INDEX`. Test B15 reproduces this with
-//     a real four-occurrence series, seeded in the specific row order that a
-//     bare `psql` session on `postgres:17` was confirmed (by hand, against
-//     this exact schema) to fail without the fix.
+//     abort mid-statement for any series whose occurrences shift UTC date
+//     FORWARD. The migration must bracket Statement B with `DROP INDEX` /
+//     `CREATE UNIQUE INDEX`. Test B15 reproduces this with a real
+//     four-occurrence west-of-UTC series; it was confirmed to fail with the
+//     bracket removed and pass with it in place. Shift direction is what
+//     decides, NOT physical row order — see B15's own comment.
 //   - Blocker 2: three of the plan's original Statement B fixtures were dated
 //     in the past, so B's `start_at >= now()` guard silently excluded them —
 //     they never ran. All Statement B fixtures below are dated 2027 and, where
 //     the case is about a DST boundary, anchored across it — see B8/B11/B12.
 //
-// TWO-LAYERED RED STATE, matching every other migration test in this
-// directory (`anchorAllDayToTeamMidnight.test.ts`,
-// `addSeriesTimesTeamLocalFlag.test.ts`):
-//   1. `1792100000_series_time_is_team_local.ts` does not exist yet, so the
-//      deep import below fails module resolution and every test in this file
-//      errors at load time. That is the correct first shape of "red" — it is
-//      not yet a statement about the migration's own SQL.
-//   2. Once the file exists and `packages/migrations` is rebuilt (integration
-//      tests deep-import from `dist`), this suite tests the migration's
-//      actual behaviour.
+// ⚠️ RUN `pnpm build` (or at least `pnpm --filter @sideline/migrations build`)
+// BEFORE RUNNING THIS SUITE, AFTER EVERY EDIT TO THE MIGRATION. The deep
+// import below resolves through `applications/server/node_modules/@sideline/
+// migrations -> packages/migrations/dist`, so this suite exercises the
+// COMPILED artifact (`dist/dist/esm/before/...js`), never `src/`. Editing the
+// migration and re-running the tests without rebuilding silently tests the
+// PREVIOUS version of the SQL.
+//
+// This is not hypothetical: it is what produced the "DO NOT MERGE, blocker
+// unfixed" state of commit 65a1a9ef, where B15 failed with a duplicate-key
+// error and Postgres's own statement log showed the migration's `DROP INDEX`
+// never executing — because the `dist` being loaded predated it. Note that
+// `dist/src/` is a COPY OF THE TYPESCRIPT SOURCE, not build output: comparing
+// `dist/src` against `src` always matches and proves nothing about staleness.
+// Check `dist/dist/esm/before/<migration>.js` instead.
 //
 // Statement C ("flip the column default") was CUT during review — see the
 // plan's status header and §A. There is no C1–C3 here; do not add them back.
@@ -1357,63 +1362,44 @@ describe('migration 1792100000 — converts series times to team-local wall cloc
       // reason. No other case in this file has a series with more than one
       // occurrence, which is why the defect survived six prior reviews.
       //
-      // ⚠️ KNOWN GAP — THIS CASE DOES NOT DISCRIMINATE, and a real defect
-      // sits behind it. It passes with the migration's DROP/CREATE INDEX
-      // bracket REMOVED, so it does not guard the blocker it was written for.
+      // THE FIXTURE MUST SHIFT THE UTC DATE FORWARD, or it does not
+      // discriminate. What decides the collision is the shift DIRECTION, not
+      // physical row order: `EXPLAIN (ANALYZE, VERBOSE)` shows Statement B
+      // planned as a nested loop driven by an Index Scan on
+      // `idx_events_series_date` itself, so rows are visited in ascending
+      // `(series_id, date)` order whatever order they were inserted in. Under
+      // ascending order a BACKWARD shift is always safe — each row vacates
+      // its slot before the row above claims it — while a FORWARD shift walks
+      // each row into its successor's still-live slot.
       //
-      // Why this fixture cannot fail: `EXPLAIN (ANALYZE, VERBOSE)` shows
-      // Statement B planned as a nested loop driven by an Index Scan on
-      // `idx_events_series_date` itself, visiting rows in ascending
-      // `(series_id, date)` order regardless of insertion order. Under
-      // ascending order a BACKWARD date shift is always safe — each row
-      // vacates its slot before the row above claims it. `Europe/Prague` is
-      // a positive-offset zone with a near-midnight local clock, so it can
-      // only shift backward. The "descending insertion order reliably fails"
-      // claim in this comment's first revision, and in the plan, is WRONG:
-      // physical row order is not what decides.
+      // So the earlier `Europe/Prague`, `23:15` form of this fixture (a
+      // positive-offset zone, which can only shift backward) passed with the
+      // bracket REMOVED and guarded nothing. The "descending insertion order
+      // reliably fails" claim in the plan and in this comment's first
+      // revision is WRONG for the same reason.
       //
-      // WHAT WAS MEASURED (2026-09-22, against the real testcontainer, not
-      // the dev database — an earlier investigation wasted time probing the
-      // dev DB, which has no `events` table at all):
+      // VERIFIED BOTH WAYS (2026-09-22, against the real testcontainer, after
+      // a full `pnpm build` — see the note on stale `dist` in this file's
+      // header):
       //
-      //   fixture                                        result
-      //   Europe/Prague, start_time 23:15 (backward)     PASSES
-      //   America/New_York, start_time 02:15 (forward)   FAILS, duplicate key
-      //                                                  on idx_events_series_date
+      //   bracket present  -> passes
+      //   bracket removed  -> ERROR 23505, duplicate key on
+      //                       idx_events_series_date, Key (series_id,
+      //                       ((start_at AT TIME ZONE 'UTC')::date))
+      //                       = (..., 2027-07-11)
       //
-      // The forward fixture seeds four occurrences on four DISTINCT UTC dates
-      // (2027-07-10..13 at 12:00Z — verified, so no seed-time collision is
-      // possible) and the reported colliding key is 2027-07-11, a
-      // POST-conversion date. Probes placed immediately after `DROP INDEX`
-      // and immediately before Statement B both failed to fire before the
-      // duplicate-key error surfaced.
-      //
-      // CONCLUSION: a west-of-UTC series whose converted clock rolls the UTC
-      // date FORWARD still collides, with the bracket in place. Blocker 1 is
-      // therefore NOT fully fixed, and this migration MUST NOT SHIP until it
-      // is — a single such series aborts the migration inside server boot
-      // (`run.ts:297`), for every team, on a forward-only release.
-      //
-      // NOT yet established: which statement actually raises it. The probe
-      // ordering suggests Statement A, but Statement A touches only
-      // `event_series` while the error names `events`, and no trigger was
-      // found linking them. That contradiction is the next thing to resolve.
-      // Reproduce with: swap this fixture to `America/New_York`,
-      // start_date 2027-01-05, start_time '02:15:00', and expect
-      // 2027-07-11/12/13/14 at 01:15:00Z.
-      //
-      // This case is kept in its passing Prague form so the rest of the file
-      // is green and honest. DO NOT read a green B15 as evidence that
-      // Blocker 1 is covered.
+      // The four occurrences are seeded on four DISTINCT UTC dates
+      // (2027-07-10..13 at 12:00Z), so no seed-time collision is possible and
+      // the reported key is necessarily a POST-conversion date.
       () =>
         Effect.Do.pipe(
-          Effect.bind('setup', () => setupTeam('970200000000000016', 'Europe/Prague')),
+          Effect.bind('setup', () => setupTeam('970200000000000016', 'America/New_York')),
           Effect.bind('seriesId', ({ setup }) =>
             insertRawSeries({
               teamId: setup.teamId,
               createdBy: setup.memberId,
               startDate: '2027-01-05',
-              startTime: '23:15:00',
+              startTime: '02:15:00',
             }),
           ),
           Effect.bind('event13', ({ setup, seriesId }) =>
@@ -1457,10 +1443,10 @@ describe('migration 1792100000 — converts series times to team-local wall cloc
           Effect.bind('row13', ({ event13 }) => readEventRow(event13)),
           Effect.tap(({ row10, row11, row12, row13 }) =>
             Effect.sync(() => {
-              expect(row10.startAtIso).toBe('2027-07-09T22:15:00.000Z');
-              expect(row11.startAtIso).toBe('2027-07-10T22:15:00.000Z');
-              expect(row12.startAtIso).toBe('2027-07-11T22:15:00.000Z');
-              expect(row13.startAtIso).toBe('2027-07-12T22:15:00.000Z');
+              expect(row10.startAtIso).toBe('2027-07-11T01:15:00.000Z');
+              expect(row11.startAtIso).toBe('2027-07-12T01:15:00.000Z');
+              expect(row12.startAtIso).toBe('2027-07-13T01:15:00.000Z');
+              expect(row13.startAtIso).toBe('2027-07-14T01:15:00.000Z');
             }),
           ),
           Effect.provide(TestLayer),

@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — Fix: changing a recurring event series' time could fail to save
+
+Recurring event series created before Sideline started storing series times in each team's own timezone kept their times in the older format. Editing one of those series and changing its start or end time as part of that edit was rejected with an error instead of saving — and editing it again never helped, because a rejected save left the series exactly as it was. Series created after that change were unaffected, as were edits that left the times alone (renaming a series or changing its location always saved normally). Every existing series has now been converted to the current format, so changing a series' time works regardless of when the series was created. Times on those series are unchanged — they keep the same wall-clock time they have always shown. No action is needed.
+
 ## 2026-09-21 — Fix: a deleted role could keep granting its permissions
 
 Deleting a custom role is normally blocked while anyone still holds it, but that check only looks at who holds the role right then. A role attached to a group that happens to be empty at the moment of deletion passes the check — and then starts granting its permissions again as soon as someone joins that group, because deleting a role doesn't remove the grant linking it to the group, it only hides the role itself. Roles deleted before the check learned to count group members could do the same. A deleted role now stops granting its permissions immediately and permanently, however it was held.

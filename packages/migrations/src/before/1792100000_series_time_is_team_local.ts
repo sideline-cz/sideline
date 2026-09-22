@@ -91,8 +91,16 @@ import { SqlClient } from 'effect/unstable/sql';
  * (`1741800000_event_datetime_columns.ts`) is a NON-DEFERRABLE unique index on
  * `(series_id, (start_at AT TIME ZONE 'UTC')::date)`. Statement B rewrites `start_at`, so for a
  * series whose occurrences shift UTC day, Postgres checks the constraint PER ROW mid-`UPDATE`
- * and a row can transiently collide with a sibling row's still-live old value — reproduced by
- * hand: identical data succeeds in ascending physical row order and fails in descending order.
+ * and a row can transiently collide with a sibling row's still-live old value.
+ *
+ * What decides is the SHIFT DIRECTION, not physical row order. The planner drives Statement B
+ * from an index scan on `idx_events_series_date` itself, so rows are visited in ascending
+ * `(series_id, date)` order whatever order they were inserted in. Under ascending visiting
+ * order a BACKWARD shift is always safe — each row vacates its slot before the row above it
+ * claims it — while a FORWARD shift walks each row into the still-live slot of its successor.
+ * Positive-offset zones can only shift the UTC date backward; a west-of-UTC zone whose
+ * converted clock rolls the date forward is the failing case (test B15, `America/New_York`).
+ *
  * Since `MigrateBefore` runs inside server boot, an abort here means the container never starts,
  * for every team, on a forward-only release with no rollback. Bracketing Statement B with
  * `DROP INDEX` / `CREATE UNIQUE INDEX` in the SAME transaction is the fix — not `CONCURRENTLY`
