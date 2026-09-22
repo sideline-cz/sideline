@@ -1,5 +1,5 @@
-// TDD mode — Release N of the timezone-migration-deploy-window plan
-// (`.work-plans/timezone-migration-deploy-window.md`, "Release N" §N.1 and
+// TDD mode — Release N of the series-time-conversion plan
+// (`.work-plans/series-time-conversion.md`, "Release N" §N.1 and
 // "Test Specification → Release N" §N.a).
 //
 // This replaces `seriesTimeIsTeamLocal.test.ts` (deleted in this same change),

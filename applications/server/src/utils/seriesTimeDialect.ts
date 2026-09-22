@@ -20,11 +20,13 @@ import { resolveOccurrenceInstant } from '~/utils/seriesOccurrence.js';
  * not leak into this legacy branch — `DateTime.makeUnsafe` accepts `HH:MM:SSZ` and `HH:MMZ`
  * equally, so no normalisation is needed here in the first place.
  *
- * Release N ships no migration that converts rows to `TRUE` (see
- * `1791700000_add_series_times_team_local_flag.ts`), so in practice almost every row reaching
- * this function today takes the `FALSE` branch. The `TRUE` branch is nonetheless already
- * correct — both for a create that explicitly declares `timesAreTeamLocal: true`, and,
- * unchanged, once `1792100000` starts converting rows at Release N+1.
+ * `1791700000_add_series_times_team_local_flag.ts` (Release N) shipped no conversion — it only
+ * added the column, defaulted `FALSE`. `1792100000_series_time_is_team_local.ts` (Release N+1)
+ * has since run that conversion, so almost every row reaching this function today takes the
+ * `TRUE` branch. The `FALSE` branch remains permanently reachable, not a transitional case: a
+ * client that omits the `timesAreTeamLocal` payload flag on a create still writes a `FALSE` row,
+ * and the column's `DEFAULT` is still `FALSE` — `1792100000` shipped without the default-flip
+ * statement its earlier draft considered (see `docs/database.md`'s row for that migration).
  */
 export const resolveSeriesOccurrenceInstant = (
   dateStr: string,

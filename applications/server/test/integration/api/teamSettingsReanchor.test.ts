@@ -316,7 +316,7 @@ const seedSeries = (
         startDate: DateTime.makeUnsafe('2026-01-06T00:00:00Z'),
         endDate: Option.none(),
         createdBy,
-        // Fix 1 (`.work-plans/timezone-migration-deploy-window.md`): `insertEventSeries` now
+        // Fix 1 (`.work-plans/series-time-conversion.md`): `insertEventSeries` now
         // writes this explicitly rather than relying on the DB column default. Defaults `false`
         // here to preserve every existing caller's behavior — tests that need a `TRUE` row
         // still go through `markSeriesTimesAreTeamLocal` afterwards, matching Release N's own
@@ -328,12 +328,12 @@ const seedSeries = (
   );
 
 /**
- * Release N (`.work-plans/timezone-migration-deploy-window.md` §N.1/§N.2): patches
- * `event_series.times_are_team_local` via raw SQL, bypassing the repository — Release N's
- * `insertEventSeries` never names this column (it relies on the DB column default, which is
- * FALSE this release), so this is the ONLY way to seed a TRUE-marked row here, mirroring
- * `seedEvent`'s established "insert via repo, then patch the column the repo does not expose"
- * pattern.
+ * Patches `event_series.times_are_team_local` via raw SQL, bypassing the repository. This is
+ * NOT because `insertEventSeries` omits the column — it names it explicitly and writes
+ * `payload.timesAreTeamLocal` verbatim (see `seedSeries`'s own doc comment); the column's
+ * `DEFAULT FALSE` is never relied on here. Rather, this helper flips an already-seeded row's
+ * dialect to `TRUE` after the fact, so a test can express "seed FALSE, then flip" as two steps
+ * instead of threading `timesAreTeamLocal: true` through the initial `seedSeries` call.
  */
 const markSeriesTimesAreTeamLocal = (seriesId: string, timesAreTeamLocal: boolean) =>
   SqlClient.SqlClient.asEffect().pipe(
@@ -656,7 +656,7 @@ describe('team-settings timezone change marks re-anchored events personal-messag
 // otherwise they keep their old instant while the series regenerates new occurrences in the
 // new zone, splitting the team's calendar in two.
 //
-// Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2 item 5, §N.c): this
+// Release N (`.work-plans/series-time-conversion.md` §N.2 item 5, §N.c): this
 // re-anchor is gated on `es.times_are_team_local` — a FALSE series stores an absolute UTC
 // time-of-day, so a team timezone change must be a no-op for it, exactly as it was before
 // #650. Every test below EXCEPT the new FALSE-dialect one explicitly marks its series TRUE
@@ -848,8 +848,10 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
           startTime: '18:00:00',
           endTime: '20:00:00',
         });
-        // No `markSeriesTimesAreTeamLocal` call — `times_are_team_local` defaults FALSE
-        // (Release N's DB column default; `insertEventSeries` never names the column itself).
+        // No `markSeriesTimesAreTeamLocal` call — `seedSeries` above was called without
+        // `timesAreTeamLocal`, so it explicitly wrote FALSE (its own default), not the DB
+        // column's `DEFAULT FALSE` — the column default is still FALSE (`1792100000` shipped
+        // without flipping it), but this row's value comes from the explicit write either way.
         // Sentinel year 2099, not a realistic near-future date: this is a NEGATIVE case proving
         // `es.times_are_team_local` still blocks the re-anchor UPDATE. A rotted-into-the-past
         // date would ALSO leave the row untouched, but for the wrong reason (`e.start_at >=
@@ -877,7 +879,7 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
   );
 });
 
-// Fix 3 (review of `.work-plans/timezone-migration-deploy-window.md`): §N.2 item 4's claim that
+// Fix 3 (review of `.work-plans/series-time-conversion.md`): §N.2 item 4's claim that
 // `EventsRepository.updateFutureUnmodified`'s `AT TIME ZONE ${tz}` with a BOUND `tz = 'UTC'` is
 // semantically identical to the pre-#650 SQL LITERAL `AT TIME ZONE 'UTC'` was previously asserted
 // only against `fields.timezone === 'UTC'` on the in-memory mock repository in
