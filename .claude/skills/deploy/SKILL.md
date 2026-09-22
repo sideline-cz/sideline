@@ -56,7 +56,16 @@ Follow in order; stop and report on any failure.
    | new web + old server | web reads the projected `'maybe'` for a member who actually stored `coming_later`, so `EventRsvpPanel` treats the mandatory note as optional and a Save writes `response = 'maybe'` — a silent downgrade of the stored answer, with no `_actual` field on `EventRsvpDetail` to defend it | **write corruption — web MUST go last** |
    | old web + new server | old web bundles the 3-literal union and fails to decode the RSVP panel | read failure, accepted cost of putting web last |
 
-   **Retiring a transitional shield field** (the `my_response_actual` row above) is itself a wire change with the SAME asymmetry, and the gate is deployment state, not merge state. The release that removed the projection must be live on EVERY class — `production` included — before the shield can be deleted, because `production` is promoted by hand and lags `stable` by an arbitrary number of releases. Check the ops repo's promote history (`git log apps/sideline-<app>/production.yaml` in `sideline-cz/ops`), not `git tag --contains`: a tag existing means `stable` has it, not production. If the shield is removed while production still runs the projecting server, the bot-first order that protected the original rollout now delivers exactly the write corruption the shield existed to prevent.
+   **Retiring a transitional shield field** (the `my_response_actual` row above) is itself a wire change with the SAME asymmetry, and the gate is deployment state, not merge state. The release that removed the projection must be live on EVERY class — `production` included — before the shield can be deleted, because `production` is promoted by hand and lags `stable` by an arbitrary number of releases. Check the ops repo's promote history, not `git tag --contains`: a tag existing means `stable` has it, not production. **Read that history from the REMOTE, never from a local ops checkout** — `/data/sideline/ops` goes stale within hours in a repo that promotes several times a day, and `git fetch` updates refs but NOT the working tree, so a stale `production.yaml` reads exactly like current state and raises no error:
+
+   ```bash
+   gh api "repos/sideline-cz/ops/commits?sha=main&path=apps/sideline-<app>/production.yaml&per_page=5" \
+     --jq '.[] | "\(.commit.committer.date)  \(.commit.message | split("\n")[0])"'   # subjects name the versions
+   gh api "repos/sideline-cz/ops/contents/apps/sideline-<app>/production.yaml?ref=main" \
+     --jq '.content' | base64 -d | grep '^digest'
+   ```
+
+   This exact mistake produced a false promote gate on 2026-09-22 (a local clone four promotes behind), blocking a change that was already safe. If the shield is removed while production still runs the projecting server, the bot-first order that protected the original rollout now delivers exactly the write corruption the shield existed to prevent.
 4. Watch `.github/workflows/release.yaml` (one run per tag) to success (`gh run watch`). Every app's run must be green.
 5. Verify **stable** picked it up: the bot auto-merges a render PR on `sideline-cz/ops` targeting `env/stable` — confirm the merged PR / new commit on `env/stable` references the `vX.Y.Z` digests:
    ```bash
