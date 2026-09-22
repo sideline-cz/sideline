@@ -50,7 +50,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '~/components/ui/dialog';
-import { buildTrainingTypeColorMap } from '~/lib/event-colors.js';
 import { ApiClient, SilentClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 import { cn } from '~/lib/utils';
@@ -211,18 +210,6 @@ export function CommandPalette({
     ? tr('search_askAssistant', { query: trimmedQuery })
     : tr('search_askAssistantAbout', { query: trimmedQuery });
 
-  const colorMap = React.useMemo(
-    () =>
-      buildTrainingTypeColorMap(
-        (data ?? []).flatMap((hit) =>
-          hit.kind === 'event' && Option.isSome(hit.event.trainingTypeName)
-            ? [hit.event.trainingTypeName.value]
-            : [],
-        ),
-      ),
-    [data],
-  );
-
   const hitsByKind = React.useMemo(() => {
     const map = new Map<SearchHitKind, Array<AiChatApi.SearchHit>>();
     for (const hit of data ?? []) {
@@ -337,7 +324,6 @@ export function CommandPalette({
                         key={SearchApi.searchHitId(hit)}
                         reference={hit}
                         teamId={teamId}
-                        colorMap={colorMap}
                         renderWrapper={(children, className) => (
                           <CommandItem
                             value={SearchApi.searchHitId(hit)}

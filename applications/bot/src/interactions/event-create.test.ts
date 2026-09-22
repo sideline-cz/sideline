@@ -168,11 +168,13 @@ describe('event-create modal submit', () => {
     });
   });
 
-  it('malformed event type in custom_id → decode defect is caught, deferred resolves with the error message', async () => {
-    // `decodeEventType` throws on an unknown literal. Previously this ran
-    // eagerly in the handler body (before the fork), killing the whole handler
-    // with "This interaction failed". It now runs inside the forked effect, so
-    // the throw becomes a defect the `catchCause` backstop resolves.
+  it('malformed event type in custom_id (B6) → neither a legacy kind nor a uuid, ephemeral bot_event_unknown_type, no RPC call', async () => {
+    // Pre-B6, `decodeEventType` threw on an unknown literal and the throw was
+    // caught as a defect by the `catchCause` backstop (bot_event_error). B6
+    // classifies `parts[1]` up front instead: a value that is neither a legacy
+    // `Event.EventType` kind literal nor a real uuid resolves to `selected =
+    // null` synchronously, so this now takes the graceful
+    // `bot_event_unknown_type` branch, never the decode-defect path.
     const restStub = makeRestStub();
     const createEvent = vi.fn(() => Effect.succeed({ event_id: 'e1', title: 'My Event' }));
     const rpcLayer = makeRpcStub(createEvent);
@@ -184,13 +186,13 @@ describe('event-create modal submit', () => {
     expect(response.type).toBe(
       DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
     );
-    // The RPC is never reached because the decode fails first.
+    // The RPC is never reached because `selected` is already null.
     expect(createEvent).not.toHaveBeenCalled();
 
     const locale = userLocale(interaction);
     expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalledTimes(1);
     expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalledWith(APP_ID, INTERACTION_TOKEN, {
-      payload: { content: m.bot_event_error({}, { locale }) },
+      payload: { content: m.bot_event_unknown_type({}, { locale }) },
     });
   });
 

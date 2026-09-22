@@ -17,12 +17,8 @@ import {
   navigateWeek,
 } from '~/lib/calendar-utils';
 import { formatEventDateRange, formatLocalTime } from '~/lib/datetime.js';
-import {
-  buildTrainingTypeColorMap,
-  getEventColor,
-  type TrainingTypeColorMap,
-} from '~/lib/event-colors';
-import { eventTypeLabels } from '~/lib/event-labels';
+import { getEventColor } from '~/lib/event-colors';
+import { eventTypeName } from '~/lib/event-labels';
 import { tr } from '~/lib/translations.js';
 import { cn } from '~/lib/utils';
 
@@ -42,11 +38,6 @@ export function EventCalendarView({ teamId, events, trainingTypes }: EventCalend
   const [currentMonth, setCurrentMonth] = React.useState(now.getMonth());
   const [currentWeekDate, setCurrentWeekDate] = React.useState(now);
   const [filterTrainingType, setFilterTrainingType] = React.useState(FILTER_ALL);
-
-  const colorMap = React.useMemo<TrainingTypeColorMap>(
-    () => buildTrainingTypeColorMap(trainingTypes.map((tt) => tt.name)),
-    [trainingTypes],
-  );
 
   const filteredEvents = React.useMemo(() => {
     if (filterTrainingType === FILTER_ALL) return events;
@@ -151,14 +142,9 @@ export function EventCalendarView({ teamId, events, trainingTypes }: EventCalend
 
       {/* Calendar Grid */}
       {calendarMode === 'month' ? (
-        <MonthGrid
-          days={monthGrid}
-          weekdayHeaders={weekdayHeaders}
-          teamId={teamId}
-          colorMap={colorMap}
-        />
+        <MonthGrid days={monthGrid} weekdayHeaders={weekdayHeaders} teamId={teamId} />
       ) : (
-        <WeekGrid days={weekDays} teamId={teamId} colorMap={colorMap} />
+        <WeekGrid days={weekDays} teamId={teamId} />
       )}
     </div>
   );
@@ -170,12 +156,10 @@ function MonthGrid({
   days,
   weekdayHeaders,
   teamId,
-  colorMap,
 }: {
   days: ReadonlyArray<CalendarDay>;
   weekdayHeaders: ReadonlyArray<string>;
   teamId: string;
-  colorMap: TrainingTypeColorMap;
 }) {
   return (
     <div>
@@ -188,12 +172,7 @@ function MonthGrid({
       </div>
       <div className='grid grid-cols-7'>
         {days.map((day) => (
-          <MonthDayCell
-            key={day.date.toISOString()}
-            day={day}
-            teamId={teamId}
-            colorMap={colorMap}
-          />
+          <MonthDayCell key={day.date.toISOString()} day={day} teamId={teamId} />
         ))}
       </div>
     </div>
@@ -202,15 +181,7 @@ function MonthGrid({
 
 const MAX_VISIBLE_CHIPS = 3;
 
-function MonthDayCell({
-  day,
-  teamId,
-  colorMap,
-}: {
-  day: CalendarDay;
-  teamId: string;
-  colorMap: TrainingTypeColorMap;
-}) {
+function MonthDayCell({ day, teamId }: { day: CalendarDay; teamId: string }) {
   const visible = day.events.slice(0, MAX_VISIBLE_CHIPS);
   const overflowCount = day.events.length - MAX_VISIBLE_CHIPS;
 
@@ -234,7 +205,7 @@ function MonthDayCell({
       {/* Desktop: chips */}
       <div className='hidden sm:flex flex-col gap-0.5'>
         {visible.map((event) => (
-          <EventChip key={event.eventId} event={event} teamId={teamId} colorMap={colorMap} />
+          <EventChip key={event.eventId} event={event} teamId={teamId} />
         ))}
         {overflowCount > 0 && (
           <span className='text-xs text-muted-foreground pl-1'>+{overflowCount} more</span>
@@ -244,11 +215,7 @@ function MonthDayCell({
       {/* Mobile: dots */}
       <div className='flex sm:hidden gap-0.5 flex-wrap'>
         {day.events.map((event) => {
-          const color = getEventColor(
-            event.eventType,
-            Option.getOrNull(event.trainingTypeName),
-            colorMap,
-          );
+          const color = getEventColor(event.eventTypeColor, event.eventType);
           return (
             <Link
               key={event.eventId}
@@ -263,16 +230,8 @@ function MonthDayCell({
   );
 }
 
-function EventChip({
-  event,
-  teamId,
-  colorMap,
-}: {
-  event: EventApi.EventInfo;
-  teamId: string;
-  colorMap: TrainingTypeColorMap;
-}) {
-  const color = getEventColor(event.eventType, Option.getOrNull(event.trainingTypeName), colorMap);
+function EventChip({ event, teamId }: { event: EventApi.EventInfo; teamId: string }) {
+  const color = getEventColor(event.eventTypeColor, event.eventType);
   const isCancelled = event.status === 'cancelled';
   const time = event.allDay ? '' : formatLocalTime(event.startAt);
 
@@ -299,15 +258,7 @@ function EventChip({
 
 /* ─── Week Grid ─── */
 
-function WeekGrid({
-  days,
-  teamId,
-  colorMap,
-}: {
-  days: ReadonlyArray<CalendarDay>;
-  teamId: string;
-  colorMap: TrainingTypeColorMap;
-}) {
+function WeekGrid({ days, teamId }: { days: ReadonlyArray<CalendarDay>; teamId: string }) {
   const dateFnsLocale = useDateFnsLocale();
   return (
     <>
@@ -341,12 +292,7 @@ function WeekGrid({
                 </span>
               ) : (
                 day.events.map((event) => (
-                  <WeekEventCard
-                    key={event.eventId}
-                    event={event}
-                    teamId={teamId}
-                    colorMap={colorMap}
-                  />
+                  <WeekEventCard key={event.eventId} event={event} teamId={teamId} />
                 ))
               )}
             </div>
@@ -366,12 +312,7 @@ function WeekGrid({
             ) : (
               <div className='flex flex-col gap-1'>
                 {day.events.map((event) => (
-                  <WeekEventCard
-                    key={event.eventId}
-                    event={event}
-                    teamId={teamId}
-                    colorMap={colorMap}
-                  />
+                  <WeekEventCard key={event.eventId} event={event} teamId={teamId} />
                 ))}
               </div>
             )}
@@ -382,16 +323,8 @@ function WeekGrid({
   );
 }
 
-function WeekEventCard({
-  event,
-  teamId,
-  colorMap,
-}: {
-  event: EventApi.EventInfo;
-  teamId: string;
-  colorMap: TrainingTypeColorMap;
-}) {
-  const color = getEventColor(event.eventType, Option.getOrNull(event.trainingTypeName), colorMap);
+function WeekEventCard({ event, teamId }: { event: EventApi.EventInfo; teamId: string }) {
+  const color = getEventColor(event.eventTypeColor, event.eventType);
   const isCancelled = event.status === 'cancelled';
   const { startTime, end } = formatEventDateRange(
     event.startAt,
@@ -417,7 +350,7 @@ function WeekEventCard({
       <div className='text-xs text-muted-foreground'>
         {timeLabel}
         {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })} ·{' '}
-        {eventTypeLabels[event.eventType]()}
+        {eventTypeName(event.eventTypeName, event.eventType)}
         {event.trainingTypeName.pipe(
           Option.map((v) => ` · ${v}`),
           Option.getOrElse(() => ''),

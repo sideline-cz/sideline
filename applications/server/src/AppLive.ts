@@ -39,6 +39,7 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { EventTypesRepository } from '~/repositories/EventTypesRepository.js';
 import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
@@ -141,6 +142,7 @@ export const Repositories = Layer.mergeAll(
   DiscordChannelsRepository.Default,
   DiscordRolesRepository.Default,
   EventsRepository.Default,
+  EventTypesRepository.Default,
   EventRsvpsRepository.Default,
   EventRostersRepository.Default,
   EventRosterRequestsRepository.Default,

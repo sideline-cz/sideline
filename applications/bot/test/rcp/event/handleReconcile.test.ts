@@ -36,6 +36,8 @@ const makeUpcomingEvent = (myResponse: 'yes' | 'no' | 'maybe' | null) => ({
   team_id: TEAM_ID as any,
   title: 'Saturday Training',
   event_type: 'training',
+  event_type_name: Option.none(),
+  event_type_color: Option.none(),
   start_at: DateTime.makeUnsafe('2027-05-10T14:00:00Z'),
   end_at: Option.none(),
   location: Option.none(),
@@ -148,6 +150,8 @@ const makeTestLayers = (opts: ReconcileMockOptions = {}) => {
                 end_at: Option.none(),
                 location: Option.none(),
                 event_type: 'training',
+                event_type_name: Option.none(),
+                event_type_color: Option.none(),
                 status: 'active',
               }),
             );

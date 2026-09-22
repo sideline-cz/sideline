@@ -86,6 +86,9 @@ type EventRecord = {
   team_id: Team.TeamId;
   training_type_id: Option.Option<string>;
   event_type: Event.EventType;
+  event_type_id: Option.Option<string>;
+  event_type_name: Option.Option<string>;
+  event_type_color: Option.Option<string>;
   title: string;
   description: Option.Option<string>;
   image_url: Option.Option<string>;
@@ -253,6 +256,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
     allDay?: boolean;
+    eventTypeId?: Option.Option<string>;
   }) => {
     const id = crypto.randomUUID() as Event.EventId;
     const tz = zoneFor(input.teamId);
@@ -261,6 +265,9 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       team_id: input.teamId,
       training_type_id: input.trainingTypeId,
       event_type: input.eventType as Event.EventType,
+      event_type_id: input.eventTypeId ?? Option.none(),
+      event_type_name: Option.none(),
+      event_type_color: Option.none(),
       title: input.title,
       description: input.description,
       image_url: input.imageUrl ?? Option.none(),
@@ -303,6 +310,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
     allDay?: boolean;
+    eventTypeId?: Option.Option<string>;
   }) => {
     const existing = eventsStore.get(input.id);
     if (!existing) return Effect.die(new Error('Not found'));
@@ -311,6 +319,12 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       ...existing,
       title: input.title,
       event_type: input.eventType as Event.EventType,
+      // Mirrors the real query's `COALESCE(input.event_type_id, event_type_id)`:
+      // `None` means "no change requested", so the existing value is kept.
+      event_type_id:
+        input.eventTypeId !== undefined && Option.isSome(input.eventTypeId)
+          ? input.eventTypeId
+          : existing.event_type_id,
       training_type_id: input.trainingTypeId,
       description: input.description,
       image_url: input.imageUrl !== undefined ? input.imageUrl : existing.image_url,

@@ -78,7 +78,7 @@ vi.mock('@tanstack/react-router', () => ({
 const { AssistantResultCard } = await import(
   '~/components/molecules/assistant/AssistantResultCard.js'
 );
-const { buildTrainingTypeColorMap, getEventColor } = await import('~/lib/event-colors.js');
+const { EVENT_COLOR_SETS } = await import('~/lib/event-colors.js');
 const { eventStatusClasses, eventStatusLabels, eventTypeLabels } = await import(
   '~/lib/event-labels.js'
 );
@@ -104,6 +104,9 @@ interface EventOverrides {
   title?: string;
   eventType?: 'training' | 'match' | 'tournament' | 'meeting' | 'social' | 'other';
   trainingTypeName?: Option.Option<string>;
+  eventTypeId?: Option.Option<string>;
+  eventTypeName?: Option.Option<Option.Option<string>>;
+  eventTypeColor?: Option.Option<string>;
   startAt?: string;
   endAt?: Option.Option<string>;
   allDay?: boolean;
@@ -119,6 +122,9 @@ function makeEventRef(overrides: EventOverrides = {}) {
     title = 'Tuesday training',
     eventType = 'training',
     trainingTypeName = Option.none<string>(),
+    eventTypeId = Option.none<string>(),
+    eventTypeName = Option.none<Option.Option<string>>(),
+    eventTypeColor = Option.none<string>(),
     startAt = '2026-05-12T18:00:00.000Z',
     endAt = Option.some('2026-05-12T19:30:00.000Z'),
     allDay = false,
@@ -137,6 +143,9 @@ function makeEventRef(overrides: EventOverrides = {}) {
       title,
       eventType,
       trainingTypeName,
+      eventTypeId,
+      eventTypeName,
+      eventTypeColor,
       description: Option.none<string>(),
       imageUrl: Option.none<string>(),
       startAt: DateTime.makeUnsafe(startAt),
@@ -291,16 +300,8 @@ function makeTrainingTypeRef(overrides: TrainingTypeOverrides = {}) {
   };
 }
 
-const EMPTY_COLOR_MAP = buildTrainingTypeColorMap([]);
-
-function renderCard(reference: unknown, colorMap = EMPTY_COLOR_MAP) {
-  return render(
-    <AssistantResultCard
-      reference={reference as any}
-      teamId={TEAM_ID}
-      colorMap={colorMap as any}
-    />,
-  );
+function renderCard(reference: unknown) {
+  return render(<AssistantResultCard reference={reference as any} teamId={TEAM_ID} />);
 }
 
 function getRow() {
@@ -329,6 +330,9 @@ function makeEventSearchHit(title = 'Widened Event'): AiChatApi.SearchHit {
       title,
       eventType: 'training',
       trainingTypeName: Option.none<string>(),
+      eventTypeId: Option.none() as any,
+      eventTypeName: Option.none<Option.Option<string>>(),
+      eventTypeColor: Option.none() as any,
       description: Option.none<string>(),
       imageUrl: Option.none<string>(),
       startAt: DateTime.makeUnsafe('2026-05-12T18:00:00.000Z'),
@@ -413,17 +417,11 @@ function makeTrainingTypeSearchHit(name = 'Widened Training'): AiChatApi.SearchH
 function renderSearchHit(
   hit: AiChatApi.SearchHit,
   extra: {
-    colorMap?: typeof EMPTY_COLOR_MAP;
     renderWrapper?: (children: React.ReactNode, className: string) => React.ReactElement;
   } = {},
 ) {
   return render(
-    <AssistantResultCard
-      reference={hit}
-      teamId={TEAM_ID}
-      colorMap={extra.colorMap ?? EMPTY_COLOR_MAP}
-      renderWrapper={extra.renderWrapper}
-    />,
+    <AssistantResultCard reference={hit} teamId={TEAM_ID} renderWrapper={extra.renderWrapper} />,
   );
 }
 
@@ -504,44 +502,31 @@ describe('AssistantResultCard', () => {
     });
   });
 
-  describe('event colour stability (13.9/4)', () => {
-    it('renders the same leading colour class whether the colour map is built from this event alone or from many training types', () => {
-      const trainingTypeName = 'Speed';
+  describe('event colour resolution', () => {
+    it('renders the leading colour dot from the event type’s own colour when Some', () => {
       const reference = makeEventRef({
         eventType: 'training',
-        trainingTypeName: Option.some(trainingTypeName),
+        eventTypeColor: Option.some('emerald'),
       });
+      renderCard(reference);
 
-      const subsetMap = buildTrainingTypeColorMap([trainingTypeName]);
-      const supersetMap = buildTrainingTypeColorMap([
-        'Alpha',
-        'Bravo',
-        'Charlie',
-        'Delta',
-        'Echo',
-        trainingTypeName,
-        'Foxtrot',
-      ]);
-
-      // The colour-hash promise itself (`getEventColor` independent of map membership) — the
-      // component's job is simply to USE whatever map it is given, not to break this property.
-      expect(getEventColor('training', trainingTypeName, subsetMap).dot).toBe(
-        getEventColor('training', trainingTypeName, supersetMap).dot,
-      );
-
-      const { unmount } = renderCard(reference, subsetMap);
-      const subsetBar = document.querySelector('.w-1.self-stretch.rounded-full');
-      expect(subsetBar).not.toBeNull();
-      const subsetDotClass = getEventColor('training', trainingTypeName, subsetMap).dot;
-      for (const c of subsetDotClass.split(' ')) {
-        expect(subsetBar?.classList.contains(c)).toBe(true);
+      const bar = document.querySelector('.w-1.self-stretch.rounded-full');
+      expect(bar).not.toBeNull();
+      for (const c of EVENT_COLOR_SETS.emerald.dot.split(' ')) {
+        expect(bar?.classList.contains(c)).toBe(true);
       }
-      unmount();
+    });
 
-      renderCard(reference, supersetMap);
-      const supersetBar = document.querySelector('.w-1.self-stretch.rounded-full');
-      for (const c of subsetDotClass.split(' ')) {
-        expect(supersetBar?.classList.contains(c)).toBe(true);
+    it('falls back to the kind default colour when eventTypeColor is None', () => {
+      const reference = makeEventRef({ eventType: 'training', eventTypeColor: Option.none() });
+      renderCard(reference);
+
+      const bar = document.querySelector('.w-1.self-stretch.rounded-full');
+      expect(bar).not.toBeNull();
+      // defaultColorForKind.training === 'blue' — unchanged behaviour from before event types
+      // were customizable.
+      for (const c of EVENT_COLOR_SETS.blue.dot.split(' ')) {
+        expect(bar?.classList.contains(c)).toBe(true);
       }
     });
   });

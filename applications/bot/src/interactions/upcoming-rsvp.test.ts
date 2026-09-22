@@ -229,6 +229,8 @@ const makeEntry = (eventId: string, title: string) => ({
   location: Option.none(),
   location_url: Option.none(),
   event_type: 'match',
+  event_type_name: Option.none(),
+  event_type_color: Option.none(),
   yes_count: 2,
   no_count: 0,
   maybe_count: 1,

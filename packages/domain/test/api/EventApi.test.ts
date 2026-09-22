@@ -105,7 +105,8 @@ const startAt = DateTime.makeUnsafe('2099-12-31T18:00:00.000Z');
 
 const baseCreatePayload: Schema.Schema.Type<typeof EventApi.CreateEventRequest> = {
   title: 'Training' as typeof Schema.NonEmptyString.Type,
-  eventType: 'training' as const,
+  eventType: Option.some('training' as const),
+  eventTypeId: Option.none(),
   trainingTypeId: Option.none(),
   description: Option.none(),
   imageUrl: Option.none(),
@@ -180,6 +181,7 @@ describe('UpdateEventRequest — encoding direction (regression for runtime cras
   const emptyPatch: Schema.Schema.Type<typeof EventApi.UpdateEventRequest> = {
     title: Option.none(),
     eventType: Option.none(),
+    eventTypeId: Option.none(),
     trainingTypeId: Option.none(),
     description: Option.none(),
     imageUrl: Option.none(),
@@ -205,6 +207,7 @@ describe('UpdateEventRequest — encoding direction (regression for runtime cras
     const patch: Schema.Schema.Type<typeof EventApi.UpdateEventRequest> = {
       title: Option.none(), // title is OptionFromOptional(NonEmptyString), not bi-level
       eventType: Option.none(),
+      eventTypeId: Option.none(), // eventTypeId is also OptionFromOptional, not bi-level
       trainingTypeId: Option.some(Option.none()),
       description: Option.some(Option.none()),
       imageUrl: Option.some(Option.none()),

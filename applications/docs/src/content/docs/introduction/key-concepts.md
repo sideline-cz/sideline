@@ -23,7 +23,7 @@ Permissions attached to a person within a team. Built-in roles are `player`, `ca
 
 ## Event
 
-A single happening at a specific date and time — a training, a game, a team dinner. Events have a location, a group (audience), an RSVP deadline, and a training type.
+A single happening at a specific date and time — a training, a game, a team dinner. Events have a location, a group (audience), an RSVP deadline, and an [event type](#event-type).
 
 ## Event series
 
@@ -33,9 +33,13 @@ A repeating pattern (e.g. "every Tuesday at 19:00") that generates individual Ev
 
 A player's response to an event: **Yes**, **Coming later**, **Not sure**, or **No**. "Coming later" means the player will attend but arrive after the start time — it counts as full attendance, same as **Yes**. "Not sure" means the player hasn't decided yet — unlike the other three, it does **not** count as attendance (no roster slot, no auto-logged training attendance, not included in team generation). Both "Coming later" and "Not sure" require a short note (an ETA for one, what the decision depends on for the other) and open a note step instead of saving instantly; **Yes** and **No** save immediately with an optional note. RSVPs can be changed until the event starts; switching away from "Coming later" or "Not sure" clears its note, since the note only makes sense for the response it was written for. Captains see live counts; reminders target players who haven't replied.
 
+## Event type
+
+A category for events, shown as a coloured badge on every event card. Sideline ships six built-in kinds — training, match, tournament, meeting, social, other — but each team owns its own list: an admin can rename any of them (e.g. "Training" → "Practice"), pick its colour, add new types built on the same six kinds (so a team can have both "League match" and "Friendly", both behaving like "match"), and reorder the list. See **Team → Event types** (admins only). This is a different thing from a training's [training type](#training-type) below (Strength, Tactical, and so on) — an event's type says *what kind of event this is*; a training's training type says *what the training focuses on*.
+
 ## Training type
 
-A category for events — "training", "match", "tournament", "friendly", "other". Used for filtering, stats, and colour coding.
+A category specific to training events — "Strength", "Tactical", or any other custom label a team defines. Used for filtering training sessions and stats; unrelated to the six built-in [event types](#event-type) above.
 
 ## Age threshold
 

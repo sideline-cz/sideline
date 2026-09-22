@@ -9,7 +9,7 @@ import { formatNameWithMention } from '../utils.js';
 import { locationDisplay } from './locationDisplay.js';
 
 const UNCLAIMED_COLOR = 0xed8936; // orange
-const CLAIMED_COLOR = 0x57f287; // green (matches EVENT_TYPE_COLORS.training)
+const CLAIMED_COLOR = 0x57f287; // green (claim-confirmation colour, unrelated to event-type colours)
 const CANCELLED_COLOR = 0xed4245; // red
 
 export type ClaimedByEntry = {

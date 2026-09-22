@@ -530,6 +530,8 @@ describe('GetEventEmbedInfo RPC — image_url field', () => {
                 event_type: row.event_type,
                 all_day: false,
                 status: 'active',
+                event_type_name: Option.none(),
+                event_type_color: Option.none(),
               }),
             ),
         }),
@@ -567,6 +569,8 @@ describe('GetEventEmbedInfo RPC — image_url field', () => {
                 event_type: row.event_type,
                 all_day: false,
                 status: 'active',
+                event_type_name: Option.none(),
+                event_type_color: Option.none(),
               }),
             ),
         }),
@@ -652,6 +656,8 @@ describe('GetChannelEvents RPC — image_url field', () => {
               status: row.status,
               discord_message_id: row.discord_message_id,
               all_day: false,
+              event_type_name: Option.none(),
+              event_type_color: Option.none(),
             }),
         ),
       ),
@@ -690,6 +696,8 @@ describe('GetChannelEvents RPC — image_url field', () => {
               status: row.status,
               discord_message_id: row.discord_message_id,
               all_day: false,
+              event_type_name: Option.none(),
+              event_type_color: Option.none(),
             }),
         ),
       ),
@@ -728,6 +736,8 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       status: 'active',
       start_date: Option.none(),
       end_date: Option.none(),
+      event_type_name: Option.none(),
+      event_type_color: Option.none(),
     });
 
     return Effect.sync(() => {
@@ -758,6 +768,8 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       status: 'active',
       start_date: Option.none(),
       end_date: Option.none(),
+      event_type_name: Option.none(),
+      event_type_color: Option.none(),
     });
 
     return Effect.sync(() => {
@@ -794,6 +806,8 @@ describe('UpcomingEventForUserEntry — my_response is Some("coming_later"), not
       status: 'active',
       start_date: Option.none(),
       end_date: Option.none(),
+      event_type_name: Option.none(),
+      event_type_color: Option.none(),
     });
 
     return Effect.sync(() => {

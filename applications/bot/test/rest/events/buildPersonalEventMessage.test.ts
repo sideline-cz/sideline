@@ -36,6 +36,8 @@ const makeEntry = (
     my_message: Option.none(),
     all_day: false,
     status: 'active',
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
     start_date: Option.none(),
     end_date: Option.none(),
     ...overrides,

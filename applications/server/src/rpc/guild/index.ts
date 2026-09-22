@@ -1741,6 +1741,10 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       status: row.status,
                       start_date: Option.some(row.start_date),
                       end_date: Option.some(row.end_date),
+                      // ponytail: this raw inline query isn't joined to `event_types` — add
+                      // the join here if this surface needs the name/color.
+                      event_type_name: Option.none(),
+                      event_type_color: Option.none(),
                     }),
                 ),
                 total: rows.length,

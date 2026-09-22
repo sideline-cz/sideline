@@ -1,6 +1,9 @@
 import { describe, expect, it } from '@effect/vitest';
 import type { TrainingType } from '@sideline/domain';
+import { FocusedOptionContext, Interaction } from 'dfx/Interactions/index';
+import * as DiscordTypes from 'dfx/types';
 import { Effect, Layer, Option } from 'effect';
+import { EventCreateAutocomplete } from '~/interactions/event-create-autocomplete.js';
 import { SyncRpc, type SyncRpcClient } from '~/services/SyncRpc.js';
 
 // --- Test IDs ---
@@ -9,23 +12,56 @@ const TEST_TT_1 = '00000000-0000-0000-0000-000000000050' as TrainingType.Trainin
 const TEST_TT_2 = '00000000-0000-0000-0000-000000000051' as TrainingType.TrainingTypeId;
 const TEST_TT_3 = '00000000-0000-0000-0000-000000000052' as TrainingType.TrainingTypeId;
 
+const TRAINING_EVENT_TYPE_ID = 'et-training';
+const MATCH_EVENT_TYPE_ID = 'et-match';
+
 const mockTrainingTypes = [
   { id: TEST_TT_1, name: 'Fitness' },
   { id: TEST_TT_2, name: 'Tactics' },
   { id: TEST_TT_3, name: 'Strength Training' },
 ];
 
-// --- Mock SyncRpc ---
-const makeMockSyncRpc = (
-  trainingTypes: Array<{ id: string; name: string }> = mockTrainingTypes,
-  shouldFail = false,
-): SyncRpcClient => {
+const mockEventTypes = [
+  { id: TRAINING_EVENT_TYPE_ID, kind: 'training', name: Option.none() },
+  { id: MATCH_EVENT_TYPE_ID, kind: 'match', name: Option.none() },
+];
+
+// ---------------------------------------------------------------------------
+// Real-handler harness for `~/interactions/event-create-autocomplete.js`
+// (the `training_type` autocomplete). Since a bot deploy after this PR sends
+// an event-type ID (not a kind literal) in the `type` option, the handler
+// must resolve that id via Event/GetEventTypesByGuild before deciding whether
+// to offer training types — this harness exercises the REAL resolution
+// logic, not a hand-rolled mirror of it.
+// ---------------------------------------------------------------------------
+
+const makeMockSyncRpc = (opts: {
+  eventTypes?: Array<{ id: string; kind: string; name: Option.Option<string> }>;
+  trainingTypes?: Array<{ id: string; name: string }>;
+  eventTypesShouldFail?: boolean;
+  trainingTypesShouldFail?: boolean;
+}): SyncRpcClient => {
+  const {
+    eventTypes = mockEventTypes,
+    trainingTypes = mockTrainingTypes,
+    eventTypesShouldFail = false,
+    trainingTypesShouldFail = false,
+  } = opts;
+
   return new Proxy({} as SyncRpcClient, {
     get: (_target, prop) => {
+      if (prop === 'Event/GetEventTypesByGuild') {
+        return (_payload: { guild_id: string }) => {
+          if (eventTypesShouldFail) {
+            return Effect.fail({ _tag: 'RpcClientError', message: 'down' });
+          }
+          return Effect.succeed(eventTypes);
+        };
+      }
       if (prop === 'Event/GetTrainingTypesByGuild') {
         return (_payload: { guild_id: string }) => {
-          if (shouldFail) {
-            return Effect.die('RPC error');
+          if (trainingTypesShouldFail) {
+            return Effect.fail({ _tag: 'RpcClientError', message: 'down' });
           }
           return Effect.succeed(trainingTypes);
         };
@@ -35,154 +71,130 @@ const makeMockSyncRpc = (
   });
 };
 
-// --- The autocomplete handler logic (mirrors what event-create-autocomplete.ts will implement) ---
-// These tests verify the BEHAVIOR of the handler that will be implemented.
+const makeAutocompleteInteraction = (
+  guildId: string | undefined,
+  eventTypeOptionValue: string,
+): DiscordTypes.APIInteraction =>
+  ({
+    id: '444444444444444444' as DiscordTypes.Snowflake,
+    application_id: '111111111111111111' as DiscordTypes.Snowflake,
+    token: 'interaction-token',
+    version: 1,
+    type: DiscordTypes.InteractionTypes.APPLICATION_COMMAND_AUTOCOMPLETE,
+    guild_id: guildId as unknown as DiscordTypes.Snowflake,
+    locale: 'en-US',
+    data: {
+      id: 'cmd-id' as DiscordTypes.Snowflake,
+      name: 'event',
+      type: DiscordTypes.ApplicationCommandType.CHAT,
+      options: [
+        {
+          name: 'create',
+          type: 1,
+          options: [
+            { name: 'type', type: 3, value: eventTypeOptionValue },
+            { name: 'training_type', type: 3, value: '', focused: true },
+          ],
+        },
+      ],
+    },
+  }) as unknown as DiscordTypes.APIInteraction;
 
-const handleAutocomplete = (
+const runAutocomplete = (
   rpc: SyncRpcClient,
-  guildId: Option.Option<string>,
-  eventType: string,
-  query: string,
+  interaction: DiscordTypes.APIInteraction,
+  focusedValue: string,
 ) =>
-  Effect.Do.pipe(
-    Effect.bind('rpcService', () => Effect.succeed(rpc)),
-    Effect.flatMap(({ rpcService }) => {
-      // Non-training event types should return empty choices immediately
-      if (eventType !== 'training') {
-        return Effect.succeed([] as Array<{ name: string; value: string }>);
-      }
-
-      // No guild means no choices
-      if (Option.isNone(guildId)) {
-        return Effect.succeed([] as Array<{ name: string; value: string }>);
-      }
-
-      return (
-        rpcService['Event/GetTrainingTypesByGuild'] as unknown as (p: {
-          guild_id: string;
-        }) => Effect.Effect<Array<{ id: string; name: string }>>
-      )({ guild_id: guildId.value }).pipe(
-        Effect.map((types) =>
-          types
-            .filter((tt) => tt.name.toLowerCase().includes(query.toLowerCase()))
-            .slice(0, 25)
-            .map((tt) => ({ name: tt.name, value: tt.id })),
-        ),
-        Effect.catchDefect(() => Effect.succeed([] as Array<{ name: string; value: string }>)),
-      );
-    }),
+  Effect.runPromise(
+    EventCreateAutocomplete.handle.pipe(
+      Effect.provide(Layer.succeed(Interaction, interaction)),
+      Effect.provide(
+        Layer.succeed(FocusedOptionContext, {
+          name: 'training_type',
+          type: 3,
+          value: focusedValue,
+        } as unknown as InstanceType<typeof FocusedOptionContext>),
+      ),
+      Effect.provide(Layer.succeed(SyncRpc, rpc)),
+    ) as Effect.Effect<unknown, never, never>,
   );
 
-const makeMockLayer = (rpc: SyncRpcClient) => Layer.succeed(SyncRpc, rpc);
+type AutocompleteResponse = { data: { choices: ReadonlyArray<{ name: string; value: string }> } };
 
-describe('event-create-autocomplete handler', () => {
-  it.effect('returns filtered training type choices matching query', () => {
-    const rpc = makeMockSyncRpc();
-    const layer = makeMockLayer(rpc);
+describe('event-create-autocomplete handler (training_type option)', () => {
+  it('offers training types when the selected event-type id resolves to kind === training', async () => {
+    const rpc = makeMockSyncRpc({});
+    const interaction = makeAutocompleteInteraction(TEST_GUILD_ID, TRAINING_EVENT_TYPE_ID);
 
-    return handleAutocomplete(rpc, Option.some(TEST_GUILD_ID), 'training', 'fit').pipe(
-      Effect.provide(layer),
-      Effect.tap((result) =>
-        Effect.sync(() => {
-          expect(result).toHaveLength(1);
-          expect(result[0].name).toBe('Fitness');
-          expect(result[0].value).toBe(TEST_TT_1);
-        }),
-      ),
-      Effect.asVoid,
-    );
+    const response = (await runAutocomplete(rpc, interaction, 'fit')) as AutocompleteResponse;
+
+    // 1 match ("Fitness") + the always-present "Other" sentinel choice.
+    expect(response.data.choices.map((c) => c.value)).toContain(TEST_TT_1);
   });
 
-  it.effect('returns all choices when query is empty', () => {
-    const rpc = makeMockSyncRpc();
-    const layer = makeMockLayer(rpc);
+  it('offers all training types (plus "Other") when query is empty and kind resolves to training', async () => {
+    const rpc = makeMockSyncRpc({});
+    const interaction = makeAutocompleteInteraction(TEST_GUILD_ID, TRAINING_EVENT_TYPE_ID);
 
-    return handleAutocomplete(rpc, Option.some(TEST_GUILD_ID), 'training', '').pipe(
-      Effect.provide(layer),
-      Effect.tap((result) =>
-        Effect.sync(() => {
-          expect(result).toHaveLength(3);
-        }),
-      ),
-      Effect.asVoid,
-    );
+    const response = (await runAutocomplete(rpc, interaction, '')) as AutocompleteResponse;
+
+    expect(response.data.choices).toHaveLength(mockTrainingTypes.length + 1);
   });
 
-  it.effect('returns empty choices when event type is not training', () =>
-    Effect.forEach(
-      ['match', 'tournament', 'meeting', 'social', 'other'],
-      (eventType) => {
-        const rpc = makeMockSyncRpc();
-        const layer = makeMockLayer(rpc);
+  it('does NOT offer training types when the selected event-type id resolves to a non-training kind (match)', async () => {
+    const rpc = makeMockSyncRpc({});
+    const interaction = makeAutocompleteInteraction(TEST_GUILD_ID, MATCH_EVENT_TYPE_ID);
 
-        return handleAutocomplete(rpc, Option.some(TEST_GUILD_ID), eventType, '').pipe(
-          Effect.provide(layer),
-          Effect.tap((result) =>
-            Effect.sync(() => {
-              expect(result).toHaveLength(0);
-            }),
-          ),
-          Effect.asVoid,
-        );
-      },
-      { discard: true },
-    ),
-  );
+    const response = (await runAutocomplete(rpc, interaction, '')) as AutocompleteResponse;
 
-  it.effect('returns empty choices on RPC error', () => {
-    const rpc = makeMockSyncRpc([], true);
-    const layer = makeMockLayer(rpc);
-
-    return handleAutocomplete(rpc, Option.some(TEST_GUILD_ID), 'training', '').pipe(
-      Effect.provide(layer),
-      Effect.tap((result) =>
-        Effect.sync(() => {
-          expect(result).toHaveLength(0);
-        }),
-      ),
-      Effect.asVoid,
-    );
+    expect(response.data.choices).toHaveLength(0);
   });
 
-  it.effect('limits results to 25 items', () => {
-    const manyTypes = Array.from({ length: 30 }, (_, i) => ({
-      id: `type-${i}`,
-      name: `Type ${i}`,
-    }));
-    const rpc = makeMockSyncRpc(manyTypes);
-    const layer = makeMockLayer(rpc);
+  it('does NOT offer training types when the event-type id is unknown to the team (RPC returned no matching row)', async () => {
+    const rpc = makeMockSyncRpc({});
+    const interaction = makeAutocompleteInteraction(TEST_GUILD_ID, 'not-a-real-event-type-id');
 
-    return handleAutocomplete(rpc, Option.some(TEST_GUILD_ID), 'training', '').pipe(
-      Effect.provide(layer),
-      Effect.tap((result) =>
-        Effect.sync(() => {
-          expect(result).toHaveLength(25);
-        }),
-      ),
-      Effect.asVoid,
-    );
+    const response = (await runAutocomplete(rpc, interaction, '')) as AutocompleteResponse;
+
+    expect(response.data.choices).toHaveLength(0);
   });
 
-  it.effect('returns empty choices when no guild_id is present', () => {
-    const rpc = makeMockSyncRpc();
-    const layer = makeMockLayer(rpc);
+  it('returns empty choices when no guild_id is present', async () => {
+    const rpc = makeMockSyncRpc({});
+    const interaction = makeAutocompleteInteraction(undefined, TRAINING_EVENT_TYPE_ID);
 
-    return handleAutocomplete(rpc, Option.none(), 'training', 'fit').pipe(
-      Effect.provide(layer),
-      Effect.tap((result) =>
-        Effect.sync(() => {
-          expect(result).toHaveLength(0);
-        }),
-      ),
-      Effect.asVoid,
-    );
+    const response = (await runAutocomplete(rpc, interaction, 'fit')) as AutocompleteResponse;
+
+    expect(response.data.choices).toHaveLength(0);
+  });
+
+  it('returns empty choices when Event/GetEventTypesByGuild fails (never throws)', async () => {
+    const rpc = makeMockSyncRpc({ eventTypesShouldFail: true });
+    const interaction = makeAutocompleteInteraction(TEST_GUILD_ID, TRAINING_EVENT_TYPE_ID);
+
+    const response = (await runAutocomplete(rpc, interaction, '')) as AutocompleteResponse;
+
+    expect(response.data.choices).toHaveLength(0);
+  });
+
+  it('returns empty choices when Event/GetTrainingTypesByGuild fails (never throws)', async () => {
+    const rpc = makeMockSyncRpc({ trainingTypesShouldFail: true });
+    const interaction = makeAutocompleteInteraction(TEST_GUILD_ID, TRAINING_EVENT_TYPE_ID);
+
+    const response = (await runAutocomplete(rpc, interaction, '')) as AutocompleteResponse;
+
+    expect(response.data.choices).toHaveLength(0);
   });
 });
 
 describe('event-create modal custom_id parsing', () => {
-  // Tests for parsing the updated modal custom_id format:
-  // Old: event-create:{eventType}
-  // New: event-create:{eventType}:{trainingTypeId}
+  // Tests for parsing the modal custom_id format:
+  // `event-create:{eventTypeIdOrKind}:{trainingTypeId}`
+  //
+  // Structural parsing only (segment split) — the semantic distinction
+  // between a legacy kind literal and a current event-type id is covered by
+  // test/interactions/event-create-legacy-modal.test.ts against the real
+  // handler.
 
   const parseModalCustomId = (
     customId: string,
@@ -218,84 +230,4 @@ describe('event-create modal custom_id parsing', () => {
     expect(Option.isSome(trainingTypeId)).toBe(true);
     expect(Option.getOrNull(trainingTypeId)).toBe('some-id');
   });
-
-  it.effect('passes trainingTypeId to CreateEvent RPC when present in custom_id', () => {
-    let capturedTrainingTypeId: Option.Option<string> = Option.none();
-
-    const rpc = new Proxy({} as SyncRpcClient, {
-      get: (_target, prop) => {
-        if (prop === 'Event/CreateEvent') {
-          return (payload: { training_type_id: Option.Option<string> }) => {
-            capturedTrainingTypeId = payload.training_type_id;
-            return Effect.succeed({ event_id: 'new-event-id', title: 'Test' });
-          };
-        }
-        return () => Effect.void;
-      },
-    });
-
-    // Simulate modal submission with 3-segment custom_id
-    const customId = `event-create:training:${TEST_TT_1}`;
-    const { trainingTypeId } = parseModalCustomId(customId);
-
-    return Effect.Do.pipe(
-      Effect.flatMap(() =>
-        (
-          rpc['Event/CreateEvent'] as unknown as (p: {
-            training_type_id: Option.Option<string>;
-          }) => Effect.Effect<unknown>
-        )({
-          training_type_id: trainingTypeId,
-        }),
-      ),
-      Effect.tap(() =>
-        Effect.sync(() => {
-          expect(Option.isSome(capturedTrainingTypeId)).toBe(true);
-          expect(Option.getOrNull(capturedTrainingTypeId)).toBe(TEST_TT_1);
-        }),
-      ),
-      Effect.asVoid,
-    );
-  });
-
-  it.effect(
-    'passes Option.none() for training_type_id when using legacy 2-segment custom_id',
-    () => {
-      let capturedTrainingTypeId: Option.Option<string> = Option.some('should-be-cleared');
-
-      const rpc = new Proxy({} as SyncRpcClient, {
-        get: (_target, prop) => {
-          if (prop === 'Event/CreateEvent') {
-            return (payload: { training_type_id: Option.Option<string> }) => {
-              capturedTrainingTypeId = payload.training_type_id;
-              return Effect.succeed({ event_id: 'new-event-id', title: 'Test' });
-            };
-          }
-          return () => Effect.void;
-        },
-      });
-
-      // Legacy custom_id without training type
-      const customId = 'event-create:training';
-      const { trainingTypeId } = parseModalCustomId(customId);
-
-      return Effect.Do.pipe(
-        Effect.flatMap(() =>
-          (
-            rpc['Event/CreateEvent'] as unknown as (p: {
-              training_type_id: Option.Option<string>;
-            }) => Effect.Effect<unknown>
-          )({
-            training_type_id: trainingTypeId,
-          }),
-        ),
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(Option.isNone(capturedTrainingTypeId)).toBe(true);
-          }),
-        ),
-        Effect.asVoid,
-      );
-    },
-  );
 });

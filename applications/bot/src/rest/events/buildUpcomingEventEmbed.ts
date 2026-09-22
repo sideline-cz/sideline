@@ -1,25 +1,30 @@
 import type { EventRpcModels } from '@sideline/domain';
-import { EventRsvp } from '@sideline/domain';
+import { EventRsvp, EventType } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
-import { Array, DateTime, Option, pipe } from 'effect';
+import { Array, DateTime, Option, pipe, Schema } from 'effect';
 import type { Locale } from '~/locale.js';
 import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
+import { eventTypeKindLabel } from '~/rest/events/eventTypeKindLabel.js';
 import { formatEventWhen } from '~/rest/events/eventWhen.js';
 import { formatName } from '../utils.js';
 import { locationDisplay } from './locationDisplay.js';
 
-const EVENT_TYPE_COLORS: Record<string, number> = {
-  training: 0x57f287,
-  match: 0xed4245,
-  tournament: 0xfee75c,
-  meeting: 0x5865f2,
-  social: 0xeb459e,
-  other: 0x99aab5,
-};
+// `entry.event_type` is a plain string on the wire (historical), not narrowed to
+// `EventType.EventTypeKind` — the CHECK constraint on `events.event_type` guarantees it in
+// practice, but a decode-time guard here is what lets the colour/label lookups below stay
+// total without a cast. Falls back to `other`, the safe default kind.
+const isEventTypeKind = Schema.is(EventType.EventTypeKind);
+const kindOf = (eventType: string): EventType.EventTypeKind =>
+  isEventTypeKind(eventType) ? eventType : 'other';
 
-const DEFAULT_COLOR = 0x99aab5;
+// Same reasoning as `kindOf` above, for the colour: `entry.event_type_color` is typed as
+// `Option<EventTypeColor>`, but that's only the RPC schema's promise, not a runtime one — a
+// hue since removed from the enum, or any producer that slips past the schema, must still
+// fall through to the kind default rather than index `eventTypeColorHex` with a bad key
+// (which would render a colourless embed).
+const isEventTypeColor = Schema.is(EventType.EventTypeColor);
 
 // The style a row-1 RSVP button wears when it IS the member's current response; every other
 // button falls back to SECONDARY. Styles: 1=Primary(blurple), 2=Secondary(grey),
@@ -88,6 +93,13 @@ export const buildUpcomingEventEmbed = (params: {
 
   const fields: Array<Discord.RichEmbedField> = [];
 
+  const kind = kindOf(entry.event_type);
+  const typeName = pipe(
+    Option.flatten(entry.event_type_name),
+    Option.getOrElse(() => eventTypeKindLabel(kind, locale)),
+  );
+  fields.push({ name: m.bot_embed_type({}, { locale }), value: typeName, inline: true });
+
   const when = formatEventWhen({
     startAt: entry.start_at,
     // ⚠ the all-day branch takes DATES, not instants. `entry.start_date` is the team-local
@@ -146,7 +158,16 @@ export const buildUpcomingEventEmbed = (params: {
     inline: false,
   });
 
-  const color = EVENT_TYPE_COLORS[entry.event_type] ?? DEFAULT_COLOR;
+  // Wire colour when the server sent one (and it's a valid `EventTypeColor`); otherwise fall
+  // back through the seeded default for the entry's kind. An old server that hasn't shipped
+  // `event_type_color` yet omits the key entirely (`Option.none()`), which falls through here
+  // cleanly. Embed colours change on this deploy (e.g. `training` green → blue) — deliberate,
+  // see plan §5/§9; do not add a compatibility map to preserve the old colours.
+  const fallbackColor = EventType.eventTypeColorHex[EventType.defaultColorForKind[kind]];
+  const color = Option.match(entry.event_type_color, {
+    onNone: () => fallbackColor,
+    onSome: (c) => (isEventTypeColor(c) ? EventType.eventTypeColorHex[c] : fallbackColor),
+  });
 
   const embeds: ReadonlyArray<Discord.RichEmbed> = [
     {

@@ -4,6 +4,7 @@ import * as Discord from '~/models/Discord.js';
 import * as Event from '~/models/Event.js';
 import * as EventRosterModel from '~/models/EventRosterModel.js';
 import * as EventRsvp from '~/models/EventRsvp.js';
+import * as EventType from '~/models/EventType.js';
 import * as GroupModel from '~/models/GroupModel.js';
 import * as RosterModel from '~/models/RosterModel.js';
 import * as Team from '~/models/Team.js';
@@ -29,6 +30,7 @@ import {
   EventEmbedInfo,
   EventRosterAlreadyLinked,
   EventRosterEventNotFound,
+  EventTypeChoice,
   GuildEventListEntry,
   GuildEventListResult,
   GuildNotFound,
@@ -163,11 +165,20 @@ export const EventRpcGroup = RpcGroup.make(
     payload: { guild_id: Discord.Snowflake },
     success: Schema.Array(TrainingTypeChoice),
   }),
+  Rpc.make('GetEventTypesByGuild', {
+    payload: { guild_id: Discord.Snowflake },
+    success: Schema.Array(EventTypeChoice),
+  }),
   Rpc.make('CreateEvent', {
     payload: {
       guild_id: Discord.Snowflake,
       discord_user_id: Discord.Snowflake,
+      // Kept required — the bot ships before the server, so a new bot may still be talking
+      // to an old server that has never heard of event_type_id.
       event_type: Event.EventType,
+      // Optional and `OptionFromOptionalKey`: an old bot omits the key entirely, and the
+      // server must decode that as None, not fail.
+      event_type_id: Schema.OptionFromOptionalKey(EventType.EventTypeId),
       title: Schema.String,
       start_at: Schema.String,
       end_at: Schema.OptionFromNullOr(Schema.String),

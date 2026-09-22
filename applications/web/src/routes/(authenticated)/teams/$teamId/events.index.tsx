@@ -23,6 +23,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/events/')({
             query: { all: deps.all ? Option.some(true) : Option.none() },
           }),
           trainingTypes: api.trainingType.listTrainingTypes({ params: { teamId } }),
+          eventTypes: api.eventType.listEventTypes({ params: { teamId } }),
           discordChannels: api.group
             .listDiscordChannels({ params: { teamId } })
             .pipe(Effect.catch(() => Effect.succeed([] as const))),
@@ -59,6 +60,7 @@ function EventsRoute() {
         })
       }
       trainingTypes={data.trainingTypes.trainingTypes}
+      eventTypes={data.eventTypes.eventTypes}
       groups={data.groups}
       // `EventListResponse.timezone` needs only membership (populated from a direct
       // repository read server-side), unlike `getTeamSettings` which requires

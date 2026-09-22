@@ -4,6 +4,7 @@ import {
   EventRpcModels,
   EventRsvp,
   EventSeries,
+  EventType,
   GroupModel,
   Team,
   TeamMember,
@@ -35,6 +36,14 @@ export class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithD
   status: Event.EventStatus,
   created_by: TeamMember.TeamMemberId,
   training_type_name: Schema.OptionFromNullOr(Schema.String),
+  // Raw columns from the `LEFT JOIN event_types ety` below — `None` for all three when the
+  // event has no resolved type at all (see AGENTS.md ownership statement); when
+  // `event_type_id` is `Some`, `event_type_name` is `None` for a seeded, never-renamed row.
+  // The API mapper (`toEventInfo`/`getEvent`/`updateEvent`) derives the wire's nested
+  // Option-of-Option shape from these two signals — never decoded as nested here.
+  event_type_id: Schema.OptionFromNullOr(EventType.EventTypeId),
+  event_type_name: Schema.OptionFromNullOr(Schema.String),
+  event_type_color: Schema.OptionFromNullOr(EventType.EventTypeColor),
   created_by_name: Schema.OptionFromNullOr(Schema.String),
   series_id: Schema.OptionFromNullOr(EventSeries.EventSeriesId),
   series_modified: Schema.Boolean,
@@ -71,6 +80,10 @@ class EventRow extends Schema.Class<EventRow>('EventRow')({
   team_id: Team.TeamId,
   training_type_id: Schema.OptionFromNullOr(TrainingType.TrainingTypeId),
   event_type: Event.EventType,
+  // Trigger-resolved (see AGENTS.md ownership statement) — this query does not join
+  // `event_types`, so no name/color here; callers needing those re-fetch via
+  // `findEventByIdWithDetails`.
+  event_type_id: Schema.OptionFromNullOr(EventType.EventTypeId),
   title: Schema.String,
   description: Schema.OptionFromNullOr(Schema.String),
   image_url: Schema.OptionFromNullOr(Schema.String),
@@ -94,6 +107,7 @@ const EventInsertInput = Schema.Struct({
   team_id: Schema.String,
   training_type_id: Schema.OptionFromNullOr(Schema.String),
   event_type: Schema.String,
+  event_type_id: Schema.OptionFromNullOr(Schema.String),
   title: Schema.String,
   description: Schema.OptionFromNullOr(Schema.String),
   image_url: Schema.OptionFromNullOr(Schema.String),
@@ -113,6 +127,11 @@ const EventUpdateInput = Schema.Struct({
   id: Event.EventId,
   title: Schema.String,
   event_type: Schema.String,
+  // `Option.none()` (-> SQL NULL) means "no change requested" — the COALESCE in the query
+  // below keeps the existing column value; this is NOT the same "null clears it" convention
+  // used elsewhere in this file. Never re-derive this from `event_type`; the trigger's
+  // `UPDATE OF` re-resolution is the one place a kind-only change re-targets the id.
+  event_type_id: Schema.OptionFromNullOr(Schema.String),
   training_type_id: Schema.OptionFromNullOr(Schema.String),
   description: Schema.OptionFromNullOr(Schema.String),
   image_url: Schema.OptionFromNullOr(Schema.String),
@@ -140,6 +159,7 @@ const make = Effect.gen(function* () {
                    e.description, e.image_url, e.start_at, e.end_at,
                    e.location, e.location_url, e.status, e.created_by,
                    tt.name AS training_type_name,
+                   e.event_type_id, ety.name AS event_type_name, ety.color AS event_type_color,
                    u.name AS created_by_name,
                    e.series_id, e.series_modified,
                    e.owner_group_id, og.name AS owner_group_name,
@@ -159,6 +179,7 @@ const make = Effect.gen(function* () {
                    COALESCE(ts.timezone, 'Europe/Prague') AS timezone
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
+            LEFT JOIN event_types ety ON ety.id = e.event_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
             LEFT JOIN users u ON u.id = tm.user_id
             LEFT JOIN groups og ON og.id = e.owner_group_id
@@ -179,6 +200,7 @@ const make = Effect.gen(function* () {
                    e.description, e.image_url, e.start_at, e.end_at,
                    e.location, e.location_url, e.status, e.created_by,
                    tt.name AS training_type_name,
+                   e.event_type_id, ety.name AS event_type_name, ety.color AS event_type_color,
                    u.name AS created_by_name,
                    e.series_id, e.series_modified,
                    e.owner_group_id, og.name AS owner_group_name,
@@ -198,6 +220,7 @@ const make = Effect.gen(function* () {
                    COALESCE(ts.timezone, 'Europe/Prague') AS timezone
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
+            LEFT JOIN event_types ety ON ety.id = e.event_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
             LEFT JOIN users u ON u.id = tm.user_id
             LEFT JOIN groups og ON og.id = e.owner_group_id
@@ -214,16 +237,16 @@ const make = Effect.gen(function* () {
     Result: EventRow,
     execute: (input) => sql`
             WITH inserted AS (
-              INSERT INTO events (team_id, training_type_id, event_type, title, description,
+              INSERT INTO events (team_id, training_type_id, event_type, event_type_id, title, description,
                                   image_url, start_at, end_at, location, location_url, created_by, series_id,
                                   owner_group_id, member_group_id, all_day, all_day_anchored)
-              VALUES (${input.team_id}, ${input.training_type_id}, ${input.event_type},
+              VALUES (${input.team_id}, ${input.training_type_id}, ${input.event_type}, ${input.event_type_id},
                       ${input.title}, ${input.description}, ${input.image_url}, ${input.start_at},
                       ${input.end_at}, ${input.location}, ${input.location_url}, ${input.created_by},
                       ${input.series_id},
                       ${input.owner_group_id}, ${input.member_group_id}, ${input.all_day},
                       ${input.all_day})
-              RETURNING id, team_id, training_type_id, event_type, title, description,
+              RETURNING id, team_id, training_type_id, event_type, event_type_id, title, description,
                         image_url, start_at, end_at, location, location_url, status,
                         created_by, series_id, series_modified,
                         owner_group_id, member_group_id, all_day
@@ -247,6 +270,7 @@ const make = Effect.gen(function* () {
               UPDATE events SET
                 title = ${input.title},
                 event_type = ${input.event_type},
+                event_type_id = COALESCE(${input.event_type_id}, event_type_id),
                 training_type_id = ${input.training_type_id},
                 description = ${input.description},
                 image_url = ${input.image_url},
@@ -260,7 +284,7 @@ const make = Effect.gen(function* () {
                 all_day_anchored = ${input.all_day},
                 updated_at = now()
               WHERE id = ${input.id}
-              RETURNING id, team_id, training_type_id, event_type, title, description,
+              RETURNING id, team_id, training_type_id, event_type, event_type_id, title, description,
                         image_url, start_at, end_at, location, location_url, status,
                         created_by, series_id, series_modified,
                         owner_group_id, member_group_id, all_day
@@ -511,15 +535,20 @@ const make = Effect.gen(function* () {
       status: Schema.String,
       discord_message_id: Discord.Snowflake,
       all_day: Schema.Boolean,
+      event_type_id: Schema.OptionFromNullOr(EventType.EventTypeId),
+      event_type_name: Schema.OptionFromNullOr(Schema.String),
+      event_type_color: Schema.OptionFromNullOr(EventType.EventTypeColor),
     }),
     execute: (channelId) => sql`
-            SELECT id AS event_id, team_id, title, description, image_url,
-                   start_at, end_at, location, location_url, event_type,
-                   status, discord_message_id, all_day
-            FROM events
-            WHERE discord_channel_id = ${channelId}
-              AND discord_message_id IS NOT NULL
-            ORDER BY start_at ASC
+            SELECT e.id AS event_id, e.team_id, e.title, e.description, e.image_url,
+                   e.start_at, e.end_at, e.location, e.location_url, e.event_type,
+                   e.status, e.discord_message_id, e.all_day,
+                   e.event_type_id, ety.name AS event_type_name, ety.color AS event_type_color
+            FROM events e
+            LEFT JOIN event_types ety ON ety.id = e.event_type_id
+            WHERE e.discord_channel_id = ${channelId}
+              AND e.discord_message_id IS NOT NULL
+            ORDER BY e.start_at ASC
           `,
   });
 
@@ -652,16 +681,20 @@ const make = Effect.gen(function* () {
       all_day: Schema.Boolean,
       // See `EventWithDetails.start_date` — same derived projection (plan §11.2/§11.3).
       start_date: Schema.String,
+      event_type_name: Schema.OptionFromNullOr(Schema.String),
+      event_type_color: Schema.OptionFromNullOr(EventType.EventTypeColor),
     }),
     execute: (input) => sql`
       SELECT e.id, e.title, e.event_type, e.start_at, e.end_at,
              e.location, e.location_url, e.member_group_id, e.all_day,
              er.response AS my_rsvp,
              (e.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
-                 AS start_date
+                 AS start_date,
+             ety.name AS event_type_name, ety.color AS event_type_color
       FROM events e
       LEFT JOIN event_rsvps er ON er.event_id = e.id AND er.team_member_id = ${input.team_member_id}
       LEFT JOIN team_settings ts ON ts.team_id = e.team_id
+      LEFT JOIN event_types ety ON ety.id = e.event_type_id
       WHERE e.team_id = ${input.team_id}
         AND ${sql.unsafe(eventVisibleNow('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
       ORDER BY ${sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
@@ -752,20 +785,25 @@ const make = Effect.gen(function* () {
       no_count: Schema.Number,
       maybe_count: Schema.Number,
       all_day: Schema.Boolean,
+      event_type_id: Schema.OptionFromNullOr(EventType.EventTypeId),
+      event_type_name: Schema.OptionFromNullOr(Schema.String),
+      event_type_color: Schema.OptionFromNullOr(EventType.EventTypeColor),
     }),
     execute: (input) => sql`
             SELECT e.id AS event_id, e.title, e.start_at, e.end_at,
                    e.location, e.location_url, e.event_type, e.all_day,
                    COALESCE(SUM(CASE WHEN er.response = 'yes' THEN 1 ELSE 0 END), 0)::int AS yes_count,
                    COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
-                   COALESCE(SUM(CASE WHEN er.response = 'maybe' THEN 1 ELSE 0 END), 0)::int AS maybe_count
+                   COALESCE(SUM(CASE WHEN er.response = 'maybe' THEN 1 ELSE 0 END), 0)::int AS maybe_count,
+                   e.event_type_id, ety.name AS event_type_name, ety.color AS event_type_color
             FROM events e
             JOIN teams t ON t.id = e.team_id
             LEFT JOIN team_settings ts ON ts.team_id = t.id
             LEFT JOIN event_rsvps er ON er.event_id = e.id
+            LEFT JOIN event_types ety ON ety.id = e.event_type_id
             WHERE t.guild_id = ${input.guild_id}
               AND ${sql.unsafe(eventVisibleNow('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
-            GROUP BY e.id, ts.timezone
+            GROUP BY e.id, ts.timezone, ety.name, ety.color
             ORDER BY ${sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
             LIMIT ${input.limit} OFFSET ${input.offset}
           `,
@@ -824,17 +862,21 @@ const make = Effect.gen(function* () {
       // date for the iCal feed's `VALUE=DATE` all-day events. This feed is cross-team
       // (JOIN teams), so the zone must be carried per row, not fetched once.
       team_timezone: Schema.String,
+      event_type_name: Schema.OptionFromNullOr(Schema.String),
+      event_type_color: Schema.OptionFromNullOr(EventType.EventTypeColor),
     }),
     execute: (userId) => sql`
             SELECT e.id, e.title, e.description, e.image_url, e.start_at, e.end_at,
                    e.location, e.location_url, e.status, e.event_type, t.name AS team_name,
                    er.response AS rsvp_response, e.all_day,
-                   COALESCE(ts.timezone, 'Europe/Prague') AS team_timezone
+                   COALESCE(ts.timezone, 'Europe/Prague') AS team_timezone,
+                   ety.name AS event_type_name, ety.color AS event_type_color
             FROM events e
             JOIN teams t ON t.id = e.team_id
             JOIN team_members tm ON tm.team_id = t.id AND tm.active = true
             JOIN event_rsvps er ON er.event_id = e.id AND er.team_member_id = tm.id
             LEFT JOIN team_settings ts ON ts.team_id = t.id
+            LEFT JOIN event_types ety ON ety.id = e.event_type_id
             WHERE tm.user_id = ${userId}
               AND e.status IN ('active', 'started')
               AND er.response IN ('yes', 'maybe', 'coming_later')
@@ -882,6 +924,7 @@ const make = Effect.gen(function* () {
     teamId,
     trainingTypeId,
     eventType,
+    eventTypeId = Option.none(),
     title,
     description,
     imageUrl = Option.none(),
@@ -898,6 +941,7 @@ const make = Effect.gen(function* () {
     teamId: Team.TeamId;
     trainingTypeId: Option.Option<string>;
     eventType: string;
+    eventTypeId?: Option.Option<string>;
     title: string;
     description: Option.Option<string>;
     imageUrl?: Option.Option<string>;
@@ -915,6 +959,7 @@ const make = Effect.gen(function* () {
       team_id: teamId,
       training_type_id: trainingTypeId,
       event_type: eventType,
+      event_type_id: eventTypeId,
       title,
       description,
       image_url: imageUrl,
@@ -933,6 +978,7 @@ const make = Effect.gen(function* () {
     id,
     title,
     eventType,
+    eventTypeId = Option.none(),
     trainingTypeId,
     description,
     imageUrl = Option.none(),
@@ -947,6 +993,9 @@ const make = Effect.gen(function* () {
     id: Event.EventId;
     title: string;
     eventType: string;
+    // `Option.none()` means "no change requested" — the repository COALESCEs it against the
+    // existing column, so callers must NOT merge this against the existing value themselves.
+    eventTypeId?: Option.Option<string>;
     trainingTypeId: Option.Option<string>;
     description: Option.Option<string>;
     imageUrl?: Option.Option<string>;
@@ -962,6 +1011,7 @@ const make = Effect.gen(function* () {
       id,
       title,
       event_type: eventType,
+      event_type_id: eventTypeId,
       training_type_id: trainingTypeId,
       description,
       image_url: imageUrl,
@@ -1047,6 +1097,11 @@ const make = Effect.gen(function* () {
               claim_discord_channel_id: row.claim_discord_channel_id,
               claim_discord_message_id: row.claim_discord_message_id,
               claim_thread_id: row.claim_thread_id,
+              // `_findClaimInfo` is kind-routed behaviour, not rendering — deliberately left
+              // unjoined (see AGENTS.md ownership statement); `EventTypeRenderFields` is
+              // wire-optional so `None` here just means "old server" to any reader.
+              event_type_name: Option.none(),
+              event_type_color: Option.none(),
             }),
         ),
       ),

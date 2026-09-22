@@ -1,10 +1,14 @@
+import { Event } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
-import { Array, Effect, Option, pipe } from 'effect';
+import { Array, Effect, Option, pipe, Schema } from 'effect';
 import { userLocale } from '~/locale.js';
+
+const isValidUuid = (s: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 export const createHandler = Interaction.asEffect().pipe(
   Effect.map((interaction) => {
@@ -26,11 +30,10 @@ export const createHandler = Interaction.asEffect().pipe(
     // and the actual options (type, training_type) are in data.options[0].options
     const subCommand = data && 'options' in data ? data.options?.[0] : undefined;
     const options = subCommand && 'options' in subCommand ? [...(subCommand.options ?? [])] : [];
-    const eventType = pipe(
+    const eventTypeId = pipe(
       options,
       Array.findFirst((o) => o.name === 'type'),
       Option.flatMap((o) => ('value' in o ? Option.some(String(o.value)) : Option.none())),
-      Option.getOrElse(() => 'other'),
     );
     const trainingTypeId = pipe(
       options,
@@ -39,10 +42,28 @@ export const createHandler = Interaction.asEffect().pipe(
       Option.getOrElse(() => ''),
     );
 
+    // `type` is a Discord autocomplete value (§B7): the user can submit anything they typed,
+    // not only a suggested choice, and if the RPC lookup was down when they typed, that can
+    // be arbitrary text. Never trust it — accept only a real event-type id, or a legacy kind
+    // literal for an in-flight command started before the type became a UUID (mirrors
+    // interactions/event-create.ts's `Schema.is(Event.EventType)` / `isValidUuid` split).
+    if (
+      Option.isNone(eventTypeId) ||
+      !(isValidUuid(eventTypeId.value) || Schema.is(Event.EventType)(eventTypeId.value))
+    ) {
+      return Ix.response({
+        type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: m.bot_event_unknown_type({}, { locale }),
+          flags: DiscordTypes.MessageFlags.Ephemeral,
+        },
+      });
+    }
+
     return Ix.response({
       type: DiscordTypes.InteractionCallbackTypes.MODAL,
       data: {
-        custom_id: `event-create:${eventType}:${trainingTypeId}`,
+        custom_id: `event-create:${eventTypeId.value}:${trainingTypeId}`,
         title: m.bot_event_modal_title({}, { locale }),
         components: [
           UI.row([

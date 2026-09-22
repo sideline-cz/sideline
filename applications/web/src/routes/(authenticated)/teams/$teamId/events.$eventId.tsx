@@ -21,6 +21,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/events/$eve
         Effect.all({
           event: api.event.getEvent({ params: { teamId, eventId } }),
           trainingTypes: api.trainingType.listTrainingTypes({ params: { teamId } }),
+          eventTypes: api.eventType.listEventTypes({ params: { teamId } }),
           rsvpDetail: api.eventRsvp.getRsvps({ params: { teamId, eventId } }),
           nonResponders: api.eventRsvp
             .getNonResponders({ params: { teamId, eventId } })
@@ -85,6 +86,7 @@ function EventDetailRoute() {
       eventId={eventIdRaw}
       eventDetail={data.event}
       trainingTypes={data.trainingTypes.trainingTypes}
+      eventTypes={data.eventTypes.eventTypes}
       rsvpDetail={data.rsvpDetail}
       nonResponders={data.nonResponders.nonResponders}
       groups={data.groups}

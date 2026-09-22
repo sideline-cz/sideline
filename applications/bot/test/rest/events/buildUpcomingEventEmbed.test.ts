@@ -1,4 +1,4 @@
-import { EventRpcModels } from '@sideline/domain';
+import { EventRpcModels, EventType } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { DateTime, Option } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
@@ -31,6 +31,8 @@ const makeEntry = (
     my_message: Option.none(),
     all_day: false,
     status: 'active',
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
     start_date: Option.none(),
     end_date: Option.none(),
     ...overrides,
@@ -66,28 +68,75 @@ describe('buildUpcomingEventEmbed', () => {
   });
 
   describe('embed color', () => {
-    it('uses training color when not started', () => {
+    // Embed colours change on this deploy — `event_type_color` (Option.none() here, the
+    // no-server-value case) now falls back through `EventType.defaultColorForKind`, NOT the
+    // old hardcoded local table. `training` was green (0x57f287) before; it is deliberately
+    // blue now (plan §5/§9 — "Discord embed colours change on deploy. Accepted.").
+    it('uses training color (blue) when not started, and NOT the old green', () => {
       const { embeds } = buildUpcomingEventEmbed({
         ...baseParams,
-        entry: makeEntry({ event_type: 'training' }),
+        entry: makeEntry({ event_type: 'training', event_type_color: Option.none() }),
       });
-      expect(embeds[0].color).toBe(0x57f287);
+      expect(embeds[0].color).toBe(EventType.eventTypeColorHex.blue);
+      expect(embeds[0].color).not.toBe(0x57f287);
     });
 
-    it('uses match color when not started', () => {
+    it('uses match color (red) when not started', () => {
       const { embeds } = buildUpcomingEventEmbed({
         ...baseParams,
-        entry: makeEntry({ event_type: 'match' }),
+        entry: makeEntry({ event_type: 'match', event_type_color: Option.none() }),
       });
-      expect(embeds[0].color).toBe(0xed4245);
+      expect(embeds[0].color).toBe(EventType.eventTypeColorHex.red);
     });
 
-    it('uses default color for unknown event type', () => {
+    it('uses default color (gray) for unknown event type', () => {
       const { embeds } = buildUpcomingEventEmbed({
         ...baseParams,
-        entry: makeEntry({ event_type: 'unknown_type' }),
+        entry: makeEntry({ event_type: 'unknown_type', event_type_color: Option.none() }),
       });
-      expect(embeds[0].color).toBe(0x99aab5);
+      expect(embeds[0].color).toBe(EventType.eventTypeColorHex.gray);
+    });
+
+    it('uses the wire color when the server sent one: event_type_color: "cyan" → eventTypeColorHex.cyan', () => {
+      const { embeds } = buildUpcomingEventEmbed({
+        ...baseParams,
+        entry: makeEntry({ event_type: 'training', event_type_color: Option.some('cyan') }),
+      });
+      expect(embeds[0].color).toBe(EventType.eventTypeColorHex.cyan);
+    });
+
+    // An old server mid-rolling-deploy that hasn't shipped `event_type_color` yet omits the
+    // key entirely, decoding to Option.none() — falls back through the kind default, NOT the
+    // pre-deploy green.
+    it('no color on the wire (rolling-deploy skew) + event_type: training → eventTypeColorHex.blue, not the old green', () => {
+      const { embeds } = buildUpcomingEventEmbed({
+        ...baseParams,
+        entry: makeEntry({ event_type: 'training', event_type_color: Option.none() }),
+      });
+      expect(embeds[0].color).toBe(EventType.eventTypeColorHex.blue);
+      expect(embeds[0].color).not.toBe(0x57f287);
+    });
+
+    // Defensive case: a colour string that isn't one of the 13 `EventTypeColor` literals
+    // (should never survive a real RPC decode, which validates against that literal set —
+    // this simulates a value that slipped past it) must not crash the renderer.
+    it('an unknown colour string does not crash the renderer', () => {
+      const entry = {
+        ...makeEntry({ event_type: 'training' }),
+        event_type_color: Option.some('mauve'),
+      } as unknown as EventRpcModels.UpcomingEventForUserEntry;
+
+      expect(() => buildUpcomingEventEmbed({ ...baseParams, entry })).not.toThrow();
+    });
+
+    it('an unknown colour string falls back through the kind default (training → blue)', () => {
+      const entry = {
+        ...makeEntry({ event_type: 'training' }),
+        event_type_color: Option.some('mauve'),
+      } as unknown as EventRpcModels.UpcomingEventForUserEntry;
+
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      expect(embeds[0].color).toBe(EventType.eventTypeColorHex.blue);
     });
   });
 
@@ -101,6 +150,43 @@ describe('buildUpcomingEventEmbed', () => {
     it('does not include description when absent', () => {
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry: makeEntry() });
       expect(embeds[0].description).not.toContain('Bring your boots');
+    });
+  });
+
+  // A new inline `Type` field, added BEFORE `When` (so `fields[0]` is now `Type`, `fields[1]`
+  // is `When` — every "when field" describe block below indexes fields[1] accordingly).
+  describe('Type field', () => {
+    it('is the first field, named via bot_embed_type', () => {
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry: makeEntry() });
+      const fields = embeds[0].fields ?? [];
+      expect(fields[0]?.name).toBe(m.bot_embed_type({}, { locale: 'en' }));
+    });
+
+    it("renders the team's custom name when the type has been renamed", () => {
+      const entry = makeEntry({
+        event_type: 'training',
+        event_type_name: Option.some(Option.some('Ranní trénink')),
+      });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const fields = embeds[0].fields ?? [];
+      expect(fields[0]?.value).toBe('Ranní trénink');
+    });
+
+    it('renders the localized kind label when the seeded row has never been renamed (name: Option.some(Option.none()))', () => {
+      const entry = makeEntry({
+        event_type: 'training',
+        event_type_name: Option.some(Option.none()),
+      });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const fields = embeds[0].fields ?? [];
+      expect(fields[0]?.value).toBe(m.event_type_training({}, { locale: 'en' }));
+    });
+
+    it('renders the localized kind label when the server has not shipped event_type_name yet (name: Option.none())', () => {
+      const entry = makeEntry({ event_type: 'match', event_type_name: Option.none() });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const fields = embeds[0].fields ?? [];
+      expect(fields[0]?.value).toBe(m.event_type_match({}, { locale: 'en' }));
     });
   });
 
@@ -180,7 +266,7 @@ describe('buildUpcomingEventEmbed', () => {
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry: makeEntry() });
       const fields = embeds[0].fields ?? [];
       // First field is "when", should not contain " — "
-      expect(fields[0].value).not.toContain(' — ');
+      expect(fields[1].value).not.toContain(' — ');
     });
 
     it('shows start and end timestamp separated by dash when end_at is set', () => {
@@ -188,7 +274,7 @@ describe('buildUpcomingEventEmbed', () => {
       const entry = makeEntry({ end_at: Option.some(endAt) });
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const fields = embeds[0].fields ?? [];
-      expect(fields[0].value).toContain(' — ');
+      expect(fields[1].value).toContain(' — ');
     });
   });
 
@@ -203,8 +289,8 @@ describe('buildUpcomingEventEmbed', () => {
       const entry = makeEntry({ all_day: true, start_at: NOON_JUL_15, end_at: Option.none() });
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const fields = embeds[0].fields ?? [];
-      expect(fields[0].value).toBe(`<t:1784116800:D>${ALL_DAY_MARKER}`);
-      expect(fields[0].value).not.toMatch(/<t:\d+:[FfRtd]>/);
+      expect(fields[1].value).toBe(`<t:1784116800:D>${ALL_DAY_MARKER}`);
+      expect(fields[1].value).not.toMatch(/<t:\d+:[FfRtd]>/);
     });
 
     it('case 2: all_day true → description still contains <t:S:R> (PR 4 changes this; PR 1 must not)', () => {
@@ -221,15 +307,15 @@ describe('buildUpcomingEventEmbed', () => {
       });
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const fields = embeds[0].fields ?? [];
-      expect(fields[0].value).toBe(`<t:1784116800:D> — <t:1784289600:D>${ALL_DAY_MARKER}`);
+      expect(fields[1].value).toBe(`<t:1784116800:D> — <t:1784289600:D>${ALL_DAY_MARKER}`);
     });
 
     it('case 4: all_day false → When field carries no all-day marker (existing behaviour unchanged)', () => {
       const entry = makeEntry({ all_day: false, start_at: NOON_JUL_15, end_at: Option.none() });
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const fields = embeds[0].fields ?? [];
-      expect(fields[0].value).toBe('<t:1784116800:f>');
-      expect(fields[0].value).not.toContain(ALL_DAY_MARKER);
+      expect(fields[1].value).toBe('<t:1784116800:f>');
+      expect(fields[1].value).not.toContain(ALL_DAY_MARKER);
     });
   });
 
@@ -263,8 +349,8 @@ describe('buildUpcomingEventEmbed', () => {
       });
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const fields = embeds[0].fields ?? [];
-      expect(fields[0].value).toBe(`<t:1784203200:D>${ALL_DAY_MARKER}`); // 2026-07-16T12:00:00Z
-      expect(fields[0].value).not.toContain('<t:1784116800:D>'); // NOT the raw start_at's UTC date
+      expect(fields[1].value).toBe(`<t:1784203200:D>${ALL_DAY_MARKER}`); // 2026-07-16T12:00:00Z
+      expect(fields[1].value).not.toContain('<t:1784116800:D>'); // NOT the raw start_at's UTC date
     });
 
     it('falls back to DateTime.formatIsoDateUtc(entry.start_at) when start_date is Option.none() (rolling-deploy skew, §17.1 row 3)', () => {
@@ -279,7 +365,7 @@ describe('buildUpcomingEventEmbed', () => {
       const fields = embeds[0].fields ?? [];
       // DateTime.formatIsoDateUtc(NOON_JUL_15) === '2026-07-15' → discordDateInstant
       // anchors it back at 12:00:00Z of that date, i.e. the SAME epoch as start_at here.
-      expect(fields[0].value).toBe(`<t:1784116800:D>${ALL_DAY_MARKER}`);
+      expect(fields[1].value).toBe(`<t:1784116800:D>${ALL_DAY_MARKER}`);
     });
 
     it('anchor-neutral: the skew fallback is byte-identical to the non-skew (start_date present) render, under the noon-UTC sentinel', () => {
@@ -298,9 +384,9 @@ describe('buildUpcomingEventEmbed', () => {
         end_date: Option.some('2026-07-15'),
       });
       const skewValue = (buildUpcomingEventEmbed({ ...baseParams, entry: skewEntry }).embeds[0]
-        .fields ?? [])[0].value;
+        .fields ?? [])[1].value;
       const nonSkewValue = (buildUpcomingEventEmbed({ ...baseParams, entry: nonSkewEntry })
-        .embeds[0].fields ?? [])[0].value;
+        .embeds[0].fields ?? [])[1].value;
       expect(skewValue).toBe(nonSkewValue);
     });
 
@@ -314,7 +400,7 @@ describe('buildUpcomingEventEmbed', () => {
       });
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const fields = embeds[0].fields ?? [];
-      expect(fields[0].value).toBe(`<t:1784203200:D> — <t:1784376000:D>${ALL_DAY_MARKER}`);
+      expect(fields[1].value).toBe(`<t:1784203200:D> — <t:1784376000:D>${ALL_DAY_MARKER}`);
     });
   });
 

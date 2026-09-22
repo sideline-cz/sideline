@@ -3,8 +3,18 @@ import { Schema } from 'effect';
 import { Snowflake } from '~/models/Discord.js';
 import { EventId } from '~/models/Event.js';
 import { RsvpResponse } from '~/models/EventRsvp.js';
+import { EventTypeColor, EventTypeId, EventTypeKind } from '~/models/EventType.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 import { TrainingTypeId } from '~/models/TrainingType.js';
+
+// event_type_name/event_type_color are wire-compatible additions to the five RPC entries
+// that already render `event_type`: an old peer on either side of the bot-ships-before-server
+// deploy simply omits/ignores the key. `event_type_name`'s inner `OptionFromNullOr` carries
+// the "seeded row, no custom name" signal, same shape as `EventApi.EventInfo.eventTypeName`.
+export const EventTypeRenderFields = {
+  event_type_name: Schema.OptionFromOptionalKey(Schema.OptionFromNullOr(Schema.String)),
+  event_type_color: Schema.OptionFromOptionalKey(EventTypeColor),
+};
 
 export class MovedEventRow extends Schema.Class<MovedEventRow>('MovedEventRow')({
   event_id: EventId,
@@ -49,6 +59,7 @@ export class EventEmbedInfo extends Schema.Class<EventEmbedInfo>('EventEmbedInfo
   event_type: Schema.String,
   all_day: Schema.Boolean,
   status: Schema.String.pipe(Schema.withDecodingDefaultKey(() => 'active')),
+  ...EventTypeRenderFields,
 }) {}
 
 export class ChannelEventEntry extends Schema.Class<ChannelEventEntry>('ChannelEventEntry')({
@@ -65,6 +76,7 @@ export class ChannelEventEntry extends Schema.Class<ChannelEventEntry>('ChannelE
   status: Schema.String,
   all_day: Schema.Boolean,
   discord_message_id: Snowflake,
+  ...EventTypeRenderFields,
 }) {}
 
 export class RsvpMemberNotFound extends Schema.TaggedErrorClass<RsvpMemberNotFound>()(
@@ -130,6 +142,7 @@ export class GuildEventListEntry extends Schema.Class<GuildEventListEntry>('Guil
   no_count: Schema.Number,
   maybe_count: Schema.Number,
   all_day: Schema.Boolean,
+  ...EventTypeRenderFields,
 }) {}
 
 export class GuildEventListResult extends Schema.Class<GuildEventListResult>(
@@ -180,6 +193,15 @@ export class TrainingTypeChoice extends Schema.Class<TrainingTypeChoice>('Traini
   name: Schema.String,
 }) {}
 
+// `kind` lets the bot fall back to its own per-user-locale translated label when `name` is
+// None (a seeded, never-renamed row) — the server has no reliable per-viewer locale to render
+// that label itself.
+export class EventTypeChoice extends Schema.Class<EventTypeChoice>('EventTypeChoice')({
+  id: EventTypeId,
+  kind: EventTypeKind,
+  name: Schema.OptionFromNullOr(Schema.String),
+}) {}
+
 export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUserEntry>(
   'UpcomingEventForUserEntry',
 )({
@@ -222,6 +244,7 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
    */
   start_date: Schema.OptionFromOptionalKey(Schema.String),
   end_date: Schema.OptionFromOptionalKey(Schema.String),
+  ...EventTypeRenderFields,
 }) {}
 
 export class UpcomingEventsForUserResult extends Schema.Class<UpcomingEventsForUserResult>(
@@ -244,6 +267,7 @@ export class EventClaimInfo extends Schema.Class<EventClaimInfo>('EventClaimInfo
   claim_discord_channel_id: Schema.OptionFromNullOr(Snowflake),
   claim_discord_message_id: Schema.OptionFromNullOr(Snowflake),
   claim_thread_id: Schema.OptionFromNullOr(Snowflake),
+  ...EventTypeRenderFields,
 }) {}
 
 export class ClaimEventNotFound extends Schema.TaggedErrorClass<ClaimEventNotFound>()(

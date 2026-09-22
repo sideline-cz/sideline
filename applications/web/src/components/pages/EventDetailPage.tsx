@@ -3,12 +3,13 @@ import type {
   EventApi,
   EventRosterApi,
   EventRsvpApi,
+  EventTypeApi,
   GroupApi,
   PlayerRatingApi,
   Roster as RosterDomain,
   TrainingTypeApi,
 } from '@sideline/domain';
-import { Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
+import { Event, EventSeries, EventType, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { type DateTime, Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -16,6 +17,7 @@ import { useForm } from 'react-hook-form';
 
 import { EventLocation } from '~/components/atoms/EventLocation.js';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { EventTypePicker } from '~/components/molecules/EventTypePicker';
 import { EventAttendanceRosterSection } from '~/components/organisms/EventAttendanceRosterSection.js';
 import { EventRsvpPanel } from '~/components/organisms/EventRsvpPanel.js';
 import { TeamGeneratorSection } from '~/components/organisms/TeamGeneratorSection.js';
@@ -32,13 +34,6 @@ import {
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '~/components/ui/select';
 import { Switch } from '~/components/ui/switch';
 import { Textarea } from '~/components/ui/textarea';
 import {
@@ -50,7 +45,7 @@ import {
   formatUtcDate,
   localToUtc,
 } from '~/lib/datetime.js';
-import { eventStatusClasses, eventStatusLabels, eventTypeLabels } from '~/lib/event-labels';
+import { eventStatusClasses, eventStatusLabels, eventTypeName } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
@@ -59,7 +54,10 @@ const NONE_VALUE = '__none__';
 
 const EventEditSchema = Schema.Struct({
   title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  // B3: always submit both — `eventType` (the selected type's `kind`) is kept in sync by
+  // `EventTypePicker`'s `onChange`, never picked directly by the user.
   eventType: Event.EventType.annotate({ message: tr('validation_invalidOption') }),
+  eventTypeId: Schema.String,
   trainingTypeId: Schema.String,
   description: Schema.String,
   imageUrl: Schema.String.pipe(
@@ -112,6 +110,7 @@ interface EventDetailPageProps {
   eventId: string;
   eventDetail: EventApi.EventDetail;
   trainingTypes: ReadonlyArray<TrainingTypeApi.TrainingTypeInfo>;
+  eventTypes: ReadonlyArray<EventTypeApi.EventTypeInfo>;
   rsvpDetail: EventRsvpApi.EventRsvpDetail;
   nonResponders: ReadonlyArray<EventRsvpApi.NonResponderEntry>;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
@@ -186,6 +185,7 @@ export function EventDetailPage({
   eventId,
   eventDetail,
   trainingTypes,
+  eventTypes,
   rsvpDetail,
   nonResponders,
   groups,
@@ -216,6 +216,7 @@ export function EventDetailPage({
     defaultValues: {
       title: eventDetail.title,
       eventType: eventDetail.eventType,
+      eventTypeId: Option.getOrElse(eventDetail.eventTypeId, () => ''),
       trainingTypeId: Option.getOrElse(eventDetail.trainingTypeId, () => NONE_VALUE),
       description: Option.getOrElse(eventDetail.description, () => ''),
       imageUrl: Option.getOrElse(eventDetail.imageUrl, () => ''),
@@ -244,15 +245,19 @@ export function EventDetailPage({
     },
   });
 
-  const watchedEventType = form.watch('eventType');
+  const watchedEventTypeId = form.watch('eventTypeId');
+  // Routed off `kind`, never off the name (plan §4/§5) — reads the LIVE lookup rather than the
+  // form's own `eventType` field, which the picker only updates once its own effects run.
+  const selectedEventType = eventTypes.find((t) => t.eventTypeId === watchedEventTypeId);
+  const isTrainingSelected = (selectedEventType?.kind ?? form.watch('eventType')) === 'training';
   const watchedLocation = form.watch('location');
   const watchedAllDay = form.watch('allDay');
 
   React.useEffect(() => {
-    if (watchedEventType !== 'training') {
+    if (!isTrainingSelected) {
       form.setValue('trainingTypeId', NONE_VALUE);
     }
-  }, [watchedEventType, form]);
+  }, [isTrainingSelected, form]);
 
   React.useEffect(() => {
     if (!watchedLocation) {
@@ -276,7 +281,11 @@ export function EventDetailPage({
           params: { teamId: teamIdBranded, eventId: eventIdBranded },
           payload: {
             title: Option.some(values.title),
+            // B3/D7: always submit both together — a title-only edit still resends whatever
+            // the picker already holds (unchanged unless the captain actively re-picks), never
+            // omits both and silently leaves the event's type alone by accident.
             eventType: Option.some(values.eventType),
+            eventTypeId: Option.some(Schema.decodeSync(EventType.EventTypeId)(values.eventTypeId)),
             allDay: Option.some(allDay),
             trainingTypeId: Option.some(trainingTypeIdOption),
             description: Option.some(
@@ -472,7 +481,7 @@ export function EventDetailPage({
         </Button>
         <h1 className='text-2xl font-bold'>{eventDetail.title}</h1>
         <div className='flex flex-wrap gap-2 sm:gap-4 text-sm text-muted-foreground mt-1'>
-          <span>{eventTypeLabels[eventDetail.eventType]()}</span>
+          <span>{eventTypeName(eventDetail.eventTypeName, eventDetail.eventType)}</span>
           <span className={eventStatusClasses[status]}>{eventStatusLabels[status]()}</span>
           {Option.isSome(eventDetail.createdByName) && (
             <span>
@@ -525,30 +534,30 @@ export function EventDetailPage({
                   />
 
                   <div className='flex flex-col gap-4 sm:flex-row'>
-                    <FormField
-                      {...form.register('eventType')}
-                      render={({ field }) => (
-                        <FormItem className='flex-1'>
-                          <FormLabel>{tr('event_eventType')}</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {Event.EventType.literals.map((type) => (
-                                <SelectItem key={type} value={type}>
-                                  {eventTypeLabels[type]()}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    {watchedEventType === 'training' && (
+                    <FormItem className='flex-1'>
+                      <FormLabel>{tr('event_eventType')}</FormLabel>
+                      <EventTypePicker
+                        eventTypes={eventTypes}
+                        event={{
+                          eventType: eventDetail.eventType,
+                          eventTypeId: eventDetail.eventTypeId,
+                          eventTypeName: eventDetail.eventTypeName,
+                          eventTypeColor: eventDetail.eventTypeColor,
+                        }}
+                        value={
+                          watchedEventTypeId
+                            ? Option.some(
+                                Schema.decodeSync(EventType.EventTypeId)(watchedEventTypeId),
+                              )
+                            : Option.none()
+                        }
+                        onChange={({ eventTypeId, kind }) => {
+                          form.setValue('eventTypeId', eventTypeId, { shouldValidate: true });
+                          form.setValue('eventType', kind, { shouldValidate: true });
+                        }}
+                      />
+                    </FormItem>
+                    {isTrainingSelected && (
                       <FormField
                         {...form.register('trainingTypeId')}
                         render={({ field }) => (

@@ -58,6 +58,9 @@ type EventWithDetailsRow = {
   team_id: Team.TeamId;
   training_type_id: Option.Option<string>;
   event_type: Event.EventType;
+  event_type_id: Option.Option<string>;
+  event_type_name: Option.Option<string>;
+  event_type_color: Option.Option<string>;
   title: string;
   description: Option.Option<string>;
   image_url: Option.Option<string>;
@@ -95,6 +98,9 @@ const makeRow = (
   team_id: TEAM_ID,
   training_type_id: Option.none(),
   event_type: 'match',
+  event_type_id: Option.none(),
+  event_type_name: Option.none(),
+  event_type_color: Option.none(),
   title,
   description: Option.none(),
   image_url: Option.none(),

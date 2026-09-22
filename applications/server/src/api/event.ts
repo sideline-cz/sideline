@@ -1,4 +1,4 @@
-import { Auth, type Event, EventApi } from '@sideline/domain';
+import { Auth, type Event, EventApi, type EventType } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Array, DateTime, Effect, Option, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -26,6 +26,23 @@ const markPersonalMessagesDirtyBestEffort = (
     );
 
 /**
+ * Derives the wire's `eventTypeId`/`eventTypeName`/`eventTypeColor` triple from a joined row's
+ * raw, single-level `event_type_id`/`event_type_name`/`event_type_color` columns (see the
+ * comment on `EventWithDetails` in `EventsRepository.ts`). `eventTypeName`'s outer `Option`
+ * means "a type resolved at all" — `None` only when `event_type_id` itself is `None` — and its
+ * inner `Option` carries the real "seeded row, no custom name" signal.
+ */
+const deriveEventTypeFields = (row: {
+  event_type_id: Option.Option<EventType.EventTypeId>;
+  event_type_name: Option.Option<string>;
+  event_type_color: Option.Option<EventType.EventTypeColor>;
+}) => ({
+  eventTypeId: row.event_type_id,
+  eventTypeName: Option.map(row.event_type_id, () => row.event_type_name),
+  eventTypeColor: row.event_type_color,
+});
+
+/**
  * Pure row -> DTO map for `EventApi.EventInfo`. `EventWithDetails` is the
  * `Result` of BOTH `EventsRepository.findByTeamId` and `findByIdWithDetails`
  * (see the comment on `EventWithDetails` in `EventsRepository.ts`), so this
@@ -38,6 +55,7 @@ export const toEventInfo = (e: EventWithDetails): EventApi.EventInfo =>
     title: e.title,
     eventType: e.event_type,
     trainingTypeName: e.training_type_name,
+    ...deriveEventTypeFields(e),
     description: e.description,
     imageUrl: e.image_url,
     locationUrl: e.location_url,
@@ -267,7 +285,13 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
               events.insertEvent({
                 teamId,
                 trainingTypeId: payload.trainingTypeId,
-                eventType: payload.eventType,
+                // Legacy path: an old web build sends `eventType` only. `eventTypeId` alone
+                // (no kind) falls back to `'other'` here — harmless whenever the id is valid
+                // for this team, since the trigger overwrites `event_type` from the row's own
+                // `kind` regardless of what we send (see AGENTS.md ownership statement); it
+                // only matters for a foreign/invalid id, which the trigger discards anyway.
+                eventType: Option.getOrElse(payload.eventType, () => 'other'),
+                eventTypeId: payload.eventTypeId,
                 title: payload.title,
                 description: payload.description,
                 imageUrl: payload.imageUrl,
@@ -307,6 +331,12 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   title: event.title,
                   eventType: event.event_type,
                   trainingTypeName: Option.none(),
+                  // `insert` doesn't join `event_types` (not one of the six render-feeding
+                  // queries) — the id is trigger-resolved and returned, but name/color are
+                  // left `None` here, same treatment as `trainingTypeName` above.
+                  eventTypeId: event.event_type_id,
+                  eventTypeName: Option.none(),
+                  eventTypeColor: Option.none(),
                   description: event.description,
                   imageUrl: event.image_url,
                   locationUrl: event.location_url,
@@ -377,6 +407,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   eventType: event.event_type,
                   trainingTypeId: event.training_type_id,
                   trainingTypeName: event.training_type_name,
+                  ...deriveEventTypeFields(event),
                   description: event.description,
                   imageUrl: event.image_url,
                   locationUrl: event.location_url,
@@ -489,6 +520,12 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 id: eventId,
                 title: Option.getOrElse(payload.title, () => existing.title),
                 eventType: Option.getOrElse(payload.eventType, () => existing.event_type),
+                // Raw passthrough, NOT merged against `existing.event_type_id` — `None` means
+                // "no change requested" and the repository's `COALESCE` already keeps the
+                // existing column value (see AGENTS.md ownership statement / D7's
+                // title-only-update guard). Re-deriving it here would duplicate the trigger's
+                // own re-resolution when only the kind changes.
+                eventTypeId: payload.eventTypeId,
                 trainingTypeId: Option.match(payload.trainingTypeId, {
                   onNone: () => existing.training_type_id,
                   onSome: (v) => v,
@@ -556,6 +593,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   eventType: detail.event_type,
                   trainingTypeId: detail.training_type_id,
                   trainingTypeName: detail.training_type_name,
+                  ...deriveEventTypeFields(detail),
                   description: detail.description,
                   imageUrl: detail.image_url,
                   locationUrl: detail.location_url,

@@ -32,25 +32,15 @@ export const EventCreateAutocomplete = Ix.autocomplete(
           ? (data.options[0].options ?? [])
           : [];
 
-      const eventType = pipe(
+      // `type` now carries an event-type id (or, for an in-flight command, a legacy kind
+      // literal — see interactions/event-create.ts's B6 handling), never the kind directly.
+      // Resolving whether it's a `training` type takes its own RPC lookup.
+      const eventTypeId = pipe(
         [...subCommandOptions],
         Array.findFirst((o) => o.name === 'type'),
         Option.flatMap((o) => ('value' in o ? Option.some(String(o.value)) : Option.none())),
         Option.getOrElse(() => ''),
       );
-
-      if (eventType !== 'training') {
-        return Effect.logInfo(
-          `[autocomplete] skipping: eventType=${eventType}, options=${JSON.stringify(subCommandOptions)}`,
-        ).pipe(
-          Effect.as(
-            Ix.response({
-              type: DiscordTypes.InteractionCallbackTypes.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT,
-              data: { choices: [] },
-            }),
-          ),
-        );
-      }
 
       if (!guildId) {
         return Effect.succeed(
@@ -64,23 +54,44 @@ export const EventCreateAutocomplete = Ix.autocomplete(
       const query =
         focused && 'value' in focused && typeof focused.value === 'string' ? focused.value : '';
 
-      return rpc['Event/GetTrainingTypesByGuild']({
-        guild_id: decodeSnowflake(guildId),
-      }).pipe(
-        Effect.map((types) => [
-          ...pipe(
-            [...types],
-            Array.filter((tt) => tt.name.toLowerCase().includes(query.toLowerCase())),
-            Array.map((tt) => ({
-              name: tt.name.slice(0, 100),
-              value: tt.id,
-            })),
-            Array.take(24),
-          ),
-          { name: 'Other', value: '' },
-        ]),
+      return rpc['Event/GetEventTypesByGuild']({ guild_id: decodeSnowflake(guildId) }).pipe(
+        Effect.flatMap((eventTypes) => {
+          const isTraining = pipe(
+            eventTypes,
+            Array.findFirst((t) => t.id === eventTypeId),
+            Option.exists((t) => t.kind === 'training'),
+          );
+
+          if (!isTraining) {
+            return Effect.logInfo(
+              `[autocomplete] skipping: eventTypeId=${eventTypeId}, options=${JSON.stringify(subCommandOptions)}`,
+            ).pipe(Effect.as<ReadonlyArray<{ name: string; value: string }>>([]));
+          }
+
+          return rpc['Event/GetTrainingTypesByGuild']({
+            guild_id: decodeSnowflake(guildId),
+          }).pipe(
+            Effect.map((types) => [
+              ...pipe(
+                [...types],
+                Array.filter((tt) => tt.name.toLowerCase().includes(query.toLowerCase())),
+                Array.map((tt) => ({
+                  name: tt.name.slice(0, 100),
+                  value: tt.id,
+                })),
+                Array.take(24),
+              ),
+              { name: 'Other', value: '' },
+            ]),
+          );
+        }),
         Effect.tapError((err) => Effect.logError('[autocomplete] RPC error', err)),
         Effect.catchTag('RpcClientError', () =>
+          Effect.succeed<ReadonlyArray<{ name: string; value: string }>>([]),
+        ),
+        // Same guarantee as the RpcClientError catch above, for an untagged defect (a died
+        // fiber, a schema-decode throw) — an autocomplete must never fail the interaction.
+        Effect.catchDefect(() =>
           Effect.succeed<ReadonlyArray<{ name: string; value: string }>>([]),
         ),
         Effect.tap((choices) =>

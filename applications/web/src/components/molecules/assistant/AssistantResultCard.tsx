@@ -22,9 +22,8 @@ import { Badge } from '~/components/ui/badge';
 import { useIsMobile } from '~/hooks/use-mobile.js';
 import { ENTITY_ROUTE, entityKindLabels } from '~/lib/assistant/entityRoutes.js';
 import { formatEventDateRange } from '~/lib/datetime.js';
-import type { TrainingTypeColorMap } from '~/lib/event-colors.js';
 import { getEventColor } from '~/lib/event-colors.js';
-import { eventStatusClasses, eventStatusLabels, eventTypeLabels } from '~/lib/event-labels.js';
+import { eventStatusClasses, eventStatusLabels, eventTypeName } from '~/lib/event-labels.js';
 import { resolveEffectiveRoles } from '~/lib/roles/resolveEffectiveRoles.js';
 import { sortEffectiveRoles } from '~/lib/roles/role-order.js';
 import { tr } from '~/lib/translations.js';
@@ -35,7 +34,6 @@ interface AssistantResultCardProps {
    *  `SearchHit` plus `ref`. */
   reference: AiChatApi.SearchHit;
   teamId: string;
-  colorMap: TrainingTypeColorMap;
   /** Overrides the default per-kind `<Link>` wrapper. The command palette passes a `CommandItem`. */
   renderWrapper?: (children: React.ReactNode, className: string) => React.ReactElement;
 }
@@ -43,7 +41,6 @@ interface AssistantResultCardProps {
 export function AssistantResultCard({
   reference,
   teamId,
-  colorMap,
   renderWrapper,
 }: AssistantResultCardProps) {
   const isMobile = useIsMobile();
@@ -51,8 +48,7 @@ export function AssistantResultCard({
   switch (reference.kind) {
     case 'event': {
       const { event } = reference;
-      const trainingTypeName = Option.getOrNull(event.trainingTypeName);
-      const color = getEventColor(event.eventType, trainingTypeName, colorMap);
+      const color = getEventColor(event.eventTypeColor, event.eventType);
       const { startDate, startTime, end } = formatEventDateRange(
         event.startAt,
         event.endAt,
@@ -65,7 +61,7 @@ export function AssistantResultCard({
       const secondary = [
         range,
         event.allDay ? tr('event_allDayLabel') : undefined,
-        eventTypeLabels[event.eventType](),
+        eventTypeName(event.eventTypeName, event.eventType),
         Option.getOrUndefined(event.location),
       ]
         .filter((part): part is string => Boolean(part))

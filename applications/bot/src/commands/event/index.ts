@@ -24,14 +24,10 @@ export const EventCommand = Ix.global(
             description_localizations: { cs: 'Typ události' },
             type: DiscordTypes.ApplicationCommandOptionType.STRING,
             required: true as const,
-            choices: [
-              { name: 'Training', name_localizations: { cs: 'Trénink' }, value: 'training' },
-              { name: 'Match', name_localizations: { cs: 'Zápas' }, value: 'match' },
-              { name: 'Tournament', name_localizations: { cs: 'Turnaj' }, value: 'tournament' },
-              { name: 'Meeting', name_localizations: { cs: 'Schůzka' }, value: 'meeting' },
-              { name: 'Social', name_localizations: { cs: 'Společenská' }, value: 'social' },
-              { name: 'Other', name_localizations: { cs: 'Jiné' }, value: 'other' },
-            ],
+            // Choices are registered globally at deploy time and would be identical for
+            // every guild — event types are per-team, so this must be autocomplete instead.
+            // See interactions/event-type-autocomplete.ts.
+            autocomplete: true as const,
           },
           {
             name: 'training_type',

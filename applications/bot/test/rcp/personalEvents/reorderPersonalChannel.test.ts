@@ -63,6 +63,8 @@ const makeEntry = (eventId: string, startAt: DateTime.Utc, allDay: boolean): Moc
   location: Option.none() as any,
   location_url: Option.none() as any,
   event_type: 'training' as any,
+  event_type_name: Option.none() as any,
+  event_type_color: Option.none() as any,
   yes_count: 0,
   no_count: 0,
   maybe_count: 0,

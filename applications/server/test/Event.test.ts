@@ -2,6 +2,7 @@ import type {
   Auth,
   Discord,
   Event,
+  EventType,
   GroupModel,
   Role,
   Team,
@@ -85,9 +86,92 @@ const TEST_EVENT_WITH_IMAGE = '00000000-0000-0000-0000-000000000063' as Event.Ev
 const TEST_EVENT_OTHER_GROUP = '00000000-0000-0000-0000-000000000064' as Event.EventId;
 const TEST_EVENT_ALL_DAY_TODAY = '00000000-0000-0000-0000-000000000065' as Event.EventId;
 const TEST_EVENT_ALL_DAY_YESTERDAY = '00000000-0000-0000-0000-000000000066' as Event.EventId;
+// Suite D (plan §7 D) — dedicated fixture for the eventTypeId/eventType interplay tests, kept
+// separate from TEST_EVENT_1 so those tests' own assertions (e.g. `markedPersonalMessagesDirty`)
+// stay unaffected.
+const TEST_EVENT_TYPE_UPDATE = '00000000-0000-0000-0000-000000000067' as Event.EventId;
 const TEST_OTHER_GROUP_ID = '00000000-0000-0000-0000-000000000070' as GroupModel.GroupId;
 const TEST_TRAINING_TYPE_A = '00000000-0000-0000-0000-000000000050' as TrainingType.TrainingTypeId;
 const TEST_TRAINING_TYPE_B = '00000000-0000-0000-0000-000000000051' as TrainingType.TrainingTypeId;
+
+// --- Suite D (plan §7 D) — a tiny fake `event_types` id<->kind mapping, simulating just
+// enough of the migration's `events_sync_event_type()` trigger (which this mock-repository
+// harness has no real Postgres to run) for the create/update eventTypeId<->eventType
+// precedence tests. See `resolveEventTypeForInsert`/`resolveEventTypeForUpdate` below.
+const EVENT_TYPE_TRAINING_ID = '00000000-0000-0000-0000-000000000200' as EventType.EventTypeId;
+const EVENT_TYPE_MATCH_ID = '00000000-0000-0000-0000-000000000201' as EventType.EventTypeId;
+
+const eventTypeKindById = new Map<string, Event.EventType>([
+  [EVENT_TYPE_TRAINING_ID, 'training'],
+  [EVENT_TYPE_MATCH_ID, 'match'],
+]);
+const defaultEventTypeIdForKind = new Map<Event.EventType, string>([
+  ['training', EVENT_TYPE_TRAINING_ID],
+  ['match', EVENT_TYPE_MATCH_ID],
+]);
+
+/**
+ * Mirrors the migration's `events_sync_event_type()` trigger for `TG_OP = 'INSERT'`: if
+ * `eventTypeId` resolves to a known row, its `kind` always wins over whatever `eventType`
+ * literal the caller sent (D1, D4, D5); otherwise (including an unresolvable/foreign id) the
+ * kind is resolved to this team's default id for that kind (D2).
+ */
+const resolveEventTypeForInsert = (
+  eventTypeId: Option.Option<string>,
+  eventType: Event.EventType,
+): { event_type: Event.EventType; event_type_id: Option.Option<string> } => {
+  let resolvedKind = eventType;
+  let resolvedId = eventTypeId;
+  if (Option.isSome(resolvedId)) {
+    const kind = eventTypeKindById.get(resolvedId.value);
+    if (kind) resolvedKind = kind;
+    else resolvedId = Option.none();
+  }
+  if (Option.isNone(resolvedId)) {
+    const fallback = defaultEventTypeIdForKind.get(resolvedKind);
+    resolvedId = fallback ? Option.some(fallback) : Option.none();
+  }
+  return { event_type: resolvedKind, event_type_id: resolvedId };
+};
+
+/**
+ * Mirrors the same trigger for `TG_OP = 'UPDATE'`. Two SQL-level facts precede this, both
+ * already true of `EventUpdateInput`/`api/event.ts`'s handler:
+ *  - `event_type_id = COALESCE(input.event_type_id, existing.event_type_id)` — an omitted id
+ *    (`None`) keeps the existing one, never clears it.
+ *  - `event_type` is ALWAYS explicitly written (the handler defaults it to the existing kind
+ *    when the payload omits it) — so "the kind literal didn't change" and "the caller didn't
+ *    send a kind" are the same case here, which is exactly D7's guard: a title-only update
+ *    computes the identical (unchanged) kind, so the special re-resolution branch below never
+ *    fires and both fields survive untouched.
+ */
+const resolveEventTypeForUpdate = (
+  existing: { event_type: Event.EventType; event_type_id: Option.Option<string> },
+  input: { eventTypeId: Option.Option<string>; eventType: Event.EventType },
+): { event_type: Event.EventType; event_type_id: Option.Option<string> } => {
+  let resolvedId = Option.isSome(input.eventTypeId) ? input.eventTypeId : existing.event_type_id;
+
+  const idOptionsEqual =
+    Option.isNone(resolvedId) === Option.isNone(existing.event_type_id) &&
+    (Option.isNone(resolvedId) ||
+      Option.getOrThrow(resolvedId) === Option.getOrThrow(existing.event_type_id));
+  if (idOptionsEqual && input.eventType !== existing.event_type) {
+    // Kind changed while the id itself didn't — force re-resolution by the new kind.
+    resolvedId = Option.none();
+  }
+
+  let resolvedKind = input.eventType;
+  if (Option.isSome(resolvedId)) {
+    const kind = eventTypeKindById.get(resolvedId.value);
+    if (kind) resolvedKind = kind;
+    else resolvedId = Option.none();
+  }
+  if (Option.isNone(resolvedId)) {
+    const fallback = defaultEventTypeIdForKind.get(resolvedKind);
+    resolvedId = fallback ? Option.some(fallback) : Option.none();
+  }
+  return { event_type: resolvedKind, event_type_id: resolvedId };
+};
 
 const ADMIN_PERMISSIONS: readonly Role.Permission[] = [
   'team:manage',
@@ -241,6 +325,15 @@ type EventRecord = {
   team_id: Team.TeamId;
   training_type_id: Option.Option<string>;
   event_type: Event.EventType;
+  // Suite D — app-owned in real Postgres via the migration's trigger; here it's just a plain
+  // field the mock `insertEvent`/`updateEvent` resolve by hand (see
+  // `resolveEventTypeForInsert`/`resolveEventTypeForUpdate`).
+  event_type_id: Option.Option<string>;
+  // Both `None` here for every mock row — GET responses only need `deriveEventTypeFields` in
+  // `api/event.ts` to see well-formed `Option`s (never a bare `undefined`), not real values;
+  // no D-suite case asserts eventTypeName/eventTypeColor.
+  event_type_name: Option.Option<string>;
+  event_type_color: Option.Option<EventType.EventTypeColor>;
   title: string;
   description: Option.Option<string>;
   image_url: Option.Option<string>;
@@ -316,6 +409,9 @@ const resetStores = () => {
     team_id: TEST_TEAM_ID,
     training_type_id: Option.none(),
     event_type: 'training',
+    event_type_id: Option.none(),
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
     title: 'Tuesday Training',
     description: Option.some('Weekly training session'),
     image_url: Option.none(),
@@ -344,6 +440,9 @@ const resetStores = () => {
     team_id: TEST_TEAM_ID,
     training_type_id: Option.none(),
     event_type: 'match',
+    event_type_id: Option.none(),
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
     title: 'Cancelled Match',
     description: Option.none(),
     image_url: Option.none(),
@@ -372,6 +471,9 @@ const resetStores = () => {
     team_id: TEST_TEAM_ID,
     training_type_id: Option.some(TEST_TRAINING_TYPE_A),
     event_type: 'training',
+    event_type_id: Option.none(),
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
     title: 'Scoped Training',
     description: Option.none(),
     image_url: Option.none(),
@@ -400,6 +502,9 @@ const resetStores = () => {
     team_id: TEST_TEAM_ID,
     training_type_id: Option.none(),
     event_type: 'training',
+    event_type_id: Option.none(),
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
     title: 'Training With Image',
     description: Option.none(),
     image_url: Option.some('https://example.com/banner.png'),
@@ -431,6 +536,9 @@ const resetStores = () => {
     team_id: TEST_TEAM_ID,
     training_type_id: Option.none(),
     event_type: 'training',
+    event_type_id: Option.none(),
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
     title: 'Other Group Training',
     description: Option.none(),
     image_url: Option.none(),
@@ -463,6 +571,9 @@ const resetStores = () => {
     team_id: TEST_TEAM_ID,
     training_type_id: Option.none(),
     event_type: 'tournament',
+    event_type_id: Option.none(),
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
     title: 'All-day Tournament (live today)',
     description: Option.none(),
     image_url: Option.none(),
@@ -494,6 +605,9 @@ const resetStores = () => {
     team_id: TEST_TEAM_ID,
     training_type_id: Option.none(),
     event_type: 'tournament',
+    event_type_id: Option.none(),
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
     title: 'All-day Tournament (ended yesterday)',
     description: Option.none(),
     image_url: Option.none(),
@@ -515,6 +629,38 @@ const resetStores = () => {
     member_group_name: Option.none(),
     start_date: toDateOnly(localMidnight(-1)),
     end_date: toDateOnly(localMidnight(-1)),
+    timezone: 'Europe/Prague',
+  });
+  // Suite D — dedicated fixture for the update (D6/D7) tests: a resolved 'training' type.
+  eventsStore.set(TEST_EVENT_TYPE_UPDATE, {
+    id: TEST_EVENT_TYPE_UPDATE,
+    team_id: TEST_TEAM_ID,
+    training_type_id: Option.none(),
+    event_type: 'training',
+    event_type_id: Option.some(EVENT_TYPE_TRAINING_ID),
+    event_type_name: Option.none(),
+    event_type_color: Option.none(),
+    title: 'Type Update Fixture',
+    description: Option.none(),
+    image_url: Option.none(),
+    start_at: daysFromNow(30),
+    end_at: Option.none(),
+    location: Option.none(),
+    location_url: Option.none(),
+    status: 'active',
+    all_day: false,
+    created_by: TEST_ADMIN_MEMBER_ID,
+    training_type_name: Option.none(),
+    created_by_name: Option.some('Admin User'),
+    series_id: Option.none(),
+    series_modified: false,
+    discord_target_channel_id: Option.none(),
+    owner_group_id: Option.none(),
+    member_group_id: Option.none(),
+    owner_group_name: Option.none(),
+    member_group_name: Option.none(),
+    start_date: toDateOnly(daysFromNow(30)),
+    end_date: toDateOnly(daysFromNow(30)),
     timezone: 'Europe/Prague',
   });
 };
@@ -710,6 +856,9 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       team_id: input.team_id as Team.TeamId,
       training_type_id: input.training_type_id,
       event_type: input.event_type as Event.EventType,
+      event_type_id: Option.none(),
+      event_type_name: Option.none(),
+      event_type_color: Option.none(),
       title: input.title,
       description: input.description,
       image_url: input.image_url ?? Option.none(),
@@ -763,6 +912,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     teamId: string;
     trainingTypeId: Option.Option<string>;
     eventType: string;
+    eventTypeId?: Option.Option<string>;
     title: string;
     description: Option.Option<string>;
     imageUrl?: Option.Option<string>;
@@ -773,11 +923,18 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     seriesId?: Option.Option<string>;
   }) => {
     const id = crypto.randomUUID() as Event.EventId;
+    const resolved = resolveEventTypeForInsert(
+      input.eventTypeId ?? Option.none(),
+      input.eventType as Event.EventType,
+    );
     const record: EventRecord = {
       id,
       team_id: input.teamId as Team.TeamId,
       training_type_id: input.trainingTypeId,
-      event_type: input.eventType as Event.EventType,
+      event_type: resolved.event_type,
+      event_type_id: resolved.event_type_id,
+      event_type_name: Option.none(),
+      event_type_color: Option.none(),
       title: input.title,
       description: input.description,
       image_url: input.imageUrl ?? Option.none(),
@@ -807,6 +964,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       team_id: record.team_id,
       training_type_id: record.training_type_id,
       event_type: record.event_type,
+      event_type_id: record.event_type_id,
       title: record.title,
       description: record.description,
       image_url: record.image_url,
@@ -881,6 +1039,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     id: Event.EventId;
     title: string;
     eventType: string;
+    eventTypeId?: Option.Option<string>;
     trainingTypeId: Option.Option<string>;
     description: Option.Option<string>;
     imageUrl?: Option.Option<string>;
@@ -890,10 +1049,18 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   }) => {
     const event = eventsStore.get(input.id);
     if (!event) return Effect.die(new Error('Not found'));
+    const resolved = resolveEventTypeForUpdate(
+      { event_type: event.event_type, event_type_id: event.event_type_id },
+      {
+        eventTypeId: input.eventTypeId ?? Option.none(),
+        eventType: input.eventType as Event.EventType,
+      },
+    );
     const updated = {
       ...event,
       title: input.title,
-      event_type: input.eventType as Event.EventType,
+      event_type: resolved.event_type,
+      event_type_id: resolved.event_type_id,
       training_type_id: input.trainingTypeId,
       description: input.description,
       image_url: input.imageUrl !== undefined ? input.imageUrl : event.image_url,
@@ -909,6 +1076,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       team_id: updated.team_id,
       training_type_id: updated.training_type_id,
       event_type: updated.event_type,
+      event_type_id: updated.event_type_id,
       title: updated.title,
       description: updated.description,
       image_url: updated.image_url,
@@ -1355,7 +1523,8 @@ describe('Events API', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.canCreate).toBe(true);
-      expect(body.events).toHaveLength(6);
+      // 6 original fixtures + TEST_EVENT_TYPE_UPDATE (suite D fixture).
+      expect(body.events).toHaveLength(7);
     });
 
     it('returns 200 with canCreate:true for captain', async () => {
@@ -1374,7 +1543,7 @@ describe('Events API', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.canCreate).toBe(false);
-      expect(body.events).toHaveLength(6);
+      expect(body.events).toHaveLength(7);
     });
   });
 
@@ -1435,6 +1604,95 @@ describe('Events API', () => {
         }),
       );
       expect(response.status).toBe(403);
+    });
+  });
+
+  // Plan §7 D — the eventTypeId/eventType interplay on create.
+  describe('POST /teams/:teamId/events — eventTypeId/eventType (suite D)', () => {
+    const basePayload = {
+      title: 'Suite D Event',
+      trainingTypeId: null,
+      description: null,
+      startAt: '2026-03-20T18:00:00',
+      endAt: null,
+      location: null,
+      ownerGroupId: null,
+      memberGroupId: null,
+    };
+
+    it('D1 — eventTypeId only: 201, eventType equals that row’s kind', async () => {
+      const response = await handler(
+        new Request(BASE, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...basePayload, eventTypeId: EVENT_TYPE_MATCH_ID }),
+        }),
+      );
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body.eventTypeId).toBe(EVENT_TYPE_MATCH_ID);
+      expect(body.eventType).toBe('match');
+    });
+
+    it('D2 — eventType only (legacy web client): 201, eventTypeId resolved', async () => {
+      const response = await handler(
+        new Request(BASE, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...basePayload, eventType: 'training' }),
+        }),
+      );
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body.eventType).toBe('training');
+      expect(body.eventTypeId).toBe(EVENT_TYPE_TRAINING_ID);
+    });
+
+    it('D3 — neither eventType nor eventTypeId: 400 (struct-level filter)', async () => {
+      const response = await handler(
+        new Request(BASE, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify(basePayload),
+        }),
+      );
+      expect(response.status).toBe(400);
+    });
+
+    it('D4 — both agreeing (what the new web sends): 201', async () => {
+      const response = await handler(
+        new Request(BASE, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...basePayload,
+            eventType: 'training',
+            eventTypeId: EVENT_TYPE_TRAINING_ID,
+          }),
+        }),
+      );
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body.eventType).toBe('training');
+      expect(body.eventTypeId).toBe(EVENT_TYPE_TRAINING_ID);
+    });
+
+    it('D5 — both disagreeing: the id wins', async () => {
+      const response = await handler(
+        new Request(BASE, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...basePayload,
+            eventType: 'training',
+            eventTypeId: EVENT_TYPE_MATCH_ID,
+          }),
+        }),
+      );
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body.eventTypeId).toBe(EVENT_TYPE_MATCH_ID);
+      expect(body.eventType).toBe('match');
     });
   });
 
@@ -1558,6 +1816,45 @@ describe('Events API', () => {
         }),
       );
       expect(response.status).toBe(400);
+    });
+  });
+
+  // Plan §7 D — the eventTypeId/eventType interplay on update, including D7's B4 silent-retype
+  // guard: a title-only update must leave both fields untouched.
+  describe('PATCH /teams/:teamId/events/:eventId — eventTypeId/eventType (suite D)', () => {
+    it('D6 — updating eventTypeId: eventType follows the new kind', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_TYPE_UPDATE}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ eventTypeId: EVENT_TYPE_MATCH_ID }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.eventTypeId).toBe(EVENT_TYPE_MATCH_ID);
+      expect(body.eventType).toBe('match');
+    });
+
+    it('D7 — title-only update: eventTypeId and eventType are both unchanged', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_TYPE_UPDATE}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: 'Renamed, type untouched' }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.title).toBe('Renamed, type untouched');
+      expect(body.eventTypeId).toBe(EVENT_TYPE_TRAINING_ID);
+      expect(body.eventType).toBe('training');
     });
   });
 
