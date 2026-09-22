@@ -2163,7 +2163,7 @@ Submits or updates the authenticated user's RSVP for an event.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `response` | `RsvpResponse` | Yes | `"yes"`, `"no"`, `"maybe"`, or `"coming_later"` |
-| `message` | `string \| null` | Yes | Message to accompany the RSVP. Optional for `"yes"`/`"no"`/`"maybe"`; required (non-blank, after falling back to any existing stored message) for `"coming_later"` |
+| `message` | `string \| null` | Yes | Message to accompany the RSVP. `null` leaves any already-stored message untouched (an idempotent resubmit keeps it); a blank/whitespace-only string clears it. Optional for `"yes"`/`"no"`/`"maybe"`; required (non-blank, after falling back to any existing stored message) for `"coming_later"` — so a blank/whitespace clear is rejected with `EventRsvpMessageRequired` on that response |
 
 **Response:** `204 No Content`
 
@@ -6957,6 +6957,7 @@ Two permission tiers, following the treasurer pattern:
 | `bankName` | `string \| null` | Yes | Printed on the PDF header |
 | `fioTokenSet` | `boolean` | No | Whether an encrypted Fio API token is stored; the token itself is never returned |
 | `tokenCreatedAt` | `string \| null` (ISO 8601) | Yes | When the current token was saved (self-reported — Fio does not expose real token metadata) |
+| `tokenSavedAt` | `string \| null` (ISO 8601) | Yes | When the server actually stored the current token (its own clock, never the caller's). Unlike the self-reported `tokenCreatedAt` this is a real instant, which is why the `activating` rank and the web countdown both key off it. `null` on rows written before migration `1792050000_add_fio_token_saved_at` |
 | `tokenExpiresAt` | `string \| null` (ISO 8601) | Yes | `tokenCreatedAt + 180 days` |
 | `status` | `BankSyncStatusCode` | No | Seven-rank status ladder computed server-side (see below); render as-is, never re-derive |
 | `expiringSoon` | `boolean` | No | `true` when `tokenExpiresAt` is within 14 days — additive, never suppressed by `status` (a token can be both expiring and failing) |
@@ -6969,7 +6970,7 @@ Two permission tiers, following the treasurer pattern:
 | `coverageWarning` | `string \| null` | Yes | Set when a recorded statement period's balances don't reconcile against ingested movements |
 | `createdAt` / `updatedAt` | `string` (ISO 8601) | No | Row timestamps |
 
-`BankSyncStatusCode` values: `not_connected`, `misconfigured`, `account_mismatch`, `invalid`, `activating`, `sync_failing`, `ok` (first-match-wins ladder — a transient Fio outage alone is never reported as `invalid`; that requires several consecutive failures over a multi-hour silence window). `misconfigured` means the server's `FIO_TOKEN_ENCRYPTION_KEY` is unset — the token is fine, nothing the treasurer can fix. `account_mismatch` means the poller refused to ingest a statement whose `info.iban` disagrees with the IBAN computed from the configured account, and recorded `last_error_code = 'account_mismatch'`; it outranks `invalid` because the token demonstrably works — it is the account that is wrong — and it is terminal: no retry count and no elapsed time clear it, only a config edit. `activating` covers the ~5 minutes Fio needs after a token is created before it accepts requests.
+`BankSyncStatusCode` values: `not_connected`, `misconfigured`, `account_mismatch`, `invalid`, `activating`, `sync_failing`, `ok` (first-match-wins ladder — a transient Fio outage alone is never reported as `invalid`; that requires several consecutive failures over a multi-hour silence window). `misconfigured` means the server's `FIO_TOKEN_ENCRYPTION_KEY` is unset — the token is fine, nothing the treasurer can fix. `account_mismatch` means the poller refused to ingest a statement whose `info.iban` disagrees with the IBAN computed from the configured account, and recorded `last_error_code = 'account_mismatch'`; it outranks `invalid` because the token demonstrably works — it is the account that is wrong — and it is terminal: no retry count and no elapsed time clear it, only a config edit. `activating` covers the ~5 minutes Fio needs after a token is created before it accepts requests; it is measured from `tokenSavedAt`, the server-stamped moment the token was stored, not from the treasurer-declared `tokenCreatedAt` calendar date (which is snapped to 12:00 UTC and may even sit in the future), and a row with no `tokenSavedAt` stamp never reports `activating`.
 
 `BankTransactionView` — a queue/list row.
 
@@ -7352,6 +7353,7 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/SaveDiscordMessageId` | `event_id`, `discord_channel_id`, `discord_message_id` | Stores the Discord message ID for an event embed |
 | `Event/GetDiscordMessageId` | `event_id` → `EventDiscordMessage \| null` | Retrieves the stored Discord message for an event |
 | `Event/SubmitRsvp` | `event_id`, `team_id`, `discord_user_id`, `response`, `message` → `SubmitRsvpResult` | Submits an RSVP from the bot; `response` accepts `"coming_later"` (requires a non-blank `message`, or `RsvpMessageRequired` is returned); result includes late-RSVP flag and optional notification channel |
+| `Event/GetRsvpMessage` | `event_id`, `team_id`, `discord_user_id` → `string \| null` | Lean read for the "Add/Edit message" modal prefill: returns the member's stored RSVP note, or `null` if none. Called synchronously before opening the modal (a `MODAL` response cannot be deferred), so the bot falls back to an empty modal on `RpcClientError` |
 | `Event/GetRsvpCounts` | `event_id` → `RsvpCountsResult` | Returns yes/no/maybe counts for an event; `maybeCount` includes both legacy `maybe` and `coming_later` responses |
 | `Event/GetEventEmbedInfo` | `event_id` → `EventEmbedInfo \| null` | Retrieves info needed to render the Discord embed |
 | `Event/GetChannelEvents` | `discord_channel_id` → `ChannelEventEntry[]` | Lists events posted in a Discord channel |

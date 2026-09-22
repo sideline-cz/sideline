@@ -106,6 +106,8 @@ References: `times_are_team_local` (`1791700000_add_series_times_team_local_flag
 
 > The reserved id above was originally `1791800000`. Production kept shipping migrations (through `1792000005`) while this one sat unwritten, so `1791800000` fell below the migrator's applied-id waterline: `Migrator.js` only checks `currentId <= latestMigrationId`, and a migration below that line is skipped silently — no error, no log line, forever. It was renumbered to `1792100000`, comfortably above every id merged so far. `scripts/check-migration-ids.mjs` now enforces this (new ids on a branch must exceed every id already on `origin/main`) so it cannot happen again unnoticed.
 
+> **Do not follow the script's suggested id while a reserved id is unwritten.** On failure `scripts/check-migration-ids.mjs` prints `next safe id: <highest id on origin/main> + 100000`, which today resolves to `1792100005` — above the reserved `1792100000`. Merging any id above the reservation drops it below the applied waterline and orphans it silently, the exact failure it was renumbered to escape. Until `1792100000_series_time_is_team_local.ts` lands, pick an id strictly between the highest id on `origin/main` and `1792100000` — `1792050000_add_fio_token_saved_at.ts` is the reference.
+
 ### Reading A Per-Team Setting Inside A Migration `UPDATE`
 
 Migrations that re-derive a column from `team_settings` (timezone, horizon days) must read that setting with a **correlated scalar subselect wrapped in `COALESCE`**, never `UPDATE ... FROM team_settings`.

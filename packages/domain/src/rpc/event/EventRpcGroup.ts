@@ -99,6 +99,16 @@ export const EventRpcGroup = RpcGroup.make(
       RsvpMessageRequired,
     ]),
   }),
+  // Lean read for the "edit message" modal prefill: a MODAL response cannot be
+  // deferred, so this returns only the member's stored note.
+  Rpc.make('GetRsvpMessage', {
+    payload: {
+      event_id: Event.EventId,
+      team_id: Team.TeamId,
+      discord_user_id: Discord.Snowflake,
+    },
+    success: Schema.OptionFromNullOr(Schema.String),
+  }),
   Rpc.make('GetRsvpCounts', {
     payload: { event_id: Event.EventId },
     success: RsvpCountsResult,

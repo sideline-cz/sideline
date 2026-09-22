@@ -66,7 +66,7 @@ const make = Effect.gen(function* () {
     team_id, provider, enabled, auto_match_enabled,
     account_prefix, account_number, bank_code, iban, currency,
     recipient_name, registered_id, registered_address, bank_name,
-    fio_token_encrypted, fio_token_created_at,
+    fio_token_encrypted, fio_token_created_at, fio_token_saved_at,
     backfill_from, backfill_cursor, backfill_status, backfill_run_id,
     last_synced_at, last_success_at, last_error_code, last_error_at,
     consecutive_failure_count, next_attempt_at, coverage_warning,
@@ -161,12 +161,20 @@ const make = Effect.gen(function* () {
       INSERT INTO bank_sync_config (
         team_id, enabled, auto_match_enabled, account_prefix, account_number, bank_code, currency,
         recipient_name, registered_id, registered_address, bank_name,
-        fio_token_encrypted, fio_token_created_at, configured_by_user_id
+        fio_token_encrypted, fio_token_created_at, fio_token_saved_at, configured_by_user_id
       ) VALUES (
         ${input.team_id}, ${input.enabled}, ${input.auto_match_enabled},
         ${input.account_prefix}, ${input.account_number}, ${input.bank_code}, ${input.currency},
         ${input.recipient_name}, ${input.registered_id}, ${input.registered_address}, ${input.bank_name},
-        ${input.fio_token_encrypted}, ${input.fio_token_created_at}::timestamptz, ${input.configured_by_user_id}
+        ${input.fio_token_encrypted}, ${input.fio_token_created_at}::timestamptz,
+        -- Server clock, never the caller's: see the fio_token_saved_at note on the model. The
+        -- ::text cast is load-bearing — the sql template emits a DISTINCT placeholder per
+        -- interpolation, so this is a second parameter that does not inherit the type the one
+        -- above gets from the fio_token_encrypted TEXT column, and IS NOT NULL contributes no
+        -- type information of its own. Without it Postgres fails at PARSE time with
+        -- "could not determine data type of parameter", breaking every save.
+        CASE WHEN ${input.fio_token_encrypted}::text IS NOT NULL THEN now() END,
+        ${input.configured_by_user_id}
       )
       ON CONFLICT (team_id) DO UPDATE SET
         enabled = EXCLUDED.enabled,
@@ -183,6 +191,10 @@ const make = Effect.gen(function* () {
         -- EmailForwardingConfigRepository.upsertQuery's imap_secret_encrypted line.
         fio_token_encrypted = COALESCE(EXCLUDED.fio_token_encrypted, bank_sync_config.fio_token_encrypted),
         fio_token_created_at = COALESCE(EXCLUDED.fio_token_created_at, bank_sync_config.fio_token_created_at),
+        -- No cast needed here, unlike the INSERT above: EXCLUDED.fio_token_encrypted is a typed
+        -- column reference, not a parameter.
+        fio_token_saved_at = CASE WHEN EXCLUDED.fio_token_encrypted IS NOT NULL
+                                  THEN now() ELSE bank_sync_config.fio_token_saved_at END,
         configured_by_user_id = EXCLUDED.configured_by_user_id,
         -- every save resets backoff bookkeeping (test 99).
         consecutive_failure_count = 0,

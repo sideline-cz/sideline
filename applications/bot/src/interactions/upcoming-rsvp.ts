@@ -6,7 +6,6 @@ import {
   Team,
 } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
-import { UI } from 'dfx';
 import { DiscordREST } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData, ModalSubmitData } from 'dfx/Interactions/index';
@@ -18,25 +17,12 @@ import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js
 import { YES_EMBED_LIMIT } from '~/rest/utils.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
-import { postRsvpDiscordUpdates } from './rsvp.js';
+import { postRsvpDiscordUpdates, rsvpAddMessageButtonEffect } from './rsvp.js';
 
 const decodeSnowflake = Schema.decodeUnknownSync(DiscordSchemas.Snowflake);
 const decodeEventId = Schema.decodeUnknownSync(Event.EventId);
 const decodeTeamId = Schema.decodeUnknownSync(Team.TeamId);
 const decodeRsvpResponse = Schema.decodeUnknownSync(EventRsvp.RsvpResponse);
-
-const localizeRsvpResponse = (response: EventRsvp.RsvpResponse, locale: Locale): string => {
-  switch (response) {
-    case 'yes':
-      return m.rsvp_yes({}, { locale });
-    case 'no':
-      return m.rsvp_no({}, { locale });
-    case 'maybe':
-      return m.rsvp_maybe({}, { locale });
-    case 'coming_later':
-      return m.rsvp_maybe({}, { locale });
-  }
-};
 
 /**
  * Re-render a member's personal event message after they interact with it.
@@ -265,49 +251,7 @@ export const UpcomingRsvpButton = Ix.messageComponent(
 // Handles custom_id: u-add-msg:<team_id>:<event_id>:<response>
 export const UpcomingAddMessageButton = Ix.messageComponent(
   Ix.idStartsWith('u-add-msg:'),
-  Effect.Do.pipe(
-    Effect.tap(() =>
-      Metric.update(
-        Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'button' }),
-        1,
-      ),
-    ),
-    Effect.bind('data', () => MessageComponentData.asEffect()),
-    Effect.bind('interaction', () => Interaction.asEffect()),
-    Effect.map(({ data, interaction }) => {
-      const parts = data.custom_id.split(':');
-      const teamId = parts[1];
-      const eventId = parts[2];
-      const response = decodeRsvpResponse(parts[3]);
-      const locale = userLocale(interaction);
-      const required = response === 'coming_later';
-      return Ix.response({
-        type: Discord.InteractionCallbackTypes.MODAL,
-        data: {
-          custom_id: `u-modal:${teamId}:${eventId}:${response}`,
-          title: m.bot_rsvp_modal_title(
-            { response: localizeRsvpResponse(response, locale) },
-            { locale },
-          ),
-          components: [
-            UI.row([
-              UI.textInput({
-                custom_id: 'rsvp_message',
-                label: required
-                  ? m.bot_rsvp_modal_label_required({}, { locale })
-                  : m.bot_rsvp_modal_label({}, { locale }),
-                style: Discord.TextInputStyleTypes.PARAGRAPH,
-                required,
-                ...(required ? { min_length: 1 } : {}),
-                max_length: 200,
-              }),
-            ]),
-          ],
-        },
-      });
-    }),
-    Effect.withSpan('interaction/upcoming-add-message-button'),
-  ),
+  rsvpAddMessageButtonEffect('u-modal', 'interaction/upcoming-add-message-button'),
 );
 
 // Handles custom_id: u-clear-msg:<team_id>:<event_id>:<response>

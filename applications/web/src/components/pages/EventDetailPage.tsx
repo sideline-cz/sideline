@@ -441,8 +441,10 @@ export function EventDetailPage({
           api.eventRsvp.submitRsvp({
             params: { teamId: teamIdBranded, eventId: eventIdBranded },
             payload: {
+              // Always send the note field's full value — an empty string is how this API is told
+              // to clear a stored note, whereas `null` would ask it to keep whatever is there.
               response,
-              message: message ? Option.some(message) : Option.none(),
+              message: Option.some(message),
             },
           }),
         ),

@@ -656,9 +656,10 @@ describe('BankSyncPoller — FioUnreachable split (T6/T7)', () => {
           last_error_at: Date | null;
           last_success_at: Date | null;
           fio_token_created_at: Date | null;
+          fio_token_saved_at: Date | null;
         }>`
           SELECT last_error_code, consecutive_failure_count, last_error_at, last_success_at,
-                 fio_token_created_at
+                 fio_token_created_at, fio_token_saved_at
           FROM bank_sync_config WHERE team_id = ${team.id}
         `;
         const row = rows[0]!;
@@ -672,6 +673,7 @@ describe('BankSyncPoller — FioUnreachable split (T6/T7)', () => {
           lastErrorAt: Option.fromNullishOr(row.last_error_at?.getTime()),
           lastSuccessAt: Option.fromNullishOr(row.last_success_at?.getTime()),
           tokenCreatedAt: Option.fromNullishOr(row.fio_token_created_at?.getTime()),
+          tokenSavedAt: Option.fromNullishOr(row.fio_token_saved_at?.getTime()),
           now: Date.now(),
         });
         expect(result.status).toBe('sync_failing');

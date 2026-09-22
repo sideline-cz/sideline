@@ -32,6 +32,7 @@ const baseConfig = {
   bankName: null,
   fioTokenSet: true,
   tokenCreatedAt: null,
+  tokenSavedAt: null,
   tokenExpiresAt: null,
   expiringSoon: false,
   backfillStatus: null,

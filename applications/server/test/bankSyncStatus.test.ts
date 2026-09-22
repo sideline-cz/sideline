@@ -13,6 +13,7 @@
 //     readonly lastErrorAt: Option.Option<number>;          // epoch ms
 //     readonly lastSuccessAt: Option.Option<number>;        // epoch ms
 //     readonly tokenCreatedAt: Option.Option<number>;       // epoch ms
+//     readonly tokenSavedAt: Option.Option<number>;         // epoch ms, server-stamped
 //     readonly now: number;                                  // epoch ms
 //   }
 //
@@ -31,7 +32,7 @@
 //   2. lastErrorIsKeyMissing                                              -> misconfigured
 //   2.5. lastErrorCode='account_mismatch'                                                          -> account_mismatch
 //   3. lastErrorCode='fio_error' AND failures>=3 AND (errorAt - (successAt ?? tokenCreatedAt)) > 6h -> invalid
-//   4. lastErrorCode='fio_error' AND tokenCreatedAt > now - 5min                                    -> activating
+//   4. lastErrorCode='fio_error' AND tokenSavedAt > now - 5min                                       -> activating
 //   5. lastErrorCode is set but rules 2.5-4 did not fire                                            -> sync_failing
 //   6. otherwise                                                                                    -> ok
 // `expiringSoon` = tokenCreatedAt present AND tokenExpiresAt - now <= 14 days. Computed
@@ -55,6 +56,7 @@ const baseInput = (overrides: Partial<BankSyncStatusInput> = {}): BankSyncStatus
   lastErrorAt: Option.none(),
   lastSuccessAt: Option.none(),
   tokenCreatedAt: Option.some(NOW - 30 * DAY),
+  tokenSavedAt: Option.some(NOW - 30 * DAY),
   now: NOW,
   ...overrides,
 });
@@ -101,13 +103,13 @@ describe('computeBankSyncStatus — the seven-rank ladder (60)', () => {
     expect(result.status).toBe('invalid');
   });
 
-  it('activating within 5 minutes of token creation', () => {
+  it('activating within 5 minutes of the token being saved', () => {
     const result = computeBankSyncStatus(
       baseInput({
         lastErrorCode: Option.some('fio_error'),
         consecutiveFailureCount: 1,
         lastErrorAt: Option.some(NOW),
-        tokenCreatedAt: Option.some(NOW - 2 * MIN),
+        tokenSavedAt: Option.some(NOW - 2 * MIN),
       }),
     );
     expect(result.status).toBe('activating');
@@ -273,26 +275,75 @@ describe('computeBankSyncStatus — expiringSoon is additive (66, 66b)', () => {
 // ---------------------------------------------------------------------------
 
 describe('computeBankSyncStatus — activating boundary (67)', () => {
-  it('4 min 59 s after token creation -> activating', () => {
+  it('4 min 59 s after the token was saved -> activating', () => {
     const result = computeBankSyncStatus(
       baseInput({
         lastErrorCode: Option.some('fio_error'),
         consecutiveFailureCount: 1,
         lastErrorAt: Option.some(NOW),
-        tokenCreatedAt: Option.some(NOW - (4 * MIN + 59 * 1000)),
+        tokenSavedAt: Option.some(NOW - (4 * MIN + 59 * 1000)),
       }),
     );
     expect(result.status).toBe('activating');
   });
 
-  it('5 min 1 s after token creation + 1 failure -> sync_failing, not activating', () => {
+  it('5 min 1 s after the token was saved + 1 failure -> sync_failing, not activating', () => {
     const result = computeBankSyncStatus(
       baseInput({
         lastErrorCode: Option.some('fio_error'),
         consecutiveFailureCount: 1,
         lastErrorAt: Option.some(NOW),
         lastSuccessAt: Option.some(NOW - 1 * HOUR),
-        tokenCreatedAt: Option.some(NOW - (5 * MIN + 1000)),
+        tokenSavedAt: Option.some(NOW - (5 * MIN + 1000)),
+      }),
+    );
+    expect(result.status).toBe('sync_failing');
+  });
+
+  // The rank is anchored on the server-stamped save instant, never on the calendar date the
+  // treasurer types: that one is snapped to 12:00 UTC and may sit in the future, so a 5-minute
+  // window around it was only reachable between 12:00 and 12:05 UTC on the declared day.
+  it("a token saved 30 s ago but dated today's noon -> activating, read in the morning", () => {
+    const morning = new Date('2026-06-15T08:00:00.000Z').getTime();
+    const result = computeBankSyncStatus(
+      baseInput({
+        now: morning,
+        lastErrorCode: Option.some('fio_error'),
+        consecutiveFailureCount: 1,
+        lastErrorAt: Option.some(morning),
+        lastSuccessAt: Option.some(morning - 1 * HOUR),
+        // 2026-06-15 as written by `dateOnlyToUtcNoon` — four hours from now.
+        tokenCreatedAt: Option.some(NOW),
+        tokenSavedAt: Option.some(morning - 30 * 1000),
+      }),
+    );
+    expect(result.status).toBe('activating');
+  });
+
+  it('a token dated far in the future but saved long ago -> sync_failing', () => {
+    const result = computeBankSyncStatus(
+      baseInput({
+        lastErrorCode: Option.some('fio_error'),
+        consecutiveFailureCount: 1,
+        lastErrorAt: Option.some(NOW),
+        lastSuccessAt: Option.some(NOW - 1 * HOUR),
+        tokenCreatedAt: Option.some(NOW + 30 * DAY),
+        tokenSavedAt: Option.some(NOW - 1 * DAY),
+      }),
+    );
+    expect(result.status).toBe('sync_failing');
+  });
+
+  // Pre-migration rows and direct-insert fixtures have no stamp. `None` must never activate.
+  it('no tokenSavedAt stamp at all -> sync_failing, never activating', () => {
+    const result = computeBankSyncStatus(
+      baseInput({
+        lastErrorCode: Option.some('fio_error'),
+        consecutiveFailureCount: 1,
+        lastErrorAt: Option.some(NOW),
+        lastSuccessAt: Option.some(NOW - 1 * HOUR),
+        tokenCreatedAt: Option.some(NOW - 1 * MIN),
+        tokenSavedAt: Option.none(),
       }),
     );
     expect(result.status).toBe('sync_failing');

@@ -306,6 +306,14 @@ Two boundary utilities keep reads/writes correct across a rolling deploy where a
 
 1. **Project a stored enum value down to the legacy wire vocabulary at EVERY read boundary — never inline the literal check at the call site.** `src/utils/rsvpWireProjection.ts` `projectRsvpResponseToLegacy` maps `'coming_later' → 'maybe'`; route every stored-response → wire-DTO mapping through it — `Option.map(x, projectRsvpResponseToLegacy)` in `api/dashboard.ts`, `api/event-rsvp.ts` `buildRsvpDetail`, and `rpc/event/index.ts` (both attendee-entry mappers). When the projection happens in SQL, mirror it exactly (`CASE WHEN my_rsvp.response = 'coming_later' THEN 'maybe' ELSE my_rsvp.response END AS my_response`). Routing through the one helper (and one SQL idiom) means the Release B change that removes the projection touches a single, greppable set of sites. Aggregate counts that fold the new value into a legacy bucket do so in SQL too (`SUM(CASE WHEN er.response IN ('maybe', 'coming_later') ...)`), and attendance predicates use `src/utils/rsvpAttendance.ts` `isAttendingRsvpResponse` rather than a bare `=== 'yes'`.
 2. **Validate a partial-update upsert against the EFFECTIVE (post-COALESCE) stored value, not the raw submitted payload.** `upsertRsvp` does `COALESCE(${message}, event_rsvps.message)`, so a re-submit with `message: null` preserves the prior note. A guard that requires a non-empty message for `'coming_later'` MUST evaluate what will actually be stored after the COALESCE: fetch the prior row (`rsvps.findRsvpByEventAndMember`) and pass both the submitted message and the prior message to `src/utils/rsvpMessageRequired.ts` `isRsvpMessageRequiredAndMissing`, which fails with `RsvpMessageRequired` only when the effective message would be blank. This generalises to any COALESCE-based partial upsert — validate the effective value, not the submitted delta. Call sites: `api/event-rsvp.ts` and `rpc/event/index.ts` (the `SubmitRsvp` handlers).
+3. **A COALESCE-based partial upsert can never clear the column — clearing needs a SEPARATE explicit signal, and every call site MUST supply it.** `upsertRsvp(eventId, memberId, response, message, clearMessage = false)` routes to `upsertClearing` (which writes `message = NULL` unconditionally) only when the 5th argument is `true`; because that parameter has a `= false` default, a call site that omits it type-checks and silently makes the clearing branch unreachable — that is exactly how the web UI was left unable to remove an RSVP note. The two write surfaces derive `clearMessage` differently and both derivations are load-bearing:
+
+   | Surface | Payload field | `clearMessage` derivation |
+   |---------|---------------|---------------------------|
+   | Web HTTP (`api/event-rsvp.ts` `submitRsvp`) | `message: Schema.OptionFromNullOr(Schema.String)` — no separate flag | `Option.isSome(payload.message) && payload.message.value.trim().length === 0` — a blank/whitespace-only string means clear; `null` means keep the stored note |
+   | Discord RPC (`rpc/event/index.ts` `Event/SubmitRsvp`) | explicit `clearMessage` field on the request | the field as sent by the bot |
+
+   On the HTTP surface, when `clearMessage` is `true` the message passed to BOTH `upsertRsvp` and `isRsvpMessageRequiredAndMissing` must be `Option.none()` — never the blank string — so the guard in rule 2 sees the same values the write will. The web client therefore always sends the note input's full value (`Option.some(message)`, never collapsing `''` to `Option.none()`); collapsing it back would resurrect the note via the COALESCE. Adding a new nullable, partially-updatable column follows the same shape: pick one clearing signal per surface, document it on the schema field, and pass it through to the repository.
 
 ## RPC Transport
 
@@ -600,6 +608,14 @@ Rules:
 3. **`emitChannel{Deleted,Archived,Detached,Updated}` accept `discordChannelId: Option<Snowflake>` and `discordRoleId: Option<Snowflake>`.** Do not wrap the channel id in `Option.some(...)` at call sites — pass the mapping field through unchanged.
 4. **`emitChannelCreated` accepts `discordChannelName?: string`.** Pass `undefined` when the group is configured for role-only provisioning (`settings.create_discord_channel_on_group = false`); the wire field decodes to `Option<string>` on the bot side and triggers the role-only branch in `handleCreated`.
 5. **When checking "is this channel already linked?"** (e.g. in `LinkChannelToGroup`), filter mappings with `Option.isSome(m.discord_channel_id) && m.discord_channel_id.value === payload.discordChannelId`. The mapping may exist with `discord_channel_id = None` for a role-only group — that is not a conflict.
+
+### Role-sync diffs: assignment is unfiltered, removal is gated
+
+Three utils diff a member's Sideline roles against their Discord roles and enqueue `role_sync_events`: `src/utils/syncMemberDiscordRoles.ts` (the manual "sync roles" button), `src/utils/syncGroupRoleMembers.ts` (group add/remove/move, its header §5), `src/utils/reconcileMemberDiscordRoles.ts` (`Guild/RegisterMember` / `Guild/ReconcileMembers`). All three obey the same asymmetry, and a fourth diff site must too:
+
+1. **`role_assigned` candidates come from the member's desired effective roles (`effectiveRolesFrom`) directly — never intersect them with `discord_role_mappings`.** A desired role with no mapping row is provisionable, not unknown: the bot's `handleMemberAdded` (`applications/bot/src/rcp/role/handleAssigned.ts`) calls `ensureMapping` (adopt-or-create) before it assigns. Intersecting with the mapping table is what left a never-mapped role permanently unprovisionable by `reconcileMemberDiscordRoles` (bug 3da93506). Take `roleName` from the desired row — it is already present and already archived-filtered, so the assign side needs no `findRoleById` lookup.
+2. **`role_unassigned` candidates must be in `discord_role_mappings` AND in `member_role_grants` for THIS member** (`TeamMembersRepository.findGrantedRoleIds`). They are built from the mappings, never from the payload's actual Discord roles, so a role a captain granted by hand is never stripped — the anti-stripping guard, CC-8. That guard is about removal only; widening assignment never widens it.
+3. **A desired-but-unmapped role re-emits `role_assigned` on every pass** until `ensureMapping` lands the mapping. Steady state (nothing emitted) means every desired role is mapped AND held. Re-emission is bounded by `MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER` (`syncMemberDiscordRoles.ts:16`, shared by all three).
 
 ### Group-role backfill and grant reapply (self-healing provisioning)
 
@@ -1145,6 +1161,23 @@ America/New_York, asked 2026-02-01 18:00 -> got 2026-03-01 18:00
 ```
 
 It fails silently and only west of UTC. A test table of `Europe/Prague` / `UTC` / `Pacific/Auckland` passes anyway — **every test of a zoned-instant builder must include at least one negative-offset zone** (`America/New_York`, `America/Los_Angeles`) and at least one non-whole-hour zone (`Asia/Kathmandu` at UTC+5:45, `Australia/Lord_Howe` with a 30-minute DST step). Reference: `src/utils/seriesOccurrence.ts` and `test/utils/seriesOccurrence.test.ts`.
+
+## A Noon-Anchored Date-Only Column Is Not An Instant
+
+Several `timestamptz` columns hold a **user-declared calendar date**, not an observed instant. The web writes them through `dateOnlyToUtcNoon` (`applications/web/src/lib/datetime.ts`), which snaps a `YYYY-MM-DD` string to `T12:00:00Z` so the UTC calendar date survives every practical offset:
+
+| Column | Written from |
+|--------|--------------|
+| `bank_sync_config.fio_token_created_at` | `components/organisms/team-settings/FioBankCard.tsx` |
+| `payments.paid_at` | `components/organisms/RecordPaymentDialog.tsx` |
+| `fees.due_at` / `fee_assignments.due_at` | `components/organisms/FeeFormDialog.tsx` |
+| `expenses.spent_at` | `components/organisms/ExpenseFormDialog.tsx` |
+
+Rules:
+
+1. **Any comparison of one of these columns against a window shorter than 24 h MUST be two-sided.** A one-sided `col > now - Δ` is also true for every moment *before* the noon anchor, so it matches continuously from 00:00 UTC on the declared day through `12:00 UTC + Δ` — and never stops matching for a date the user set in the future. Write `col <= now && col > now - Δ`. Reference: `src/services/bankSyncStatus.ts` rule 4 (`activating`), whose window is `now - 5min < tokenCreatedAt <= now`; the same predicate one-sided reported `activating` for ~12 h a day and forever on a future-dated token.
+2. **Never read one of these values as evidence that the thing happened at that instant.** The user typed a date; nothing observed it. A future-dated value is reachable from the UI unless that specific call site clamps its picker (`applications/web/AGENTS.md` → "Date Inputs — `DatePicker`", rule 4), and a clamp added today does not sanitise rows already written — server-side predicates must stay correct for a future-dated row regardless.
+3. **A test for such a comparison MUST pin an explicit `now` and assert BOTH sides of the window**: one fixture past the upper bound (a value in the future) and one before the lower bound. A suite that only moves the fixture backwards passes against a one-sided predicate. Reference: `test/bankSyncStatus.test.ts` → `computeBankSyncStatus — activating boundary (67)`.
 
 ## Cron Jobs
 

@@ -29,6 +29,12 @@ export interface BankSyncStatusInput {
   readonly lastErrorAt: Option.Option<number>;
   readonly lastSuccessAt: Option.Option<number>;
   readonly tokenCreatedAt: Option.Option<number>;
+  /**
+   * `bank_sync_config.fio_token_saved_at` — server-stamped when a token was actually written.
+   * `None` for pre-migration rows and for fixtures that insert straight into the table, which is
+   * the safe polarity: no stamp simply means nothing is activating.
+   */
+  readonly tokenSavedAt: Option.Option<number>;
   readonly now: number;
 }
 
@@ -91,11 +97,17 @@ const computeStatus = (input: BankSyncStatusInput): BankSyncConfig.BankSyncStatu
     if (silenceMs > INVALID_SILENCE_MS) return 'invalid';
   }
 
-  // 4 — activating.
+  // 4 — activating. Anchored on `fio_token_saved_at`, the instant the server actually stored the
+  // token, NOT on `fio_token_created_at` — that one is a calendar date the treasurer types,
+  // snapped to 12:00 UTC (`applications/web/src/lib/datetime.ts`) and settable into the future,
+  // so a 5-minute instant window around it could only ever match between 12:00 and 12:05 UTC on
+  // the declared day. The saved stamp is a real instant, so the window is one-sided again: it can
+  // never precede `now`, and a `None` stamp (pre-migration row, direct-insert fixture) simply
+  // never activates.
   if (isFioError(input)) {
-    const activating = Option.match(input.tokenCreatedAt, {
+    const activating = Option.match(input.tokenSavedAt, {
       onNone: () => false,
-      onSome: (createdAt) => createdAt > input.now - ACTIVATING_WINDOW_MS,
+      onSome: (savedAt) => savedAt > input.now - ACTIVATING_WINDOW_MS,
     });
     if (activating) return 'activating';
   }

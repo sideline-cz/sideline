@@ -200,6 +200,7 @@ const toConfigView = (config: BankSyncConfig.BankSyncConfig): BankSyncApi.BankSy
     lastErrorAt: Option.map(config.last_error_at, DateTime.toEpochMillis),
     lastSuccessAt: Option.map(config.last_success_at, DateTime.toEpochMillis),
     tokenCreatedAt: Option.map(config.fio_token_created_at, DateTime.toEpochMillis),
+    tokenSavedAt: Option.map(config.fio_token_saved_at, DateTime.toEpochMillis),
     now: Date.now(),
   });
 
@@ -219,6 +220,7 @@ const toConfigView = (config: BankSyncConfig.BankSyncConfig): BankSyncApi.BankSy
     bankName: config.bank_name,
     fioTokenSet: Option.isSome(config.fio_token_encrypted),
     tokenCreatedAt: config.fio_token_created_at,
+    tokenSavedAt: config.fio_token_saved_at,
     tokenExpiresAt: Option.map(statusResult.tokenExpiresAt, (ms) => DateTime.makeUnsafe(ms)),
     status: statusResult.status,
     expiringSoon: statusResult.expiringSoon,
@@ -251,6 +253,7 @@ const defaultConfigView = (teamId: Team.TeamId): BankSyncApi.BankSyncConfigView 
     bankName: Option.none(),
     fioTokenSet: false,
     tokenCreatedAt: Option.none(),
+    tokenSavedAt: Option.none(),
     tokenExpiresAt: Option.none(),
     status: 'not_connected',
     expiringSoon: false,
