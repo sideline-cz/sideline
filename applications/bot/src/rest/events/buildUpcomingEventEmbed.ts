@@ -158,25 +158,10 @@ export const buildUpcomingEventEmbed = (params: {
     },
   ];
 
-  // The TRUE (unprojected) response, falling back to the legacy projected
-  // `my_response` if the server hasn't shipped the new field yet (rolling
-  // deploy safety). `my_response` now carries the true stored value against a
-  // server that has shipped this release; `my_response_actual` remains for the
-  // window where a NEW bot talks to an OLD server that still projects
-  // `coming_later -> maybe`. This one variable drives BOTH row 1's style
-  // highlight and row 2's Edit/Clear message custom_ids — against a new server
-  // the two sources are identical, against an old one only the true value
-  // avoids wrongly highlighting the maybe button for a `coming_later` member.
-  const myActualResponse: Option.Option<EventRsvp.RsvpResponse> = Option.isSome(
-    entry.my_response_actual,
-  )
-    ? entry.my_response_actual
-    : entry.my_response;
-
-  // Row 1: RSVP buttons. The highlight reads `myActualResponse`, NOT `entry.my_response` —
-  // see the note above.
+  // Row 1: RSVP buttons. `my_response` carries the member's true stored response —
+  // it drives both this style highlight and row 2's Edit/Clear message custom_ids.
   const styleFor = (response: EventRsvp.RsvpResponse): Discord.ButtonStyleTypes =>
-    Option.contains(myActualResponse, response)
+    Option.contains(entry.my_response, response)
       ? ACTIVE_BUTTON_STYLE[response]
       : Discord.ButtonStyleTypes.SECONDARY;
 
@@ -229,7 +214,7 @@ export const buildUpcomingEventEmbed = (params: {
 
   // Row 2: Attendees button, plus (when user has responded) add/edit/clear message buttons
   const messageButtons: ReadonlyArray<Discord.ButtonComponentForMessageRequest> =
-    myActualResponse.pipe(
+    entry.my_response.pipe(
       Option.map((response) =>
         Option.isSome(entry.my_message)
           ? [

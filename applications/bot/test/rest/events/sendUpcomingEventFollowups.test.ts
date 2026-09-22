@@ -34,7 +34,6 @@ const makeEntry = (
     maybe_count: 0,
     coming_later_count: 0,
     my_response: Option.some('yes'),
-    my_response_actual: Option.some('yes'),
     my_message: Option.none(),
     all_day: false,
     status: 'active',

@@ -210,25 +210,15 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
    */
   status: Schema.String.pipe(Schema.withDecodingDefaultKey(() => 'active')),
   my_response: Schema.OptionFromNullOr(RsvpResponse),
-  // `my_response` now carries the true stored value, so this field is its exact duplicate
-  // against a server that has shipped this release. It stays only for the rolling-deploy
-  // window in the OTHER direction: a new bot talking to an OLD server still reads
-  // `my_response: 'maybe'` for a member who actually stored `coming_later`, and row 2 of the
-  // embed would then mint `u-add-msg:{team}:{event}:maybe`; submitting that rewrites the
-  // stored response to `maybe` and slips past the mandatory-comment guard in
-  // `applications/server/src/utils/rsvpMessageRequired.ts`. `OptionFromOptionalKey` tolerates
-  // a producer on either side of the deploy that hasn't shipped/dropped this key yet. Delete
-  // in the release AFTER the old projection is gone from every deployed instance.
-  my_response_actual: Schema.OptionFromOptionalKey(RsvpResponse),
   my_message: Schema.OptionFromNullOr(Schema.String),
   /**
    * Derived team-local calendar date (`YYYY-MM-DD`), projected server-side from
    * `start_at`/`end_at` and the team's timezone (plan §11.2/§11.3). Feeds Discord's
    * `buildUpcomingEventEmbed` (B0) render through `discordDateInstant`. `Option.none()`
    * means the key was absent (old-server skew); the reader falls back to
-   * `DateTime.formatIsoDateUtc(start_at)`. Same `OptionFromOptionalKey` shape as
-   * `my_response_actual` above, for the identical rolling-deploy reason — never a plain
-   * string defaulted to `''` (see `EventApi.EventInfo.startDate`'s doc comment).
+   * `DateTime.formatIsoDateUtc(start_at)`. `OptionFromOptionalKey` tolerates a producer on
+   * either side of a rolling deploy that hasn't shipped this key yet — never a plain string
+   * defaulted to `''` (see `EventApi.EventInfo.startDate`'s doc comment).
    */
   start_date: Schema.OptionFromOptionalKey(Schema.String),
   end_date: Schema.OptionFromOptionalKey(Schema.String),

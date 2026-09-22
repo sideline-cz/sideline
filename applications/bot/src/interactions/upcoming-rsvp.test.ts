@@ -236,7 +236,6 @@ const makeEntry = (eventId: string, title: string) => ({
   all_day: false,
   status: 'active',
   my_response: Option.some('coming_later' as const),
-  my_response_actual: Option.some('coming_later' as const),
   my_message: Option.some('running late'),
   start_date: Option.none(),
   end_date: Option.none(),

@@ -247,7 +247,6 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             maybe_count: 2,
             coming_later_count: 0,
             my_response: Option.some('yes'),
-            my_response_actual: Option.some('yes'),
             my_message: Option.some('See you there'),
             all_day: false,
             status: 'active',
@@ -332,7 +331,6 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             maybe_count: 0,
             coming_later_count: 0,
             my_response: Option.none(),
-            my_response_actual: Option.none(),
             my_message: Option.none(),
             all_day: false,
             status: 'active',
@@ -358,9 +356,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
   // docs/plans/rsvp-maybe-restore.md — the projection that folded a stored
   // `coming_later` row down to `my_response: 'maybe'` is removed. `my_response`
   // now carries the true stored value, and `coming_later_count` is its own
-  // bucket, split from `maybe_count`. `my_response_actual` is DELIBERATELY
-  // RETAINED (one more release, rolling-deploy safety) — both fields are
-  // asserted here.
+  // bucket, split from `maybe_count`.
   // ---------------------------------------------------------------------------
 
   it.effect(
@@ -386,7 +382,6 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
               maybe_count: 2,
               coming_later_count: 4,
               my_response: Option.some('coming_later'),
-              my_response_actual: Option.some('coming_later'),
               my_message: Option.some('Running late'),
               all_day: false,
               status: 'active',
@@ -397,9 +392,6 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
         Effect.tap(({ entry }) =>
           Effect.sync(() => {
             expect(Option.isSome(entry.my_response) && entry.my_response.value).toBe(
-              'coming_later',
-            );
-            expect(Option.isSome(entry.my_response_actual) && entry.my_response_actual.value).toBe(
               'coming_later',
             );
             expect(entry.maybe_count).toBe(2);

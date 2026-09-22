@@ -280,7 +280,7 @@ describe('UpdateEventRequest — encoding direction (regression for runtime cras
 // `OptionFromOptionalKey` forces every reader's `onNone` branch to exist.
 //
 // Precedent for the exact absent-key / explicit-null semantics asserted here:
-// `EventRpcModels.ts`'s `my_response_actual` and `AgeThresholdCriteria`'s
+// `EventRpcModels.ts`'s `start_date`/`end_date` and `AgeThresholdCriteria`'s
 // `gender`/`requiredGroupId` (applications/server/test/AgeThreshold.test.ts).
 // ---------------------------------------------------------------------------
 
