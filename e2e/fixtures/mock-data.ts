@@ -6,6 +6,8 @@ export const ROSTER_ID = 'test-roster-00000001';
 export const ROLE_ID = 'test-role-00000001';
 export const GROUP_ID = 'test-group-00000001';
 export const TRAINING_TYPE_ID = 'test-training-type-00000001';
+export const EVENT_TYPE_ID = 'test-event-type-00000001';
+export const EVENT_TYPE_MATCH_ID = 'test-event-type-00000002';
 export const NOTIFICATION_ID = 'test-notification-00000001';
 export const INVITE_CODE = 'test-invite-abc123';
 
@@ -118,6 +120,68 @@ export const mockDashboardResponse = {
   myMemberId: MEMBER_ID,
 };
 
+// The six types the migration seeds for every team. `name` is null on a seeded row, meaning
+// "render the built-in translated label for `kind`" — so these exercise the fallback path.
+export const mockEventTypeList = {
+  canAdmin: true,
+  eventTypes: [
+    {
+      eventTypeId: EVENT_TYPE_ID,
+      teamId: TEAM_ID,
+      name: null,
+      kind: 'training',
+      color: 'blue',
+      position: 0,
+      usageCount: 1,
+    },
+    {
+      eventTypeId: EVENT_TYPE_MATCH_ID,
+      teamId: TEAM_ID,
+      name: null,
+      kind: 'match',
+      color: 'red',
+      position: 1,
+      usageCount: 1,
+    },
+    {
+      eventTypeId: 'test-event-type-00000003',
+      teamId: TEAM_ID,
+      name: null,
+      kind: 'tournament',
+      color: 'orange',
+      position: 2,
+      usageCount: 0,
+    },
+    {
+      eventTypeId: 'test-event-type-00000004',
+      teamId: TEAM_ID,
+      name: null,
+      kind: 'meeting',
+      color: 'slate',
+      position: 3,
+      usageCount: 0,
+    },
+    {
+      eventTypeId: 'test-event-type-00000005',
+      teamId: TEAM_ID,
+      name: null,
+      kind: 'social',
+      color: 'pink',
+      position: 4,
+      usageCount: 0,
+    },
+    {
+      eventTypeId: 'test-event-type-00000006',
+      teamId: TEAM_ID,
+      name: null,
+      kind: 'other',
+      color: 'gray',
+      position: 5,
+      usageCount: 0,
+    },
+  ],
+};
+
 export const mockEventList = {
   canCreate: true,
   canViewAll: false,
@@ -127,6 +191,9 @@ export const mockEventList = {
       teamId: TEAM_ID,
       title: 'Weekly Training',
       eventType: 'training',
+      eventTypeId: EVENT_TYPE_ID,
+      eventTypeName: null,
+      eventTypeColor: 'blue',
       trainingTypeName: 'Goalkeeping',
       description: null,
       imageUrl: null,
@@ -143,6 +210,9 @@ export const mockEventList = {
       teamId: TEAM_ID,
       title: 'Friendly Match',
       eventType: 'match',
+      eventTypeId: EVENT_TYPE_MATCH_ID,
+      eventTypeName: null,
+      eventTypeColor: 'red',
       trainingTypeName: null,
       description: null,
       imageUrl: null,
@@ -162,6 +232,9 @@ export const mockEventDetail = {
   teamId: TEAM_ID,
   title: 'Weekly Training',
   eventType: 'training',
+  eventTypeId: EVENT_TYPE_ID,
+  eventTypeName: null,
+  eventTypeColor: 'blue',
   trainingTypeId: TRAINING_TYPE_ID,
   trainingTypeName: 'Goalkeeping',
   description: 'Regular weekly training session',
