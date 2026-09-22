@@ -20,8 +20,18 @@ const EVENT_TYPE_COLORS: Record<string, number> = {
 
 const DEFAULT_COLOR = 0x99aab5;
 
+// The style a row-1 RSVP button wears when it IS the member's current response; every other
+// button falls back to SECONDARY. Styles: 1=Primary(blurple), 2=Secondary(grey),
+// 3=Success(green), 4=Danger(red).
+const ACTIVE_BUTTON_STYLE: Record<EventRsvp.RsvpResponse, Discord.ButtonStyleTypes> = {
+  yes: Discord.ButtonStyleTypes.SUCCESS,
+  coming_later: Discord.ButtonStyleTypes.PRIMARY,
+  maybe: Discord.ButtonStyleTypes.PRIMARY,
+  no: Discord.ButtonStyleTypes.DANGER,
+};
+
 const buildYourRsvpValue = (
-  myResponse: Option.Option<'yes' | 'no' | 'maybe'>,
+  myResponse: Option.Option<EventRsvp.RsvpResponse>,
   myMessage: Option.Option<string>,
   locale: Locale,
 ): string => {
@@ -35,6 +45,8 @@ const buildYourRsvpValue = (
           return m.bot_your_rsvp_no({}, { locale });
         case 'maybe':
           return m.bot_your_rsvp_maybe({}, { locale });
+        case 'coming_later':
+          return m.bot_your_rsvp_coming_later({}, { locale });
       }
     },
   });
@@ -106,8 +118,9 @@ export const buildUpcomingEventEmbed = (params: {
     value: m.bot_embed_rsvp_summary(
       {
         yes: String(entry.yes_count),
-        no: String(entry.no_count),
+        coming_later: String(entry.coming_later_count),
         maybe: String(entry.maybe_count),
+        no: String(entry.no_count),
       },
       { locale },
     ),
@@ -144,55 +157,40 @@ export const buildUpcomingEventEmbed = (params: {
     },
   ];
 
-  const myResponse = entry.my_response;
-
   // The TRUE (unprojected) response, falling back to the legacy projected
   // `my_response` if the server hasn't shipped the new field yet (rolling
-  // deploy safety). Row 2's Edit/Clear message buttons must encode this true
-  // value in their custom_id — the projected `my_response` can't be told
-  // apart from a real legacy `maybe`, so building those buttons from it would
-  // let "Clear message" silently downgrade a `coming_later` RSVP to `maybe`
-  // and bypass the mandatory-comment guard. Row 1's RSVP buttons and the
-  // visual highlight logic intentionally keep using the projected
-  // `my_response` above — those are confirmed correct as-is.
+  // deploy safety). `my_response` now carries the true stored value against a
+  // server that has shipped this release; `my_response_actual` remains for the
+  // window where a NEW bot talks to an OLD server that still projects
+  // `coming_later -> maybe`. This one variable drives BOTH row 1's style
+  // highlight and row 2's Edit/Clear message custom_ids — against a new server
+  // the two sources are identical, against an old one only the true value
+  // avoids wrongly highlighting the maybe button for a `coming_later` member.
   const myActualResponse: Option.Option<EventRsvp.RsvpResponse> = Option.isSome(
     entry.my_response_actual,
   )
     ? entry.my_response_actual
     : entry.my_response;
 
-  // Row 1: RSVP buttons
-  // Styles: 1=Primary(blurple), 2=Secondary(grey), 3=Success(green), 4=Danger(red)
-  const yesStyle =
-    Option.isSome(myResponse) && myResponse.value === 'yes'
-      ? Discord.ButtonStyleTypes.SUCCESS
-      : Discord.ButtonStyleTypes.SECONDARY;
-  const noStyle =
-    Option.isSome(myResponse) && myResponse.value === 'no'
-      ? Discord.ButtonStyleTypes.DANGER
-      : Discord.ButtonStyleTypes.SECONDARY;
-  const maybeStyle =
-    Option.isSome(myResponse) && myResponse.value === 'maybe'
-      ? Discord.ButtonStyleTypes.PRIMARY
+  // Row 1: RSVP buttons. The highlight reads `myActualResponse`, NOT `entry.my_response` —
+  // see the note above.
+  const styleFor = (response: EventRsvp.RsvpResponse): Discord.ButtonStyleTypes =>
+    Option.contains(myActualResponse, response)
+      ? ACTIVE_BUTTON_STYLE[response]
       : Discord.ButtonStyleTypes.SECONDARY;
 
   // custom_id: upcoming-rsvp:<event_id>:<team_id>:<response> — except the
-  // third (coming_later) button, which always opens the required-comment
-  // modal instead of instant-submitting (custom_id: u-add-msg:...).
+  // coming_later button, which always opens the required-comment modal
+  // instead of instant-submitting (custom_id: u-add-msg:...).
   const rsvpRow: Discord.ActionRowComponentForMessageRequest = UI.row([
     UI.button({
-      style: yesStyle,
+      style: styleFor('yes'),
       label: m.bot_btn_yes({}, { locale }),
       custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:yes`,
     }),
     UI.button({
-      style: noStyle,
-      label: m.bot_btn_no({}, { locale }),
-      custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:no`,
-    }),
-    UI.button({
-      style: maybeStyle,
-      label: m.bot_btn_maybe({}, { locale }),
+      style: styleFor('coming_later'),
+      label: m.bot_btn_coming_later({}, { locale }),
       // ⚠ The `:v` marker is load-bearing. Once the member's response IS
       // `coming_later`, row 2 below renders an edit-message button whose
       // custom_id is `u-add-msg:{team}:{event}:coming_later` — byte-identical to
@@ -205,8 +203,21 @@ export const buildUpcomingEventEmbed = (params: {
       // the collision was guaranteed, not occasional.
       // The marker is inert — `UpcomingAddMessageButton` matches on the
       // `u-add-msg:` prefix and reads parts[1..3] only. Keep it SHORT: with two
-      // UUIDs this id is already 96 of Discord's 100-character budget.
+      // UUIDs this id is already 98 of Discord's 100-character budget.
       custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:coming_later:v`,
+    }),
+    UI.button({
+      style: styleFor('maybe'),
+      label: m.bot_btn_maybe({}, { locale }),
+      // Instant-submit, unlike coming_later above: `maybe` never mandates a
+      // comment, so it reuses the plain `upcoming-rsvp:` prefix — a prefix
+      // row 2 never mints, so this adds zero new 50035 collision surface.
+      custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:maybe`,
+    }),
+    UI.button({
+      style: styleFor('no'),
+      label: m.bot_btn_no({}, { locale }),
+      custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:no`,
     }),
   ]);
 

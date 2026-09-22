@@ -10,7 +10,7 @@ const makeAttendee = (opts: {
   display_name?: Option.Option<string>;
   username?: Option.Option<string>;
   message?: Option.Option<string>;
-  response?: 'yes' | 'no' | 'maybe';
+  response?: 'yes' | 'no' | 'maybe' | 'coming_later';
 }): EventRpcModels.RsvpAttendeeEntry =>
   new EventRpcModels.RsvpAttendeeEntry({
     discord_id: Option.map(opts.discord_id ?? Option.none(), DomainDiscord.Snowflake.makeUnsafe),
@@ -183,52 +183,108 @@ describe('buildAttendeesEmbed - formatEntry', () => {
 // FIELD ORDER: yes → coming_later(maybe) → no (previously yes → no → maybe).
 // ---------------------------------------------------------------------------
 
-describe('buildAttendeesEmbed — field order (yes -> coming_later -> no)', () => {
-  it('places the maybe/coming_later group between yes and no, not after no', () => {
+// ---------------------------------------------------------------------------
+// docs/plans/rsvp-maybe-restore.md — `maybe` becomes a first-class,
+// distinct-from-coming_later response. The server-side coming_later -> maybe
+// wire projection is removed, so `RsvpAttendeeEntry.response` now arrives as
+// its true value and `buildAttendeesEmbed` must render FOUR sections in the
+// canonical gradient order: yes -> coming_later -> maybe -> no.
+// ---------------------------------------------------------------------------
+
+describe('buildAttendeesEmbed — four sections in gradient order (yes -> coming_later -> maybe -> no)', () => {
+  it('places sections in the order yes, coming_later, maybe, no — even when seeded out of order', () => {
     const yesAttendee = makeAttendee({ name: Option.some('Yes Person'), response: 'yes' });
-    const maybeAttendee = makeAttendee({ name: Option.some('Maybe Person'), response: 'maybe' });
     const noAttendee = makeAttendee({ name: Option.some('No Person'), response: 'no' });
+    const maybeAttendee = makeAttendee({ name: Option.some('Maybe Person'), response: 'maybe' });
+    const comingLaterAttendee = makeAttendee({
+      name: Option.some('Later Person'),
+      response: 'coming_later',
+    });
 
     const { embeds } = buildAttendeesEmbed({
       ...baseOpts,
-      attendees: [yesAttendee, maybeAttendee, noAttendee],
-      total: 3,
+      attendees: [noAttendee, maybeAttendee, yesAttendee, comingLaterAttendee],
+      total: 4,
     });
 
     const fields = embeds[0].fields ?? [];
     const yesIndex = fields.findIndex((f) => f.value.includes('Yes Person'));
+    const comingLaterIndex = fields.findIndex((f) => f.value.includes('Later Person'));
     const maybeIndex = fields.findIndex((f) => f.value.includes('Maybe Person'));
     const noIndex = fields.findIndex((f) => f.value.includes('No Person'));
 
     expect(yesIndex).toBeGreaterThanOrEqual(0);
+    expect(comingLaterIndex).toBeGreaterThanOrEqual(0);
     expect(maybeIndex).toBeGreaterThanOrEqual(0);
     expect(noIndex).toBeGreaterThanOrEqual(0);
-    expect(yesIndex).toBeLessThan(maybeIndex);
+    expect(yesIndex).toBeLessThan(comingLaterIndex);
+    expect(comingLaterIndex).toBeLessThan(maybeIndex);
     expect(maybeIndex).toBeLessThan(noIndex);
   });
 
-  it('both a legacy maybe attendee and a projected coming_later (maybe on the wire) attendee land in the same group', () => {
-    // Both arrive as response: 'maybe' post-projection — this just locks that
-    // grouping continues to work when two independently-originated rows share
-    // the literal 'maybe' value.
-    const legacyMaybe = makeAttendee({ name: Option.some('Legacy'), response: 'maybe' });
-    const convertedComingLater = makeAttendee({
+  // INVERTED (docs/plans/rsvp-maybe-restore.md): the projection that made a
+  // legacy `maybe` and a converted `coming_later` arrive as the same literal
+  // is removed. They must now land in DIFFERENT fields.
+  it('a maybe attendee and a coming_later attendee land in DIFFERENT fields, not the same group', () => {
+    const maybeAttendee = makeAttendee({ name: Option.some('Legacy'), response: 'maybe' });
+    const comingLaterAttendee = makeAttendee({
       name: Option.some('Converted'),
-      response: 'maybe',
+      response: 'coming_later',
     });
 
     const { embeds } = buildAttendeesEmbed({
       ...baseOpts,
-      attendees: [legacyMaybe, convertedComingLater],
+      attendees: [maybeAttendee, comingLaterAttendee],
       total: 2,
     });
 
     const fields = embeds[0].fields ?? [];
-    const groupField = fields.find(
-      (f) => f.value.includes('Legacy') || f.value.includes('Converted'),
-    );
-    expect(groupField).toBeDefined();
-    expect(groupField?.value).toContain('Legacy');
-    expect(groupField?.value).toContain('Converted');
+    const maybeField = fields.find((f) => f.value.includes('Legacy'));
+    const comingLaterField = fields.find((f) => f.value.includes('Converted'));
+
+    expect(maybeField).toBeDefined();
+    expect(comingLaterField).toBeDefined();
+    expect(maybeField).not.toBe(comingLaterField);
+    expect(maybeField?.value).not.toContain('Converted');
+    expect(comingLaterField?.value).not.toContain('Legacy');
+  });
+
+  it('an empty section (no attendees of that response) is omitted entirely', () => {
+    const yesAttendee = makeAttendee({ name: Option.some('Yes Person'), response: 'yes' });
+    const noAttendee = makeAttendee({ name: Option.some('No Person'), response: 'no' });
+
+    const { embeds } = buildAttendeesEmbed({
+      ...baseOpts,
+      attendees: [yesAttendee, noAttendee],
+      total: 2,
+    });
+
+    // Only two sections should be present — no empty coming_later/maybe fields.
+    expect(embeds[0].fields).toHaveLength(2);
+  });
+
+  it('each rendered section carries its own count, independent of the other three', () => {
+    const attendees = [
+      makeAttendee({ name: Option.some('Y1'), response: 'yes' }),
+      makeAttendee({ name: Option.some('Y2'), response: 'yes' }),
+      makeAttendee({ name: Option.some('CL1'), response: 'coming_later' }),
+      makeAttendee({ name: Option.some('M1'), response: 'maybe' }),
+      makeAttendee({ name: Option.some('M2'), response: 'maybe' }),
+      makeAttendee({ name: Option.some('M3'), response: 'maybe' }),
+      makeAttendee({ name: Option.some('N1'), response: 'no' }),
+    ];
+
+    const { embeds } = buildAttendeesEmbed({ ...baseOpts, attendees, total: attendees.length });
+    const fields = embeds[0].fields ?? [];
+
+    const yesField = fields.find((f) => f.value.includes('Y1'));
+    const comingLaterField = fields.find((f) => f.value.includes('CL1'));
+    const maybeField = fields.find((f) => f.value.includes('M1'));
+    const noField = fields.find((f) => f.value.includes('N1'));
+
+    expect(yesField?.name).toContain('2');
+    expect(comingLaterField?.name).toContain('1');
+    expect(maybeField?.name).toContain('3');
+    expect(noField?.name).toContain('1');
   });
 });

@@ -54,7 +54,11 @@ There is no per-member opt-out at this time. Reminders are sent automatically to
 
 ### How do I change my RSVP after I submitted it?
 
-Click a different button — Yes, No, or Coming later. The new answer overwrites the old one. You can change it as many times as you like until the event starts. Switching to **Coming later** requires a short note (reason/ETA).
+Click a different button — Yes, Coming later, Not sure, or No. The new answer overwrites the old one. You can change it as many times as you like until the event starts. Switching to **Coming later** requires a short note (reason/ETA); switching away from **Coming later** clears that note, since it only answers "when will you arrive".
+
+### What does "Not sure" mean, and does it count as attending?
+
+No. **Not sure** just tells your captain you've seen the event but haven't decided — it doesn't count toward confirmed headcounts, doesn't give you a roster slot on roster-linked events, and doesn't get your training attendance auto-logged. It still resets your reminder streak like any other response. If the event is linked to a roster with approval required, switching straight from **Coming later** to **Not sure** withdraws you from the roster; answering **Coming later** again re-queues you for approval rather than putting you straight back on.
 
 ### Why didn't I get a Discord notification?
 

@@ -173,6 +173,19 @@ const testEvents = [
     rsvp_response: 'maybe',
   },
   {
+    id: '00000000-0000-0000-0000-000000000063',
+    title: 'Late Arrival Match',
+    description: Option.none<string>(),
+    start_at: DateTime.makeUnsafe('2026-03-21T15:00:00Z'),
+    end_at: Option.none<DateTime.Utc>(),
+    location: Option.none<string>(),
+    location_url: Option.none<string>(),
+    status: 'active',
+    event_type: 'match',
+    team_name: 'Test FC',
+    rsvp_response: 'coming_later',
+  },
+  {
     id: '00000000-0000-0000-0000-000000000062',
     title: 'Training with Map Link',
     description: Option.some('Warm-up included'),
@@ -560,6 +573,12 @@ describe('iCal Subscription API', () => {
     expect(text).toContain('DESCRIPTION:Bring your boots');
     expect(text).toContain('LOCATION:Main Field');
     expect(text).toContain('SUMMARY:[Maybe] Match vs Rivals');
+    // coming_later renders a DIFFERENT prefix than maybe — locks the decision
+    // that ical.ts needs no edit for the rsvp-maybe-restore change: L145-148
+    // already distinguishes `[Maybe] ` from `[Later] `.
+    expect(text).toContain('SUMMARY:[Later] Late Arrival Match');
+    expect(text).not.toContain('SUMMARY:[Maybe] Late Arrival Match');
+    expect(text).not.toContain('SUMMARY:[Later] Match vs Rivals');
     expect(text).toContain('END:VCALENDAR');
     expect(text).toContain('STATUS:CONFIRMED');
   });

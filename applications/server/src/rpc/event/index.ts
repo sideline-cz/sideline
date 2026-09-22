@@ -42,8 +42,10 @@ import { EventRosterProvisioningService } from '~/services/EventRosterProvisioni
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
 import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
 import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
-import { isRsvpMessageRequiredAndMissing } from '~/utils/rsvpMessageRequired.js';
-import { projectRsvpResponseToLegacy } from '~/utils/rsvpWireProjection.js';
+import {
+  isLeavingComingLaterWithoutNewMessage,
+  isRsvpMessageRequiredAndMissing,
+} from '~/utils/rsvpMessageRequired.js';
 import { constructEvent } from './events.js';
 
 class NoChanges extends Data.TaggedError('NoChanges')<{
@@ -77,7 +79,9 @@ const getRsvpCounts = (
       for (const c of counts) {
         if (c.response === 'yes') yesCount = c.count;
         else if (c.response === 'no') noCount = c.count;
-        else if (c.response === 'maybe' || c.response === 'coming_later') maybeCount += c.count;
+        // `maybe` only — NOT lumped with `coming_later`. The two are distinct user-visible
+        // answers now, so a field named `maybeCount` must mean exactly `maybe` on every surface.
+        else if (c.response === 'maybe') maybeCount = c.count;
       }
       const canRsvp =
         event !== undefined && eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe());
@@ -490,8 +494,22 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               ? Effect.fail(new EventRpcModels.RsvpMessageRequired())
               : Effect.void,
           ),
-          Effect.bind('upsertResult', ({ member }) =>
-            svc.rsvps.upsertRsvp(event_id, member.id, response, message, clearMessage).pipe(
+          // Switching away from `coming_later` (whose note is mandatory) to any other response
+          // must not leave that note attached to the new response — otherwise e.g. "Nevím"
+          // renders with a stale "dorazím v 19:00" note nobody asked for on this submission.
+          // Shared with the HTTP `submitRsvp` handler so both surfaces agree on the transition.
+          Effect.let(
+            'effectiveClear',
+            ({ priorRsvp }) =>
+              clearMessage ||
+              isLeavingComingLaterWithoutNewMessage(
+                response,
+                message,
+                Option.map(priorRsvp, (r) => r.response),
+              ),
+          ),
+          Effect.bind('upsertResult', ({ member, effectiveClear }) =>
+            svc.rsvps.upsertRsvp(event_id, member.id, response, message, effectiveClear).pipe(
               Effect.catchTag(
                 'NoSuchElementError',
                 LogicError.withMessage(
@@ -561,17 +579,14 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
           ),
           // The channel post announces CHANGED answers only — a first answer after the reminder
           // is not a change, it is the answer the reminder asked for. `isLateRsvp` keeps the
-          // wider meaning for the ephemeral hint. Compare through the legacy projection so a
-          // legacy `maybe` row resubmitted as `coming_later` (both render as `rsvp_maybe`,
-          // "Coming later") doesn't count as a change.
+          // wider meaning for the ephemeral hint. `maybe` and `coming_later` are now distinct,
+          // genuinely user-visible responses ("Nevím" vs "Přijdu později"), so switching between
+          // them SHOULD announce to the late-RSVP channel like any other change.
           Effect.let(
             'isLateRsvpChange',
             ({ event, upsertResult }) =>
               Option.isSome(event.reminder_sent_at) &&
-              Option.exists(
-                upsertResult.priorResponse,
-                (r) => projectRsvpResponseToLegacy(r) !== projectRsvpResponseToLegacy(response),
-              ),
+              Option.exists(upsertResult.priorResponse, (r) => r !== response),
           ),
           // `Some` ⇔ channel configured AND this was a real change. Gating here rather than on a
           // new wire field means the fix lands with the server deploy, not the bot.
@@ -705,7 +720,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       nickname: row.nickname,
                       username: row.username,
                       display_name: row.display_name,
-                      response: projectRsvpResponseToLegacy(row.response),
+                      response: row.response,
                       message: row.message,
                     }),
                 ),
@@ -754,8 +769,8 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
             for (const c of counts) {
               if (c.response === 'yes') yesCount = c.count;
               else if (c.response === 'no') noCount = c.count;
-              else if (c.response === 'maybe' || c.response === 'coming_later')
-                maybeCount += c.count;
+              // `maybe` only — see the note in `getRsvpCounts` above.
+              else if (c.response === 'maybe') maybeCount = c.count;
             }
             return new EventRpcModels.RsvpReminderSummary({
               yesCount,
@@ -938,7 +953,8 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                 yes_count: Schema.Number,
                 no_count: Schema.Number,
                 maybe_count: Schema.Number,
-                my_response: Schema.OptionFromNullOr(Schema.Literals(['yes', 'no', 'maybe'])),
+                coming_later_count: Schema.Number,
+                my_response: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
                 my_response_actual: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
                 my_message: Schema.OptionFromNullOr(Schema.String),
                 all_day: Schema.Boolean,
@@ -962,8 +978,9 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   e.status,
                   COALESCE(SUM(CASE WHEN er.response = 'yes' THEN 1 ELSE 0 END), 0)::int AS yes_count,
                   COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
-                  COALESCE(SUM(CASE WHEN er.response IN ('maybe', 'coming_later') THEN 1 ELSE 0 END), 0)::int AS maybe_count,
-                  CASE WHEN my_rsvp.response = 'coming_later' THEN 'maybe' ELSE my_rsvp.response END AS my_response,
+                  COALESCE(SUM(CASE WHEN er.response = 'maybe' THEN 1 ELSE 0 END), 0)::int AS maybe_count,
+                  COALESCE(SUM(CASE WHEN er.response = 'coming_later' THEN 1 ELSE 0 END), 0)::int AS coming_later_count,
+                  my_rsvp.response AS my_response,
                   my_rsvp.response AS my_response_actual,
                   my_rsvp.message AS my_message,
                   (e.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
@@ -1073,6 +1090,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       yes_count: row.yes_count,
                       no_count: row.no_count,
                       maybe_count: row.maybe_count,
+                      coming_later_count: row.coming_later_count,
                       my_response: row.my_response,
                       my_response_actual: row.my_response_actual,
                       my_message: row.my_message,
@@ -1134,7 +1152,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   nickname: row.nickname,
                   username: row.username,
                   display_name: row.display_name,
-                  response: projectRsvpResponseToLegacy(row.response),
+                  response: row.response,
                   message: row.message,
                 }),
             ),

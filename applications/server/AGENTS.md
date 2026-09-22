@@ -304,7 +304,20 @@ sql`UPDATE fees SET
 
 Two boundary utilities keep reads/writes correct across a rolling deploy where a new stored enum value (`event_rsvps.response = 'coming_later'`) is persisted before deployed clients understand it (the wire-schema half lives in `packages/domain/AGENTS.md` → "Introducing a new value into a stored enum ... wire-value projection").
 
-1. **Project a stored enum value down to the legacy wire vocabulary at EVERY read boundary — never inline the literal check at the call site.** `src/utils/rsvpWireProjection.ts` `projectRsvpResponseToLegacy` maps `'coming_later' → 'maybe'`; route every stored-response → wire-DTO mapping through it — `Option.map(x, projectRsvpResponseToLegacy)` in `api/dashboard.ts`, `api/event-rsvp.ts` `buildRsvpDetail`, and `rpc/event/index.ts` (both attendee-entry mappers). When the projection happens in SQL, mirror it exactly (`CASE WHEN my_rsvp.response = 'coming_later' THEN 'maybe' ELSE my_rsvp.response END AS my_response`). Routing through the one helper (and one SQL idiom) means the Release B change that removes the projection touches a single, greppable set of sites. Aggregate counts that fold the new value into a legacy bucket do so in SQL too (`SUM(CASE WHEN er.response IN ('maybe', 'coming_later') ...)`), and attendance predicates use `src/utils/rsvpAttendance.ts` `isAttendingRsvpResponse` rather than a bare `=== 'yes'`.
+1. **Project a stored enum value down to the legacy wire vocabulary at EVERY read boundary — never inline the literal check at the call site.** Put the mapping in one named helper and route every stored-value → wire-DTO mapping through it (`Option.map(x, projectFooToLegacy)`); when the projection also happens in SQL, mirror it exactly (`CASE WHEN col = 'new_value' THEN 'legacy_value' ELSE col END AS wire_col`). The point is that the follow-up release which REMOVES the projection then touches a single greppable set of sites instead of a scatter of inline literal checks. Live example: `src/utils/inviteErrorWireProjection.ts`.
+
+   The `event_rsvps.response` projection (`projectRsvpResponseToLegacy`, `'coming_later' → 'maybe'`) was the worked example here and has now completed its lifecycle — the follow-up release landed, the helper is deleted, and all four read boundaries (`api/dashboard.ts`, `api/event-rsvp.ts`, both `rpc/event/index.ts` attendee mappers) plus the SQL casts were unwound in one change. `'maybe'` is now a first-class non-attending response ("Nevím"), NOT a legacy alias for `'coming_later'`.
+
+   No data migration was needed, and this is worth knowing before anyone writes one: `1790300016_rename_rsvp_maybe_to_coming_later.ts` deferred converting historical `'maybe'` rows to a "Release B follow-up", but that deferral rested on a false premise. Before #549 (`5ec1fcba`) the button was literally labelled `❓ Maybe` / `❓ Možná` — so every historical `'maybe'` row already means "Nevím" and is correct as stored. Converting them would have rewritten real user answers to the opposite meaning, irreversibly, and minted `coming_later` rows with `message IS NULL` in violation of the mandatory-note invariant. **Check what a stored literal actually meant to the user who wrote it (`git show <commit>^:packages/i18n/messages/en.json`) before writing a migration that reinterprets it.**
+
+   Two rules outlived the projection: aggregate counts stay per-literal in SQL, and attendance is decided in exactly TWO places — never a bare `=== 'yes'` at a call site. Narrowing either is a behaviour change, not a refactor, and you must grep BOTH; the TypeScript helper alone covers only one of the four write paths.
+
+   | Chokepoint | What it decides |
+   |------------|------------------------|
+   | `src/utils/rsvpAttendance.ts` `isAttendingRsvpResponse` (TypeScript) | `services/EventRosterProvisioningService.ts` Discord role grants; the auto-approve backfills in `rpc/event/index.ts` and `api/event-roster.ts` |
+   | `response IN ('yes', 'coming_later')` (SQL, three queries) | `EventRsvpsRepository.findYesRsvpMemberIds` → `services/TrainingAutoLogCron.ts` auto activity logs AND `api/player-rating.ts`'s `notRsvpYes` game-result gate; `EventRsvpsRepository.findYesAttendeesWithLimit` → the bot's "who is coming" embed (read); `TeamGenerationRepository.findYesMembersForEvent` → the team-generation pool |
+
+   `EventsRepository`'s iCal query is the ONE deliberate exception: it still selects `IN ('yes', 'maybe', 'coming_later')`, because a member's own calendar feed should carry the events they are undecided about, and `api/ical.ts` prefixes them `[Maybe] ` versus `coming_later`'s `[Later] `.
 2. **Validate a partial-update upsert against the EFFECTIVE (post-COALESCE) stored value, not the raw submitted payload.** `upsertRsvp` does `COALESCE(${message}, event_rsvps.message)`, so a re-submit with `message: null` preserves the prior note. A guard that requires a non-empty message for `'coming_later'` MUST evaluate what will actually be stored after the COALESCE: fetch the prior row (`rsvps.findRsvpByEventAndMember`) and pass both the submitted message and the prior message to `src/utils/rsvpMessageRequired.ts` `isRsvpMessageRequiredAndMissing`, which fails with `RsvpMessageRequired` only when the effective message would be blank. This generalises to any COALESCE-based partial upsert — validate the effective value, not the submitted delta. Call sites: `api/event-rsvp.ts` and `rpc/event/index.ts` (the `SubmitRsvp` handlers).
 3. **A COALESCE-based partial upsert can never clear the column — clearing needs a SEPARATE explicit signal, and every call site MUST supply it.** `upsertRsvp(eventId, memberId, response, message, clearMessage = false)` routes to `upsertClearing` (which writes `message = NULL` unconditionally) only when the 5th argument is `true`; because that parameter has a `= false` default, a call site that omits it type-checks and silently makes the clearing branch unreachable — that is exactly how the web UI was left unable to remove an RSVP note. The two write surfaces derive `clearMessage` differently and both derivations are load-bearing:
 
@@ -1079,17 +1092,15 @@ Effect.let(
 ),
 // Reminder sent, AND a prior response existed, AND it differs — narrower than
 // `isLateRsvp` on purpose. Gates the late-RSVP channel post, which should announce
-// changed minds, not first answers. Compare through `projectRsvpResponseToLegacy` so a
-// legacy `maybe` row resubmitted as `coming_later` (both render as `rsvp_maybe`,
-// "Coming later") isn't a change.
+// changed minds, not first answers. A plain `!==`: every stored literal is now a
+// distinct user-visible answer, so `maybe` -> `coming_later` IS a real change and
+// should announce. (It used to compare through `projectRsvpResponseToLegacy`, back
+// when both rendered as "Coming later" — that projection is gone.)
 Effect.let(
   'isLateRsvpChange',
   ({ event, upsertResult }) =>
     Option.isSome(event.reminder_sent_at) &&
-    Option.exists(
-      upsertResult.priorResponse,
-      (r) => projectRsvpResponseToLegacy(r) !== projectRsvpResponseToLegacy(response),
-    ),
+    Option.exists(upsertResult.priorResponse, (r) => r !== response),
 ),
 ```
 

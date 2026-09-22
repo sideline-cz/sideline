@@ -826,7 +826,7 @@ The parent (page) builds the Effect pipeline and passes it as a prop. The child 
 ```typescript
 // Parent (page) — builds the Effect, does NOT run it
 const handleRsvpSubmit = React.useCallback(
-  (response: 'yes' | 'no' | 'maybe', message: string) =>
+  (response: EventRsvp.RsvpResponse, message: string) =>
     ApiClient.pipe(
       Effect.flatMap((api) => api.eventRsvp.submitRsvp({ path: {...}, payload: {...} })),
       Effect.catchAll(() => ClientError.make(m.rsvp_submitFailed())),

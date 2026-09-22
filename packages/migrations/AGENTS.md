@@ -199,6 +199,18 @@ Always use the exact constraint name. Check the original migration that created 
 
 **Rolling-deploy-safe enum widening.** When the new value cannot yet appear on the wire for already-deployed clients (see `packages/domain/AGENTS.md` → wire-value projection), widen the CHECK to a permissive **superset** that keeps every legacy value AND the new one (`CHECK (response IN ('yes', 'no', 'maybe', 'coming_later'))`), use `DROP CONSTRAINT IF EXISTS` so the widening is idempotent, and do NOT rewrite historical rows in this migration. Eagerly converting historical rows would expose an old still-running instance's legacy decode to every historical row (not just newly-written ones) during the rolling deploy, for no functional benefit — the app already tolerates both the legacy and new values this release. Drop the legacy value from the CHECK and convert any leftover rows in the Release B follow-up, once no client relies on the old value. Reference: `1790300016_rename_rsvp_maybe_to_coming_later.ts`.
 
+**A deferred "convert the legacy rows later" note is a CLAIM, not a fact — re-derive it before you act on it.** The `1790300016` note above deferred converting historical `'maybe'` rows to `'coming_later'` in a Release B follow-up. That follow-up was investigated in `feat/adjust-later-option` and DELIBERATELY NOT WRITTEN, because the premise was wrong. Before writing any migration that REINTERPRETS a stored literal (as opposed to renaming one), you MUST establish what that literal meant to the user who wrote the row, by reading the UI label in force at the time:
+
+```bash
+git log --oneline -- packages/i18n/messages/en.json   # find the commit that changed the label
+git show <commit>^:packages/i18n/messages/en.json | grep <message_key>
+```
+
+Here `git show 5ec1fcba^:packages/i18n/messages/en.json` shows `"bot_btn_maybe": "❓ Maybe"` (cs: `"❓ Možná"`) — before #549 the button was literally labelled *Maybe*, so every historical `'maybe'` row already meant "Nevím" / "Not sure". Converting them would have (1) rewritten real user answers into their opposite — "I don't know" recorded as "I am definitely coming, just late" — with no way back, since the original value is destroyed by the `UPDATE`, and (2) minted `coming_later` rows with `message IS NULL`, violating the mandatory-note invariant that `applications/server/src/utils/rsvpMessageRequired.ts` enforces on every write. Two rules follow:
+
+1. **A reinterpreting `UPDATE` is irreversible in a way a renaming one is not.** A rename preserves the answer and changes its spelling; a reinterpretation changes the answer. Where you cannot prove from the historical UI that every affected row meant the new thing, do not write the migration — leave the rows and say so.
+2. **Do NOT tighten `event_rsvps_response_check` to drop `'maybe'`.** `'maybe'` is actively written again as a first-class response; the four-literal superset `CHECK (response IN ('yes', 'no', 'maybe', 'coming_later'))` is the permanent shape, not a transitional one.
+
 ### Widening a UNIQUE Constraint (Add the Wider Index BEFORE Dropping the Narrower One)
 
 Widening uniqueness from `(a, b)` to `(a, b, c)` is not a `DROP` followed by a `CREATE`. Order the statements so the table is never unprotected, and account for the fact that dropping the old constraint breaks in-flight `ON CONFLICT` clauses.

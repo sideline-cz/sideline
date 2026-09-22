@@ -5,6 +5,17 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — "Not sure" is back as a fourth RSVP option
+
+RSVP now offers four responses instead of three: **Yes**, **Coming later**, **Not sure**, **No**.
+
+- **Not sure** submits instantly (no note needed) and does **not** count as attending — unlike **Coming later**, which still counts as full attendance and still requires a note. Someone who answers **Not sure** is not included in confirmed headcounts, doesn't get a roster slot (or its Discord role) on events linked to a roster, isn't put into generated teams, and doesn't get training attendance auto-logged.
+- **Switching away from Coming later now always clears its note.** The note only answers "when will you arrive?", so moving to any other response — including **Not sure** — removes it, not just moving to **Yes**/**No** as before.
+- If an event is linked to a roster with approval required, switching straight from **Coming later** to **Not sure** withdraws you from the roster (same as withdrawing a "yes"). Answering **Coming later** again re-enters you through the normal auto-approve or pending-request flow, rather than putting you straight back on.
+- The attendees list, the event card, and Discord's RSVP embed now show all four responses as separate groups instead of folding **Not sure** into **Coming later**.
+- See the [RSVP guide](/guides/rsvp-to-an-event/) for the full rundown.
+- API integrators: `SubmitRsvpRequest.response` and `EventRsvpDetail.myResponse` / `RsvpEntry.response` no longer project `"coming_later"` down to `"maybe"` on read — both values are now returned as submitted. `EventRsvpDetail` gains a `comingLaterCount` field (decodes as `0` if absent from an older response); `maybeCount` now counts only "Not sure" responses.
+
 ## 2026-09-22 — New: control your own attendee list, reminders, and event channels
 
 A new **My events in Discord** card on your profile page lets you control three things about your own Discord experience, per team:

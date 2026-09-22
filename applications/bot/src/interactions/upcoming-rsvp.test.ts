@@ -11,7 +11,11 @@ import { Interaction, MessageComponentData, ModalSubmitData } from 'dfx/Interact
 import * as DiscordTypes from 'dfx/types';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
-import { UpcomingAddMessageButton, UpcomingRsvpModal } from '~/interactions/upcoming-rsvp.js';
+import {
+  UpcomingAddMessageButton,
+  UpcomingRsvpButton,
+  UpcomingRsvpModal,
+} from '~/interactions/upcoming-rsvp.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 const GUILD_ID = '600000000000000001' as DiscordTypes.Snowflake;
@@ -143,6 +147,23 @@ describe('UpcomingAddMessageButton modal shape', () => {
     expect(input?.required).toBe(true);
     expect(input?.label).toBe('Add a reason (required)');
   });
+
+  // ---------------------------------------------------------------------------
+  // maybe ("Nevím") — docs/plans/rsvp-maybe-restore.md: `maybe` stays a
+  // non-mandatory-comment response (mirrors yes/no), unlike coming_later.
+  // ---------------------------------------------------------------------------
+
+  it('builds the text input with required: false and no min_length for maybe', async () => {
+    const response = await runHandler(`u-add-msg:${TEAM_ID}:${EVENT_ID}:maybe`);
+    const typed = response as {
+      data: {
+        components: ReadonlyArray<{ type: number; components: ReadonlyArray<TextInputComponent> }>;
+      };
+    };
+    const input = typed.data.components[0]?.components[0];
+    expect(input?.required).toBe(false);
+    expect(input).not.toHaveProperty('min_length');
+  });
   // ---------------------------------------------------------------------------
   // Prefill — the modal must show the member's existing note so "Edit message"
   // doesn't read as though the note was lost.
@@ -210,6 +231,7 @@ const makeEntry = (eventId: string, title: string) => ({
   yes_count: 2,
   no_count: 0,
   maybe_count: 1,
+  coming_later_count: 0,
   all_day: false,
   status: 'active',
   my_response: Option.some('coming_later' as const),
@@ -404,5 +426,73 @@ describe('UpcomingRsvpModal — reads the unpaginated upcoming-events RPC', () =
     expect('embeds' in payload).toBe(false);
     expect('components' in payload).toBe(false);
     expect(payload.content).toBe(m.bot_rsvp_event_not_found({}, { locale: 'en' }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/plans/rsvp-maybe-restore.md — `maybe` ("Nevím") is a first-class,
+// instant-submit RSVP response. `UpcomingRsvpButton` already decodes any of
+// the four `RsvpResponse` literals from `parts[3]` generically, so pressing
+// `upcoming-rsvp:<event>:<team>:maybe` must call `Event/SubmitRsvp` with
+// `response: 'maybe'`, `message: none`, `clearMessage: false` — exactly like
+// `yes`/`no` — and must NOT return a MODAL callback type (that is reserved
+// for `coming_later`'s mandatory-comment button, a different custom_id
+// prefix entirely: `u-add-msg:...`).
+// ---------------------------------------------------------------------------
+
+describe('UpcomingRsvpButton — maybe is an instant-submit response, not a modal', () => {
+  it("pressing upcoming-rsvp:<event>:<team>:maybe calls Event/SubmitRsvp with response 'maybe', message none, clearMessage false, and returns DEFERRED_UPDATE_MESSAGE (not MODAL)", async () => {
+    const submitRsvpSpy = vi.fn(() =>
+      Effect.succeed({
+        yesCount: 2,
+        noCount: 0,
+        maybeCount: 1,
+        canRsvp: true,
+        isLateRsvp: false,
+        lateRsvpChannelId: Option.none(),
+        message: Option.none(),
+        userName: Option.some('Alice'),
+        userNickname: Option.none(),
+        userDisplayName: Option.none(),
+        userUsername: Option.none(),
+      }),
+    );
+    const restStub = makeRestStub();
+    const rpcLayer = makeRpcLayer({
+      'Event/SubmitRsvp': submitRsvpSpy,
+      'Guild/GetAllUpcomingEventsForUser': () =>
+        Effect.succeed({ events: [], total: 0, team_id: TEAM_ID }),
+    });
+    const interaction = makeComponentInteraction(`upcoming-rsvp:${EVENT_ID}:${TEAM_ID}:maybe`);
+
+    const response = await Effect.runPromise(
+      UpcomingRsvpButton.handle.pipe(
+        Effect.provide(Layer.succeed(Interaction, interaction)),
+        Effect.provide(
+          Layer.succeed(
+            MessageComponentData,
+            interaction.data as DiscordTypes.APIMessageComponentInteractionData,
+          ),
+        ),
+        Effect.provide(restStub.layer),
+        Effect.provide(rpcLayer),
+      ) as Effect.Effect<unknown, never, never>,
+    );
+
+    const typed = response as { type: number };
+    expect(typed.type).toBe(DiscordTypes.InteractionCallbackTypes.DEFERRED_UPDATE_MESSAGE);
+    expect(typed.type).not.toBe(DiscordTypes.InteractionCallbackTypes.MODAL);
+
+    // Flush the forkDetach'd background work that actually calls Event/SubmitRsvp
+    // (same technique as runModalHandler above — a bare TestClock does not
+    // drive a detached fork).
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(submitRsvpSpy).toHaveBeenCalledTimes(1);
+    const [params] = submitRsvpSpy.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(params.response).toBe('maybe');
+    expect(params.message).toEqual(Option.none());
+    expect(params.clearMessage).toBe(false);
   });
 });

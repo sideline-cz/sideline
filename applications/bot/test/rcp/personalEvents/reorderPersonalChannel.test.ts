@@ -66,6 +66,7 @@ const makeEntry = (eventId: string, startAt: DateTime.Utc, allDay: boolean): Moc
   yes_count: 0,
   no_count: 0,
   maybe_count: 0,
+  coming_later_count: 0,
   my_response: Option.some('yes') as any,
   my_response_actual: Option.some('yes') as any,
   my_message: Option.none() as any,

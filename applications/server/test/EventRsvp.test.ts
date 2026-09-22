@@ -1093,6 +1093,54 @@ describe('Event RSVP API', () => {
       expect(body.rsvps).toHaveLength(1);
       expect(body.yesCount).toBe(1);
     });
+
+    // -------------------------------------------------------------------------
+    // Count split (docs/plans/rsvp-maybe-restore.md) — `countRsvpsByEventId`
+    // returning distinct yes/no/maybe/coming_later buckets must map onto FOUR
+    // independent counts on the wire, not fold maybe+coming_later together.
+    // Seeded directly into the store-based `rsvpsStore` (bypassing the PUT
+    // endpoint) so the exact bucket sizes are controlled precisely.
+    // -------------------------------------------------------------------------
+
+    it('splits countRsvpsByEventId into yesCount/noCount/maybeCount/comingLaterCount independently', async () => {
+      const seedResponse = (suffix: string, response: EventRsvp.RsvpResponse) => {
+        const memberId = `fake-member-${suffix}` as TeamMember.TeamMemberId;
+        rsvpsStore.set(`${TEST_EVENT_ACTIVE}:${memberId}`, {
+          id: crypto.randomUUID() as EventRsvp.EventRsvpId,
+          event_id: TEST_EVENT_ACTIVE,
+          team_member_id: memberId,
+          response,
+          message: Option.none(),
+          member_name: Option.none(),
+          username: Option.none(),
+          nickname: Option.none(),
+          display_name: Option.none(),
+        });
+      };
+      // yes: 3, no: 1, maybe: 2, coming_later: 4
+      seedResponse('yes-1', 'yes');
+      seedResponse('yes-2', 'yes');
+      seedResponse('yes-3', 'yes');
+      seedResponse('no-1', 'no');
+      seedResponse('maybe-1', 'maybe');
+      seedResponse('maybe-2', 'maybe');
+      seedResponse('cl-1', 'coming_later');
+      seedResponse('cl-2', 'coming_later');
+      seedResponse('cl-3', 'coming_later');
+      seedResponse('cl-4', 'coming_later');
+
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvps`, {
+          headers: { Authorization: 'Bearer user-token' },
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.yesCount).toBe(3);
+      expect(body.noCount).toBe(1);
+      expect(body.maybeCount).toBe(2);
+      expect(body.comingLaterCount).toBe(4);
+    });
   });
 
   describe('PUT /teams/:teamId/events/:eventId/rsvp', () => {
@@ -1470,7 +1518,10 @@ describe('Event RSVP API', () => {
       expect(body.rsvps).toHaveLength(2);
     });
 
-    it('a stored coming_later RSVP increments maybeCount (not a separate bucket)', async () => {
+    // INVERTED (docs/plans/rsvp-maybe-restore.md): the coming_later -> maybe wire projection
+    // is removed and the counts are split, so `coming_later` increments its own
+    // `comingLaterCount` bucket, not `maybeCount`.
+    it('a stored coming_later RSVP increments comingLaterCount, not maybeCount', async () => {
       const response = await handler(
         new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
           method: 'PUT',
@@ -1490,13 +1541,14 @@ describe('Event RSVP API', () => {
         }),
       );
       const body = await getResponse.json();
-      expect(body.maybeCount).toBe(1);
+      expect(body.comingLaterCount).toBe(1);
+      expect(body.maybeCount).toBe(0);
       expect(body.yesCount).toBe(0);
       expect(body.noCount).toBe(0);
     });
 
-    it('SUMS legacy maybe + coming_later into maybeCount (accumulation, not overwrite)', async () => {
-      // User submits legacy maybe
+    it('keeps maybe and coming_later in separate buckets (no accumulation)', async () => {
+      // User submits maybe ("Nevím")
       const maybeResponse = await handler(
         new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
           method: 'PUT',
@@ -1529,8 +1581,9 @@ describe('Event RSVP API', () => {
         }),
       );
       const body = await getResponse.json();
-      // Both rows aggregate into maybeCount — 2, not two separate 1s.
-      expect(body.maybeCount).toBe(2);
+      // Each response lands in its own bucket — 1 each, not summed into maybeCount.
+      expect(body.maybeCount).toBe(1);
+      expect(body.comingLaterCount).toBe(1);
       expect(body.yesCount).toBe(0);
       expect(body.noCount).toBe(0);
       expect(body.rsvps).toHaveLength(2);
@@ -2121,8 +2174,10 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
   // `isLateRsvp` and `lateRsvpChannelId` now answer different questions:
   //  - isLateRsvp: reminder was sent, and this is a first answer OR a change (unchanged rule).
   //  - lateRsvpChannelId: Some only when the reminder was sent AND a prior response existed
-  //    AND it differs from the new one, compared through `projectRsvpResponseToLegacy` so a
-  //    legacy `maybe` row hit with "Coming later" doesn't count as a change.
+  //    AND it differs from the new one, compared with a plain `!==`. Every stored literal is
+  //    now a distinct user-visible answer, so `maybe` -> `coming_later` IS a change and does
+  //    announce (it did not, back when both rendered as "Coming later" through the since-
+  //    deleted wire projection).
   const markReminderSent = () => {
     const event = rpcEventsStore.get(RPC_TEST_EVENT_ID);
     if (event) {
@@ -2322,7 +2377,11 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
   );
 
   itEffect.effect(
-    'lateRsvpChannelId = None when a legacy "maybe" prior is resubmitted as "coming_later" after the reminder (both project to "maybe" — not a real change)',
+    // INVERTED (docs/plans/rsvp-maybe-restore.md): the coming_later -> maybe wire projection
+    // is removed, so `maybe` and `coming_later` are now genuinely distinct responses. A prior
+    // `maybe` resubmitted as `coming_later` after the reminder IS a real change and must
+    // announce — this locks the exact behaviour flip the projection removal causes.
+    'lateRsvpChannelId is Some when a prior "maybe" is resubmitted as "coming_later" after the reminder (no longer projected to the same value — this is a real change)',
     () => {
       rpcLateRsvpChannelId = Option.some(LATE_RSVP_CHANNEL_ID);
       seedPriorRsvp('maybe');
@@ -2334,10 +2393,28 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
       }).pipe(
         Effect.tap((result) =>
           Effect.sync(() => {
-            // Raw comparison ('maybe' !== 'coming_later') would make isLateRsvp true, while the
-            // legacy-projected comparison makes isLateRsvpChange false. Asserting both booleans
-            // proves they genuinely diverge here — not just that the channel is withheld.
             expect(result.isLateRsvp).toBe(true);
+            expect(Option.isSome(result.lateRsvpChannelId)).toBe(true);
+            expect(Option.getOrNull(result.lateRsvpChannelId)).toBe(LATE_RSVP_CHANNEL_ID);
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'lateRsvpChannelId = None when a prior "yes" is resubmitted as "yes" (unchanged behaviour: same response is never a change)',
+    () => {
+      rpcLateRsvpChannelId = Option.some(LATE_RSVP_CHANNEL_ID);
+      seedPriorRsvp('yes');
+      markReminderSent();
+
+      return makeSubmitRsvp({ response: 'yes' }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.isLateRsvp).toBe(false);
             expect(Option.isNone(result.lateRsvpChannelId)).toBe(true);
           }),
         ),
@@ -2346,6 +2423,21 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
       );
     },
   );
+
+  itEffect.effect('lateRsvpChannelId = None when there is no prior response at all', () => {
+    rpcLateRsvpChannelId = Option.some(LATE_RSVP_CHANNEL_ID);
+    markReminderSent();
+
+    return makeSubmitRsvp({ response: 'yes' }).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(Option.isNone(result.lateRsvpChannelId)).toBe(true);
+        }),
+      ),
+      Effect.provide(RpcTestLayer),
+      Effect.asVoid,
+    );
+  });
 });
 
 // ============================================================
@@ -2616,20 +2708,108 @@ describe('Event/SubmitRsvp RPC — coming_later requires a message', () => {
       Effect.asVoid,
     ),
   );
+
+  itEffect.effect(
+    'maybe (first-class "Nevím") with message: none, clearMessage: true → Success (instant-submit, no message required)',
+    () =>
+      makeSubmitRsvp({ response: 'maybe', message: Option.none(), clearMessage: true }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Success');
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      ),
+  );
 });
 
 // ============================================================
-// Read projection — RPC per-row response fields surface "maybe"
-// for a stored "coming_later" row (deployed-web / deployed-bot safety)
+// Note-retention guard (docs/plans/rsvp-maybe-restore.md, "Note-retention
+// fix") — `coming_later` mandates a note and the upsert COALESCEs the
+// message, so switching FROM `coming_later` TO any other response with no
+// new message would otherwise keep the old "running late" note attached
+// forever. The guard must clear the note on that specific transition, while
+// an idempotent `coming_later -> coming_later` re-click must NOT regress and
+// wipe an already-saved note.
 // ============================================================
 
-describe('Event/GetRsvpAttendees RPC — coming_later read projection', () => {
+describe('Event/SubmitRsvp RPC — note-retention guard on leaving coming_later', () => {
+  beforeEach(() => {
+    resetRpcStores();
+  });
+
+  const seedPriorComingLaterWithNote = (note: string) => {
+    const priorKey = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
+    rpcRsvpsStore.set(priorKey, {
+      id: crypto.randomUUID() as EventRsvp.EventRsvpId,
+      event_id: RPC_TEST_EVENT_ID,
+      team_member_id: RPC_TEST_MEMBER_ID,
+      response: 'coming_later',
+      message: Option.some(note),
+      member_name: Option.none(),
+      username: Option.none(),
+      nickname: Option.none(),
+      display_name: Option.none(),
+    });
+  };
+
+  itEffect.effect(
+    'prior coming_later WITH a note, new response maybe, message: none → the stored message is CLEARED',
+    () => {
+      seedPriorComingLaterWithNote('dorazím v 19:00');
+
+      return makeSubmitRsvp({ response: 'maybe', message: Option.none() }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const key = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
+            const stored = rpcRsvpsStore.get(key);
+            expect(stored?.response).toBe('maybe');
+            expect(Option.isNone(stored?.message ?? Option.none())).toBe(true);
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'the negative: prior coming_later, new response coming_later (idempotent re-click), message: none → the note is PRESERVED',
+    () => {
+      seedPriorComingLaterWithNote('dorazím v 19:00');
+
+      return makeSubmitRsvp({ response: 'coming_later', message: Option.none() }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const key = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
+            const stored = rpcRsvpsStore.get(key);
+            expect(stored?.response).toBe('coming_later');
+            expect(Option.getOrNull(stored?.message ?? Option.none())).toBe('dorazím v 19:00');
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+});
+
+// ============================================================
+// Projection removal (docs/plans/rsvp-maybe-restore.md) — the server-side
+// coming_later -> maybe wire projection is deleted. A stored `coming_later`
+// row must now surface its TRUE response on `Event/GetRsvpAttendees`, not
+// the legacy-projected `maybe`.
+// ============================================================
+
+describe('Event/GetRsvpAttendees RPC — coming_later surfaces its true response (projection removed)', () => {
   beforeEach(() => {
     resetRpcStores();
   });
 
   itEffect.effect(
-    'a stored coming_later row surfaces response: "maybe" on the wire (not coming_later)',
+    'a stored coming_later row surfaces response: "coming_later" on the wire (NOT the legacy-projected "maybe")',
     () => {
       const ComingLaterAttendeeRow = {
         discord_id: Option.some(RPC_TEST_DISCORD_USER_ID),
@@ -2697,7 +2877,7 @@ describe('Event/GetRsvpAttendees RPC — coming_later read projection', () => {
         Effect.tap((result) =>
           Effect.sync(() => {
             expect(result.attendees).toHaveLength(1);
-            expect(result.attendees[0].response).toBe('maybe');
+            expect(result.attendees[0].response).toBe('coming_later');
           }),
         ),
         Effect.provide(RpcTestLayerWithRow),

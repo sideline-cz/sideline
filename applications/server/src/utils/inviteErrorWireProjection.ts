@@ -12,8 +12,6 @@ import { Option } from 'effect';
  * remaining non-identity mapping — PR-9 deletes the `'bot_not_in_guild' → 'unknown'` mapping now
  * that the client-facing union carries the real code. Keep this file and the `'expired'`
  * collapse; do not delete the projection entirely (rev 2 got this wrong).
- *
- * Model: `applications/server/src/utils/rsvpWireProjection.ts`.
  */
 export const projectInviteErrorToWire = (
   code: Onboarding.InviteGeneratorErrorCode,

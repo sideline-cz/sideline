@@ -92,8 +92,7 @@ export * as ICalApi from './api/ICalApi.js';
  * `'bot_not_in_guild'` joined in PR-9, once the server bundles the widened stored enum (PR-2) and
  * every browser that could receive it does too (CC-3's three-release schedule). See
  * `applications/server/src/utils/inviteErrorWireProjection.ts` for the projection applied at the
- * `getJoinStatus` read boundary. Model: `EventRsvpApi.ts` `LegacyRsvpResponse` /
- * `rsvpWireProjection.ts`.
+ * `getJoinStatus` read boundary.
  */
 export * as Invite from './api/Invite.js';
 

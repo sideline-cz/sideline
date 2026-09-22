@@ -1,4 +1,4 @@
-import type { EventRpcModels } from '@sideline/domain';
+import type { EventRpcModels, EventRsvp } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
@@ -32,13 +32,14 @@ export const buildAttendeesEmbed = (opts: {
   const locale = opts.locale;
   const fields: Array<Discord.RichEmbedField> = [];
 
-  // Legacy `maybe` and the newer `coming_later` response both land in the
-  // same "coming later" bucket — the wire still only ever sends 'maybe' for
-  // this read-model, but grouping is written defensively either way.
-  const grouped = { yes: [] as string[], coming_later: [] as string[], no: [] as string[] };
+  const grouped: Record<EventRsvp.RsvpResponse, Array<string>> = {
+    yes: [],
+    coming_later: [],
+    maybe: [],
+    no: [],
+  };
   for (const entry of opts.attendees) {
-    const key = entry.response === 'maybe' ? 'coming_later' : entry.response;
-    grouped[key].push(formatEntry(entry));
+    grouped[entry.response].push(formatEntry(entry));
   }
 
   if (grouped.yes.length > 0) {
@@ -49,8 +50,14 @@ export const buildAttendeesEmbed = (opts: {
   }
   if (grouped.coming_later.length > 0) {
     fields.push({
-      name: m.bot_attendees_maybe({ count: `${grouped.coming_later.length}` }, { locale }),
+      name: m.bot_attendees_coming_later({ count: `${grouped.coming_later.length}` }, { locale }),
       value: grouped.coming_later.join('\n'),
+    });
+  }
+  if (grouped.maybe.length > 0) {
+    fields.push({
+      name: m.bot_attendees_maybe({ count: `${grouped.maybe.length}` }, { locale }),
+      value: grouped.maybe.join('\n'),
     });
   }
   if (grouped.no.length > 0) {

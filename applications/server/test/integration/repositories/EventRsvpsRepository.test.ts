@@ -319,31 +319,35 @@ describe('EventRsvpsRepository — coming_later persistence', () => {
     ),
   );
 
-  it.effect('findYesRsvpMemberIdsByEventId includes a coming_later member (full attendance)', () =>
+  it.effect('findYesRsvpMemberIdsByEventId includes yes and coming_later, EXCLUDES maybe', () =>
     Effect.Do.pipe(
       Effect.bind('ownerId', () => createUser('210000000000000021', 'owner-cl-21')),
       Effect.bind('userId1', () => createUser('210000000000000022', 'user-cl-22')),
       Effect.bind('userId2', () => createUser('210000000000000023', 'user-cl-23')),
+      Effect.bind('userId3', () => createUser('210000000000000024', 'user-cl-24')),
       Effect.bind('team', ({ ownerId }) =>
         createTeam('211030303030303030' as Discord.Snowflake, ownerId),
       ),
       Effect.bind('tmYes', ({ team, userId1 }) => addTeamMember(team.id, userId1)),
       Effect.bind('tmComingLater', ({ team, userId2 }) => addTeamMember(team.id, userId2)),
+      Effect.bind('tmMaybe', ({ team, userId3 }) => addTeamMember(team.id, userId3)),
       Effect.bind('event', ({ team, tmYes }) => createEvent(team.id, tmYes.id)),
       Effect.tap(({ event, tmYes }) => submitYesRsvp(event.id, tmYes.id)),
       Effect.tap(({ event, tmComingLater }) => submitComingLaterRsvp(event.id, tmComingLater.id)),
+      Effect.tap(({ event, tmMaybe }) => submitMaybeRsvp(event.id, tmMaybe.id)),
       Effect.bind('memberIds', ({ event }) =>
         EventRsvpsRepository.asEffect().pipe(
           Effect.andThen((repo) => repo.findYesRsvpMemberIdsByEventId(event.id)),
         ),
       ),
-      Effect.tap(({ memberIds, tmYes, tmComingLater }) =>
+      Effect.tap(({ memberIds, tmYes, tmComingLater, tmMaybe }) =>
         Effect.sync(() => {
           const ids = (memberIds as ReadonlyArray<{ team_member_id: string }>).map(
             (m) => m.team_member_id,
           );
           expect(ids).toContain(tmYes.id);
           expect(ids).toContain(tmComingLater.id);
+          expect(ids).not.toContain(tmMaybe.id);
         }),
       ),
       Effect.provide(TestLayer),
@@ -351,7 +355,7 @@ describe('EventRsvpsRepository — coming_later persistence', () => {
   );
 
   it.effect(
-    'findYesAttendeesForEmbed includes both a coming_later member and a legacy maybe member (full attendance = yes+coming_later+maybe)',
+    'findYesAttendeesForEmbed includes a coming_later member, EXCLUDES a maybe member (maybe no longer counts as attendance)',
     () =>
       Effect.Do.pipe(
         Effect.bind('ownerId', () => createUser('210000000000000031', 'owner-cl-31')),
@@ -372,47 +376,96 @@ describe('EventRsvpsRepository — coming_later persistence', () => {
         ),
         Effect.tap(({ attendees }) =>
           Effect.sync(() => {
-            // coming_later and legacy maybe both count as full attendance → both included
-            expect((attendees as unknown[]).length).toBe(2);
+            // Only coming_later counts as full attendance now — maybe ("Nevím") is excluded.
+            const responses = (attendees as ReadonlyArray<{ response: string }>).map(
+              (a) => a.response,
+            );
+            expect(responses).toEqual(['coming_later']);
           }),
         ),
         Effect.provide(TestLayer),
       ),
   );
 
-  it.effect('attendees paging orders yes → coming_later → no', () =>
+  it.effect(
+    'attendees paging orders yes < coming_later < maybe < no (the gradient order, seeded one of each)',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('210000000000000041', 'owner-cl-41')),
+        Effect.bind('userId1', () => createUser('210000000000000042', 'user-cl-42')),
+        Effect.bind('userId2', () => createUser('210000000000000043', 'user-cl-43')),
+        Effect.bind('userId3', () => createUser('210000000000000044', 'user-cl-44')),
+        Effect.bind('userId4', () => createUser('210000000000000045', 'user-cl-45')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('211050505050505050' as Discord.Snowflake, ownerId),
+        ),
+        Effect.bind('tmNo', ({ team, userId1 }) => addTeamMember(team.id, userId1)),
+        Effect.bind('tmComingLater', ({ team, userId2 }) => addTeamMember(team.id, userId2)),
+        Effect.bind('tmYes', ({ team, userId3 }) => addTeamMember(team.id, userId3)),
+        Effect.bind('tmMaybe', ({ team, userId4 }) => addTeamMember(team.id, userId4)),
+        Effect.bind('event', ({ team, tmYes }) => createEvent(team.id, tmYes.id)),
+        // Insert in "no, maybe, yes, coming_later" order — deliberately seeding `maybe`
+        // BEFORE `coming_later`. If the two ever shared a tied rank (the old behaviour,
+        // both at rank 2, broken by `created_at ASC`), this insertion order would leak
+        // through as maybe-before-coming_later in the result — the opposite of the
+        // required gradient — so this test only passes when the ranks are truly split.
+        Effect.tap(({ event, tmNo }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.upsertRsvp(event.id, tmNo.id, 'no', Option.none())),
+          ),
+        ),
+        Effect.tap(({ event, tmMaybe }) => submitMaybeRsvp(event.id, tmMaybe.id)),
+        Effect.tap(({ event, tmYes }) => submitYesRsvp(event.id, tmYes.id)),
+        Effect.tap(({ event, tmComingLater }) => submitComingLaterRsvp(event.id, tmComingLater.id)),
+        Effect.bind('page', ({ event }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.findRsvpAttendeesPage(event.id, 0, 10)),
+          ),
+        ),
+        Effect.tap(({ page }) =>
+          Effect.sync(() => {
+            const responses = (page as ReadonlyArray<{ response: string }>).map((r) => r.response);
+            expect(responses).toEqual(['yes', 'coming_later', 'maybe', 'no']);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('a paginated slice (limit 2, offset 2) returns [maybe, no] with no interleaving', () =>
     Effect.Do.pipe(
-      Effect.bind('ownerId', () => createUser('210000000000000041', 'owner-cl-41')),
-      Effect.bind('userId1', () => createUser('210000000000000042', 'user-cl-42')),
-      Effect.bind('userId2', () => createUser('210000000000000043', 'user-cl-43')),
-      Effect.bind('userId3', () => createUser('210000000000000044', 'user-cl-44')),
+      Effect.bind('ownerId', () => createUser('210000000000000051', 'owner-cl-51')),
+      Effect.bind('userId1', () => createUser('210000000000000052', 'user-cl-52')),
+      Effect.bind('userId2', () => createUser('210000000000000053', 'user-cl-53')),
+      Effect.bind('userId3', () => createUser('210000000000000054', 'user-cl-54')),
+      Effect.bind('userId4', () => createUser('210000000000000055', 'user-cl-55')),
       Effect.bind('team', ({ ownerId }) =>
-        createTeam('211050505050505050' as Discord.Snowflake, ownerId),
+        createTeam('211060606060606060' as Discord.Snowflake, ownerId),
       ),
       Effect.bind('tmNo', ({ team, userId1 }) => addTeamMember(team.id, userId1)),
       Effect.bind('tmComingLater', ({ team, userId2 }) => addTeamMember(team.id, userId2)),
       Effect.bind('tmYes', ({ team, userId3 }) => addTeamMember(team.id, userId3)),
+      Effect.bind('tmMaybe', ({ team, userId4 }) => addTeamMember(team.id, userId4)),
       Effect.bind('event', ({ team, tmYes }) => createEvent(team.id, tmYes.id)),
-      // Insert in "no, coming_later, yes" order — the query must still return yes → coming_later → no
+      // Same deliberate ordering as the test above: maybe seeded BEFORE coming_later,
+      // so a tied-rank fallback to insertion order would surface as the wrong slice.
       Effect.tap(({ event, tmNo }) =>
         EventRsvpsRepository.asEffect().pipe(
           Effect.andThen((repo) => repo.upsertRsvp(event.id, tmNo.id, 'no', Option.none())),
         ),
       ),
-      Effect.tap(({ event, tmComingLater }) => submitComingLaterRsvp(event.id, tmComingLater.id)),
+      Effect.tap(({ event, tmMaybe }) => submitMaybeRsvp(event.id, tmMaybe.id)),
       Effect.tap(({ event, tmYes }) => submitYesRsvp(event.id, tmYes.id)),
+      Effect.tap(({ event, tmComingLater }) => submitComingLaterRsvp(event.id, tmComingLater.id)),
       Effect.bind('page', ({ event }) =>
         EventRsvpsRepository.asEffect().pipe(
-          Effect.andThen((repo) => repo.findRsvpAttendeesPage(event.id, 0, 10)),
+          Effect.andThen((repo) => repo.findRsvpAttendeesPage(event.id, 2, 2)),
         ),
       ),
-      Effect.tap(({ page, tmYes, tmComingLater, tmNo }) =>
+      Effect.tap(({ page }) =>
         Effect.sync(() => {
           const responses = (page as ReadonlyArray<{ response: string }>).map((r) => r.response);
-          expect(responses).toEqual(['yes', 'coming_later', 'no']);
-          void tmYes;
-          void tmComingLater;
-          void tmNo;
+          expect(responses).toEqual(['maybe', 'no']);
         }),
       ),
       Effect.provide(TestLayer),

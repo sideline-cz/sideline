@@ -721,6 +721,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       yes_count: 0,
       no_count: 0,
       maybe_count: 0,
+      coming_later_count: 0,
       my_response: Option.none(),
       my_response_actual: Option.none(),
       my_message: Option.none(),
@@ -751,6 +752,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       yes_count: 0,
       no_count: 0,
       maybe_count: 0,
+      coming_later_count: 0,
       my_response: Option.none(),
       my_response_actual: Option.none(),
       my_message: Option.none(),
@@ -764,4 +766,49 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       expect(Option.isNone(entry.image_url)).toBe(true);
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// docs/plans/rsvp-maybe-restore.md — the coming_later -> maybe wire
+// projection is removed. `my_response` now carries the true stored value;
+// `my_response_actual` is DELIBERATELY RETAINED for one more release
+// (rolling-deploy safety) and is kept in this fixture.
+// ---------------------------------------------------------------------------
+
+describe('UpcomingEventForUserEntry — my_response is Some("coming_later"), not the legacy Some("maybe")', () => {
+  it.effect(
+    'my_response and my_response_actual both carry "coming_later"; my_response is retained',
+    () => {
+      const entry = new EventRpcModels.UpcomingEventForUserEntry({
+        event_id: '00000000-0000-0000-0000-000000000074',
+        team_id: TEST_TEAM_ID,
+        title: 'Coming Later Event',
+        description: Option.none(),
+        image_url: Option.none(),
+        start_at: DateTime.makeUnsafe('2099-06-01T18:00:00Z'),
+        end_at: Option.none(),
+        location: Option.none(),
+        location_url: Option.none(),
+        event_type: 'training',
+        yes_count: 0,
+        no_count: 0,
+        maybe_count: 0,
+        coming_later_count: 1,
+        my_response: Option.some('coming_later'),
+        my_response_actual: Option.some('coming_later'),
+        my_message: Option.some('Running late'),
+        all_day: false,
+        status: 'active',
+        start_date: Option.none(),
+        end_date: Option.none(),
+      });
+
+      return Effect.sync(() => {
+        expect(Option.isSome(entry.my_response) && entry.my_response.value).toBe('coming_later');
+        expect(Option.isSome(entry.my_response_actual) && entry.my_response_actual.value).toBe(
+          'coming_later',
+        );
+      });
+    },
+  );
 });

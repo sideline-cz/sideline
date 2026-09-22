@@ -45,6 +45,16 @@ Follow in order; stop and report on any failure.
    git tag "@sideline/server@v0.46.2" && git push origin "@sideline/server@v0.46.2"
    git tag "@sideline/bot@v0.38.3"    && git push origin "@sideline/bot@v0.38.3"
    ```
+   **When the release changes a shared wire schema (`packages/domain`), the tag ORDER is not free — derive it per client by asking which skew direction loses DATA, never which one merely errors.** A client that fails to decode a widened union renders nothing until you deploy it: bad, visible, and fully recoverable. A client that decodes an OLD server's narrowed/projected value and then WRITES based on it corrupts the row: silent, and not recoverable by deploying anything. Never trade a read failure for a write corruption to get one tidy ordering rule; expect the answer to be asymmetric across clients, so write the order down in the PR.
+
+   Worked example — `feat/adjust-later-option` (RSVP `maybe`/`coming_later`), order **bot → server → web**:
+
+   | Skew | What happens | Verdict |
+   |------|--------------|---------|
+   | old bot + new server | bot bundles `Schema.Literals(['yes','no','maybe'])`, server sends `coming_later` → the WHOLE RPC result fails to decode, personal cards stop rendering | read failure, no data lost — but avoid it: tag bot FIRST |
+   | new bot + old server | old server still projects `coming_later → maybe`, but the bot reads `my_response_actual` (`OptionFromOptionalKey`) and falls back only when absent | defended by design — this is why bot goes first |
+   | new web + old server | web reads the projected `'maybe'` for a member who actually stored `coming_later`, so `EventRsvpPanel` treats the mandatory note as optional and a Save writes `response = 'maybe'` — a silent downgrade of the stored answer, with no `_actual` field on `EventRsvpDetail` to defend it | **write corruption — web MUST go last** |
+   | old web + new server | old web bundles the 3-literal union and fails to decode the RSVP panel | read failure, accepted cost of putting web last |
 4. Watch `.github/workflows/release.yaml` (one run per tag) to success (`gh run watch`). Every app's run must be green.
 5. Verify **stable** picked it up: the bot auto-merges a render PR on `sideline-cz/ops` targeting `env/stable` — confirm the merged PR / new commit on `env/stable` references the `vX.Y.Z` digests:
    ```bash

@@ -6,31 +6,24 @@ import { RsvpResponse } from '~/models/EventRsvp.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
-// This HTTP surface (used by the web app's HTTP client) is intentionally still
-// restricted to the legacy 3-value wire vocabulary (`'yes' | 'no' | 'maybe'`) —
-// mirrors `RsvpAttendeeEntry.response` / `UpcomingEventForUserEntry.my_response`
-// on the RPC side. `coming_later` is projected down to `'maybe'` by the server
-// (see `applications/server/src/utils/rsvpWireProjection.ts`) before it reaches
-// here, so already-deployed clients never decode an unrecognized value.
-const LegacyRsvpResponse = Schema.Literals(['yes', 'no', 'maybe']);
-
 export class RsvpEntry extends Schema.Class<RsvpEntry>('RsvpEntry')({
   teamMemberId: TeamMemberId,
   memberName: Schema.OptionFromNullOr(Schema.String),
   username: Schema.OptionFromNullOr(Schema.String),
-  response: LegacyRsvpResponse,
+  response: RsvpResponse,
   message: Schema.OptionFromNullOr(Schema.String),
   /** Resolved display name (profile name → Discord nickname → Discord display name → username). */
   displayName: Schema.String,
 }) {}
 
 export class EventRsvpDetail extends Schema.Class<EventRsvpDetail>('EventRsvpDetail')({
-  myResponse: Schema.OptionFromNullOr(LegacyRsvpResponse),
+  myResponse: Schema.OptionFromNullOr(RsvpResponse),
   myMessage: Schema.OptionFromNullOr(Schema.String),
   rsvps: Schema.Array(RsvpEntry),
   yesCount: Schema.Number,
   noCount: Schema.Number,
   maybeCount: Schema.Number,
+  comingLaterCount: Schema.Number.pipe(Schema.withDecodingDefaultKey(() => 0)),
   canRsvp: Schema.Boolean,
   minPlayersThreshold: Schema.Number,
 }) {}

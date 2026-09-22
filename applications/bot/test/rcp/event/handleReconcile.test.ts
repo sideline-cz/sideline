@@ -51,6 +51,7 @@ const makeUpcomingEvent = (myResponse: 'yes' | 'no' | 'maybe' | null) => ({
   yes_count: 5,
   no_count: 1,
   maybe_count: 2,
+  coming_later_count: 0,
 });
 
 // ---------------------------------------------------------------------------

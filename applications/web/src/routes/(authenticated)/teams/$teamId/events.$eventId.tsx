@@ -71,13 +71,12 @@ function EventDetailRoute() {
   const { teamId: teamIdRaw, eventId: eventIdRaw } = Route.useParams();
   const data = Route.useLoaderData();
 
-  // "Coming later" (written as `coming_later`) is still an attending state, so it counts as an
-  // attendee alongside `yes`. The HTTP wire only ever carries the legacy 3-value vocabulary here
-  // — the server projects `coming_later` down to `maybe` before it reaches this response (see
-  // `applications/server/src/utils/rsvpWireProjection.ts`), so there is no `coming_later` literal
-  // to compare against on this side.
+  // "Coming later" (`coming_later`) is an attending state, so it counts as an attendee alongside
+  // `yes`. `maybe` ("Nevím") is a distinct, non-attending response and is deliberately excluded —
+  // see docs/plans/rsvp-maybe-restore.md.
   const rsvpYesAttendees = data.rsvpDetail.rsvps.filter(
-    (r: (typeof data.rsvpDetail.rsvps)[number]) => r.response === 'yes' || r.response === 'maybe',
+    (r: (typeof data.rsvpDetail.rsvps)[number]) =>
+      r.response === 'yes' || r.response === 'coming_later',
   );
 
   return (

@@ -199,6 +199,7 @@ export const mockEventRsvpDetail = {
   yesCount: 1,
   noCount: 0,
   maybeCount: 0,
+  comingLaterCount: 0,
   canRsvp: true,
   minPlayersThreshold: 10,
 };
