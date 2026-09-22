@@ -1,10 +1,12 @@
 import { Discord as DiscordSchemas, Event, Team } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData } from 'dfx/Interactions/index';
 import * as Discord from 'dfx/types';
 import { Effect, Metric, Option, Schema } from 'effect';
+import { buildVerifyButton } from '~/interactions/profile-verify.js';
 import { type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { interactionUserId } from '~/schemas.js';
@@ -109,6 +111,17 @@ export const ClaimButton = Ix.messageComponent(
         Effect.flatMap((content) =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload: { content },
+          }),
+        ),
+        // Task 8: profile-gate arm. Placed after the success flatMap so it catches
+        // the RPC's own failure (the arm above only runs on success) — see
+        // rsvp.ts's RsvpButton for the shared rationale (no resume, R2).
+        Effect.catchTag('ClaimProfileIncomplete', () =>
+          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+            payload: {
+              content: m.bot_verify_blocked_claim({}, { locale }),
+              components: [UI.row([buildVerifyButton(locale)])],
+            },
           }),
         ),
         Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (error) =>

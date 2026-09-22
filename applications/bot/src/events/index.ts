@@ -1,13 +1,20 @@
 import { Discord } from '@sideline/domain';
+import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { DiscordGateway } from 'dfx/gateway';
 import * as DiscordTypes from 'dfx/types';
 import { Array as Arr, Effect, Metric, Option, Schema } from 'effect';
+import { buildVerifyButton } from '~/interactions/profile-verify.js';
+import type { Locale } from '~/locale.js';
 import { discordEventsTotal } from '~/metrics.js';
+import { ensureVerificationChannel } from '~/rest/channels/ensureVerificationChannel.js';
+import { ensureUnverifiedRole, findUnverifiedRole } from '~/rest/roles/ensureUnverifiedRole.js';
 import { DfxSyncableChannel, DfxUser } from '~/schemas.js';
 import { InviteCache } from '~/services/InviteCache.js';
 import { OnboardingRoleCache } from '~/services/OnboardingRoleCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
+import { VerificationChannelCache } from '~/services/VerificationChannelCache.js';
 import { buildSystemLogEmbed, buildWelcomeEmbed } from '~/services/welcomeRenderer.js';
 import { handleGuildCreate } from './guildCreate.js';
 import { handleGuildMemberUpdate } from './guildMemberUpdate.js';
@@ -178,6 +185,10 @@ export const eventHandlers = Effect.Do.pipe(
             }),
           );
 
+      // Task 9: `verifyLocale` is `Some(locale)` exactly when the member should see the
+      // verify field + button on THIS SAME welcome message (gate on, profile incomplete)
+      // — `None` means unchanged behaviour (gate off, or already complete). One message,
+      // one ping, never a second bot message chasing someone who just walked in.
       const sendWelcome = (
         welcomeChannelId: Discord.Snowflake,
         rendered: string,
@@ -186,18 +197,37 @@ export const eventHandlers = Effect.Do.pipe(
           readonly group_color_int: Option.Option<number>;
           readonly inviter_discord_id: Option.Option<Discord.Snowflake>;
         },
-      ) =>
-        rest
+        verifyLocale: Option.Option<Locale>,
+      ) => {
+        const baseEmbed = buildWelcomeEmbed({
+          rendered,
+          groupName: welcome.group_name,
+          colorInt: Option.getOrElse(welcome.group_color_int, () => DEFAULT_WELCOME_COLOR),
+          memberDisplayName,
+          locale: Option.getOrElse(verifyLocale, () => 'en' as const),
+        });
+        const embed = Option.match(verifyLocale, {
+          onNone: () => baseEmbed,
+          onSome: (locale) => ({
+            ...baseEmbed,
+            fields: [
+              ...(baseEmbed.fields ?? []),
+              {
+                name: m.bot_verify_welcome_field_name({}, { locale }),
+                value: m.bot_verify_welcome_field_value({}, { locale }),
+                inline: false,
+              },
+            ],
+          }),
+        });
+
+        return rest
           .createMessage(welcomeChannelId, {
             content: `<@${user.id}>`,
-            embeds: [
-              buildWelcomeEmbed({
-                rendered,
-                groupName: welcome.group_name,
-                colorInt: Option.getOrElse(welcome.group_color_int, () => DEFAULT_WELCOME_COLOR),
-                memberDisplayName,
-              }),
-            ],
+            embeds: [embed],
+            ...(Option.isSome(verifyLocale)
+              ? { components: [UI.row([buildVerifyButton(verifyLocale.value)])] }
+              : {}),
             allowed_mentions: {
               parse: [],
               users: [user.id, ...Option.toArray(welcome.inviter_discord_id)],
@@ -212,6 +242,72 @@ export const eventHandlers = Effect.Do.pipe(
               ErrorResponse: (e) => Effect.logWarning('Error sending welcome message', e),
             }),
           );
+      };
+
+      // Task 10: grant on join when the gate is on and the profile is incomplete;
+      // revoke when the gate is on and the profile is complete — evaluated on EVERY
+      // `guildMemberAdd`, not just on modal-submit success, so a member who finished
+      // their profile on the web (`api/auth.ts`, the second `completeProfile` writer)
+      // self-heals on their next join. Both directions are idempotent Discord no-ops
+      // when already in the target state. A permission failure logs a warning and
+      // lets the join resolve — it must never fail the member's join over a cosmetic
+      // role/channel.
+      const grantUnverified = (
+        guildId: Discord.Snowflake,
+        discordUserId: Discord.Snowflake,
+        verifyLocale: Locale,
+      ) =>
+        VerificationChannelCache.asEffect().pipe(
+          Effect.flatMap((verificationChannelCache) =>
+            verificationChannelCache.get(guildId).pipe(
+              Effect.flatMap((cached) =>
+                Option.match(cached, {
+                  onSome: (entry) => Effect.succeed(Discord.Snowflake.makeUnsafe(entry.roleId)),
+                  onNone: () => ensureUnverifiedRole(guildId),
+                }).pipe(
+                  Effect.tap((roleId) => rest.addGuildMemberRole(guildId, discordUserId, roleId)),
+                  Effect.tap((roleId) =>
+                    Option.isSome(cached)
+                      ? Effect.void
+                      : ensureVerificationChannel(guildId, roleId, verifyLocale).pipe(
+                          Effect.flatMap((channelIdOption) =>
+                            Option.match(channelIdOption, {
+                              onNone: () => Effect.void,
+                              onSome: (channelId) =>
+                                verificationChannelCache.set(guildId, { roleId, channelId }),
+                            }),
+                          ),
+                          Effect.catchCause((cause) =>
+                            Effect.logWarning(
+                              `Failed to ensure the verification channel in guild ${guildId}`,
+                              cause,
+                            ),
+                          ),
+                        ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Effect.asVoid,
+          Effect.catchCause((cause) =>
+            Effect.logWarning(`Failed to grant the unverified role in guild ${guildId}`, cause),
+          ),
+        );
+
+      const revokeUnverified = (guildId: Discord.Snowflake, discordUserId: Discord.Snowflake) =>
+        findUnverifiedRole(guildId).pipe(
+          Effect.flatMap((roleIdOption) =>
+            Option.match(roleIdOption, {
+              onNone: () => Effect.void,
+              onSome: (roleId) =>
+                rest.deleteGuildMemberRole(guildId, discordUserId, roleId).pipe(Effect.asVoid),
+            }),
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning(`Failed to revoke the unverified role in guild ${guildId}`, cause),
+          ),
+        );
 
       const handleWelcomeMeta = (meta: {
         readonly system_log_channel_id: Option.Option<Discord.Snowflake>;
@@ -223,11 +319,22 @@ export const eventHandlers = Effect.Do.pipe(
           readonly group_color_int: Option.Option<number>;
           readonly inviter_discord_id: Option.Option<Discord.Snowflake>;
         }>;
+        readonly profile_complete: boolean;
+        readonly profile_gate_enabled: boolean;
+        readonly verify_locale: Locale;
       }) => {
         const systemLog = Option.match(meta.system_log_channel_id, {
           onNone: () => Effect.void,
           onSome: (channelId) => sendSystemLog(channelId, meta),
         });
+
+        // Task 9: only the cohort with a welcome embed gets the field + button
+        // added to it. The plain-invite cohort (welcome: None) gets NOTHING extra
+        // here — Task 10's pinned channel card is their surface, and Task 8's
+        // blocked-action ephemeral is the universal safety net. Posting a
+        // per-member message into the verify channel would turn one clean pinned
+        // card into a scroll of identical bot spam.
+        const showVerifyPrompt = meta.profile_gate_enabled && !meta.profile_complete;
         const welcomeMessage = Option.match(
           Option.all([
             Option.flatMap(meta.welcome, (w) => w.welcome_channel_id),
@@ -236,12 +343,27 @@ export const eventHandlers = Effect.Do.pipe(
           ]),
           {
             onNone: () => Effect.void,
-            onSome: ([channelId, rendered, welcome]) => sendWelcome(channelId, rendered, welcome),
+            onSome: ([channelId, rendered, welcome]) =>
+              sendWelcome(
+                channelId,
+                rendered,
+                welcome,
+                showVerifyPrompt ? Option.some(meta.verify_locale) : Option.none(),
+              ),
           },
         );
-        return Effect.all([systemLog, welcomeMessage], { concurrency: 'unbounded' }).pipe(
-          Effect.asVoid,
-        );
+
+        // Task 10: independent of whether a welcome message was sent at all — this is
+        // exactly the catch-all for the plain-invite cohort that gets `welcome: None`.
+        const verificationState = !meta.profile_gate_enabled
+          ? Effect.void
+          : meta.profile_complete
+            ? revokeUnverified(decodeSnowflake(member.guild_id), user.id)
+            : grantUnverified(decodeSnowflake(member.guild_id), user.id, meta.verify_locale);
+
+        return Effect.all([systemLog, welcomeMessage, verificationState], {
+          concurrency: 'unbounded',
+        }).pipe(Effect.asVoid);
       };
 
       const registerAndWelcome = Effect.Do.pipe(

@@ -6,6 +6,7 @@ import * as Ix from 'dfx/Interactions/index';
 import { Interaction, ModalSubmitData } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { Array as Arr, Effect, Metric, Option, Schema } from 'effect';
+import { buildVerifyButton } from '~/interactions/profile-verify.js';
 import { type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { buildCarpoolEmbed } from '~/rest/carpool/buildCarpoolEmbed.js';
@@ -485,6 +486,13 @@ export const CarpoolAddModal = Ix.modalSubmit(
             content: m.bot_carpool_err_already_in_other({}, { locale }),
           }),
         ),
+        // Task 8: profile-gate arm — see the comment on rsvp.ts's RsvpButton.
+        Effect.catchTag('CarpoolProfileIncomplete', () =>
+          replyWebhook(rest, interaction, {
+            content: m.bot_verify_blocked_carpool({}, { locale }),
+            components: [UI.row([buildVerifyButton(locale)])],
+          }),
+        ),
       );
 
       return Effect.as(
@@ -615,6 +623,13 @@ export const CarpoolReserveButton = Effect.Do.pipe(
       ),
       Effect.catchTag('CarpoolGuildNotFound', () =>
         replyWebhook(rest, interaction, { content: m.bot_carpool_no_guild({}, { locale }) }),
+      ),
+      // Task 8: profile-gate arm — see the comment on rsvp.ts's RsvpButton.
+      Effect.catchTag('CarpoolProfileIncomplete', () =>
+        replyWebhook(rest, interaction, {
+          content: m.bot_verify_blocked_carpool({}, { locale }),
+          components: [UI.row([buildVerifyButton(locale)])],
+        }),
       ),
     );
 
