@@ -41,13 +41,14 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
   rsvpRemindersEnabled: Schema.Boolean,
   requireCompleteProfile: Schema.Boolean,
   rsvpReminderDaysBefore: Schema.Int,
-  /**
-   * Per-event-type overrides for the reminder lead time; `rsvpReminderDaysBefore` remains the
-   * fallback for any type absent from the map. Decodes TOLERANTLY (missing key -> `{}`) for the
-   * same reason as `discordEventsChannelId` above: web bundles a FROZEN copy of this schema, so a
-   * new bundle served against a server that predates the column must not fail to decode team
-   * settings outright and take the whole settings page down.
-   */
+  // Per-event-type overrides for the reminder lead time; `rsvpReminderDaysBefore` remains the
+  // fallback for any type absent from the map. Decodes TOLERANTLY (missing key -> `{}`) for the
+  // same reason as `discordEventsChannelId` above: web bundles a FROZEN copy of this schema, so a
+  // new bundle served against a server that predates the column must not fail to decode team
+  // settings outright and take the whole settings page down.
+  //
+  // Plain `//` and not JSDoc on purpose: the barrel codegen hoists a module's first JSDoc block
+  // onto its `export * as` line in `index.ts`.
   rsvpReminderDaysBeforeOverrides: RsvpReminderDaysBeforeOverrides.pipe(
     Schema.withDecodingDefaultKey(() => ({})),
   ),
