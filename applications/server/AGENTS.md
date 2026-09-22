@@ -2331,6 +2331,40 @@ Rules:
 2. **`CZ6508000000192000145399` stays in `test/fioColumns.test.ts`, `test/integration/services/FioApiClient.test.ts`, `test/bankSyncAccount.test.ts`, `packages/domain/test/CzIban.test.ts` and the bot's SPAYD fixtures.** No cross-check runs on any of those paths, and it is a checksum-verified vector (`packages/domain/AGENTS.md` → Pure Algorithm Modules rule 6). Do not "unify" the two vectors.
 3. **Assert the guard from both sides in the file that owns it.** `bankSync.test.ts` T8f asserts the probe's changed-column set is EMPTY on a mismatch and T19 asserts it is exactly `['next_attempt_at']` on a green probe; the pair is what distinguishes "gated correctly" from "writes nothing ever".
 
+### Claim-Then-Act Transactions Are Testable Without A Production Seam
+
+A claim-then-act sweep (`sql.withTransaction(claim → act)`, see "Status-Claim As Per-Row Lock" and "Atomic Conditional UPDATE Pattern") has two behaviours that look untestable from the outside — "the claim rolls back when the act fails" and "two replicas, one winner" — and `test/integration/services/EventStartCron.deferred.test.ts` carried a written-down KNOWN GAP saying so for months. Both are testable from the repository surface alone. **Never add a test-only hook, a failure-injection flag, or an injectable sub-step to production code for either one.**
+
+**Rollback after the claim:** the act half of a claim-then-act sweep is a call into a DIFFERENT repository than the one that claims. Override only that repository, with only the one method the act half calls, and provide it INSIDE the effect over the real `TestLayer` — everything else stays a real Postgres:
+
+```typescript
+const FailingEmitSyncLayer = Layer.succeed(EventSyncEventsRepository, {
+  emitEventStarted: () => Effect.fail(new Error('injected emitEventStarted failure')),
+} as any);
+
+Effect.tap(() => runCron().pipe(Effect.provide(FailingEmitSyncLayer))),  // claim must roll back
+Effect.tap(() => runCron()),                                             // next cycle acts exactly once
+```
+
+**Two sessions:** `secondTestPgClient` (`test/integration/helpers.ts`) is a genuinely separate Postgres session. Two fibers sharing one `SqlClient` share one session and can NEVER observe a row-lock wait, so a "concurrency" test on one client proves nothing. Split the suite's layer so the repository set can be rebound to the second client:
+
+```typescript
+const RepositoryLayers = Layer.mergeAll(EventsRepository.Default, /* … */);
+const TestLayer = RepositoryLayers.pipe(Layer.provideMerge(TestPgClient));
+
+const repoB = yield* EventsRepository.asEffect().pipe(
+  Effect.provide(EventsRepository.Default),
+  Effect.provideService(SqlClient.SqlClient, yield* secondTestPgClient),
+);
+```
+
+Rules:
+
+1. **Override the repository that owns the ACT half, never the one that owns the claim** — overriding the claiming repository tests the mock, not the transaction. The override object implements ONLY the methods the sweep resolves from it; leave the rest of the surface absent rather than stubbed, so an unexpected call fails loudly.
+2. **Assert both halves of a rollback: the claim column is still `NULL` AND the side effect count is 0, then re-run the cron unmodified and assert the side effect count is exactly 1.** The second run is what distinguishes "rolled back" from "never ran".
+3. **A two-replica test that runs two full cycles concurrently (`Effect.all([…], { concurrency: 'unbounded' })`) is NOT sufficient on its own** — whether the claims overlap is up to the scheduler, and when both finders run after the winner commits, the finder query's own `WHERE … IS NULL` filter hides a claim UPDATE that lost its `IS NULL`. Pair it with a deterministic case: fork replica A, hold its claim open inside `repoA.withTransaction(...)` parked on a `Deferred`, fork replica B's claim on the second session, release A, then assert `Option.isSome(resultA)` and `Option.isNone(resultB)`.
+4. **Mutation-check both before landing them**: making `withTransaction` pass through must fail the rollback tests, and deleting `IS NULL` from the claim `UPDATE` must fail the deterministic race test. A concurrency test that stays green under either mutation asserts nothing.
+
 ## Config-Gated External Service Provider (Real vs Deterministic Stub)
 
 An external integration that is **optional** in some environments (missing API key in dev/preview, present in production) is modelled as a single `ServiceMap.Service` whose `Default` layer chooses a real or a stub implementation at construction time, based on config. The service interface is the same either way, so consumers never branch on "is it configured".
