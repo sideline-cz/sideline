@@ -152,6 +152,8 @@ membersStore.set(TEST_MEMBER_ID, {
   active: true,
   role_names: ['Player'],
   permissions: PLAYER_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 membersStore.set(TEST_ADMIN_MEMBER_ID, {
   id: TEST_ADMIN_MEMBER_ID,
@@ -160,6 +162,8 @@ membersStore.set(TEST_ADMIN_MEMBER_ID, {
   active: true,
   role_names: ['Admin'],
   permissions: ADMIN_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 
 type RsvpRecord = {
@@ -578,6 +582,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         discord_channel_cleanup_on_roster_deactivate: 'delete' as const,
         discord_role_format: '{emoji} {name}',
         discord_channel_format: '{emoji}│{name}',
+        require_complete_profile: false,
       }),
     ),
   findByTeamId: () =>
@@ -609,6 +614,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         discord_channel_cleanup_on_roster_deactivate: 'delete' as const,
         discord_role_format: '{emoji} {name}',
         discord_channel_format: '{emoji}│{name}',
+        require_complete_profile: false,
       }),
     ),
   upsertSettings: (input: {
@@ -651,6 +657,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       discord_channel_cleanup_on_roster_deactivate: 'delete' as const,
       discord_role_format: '{emoji} {name}',
       discord_channel_format: '{emoji}│{name}',
+      require_complete_profile: false,
     }),
   upsert: (input: {
     teamId: string;
@@ -706,6 +713,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       discord_channel_cleanup_on_roster_deactivate: 'delete' as const,
       discord_role_format: '{emoji} {name}',
       discord_channel_format: '{emoji}│{name}',
+      require_complete_profile: false,
     });
   },
   getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),

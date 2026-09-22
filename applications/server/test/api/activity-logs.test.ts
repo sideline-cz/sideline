@@ -71,6 +71,8 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
           active: true,
           role_names: ['Player'],
           permissions: PLAYER_PERMISSIONS,
+          is_profile_complete: true,
+          require_complete_profile: Option.none(),
         } as MembershipWithRole),
       );
     if (teamId === TEST_TEAM_ID && userId === TEST_OTHER_USER_ID)
@@ -82,6 +84,8 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
           active: true,
           role_names: ['Player'],
           permissions: PLAYER_PERMISSIONS,
+          is_profile_complete: true,
+          require_complete_profile: Option.none(),
         } as MembershipWithRole),
       );
     return Effect.succeed(Option.none());
@@ -109,6 +113,8 @@ const MockInactiveMemberTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRe
           active: false,
           role_names: ['Player'],
           permissions: PLAYER_PERMISSIONS,
+          is_profile_complete: true,
+          require_complete_profile: Option.none(),
         } as MembershipWithRole),
       );
     return Effect.succeed(Option.none());

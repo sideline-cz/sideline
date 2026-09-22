@@ -96,6 +96,18 @@ export const env = createEnv({
       Schemas.Optional(() => ''),
       Schema.toStandardSchemaV1,
     ),
+    // Task 3 (`.work-plans/discord-full-onboarding.md`) — the global incident lever for the
+    // profile-completeness gate (RSVP / training claim / carpool seat). Unlike
+    // `DISCORD_JOIN_ENFORCEMENT_ENABLED` and `AI_CHAT_ENABLED` above, this flag defaults ON:
+    // `team_settings.require_complete_profile` (DEFAULT false) is the real off switch, so no team
+    // is affected until its captain opts in — this variable exists purely to kill the gate for
+    // every team at once during an incident. That is why the default is `'true'`, not `''`, and
+    // why `''` must NOT be in the FALSY set (see `parseProfileGateEnabled` below): an unset
+    // variable must resolve to "on", not silently invert to "off".
+    PROFILE_GATE_ENABLED: Schema.String.pipe(
+      Schemas.Optional(() => 'true'),
+      Schema.toStandardSchemaV1,
+    ),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
@@ -167,3 +179,31 @@ export const parseAiChatEnabled = (raw: string): boolean => {
 // `AiChatEnabledConfig` (the injectable wrapper `capabilities`/`chat` handlers consume) and
 // `ChatAgent.respond`'s `degradedReason: 'disabled'` short-circuit.
 export const aiChatEnabled = parseAiChatEnabled(env.AI_CHAT_ENABLED);
+
+const PROFILE_GATE_TRUTHY = new Set(['true', '1', 'yes', 'on']);
+// Deliberately does NOT include `''` — see `PROFILE_GATE_ENABLED`'s doc comment in `env.ts`. This
+// flag's safe direction is enabled, so an unset/empty variable must fall through to the
+// unrecognised-value branch below, which also resolves to enabled.
+const PROFILE_GATE_FALSY = new Set(['false', '0', 'no', 'off']);
+
+/**
+ * Permissive, case-insensitive parsing for the `PROFILE_GATE_ENABLED` incident lever —
+ * deliberately outside `createEnv`'s schema validation, modelled on
+ * `parseDiscordJoinEnforcementEnabled` above with one deviation: the safe direction here is
+ * ENABLED, not disabled (see `env.ts`'s `PROFILE_GATE_ENABLED` field for why). An unrecognised
+ * value defaults to enabled and logs a warning rather than throwing.
+ */
+export const parseProfileGateEnabled = (raw: string): boolean => {
+  const normalized = raw.trim().toLowerCase();
+  if (PROFILE_GATE_TRUTHY.has(normalized)) return true;
+  if (PROFILE_GATE_FALSY.has(normalized)) return false;
+  console.warn(
+    `PROFILE_GATE_ENABLED=${JSON.stringify(raw)} is not a recognised boolean value ` +
+      '(expected one of true/false/1/0/yes/no/on/off, case-insensitive) — defaulting to enabled.',
+  );
+  return true;
+};
+
+// Default `'true'` — see `PROFILE_GATE_ENABLED`'s doc comment above for why this lever, unlike
+// the other two on this page, defaults on.
+export const profileGateEnabled = parseProfileGateEnabled(env.PROFILE_GATE_ENABLED);

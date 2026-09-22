@@ -11,6 +11,7 @@ import { Effect, Option } from 'effect';
 import { CarpoolsRepository } from '~/repositories/CarpoolsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
+import { requireCompleteProfile } from '~/utils/requireCompleteProfile.js';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -142,6 +143,17 @@ const rpcHandlers = Effect.Do.pipe(
         Effect.Do.pipe(
           Effect.bind('team', () => resolveTeamByGuild(guild_id)),
           Effect.bind('membership', ({ team }) => resolveMember(discord_user_id, team.id)),
+          // Task 3 (`.work-plans/discord-full-onboarding.md`) — adding a car IS taking a seat
+          // (capacity is "včetně řidiče"), so it is gated the same as `Carpool/ReserveSeat`. NOT
+          // inside `resolveMember` — that would also gate `Carpool/LeaveCarpool` /
+          // `Carpool/RemoveCar`, the un-blocking actions that must always work.
+          Effect.tap(({ membership }) =>
+            requireCompleteProfile({
+              requiredByTeam: Option.getOrElse(membership.require_complete_profile, () => false),
+              isProfileComplete: membership.is_profile_complete,
+              incomplete: new CarpoolRpcModels.CarpoolProfileIncomplete(),
+            }),
+          ),
           Effect.bind('addResult', ({ membership }) =>
             carpools.addCar({
               carpoolId: carpool_id,
@@ -174,6 +186,16 @@ const rpcHandlers = Effect.Do.pipe(
         Effect.Do.pipe(
           Effect.bind('team', () => resolveTeamByGuild(guild_id)),
           Effect.bind('membership', ({ team }) => resolveMember(discord_user_id, team.id)),
+          // Task 3 (`.work-plans/discord-full-onboarding.md`) — NOT inside `resolveMember`, which
+          // is shared by all six carpool handlers including the un-blocking `Carpool/LeaveCarpool`
+          // / `Carpool/RemoveCar`.
+          Effect.tap(({ membership }) =>
+            requireCompleteProfile({
+              requiredByTeam: Option.getOrElse(membership.require_complete_profile, () => false),
+              isProfileComplete: membership.is_profile_complete,
+              incomplete: new CarpoolRpcModels.CarpoolProfileIncomplete(),
+            }),
+          ),
           Effect.tap(({ membership }) =>
             carpools.reserveSeat({
               carId: car_id,

@@ -224,6 +224,8 @@ const makeMockSqlClientLayer = () =>
               nickname: null,
               display_name: 'Coach User',
               username: null,
+              is_profile_complete: true,
+              require_complete_profile: null,
             },
           ]);
         }
@@ -235,6 +237,8 @@ const makeMockSqlClientLayer = () =>
               nickname: null,
               display_name: 'Other Coach',
               username: null,
+              is_profile_complete: true,
+              require_complete_profile: null,
             },
           ]);
         }
@@ -246,6 +250,8 @@ const makeMockSqlClientLayer = () =>
               nickname: null,
               display_name: 'Player',
               username: null,
+              is_profile_complete: true,
+              require_complete_profile: null,
             },
           ]);
         }

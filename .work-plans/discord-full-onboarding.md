@@ -290,10 +290,24 @@ restriction is for the one info channel's visibility, nothing else.
   exact pattern (`rest/roles/ensureSudoRole.ts`: list → find by name → create, deterministic
   oldest-id tiebreak, no DB row).
 * **No `discord_role_mappings` row and no Sideline `roles` row.** This is what makes it inert with
-  respect to `reconcileMemberDiscordRoles`: both of that diff's candidate lists are filtered from
-  `managed` (the team's `discord_role_mappings`), so "a Discord role with no `discord_role_mappings`
-  row is never considered, added, or removed" — the CC-8 anti-stripping guard, stated in that
-  file's own doc comment. Verified; zero interaction, by construction, with no new code.
+  respect to `reconcileMemberDiscordRoles`, and **the second half of that sentence is load-bearing**.
+
+  *Re-verified after rebasing onto `4224178e` ("let reconcile provision a role that has no Discord
+  mapping yet", #689), which changed this guarantee and invalidated the original justification.*
+  It is no longer true that "both candidate lists are filtered from `managed`":
+
+  - `unassignCandidates` **is** still filtered from `managed`, so an unmapped Discord role can never
+    be stripped — the CC-8 anti-stripping guard survives #689 intact, and it is what stops the
+    unverified role being torn off a member on every reconcile.
+  - `role_assigned` is now built from **`desired`**, not `managed`, precisely so a never-mapped
+    Sideline role can be provisioned automatically. An unmapped role is no longer ignored on the
+    *add* side.
+
+  The unverified role stays inert anyway, but now for the *other* reason: `desired` is
+  `findEffectiveRoleIdsForMember` (`member_roles` ∪ group-derived roles), and this role has **no
+  Sideline `roles` row at all**, so it can never appear in `desired`. It is in neither candidate
+  list. Keep the no-`roles`-row rule — post-#689 it, not the missing mapping, is what guarantees
+  the role is never auto-assigned.
 * **One channel**, created with the `createDiscordChannelAndRole` shape
   (`rest/channels/createChannelWithRole.ts:33`), using two constants that already exist
   (`rest/permissions.ts:11-13`, `:44-51`):
@@ -614,6 +628,13 @@ The spike (task 0) has passed. One tap, one form, no intermediate step.
     `if (row.type !== 1) continue;`; it gains a `row.type === 18` branch reading `row.component`,
     and per-component it reads `values[0]` for a select and `value` for a text input. The
     action-row branch stays — the three text inputs still ride in action rows.
+  * **Change only this file's copy, and do not unify the duplicates.** `modalValueOption` is
+    defined *locally three times* — here, in `interactions/event-create.ts:17`, and as an inline
+    `for (const row of …) if (row.type !== 1) continue` loop in `interactions/report.ts:23-25`
+    (added by #693, `38834a9d`). That duplication is what keeps this change's blast radius at
+    exactly one modal. Extracting a shared helper would push type-18 parsing into two modals that
+    have no select in them, for no benefit — it is scope creep, and it is the obvious "tidy-up" for
+    a later refactor pass to attempt. Leave the other two alone.
   * Failure copy: split the current single `bot_complete_not_member` arm into
     `bot_verify_not_member` (`CompleteProfileNotMember`) and `bot_verify_guild_not_registered`
     (`CompleteProfileGuildNotFound`); map `RpcClientError` to `bot_verify_unavailable`.
@@ -737,8 +758,11 @@ not because it is optional.
   (never `Administrator`). Export **two** functions: `findUnverifiedRole` (list → find by name →
   `Option`, never creates) for the revoke path, and `ensureUnverifiedRole` (find-or-create) for the
   grant path. No `Role/UpsertMapping`, no `discord_role_mappings`, no Sideline `roles` row — state
-  in the file's doc comment that this absence is what keeps `reconcileMemberDiscordRoles` inert
-  (CC-8 anti-stripping guard).
+  in the file's doc comment that this absence is what keeps `reconcileMemberDiscordRoles` inert,
+  and be precise about which half does the work post-#689: the missing **`roles` row** keeps it out
+  of `desired` (so it is never auto-assigned), and the missing **mapping** keeps it out of
+  `managed` (so it is never stripped — CC-8 anti-stripping). Since `4224178e`, `role_assigned` is
+  built from `desired` rather than `managed`, so the mapping alone no longer prevents assignment.
 * `applications/bot/src/rest/channels/ensureVerificationChannel.ts` — **new**. `listGuildChannels` →
   find by name (`bot_verify_channel_name`) → else `createGuildChannel` with
   `topic: bot_verify_channel_topic` and
@@ -1040,8 +1064,14 @@ the JSON, and do not re-open them:
 | `bot_complete_gender_placeholder` | `Pick one…` | `Vyber…` |
 | `bot_complete_jersey_description` | `Optional — you can add it later.` | `Nepovinné, můžeš doplnit potom.` |
 | `teamSettings_requireCompleteProfile` *(web, vykání)* | `Require a complete profile` | `Vyžadovat dokončený profil` |
-| `teamSettings_requireCompleteProfile_help` *(web, vykání)* | `Members without a name, date of birth and gender cannot RSVP, take a training or reserve a carpool seat. They get a button in Discord that walks them through it.` | `Členové bez jména, data narození a pohlaví nemohou zapisovat účast, brát si tréninky ani se zapisovat do aut. V Discordu dostanou tlačítko, které je provede vyplněním.` |
-| `rsvp_profileIncomplete` *(web, vykání)* | `Finish your profile before you sign up.` | `Než zapíšete účast, dokončete si profil.` |
+| `teamSettings_requireCompleteProfile_help` *(web, vykání)* | `Members without a name, date of birth and gender cannot RSVP, claim trainings or reserve a carpool seat. They get a button in Discord that walks them through it.` | `Členové bez jména, data narození a pohlaví nemohou zapisovat účast, brát si tréninky ani si rezervovat místo ve spolujízdě. V Discordu dostanou tlačítko, které je provede vyplněním.` |
+| `rsvp_profileIncomplete` *(web, vykání)* | `Finish your profile before you can RSVP.` | `Než zapíšete účast, dokončete svůj profil.` |
+
+<!-- Synced after Task 5 shipped. These three rows previously disagreed with design spec §6
+     ("before you sign up" / "dokončete si profil", "se zapisovat do aut"). Per the source-of-truth
+     rule above, §6 owns wording, so §6's strings are what landed in the JSON and the rows here have
+     been corrected to match. Nothing else in this table diverged. -->
+
 
 ### Existing keys whose copy changes (task 6, the modal)
 
@@ -1129,6 +1159,19 @@ deletes the channel.
 
 ## Deliberately NOT building
 
+0. **`Carpool/AssignSeat`** — found during test-writing, when `gatedWriters.test.ts` showed
+   `carpools.reserveSeat(` has **two** call sites, not the one this plan's table claimed:
+   `Carpool/ReserveSeat` and `Carpool/AssignSeat`. Only the first is gated. `AssignSeat` is the
+   *car owner* putting somebody else in a seat (`callerMembership.id !== car.owner_team_member_id`
+   → `CarpoolNotCarOwner`), so the two candidate gates are both wrong:
+   - On the **caller's** profile: redundant. The caller owns the car, and `Carpool/AddCar` is
+     already gated, so they could not have created it with an incomplete profile.
+   - On the **target's** profile: punishes the driver for someone else's unfinished profile, and
+     produces an error naming a person the driver cannot fix. The gate exists to stop an unverified
+     member *acting*, not to stop other people referring to them — by that logic every roster
+     listing would need gating too.
+
+   Correct the call-site count in `gatedWriters.test.ts`, not the gate.
 1. **Guild-wide muting of unverified members.** Not expressible as a Discord role — guild-level role
    permissions are additive only — so it means a deny overwrite on every channel that exists or will
    ever exist. Unbounded surface over channels Sideline does not own, no backout. The enforcement

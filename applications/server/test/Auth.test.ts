@@ -1327,7 +1327,10 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
         _teamId: Team.TeamId,
         _userId: Auth.UserId,
         options?: { includeInactive?: boolean },
-      ) => (options?.includeInactive === true ? Option.some(inactiveMembershipB) : Option.none()),
+      ) =>
+        options?.includeInactive === true
+          ? Option.some(inactiveMembershipB as unknown as MembershipWithRole)
+          : Option.none(),
       teamsToReturn: [{ ...teamA, id: AUTH_TEAM_ID_B, guild_id: AUTH_GUILD_B, name: 'Team B' }],
       profileComplete: true,
       guildIds: [AUTH_GUILD_B],
@@ -1368,7 +1371,10 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
         _teamId: Team.TeamId,
         _userId: Auth.UserId,
         options?: { includeInactive?: boolean },
-      ) => (options?.includeInactive === true ? Option.some(activeMembershipA) : Option.none()),
+      ) =>
+        options?.includeInactive === true
+          ? Option.some(activeMembershipA as unknown as MembershipWithRole)
+          : Option.none(),
       teamsToReturn: [teamA],
       profileComplete: true,
       guildIds: [AUTH_GUILD_A],

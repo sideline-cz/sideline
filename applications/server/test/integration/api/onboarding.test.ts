@@ -145,6 +145,8 @@ const resetStores = () => {
     active: true,
     role_names: ['Admin'],
     permissions: ['team:manage'] as any,
+    is_profile_complete: true,
+    require_complete_profile: Option.none(),
   } as MembershipWithRole);
 };
 
@@ -397,6 +399,8 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
       active: true,
       role_names: [],
       permissions: [],
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     };
     membersStore.set(id, member as MembershipWithRole);
     return Effect.succeed(member);

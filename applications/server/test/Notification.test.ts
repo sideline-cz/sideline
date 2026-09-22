@@ -117,6 +117,8 @@ const activeMembership: MembershipWithRole = {
   active: true,
   role_names: ['Player'],
   permissions: ['roster:view', 'member:view'] as readonly Role.Permission[],
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 };
 
 // ---------------------------------------------------------------------------

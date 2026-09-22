@@ -78,6 +78,8 @@ const MockPlayerTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository
           active: true,
           role_names: ['Player'],
           permissions: PLAYER_PERMISSIONS,
+          is_profile_complete: true,
+          require_complete_profile: Option.none(),
         } as MembershipWithRole),
       );
     return Effect.succeed(Option.none());
@@ -106,6 +108,8 @@ const MockCaptainTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepositor
           active: true,
           role_names: ['Captain'],
           permissions: CAPTAIN_PERMISSIONS,
+          is_profile_complete: true,
+          require_complete_profile: Option.none(),
         } as MembershipWithRole),
       );
     return Effect.succeed(Option.none());

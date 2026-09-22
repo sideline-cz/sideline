@@ -20,6 +20,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
+import { requireCompleteProfile } from '~/utils/requireCompleteProfile.js';
 import {
   isLeavingRequiredNoteResponse,
   isRsvpMessageRequiredAndMissing,
@@ -42,6 +43,7 @@ const forbidden = new EventRsvpApi.Forbidden();
 const notFound = new EventRsvpApi.EventNotFound();
 const deadlinePassed = new EventRsvpApi.RsvpDeadlinePassed();
 const messageRequired = new EventRsvpApi.RsvpMessageRequired();
+const profileIncomplete = new EventRsvpApi.RsvpProfileIncomplete();
 
 const checkGroupAccess = (
   groups: ServiceMap.Service.Shape<typeof GroupsRepository>,
@@ -177,6 +179,17 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            // Task 3 (`.work-plans/discord-full-onboarding.md`) — reads off the `membership`
+            // bind's `require_complete_profile` (the per-team `LEFT JOIN team_settings`) and
+            // `currentUser.isProfileComplete` (already free on `Auth.CurrentUserContext`), before
+            // any other precondition, so an incomplete profile reports as itself.
+            Effect.tap(({ currentUser, membership }) =>
+              requireCompleteProfile({
+                requiredByTeam: Option.getOrElse(membership.require_complete_profile, () => false),
+                isProfileComplete: currentUser.isProfileComplete,
+                incomplete: profileIncomplete,
+              }),
             ),
             Effect.bind('event', () =>
               events.findEventByIdWithDetails(eventId).pipe(

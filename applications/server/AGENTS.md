@@ -1112,20 +1112,25 @@ Rules:
 3. Derive booleans in an `Effect.let` **after** the `Effect.bind` that performs the upsert, never before — the write must not be conditional on the derived state.
 4. When two consumers of "did this change?" want different answers (e.g. a wide ephemeral hint vs. a narrow notification gate), give them two named booleans instead of overloading one — don't let a single flag's meaning drift to satisfy a new caller.
 
-## RSVP Has Two Write Surfaces — Apply Side Effects to Both
+## RSVP, Claim and Carpool Have Four Gated Writers — Apply Side Effects and Guards to All
 
-An RSVP response is written through **exactly two** handlers, and any per-response side effect MUST be added to **both** or it silently applies on only one surface:
+An RSVP response, a training claim, and a carpool seat/car are each written through their own small, fixed set of handlers, and any per-response side effect — or precondition, like the profile-completeness gate below — MUST be added to **every one of them** or it silently applies on only some surfaces:
 
-| Surface | Handler | RSVP write |
+| Surface | Handler | Write |
 |---------|---------|-----------|
 | Web HTTP | `submitRsvp` (`src/api/event-rsvp.ts`) | `rsvps.upsertRsvp(...)` |
 | Discord button | `Event/SubmitRsvp` (`src/rpc/event/index.ts`) | `svc.rsvps.upsertRsvp(...)` |
+| Discord button | `Event/ClaimTraining` (`src/rpc/event/index.ts`) | `svc.events.claimTraining(...)` |
+| Discord button | `Carpool/ReserveSeat` + `Carpool/AddCar` (`src/rpc/carpool/index.ts`) | `carpools.reserveSeat(...)` / `carpools.addCar(...)` |
 
-Reference: the consecutive missed-RSVP streak reset (`team_members.missed_rsvps`). Both handlers call `members.resetMissedRsvps(membership.id)` in a best-effort `Effect.tap` after the upsert, wrapped in `Effect.catchCause((cause) => Effect.logWarning('Failed to reset missed RSVPs, continuing', cause))` so a reset failure never fails the RSVP write.
+Reference: the consecutive missed-RSVP streak reset (`team_members.missed_rsvps`). Both RSVP handlers call `members.resetMissedRsvps(membership.id)` in a best-effort `Effect.tap` after the upsert, wrapped in `Effect.catchCause((cause) => Effect.logWarning('Failed to reset missed RSVPs, continuing', cause))` so a reset failure never fails the RSVP write.
+
+**The profile-completeness gate** (`.work-plans/discord-full-onboarding.md`) is the newest guard shared across all four writers: `src/utils/requireCompleteProfile.ts` is a pure predicate over `PROFILE_GATE_ENABLED` (the global incident lever, `env.ts`, defaults **on**), `team_settings.require_complete_profile` (the per-team opt-in, defaults **off**), and `users.is_profile_complete`. Every call site reads both booleans off the member/membership lookup it already runs (`TeamMemberLookup` in `rpc/event/index.ts`, `MembershipWithRole` in `TeamMembersRepository.ts`) — **never add a query for this**. It is deliberately **not** wired into carpool's shared `resolveMember`, which would also gate the un-blocking actions (`Carpool/LeaveCarpool`, `Carpool/RemoveCar`, `Event/UnclaimTraining`) and trap an already-in-progress member. It is also deliberately **not** on `Carpool/AssignSeat` — that is the car owner acting on someone else, not the target acting on themselves.
 
 Rules:
-1. **Any new per-response side effect (counter reset, streak update, derived flag) goes in BOTH handlers.** Grep `upsertRsvp` before shipping — two call sites in `src/` is the invariant. A side effect on only the web path leaves Discord RSVPs (the majority) unhandled.
-2. **Side effects that are not part of the RSVP's own correctness are best-effort** — `Effect.tap` after the upsert, wrapped in `Effect.catchCause(... logWarning)`. The same rule already governs roster provisioning (`provisioning.onRsvp`) on both surfaces.
+1. **Any new per-response side effect (counter reset, streak update, derived flag) goes in every handler above.** An invariant test enforces this — see `test/gatedWriters.test.ts`, which walks `src/` and asserts both the exact call-site count for each writer and that every file containing one also references `requireCompleteProfile`. Run it (or the equivalent for a new side effect) before shipping; do not rely on a human grep.
+2. **Side effects that are not part of the write's own correctness are best-effort** — `Effect.tap` after the write, wrapped in `Effect.catchCause(... logWarning)`. The same rule already governs roster provisioning (`provisioning.onRsvp`) on both RSVP surfaces.
+3. **A new gated writer must call `requireCompleteProfile` immediately after its member/membership bind**, before any other precondition, so an incomplete profile reports as itself rather than as some unrelated domain error — and must be added to `test/gatedWriters.test.ts`'s table.
 
 ## Idempotent Counter Increment Folded Into the `active`→`started` Status Flip
 

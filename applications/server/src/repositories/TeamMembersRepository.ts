@@ -69,6 +69,12 @@ export class MembershipWithRole extends Schema.Class<MembershipWithRole>('Member
   active: Schema.Boolean,
   role_names: Schemas.ArrayFromSplitString(),
   permissions: pipe(Schemas.ArrayFromSplitString(), Schema.decodeTo(Schema.Array(Role.Permission))),
+  // Task 3 (`.work-plans/discord-full-onboarding.md`) — the profile-completeness gate
+  // (`~/utils/requireCompleteProfile.ts`) reads both off this SELECT so gated writers add no
+  // extra query. `require_complete_profile` comes from a `LEFT JOIN team_settings`; a team with
+  // no `team_settings` row decodes as `None`, which the helper treats as "off".
+  is_profile_complete: Schema.Boolean,
+  require_complete_profile: Schema.OptionFromNullOr(Schema.Boolean),
 }) {}
 
 // PR-9 / CC-15: what `auth.myTeams` needs to derive `Auth.UserTeam.discordJoined` (the tri-state
@@ -188,10 +194,13 @@ const make = Effect.gen(function* () {
     Request: MembershipQuery,
     Result: MembershipWithRole,
     execute: (input) =>
-      sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active,
+      sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active, u.is_profile_complete,
+                   ts.require_complete_profile,
                    ${sql.unsafe(effectiveRoleNamesAgg('tm'))} AS role_names,
                    ${sql.unsafe(effectivePermissionsAgg('tm'))} AS permissions
             FROM team_members tm
+            JOIN users u ON u.id = tm.user_id
+            LEFT JOIN team_settings ts ON ts.team_id = tm.team_id
             WHERE tm.team_id = ${input.team_id}
               AND tm.user_id = ${input.user_id}
               AND (${input.include_inactive} OR tm.active = true)`,
@@ -201,11 +210,13 @@ const make = Effect.gen(function* () {
     Request: MembershipByDiscordQuery,
     Result: MembershipWithRole,
     execute: (input) =>
-      sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active,
+      sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active, u.is_profile_complete,
+                   ts.require_complete_profile,
                    ${sql.unsafe(effectiveRoleNamesAgg('tm'))} AS role_names,
                    ${sql.unsafe(effectivePermissionsAgg('tm'))} AS permissions
             FROM team_members tm
             JOIN users u ON u.id = tm.user_id
+            LEFT JOIN team_settings ts ON ts.team_id = tm.team_id
             WHERE tm.team_id = ${input.team_id}
               AND u.discord_id = ${input.discord_id}
               AND tm.active = true`,

@@ -136,6 +136,8 @@ membersStore.set(`${TEST_TEAM_ID}:${TEST_ADMIN_ID}`, {
     'role:view',
     'role:manage',
   ] as readonly Role.Permission[],
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 });
 
 const TEST_GROUP_ID = '00000000-0000-0000-0000-000000000040' as GroupModel.GroupId;
@@ -274,6 +276,8 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
       active: input.active,
       role_names: ['Player'],
       permissions: ['roster:view', 'member:view'] as readonly Role.Permission[],
+      is_profile_complete: true,
+      require_complete_profile: Option.none(),
     };
     membersStore.set(key, member);
     return Effect.succeed({
@@ -1400,6 +1404,8 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
     active: false,
     role_names: [],
     permissions: [],
+    is_profile_complete: true,
+    require_complete_profile: Option.none(),
   };
 
   const rejoinSessions = new Map<string, Auth.UserId>();
@@ -1908,6 +1914,8 @@ describe('Invite API — resolveOrCreateAcceptance / requiresReauth gating (TDD:
     active: true,
     role_names: ['Player'],
     permissions: [],
+    is_profile_complete: true,
+    require_complete_profile: Option.none(),
   };
 
   type Pr4AcceptanceRecord = {
@@ -2403,6 +2411,8 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
     active: true,
     role_names: ['Player'],
     permissions: [],
+    is_profile_complete: true,
+    require_complete_profile: Option.none(),
   };
 
   const Pr5TeamMembersLayer = Layer.succeed(TeamMembersRepository, {

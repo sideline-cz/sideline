@@ -183,6 +183,8 @@ const testMembership: MembershipWithRole = {
   active: true,
   permissions: [...ADMIN_PERMISSIONS],
   role_names: ['Admin'],
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
 };
 
 const MockICalTokensRepositoryLayer = Layer.succeed(ICalTokensRepository, {

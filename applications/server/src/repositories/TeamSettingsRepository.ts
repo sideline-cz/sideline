@@ -43,6 +43,10 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   /** `HH:MM` in the team's own `timezone`, same convention as
    * `rsvp_reminder_time`. */
   rules_quiz_time: Schema.String,
+  // Task 3 (`.work-plans/discord-full-onboarding.md`) — the captain's opt-in for the
+  // profile-completeness gate (RSVP / training claim / carpool seat). DEFAULT false on the
+  // migration, so no existing team is affected until its captain flips it.
+  require_complete_profile: Schema.Boolean,
 }) {}
 
 /** One team with the scheduled rules quiz enabled, plus everything the cron
@@ -95,6 +99,7 @@ const TeamSettingsUpsertInput = Schema.Struct({
   rules_quiz_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   rules_quiz_interval_days: Schema.Number,
   rules_quiz_time: Schema.String,
+  require_complete_profile: Schema.Boolean,
 });
 
 class EventNeedingClaimRequest extends Schema.Class<EventNeedingClaimRequest>(
@@ -175,7 +180,8 @@ const make = Effect.gen(function* () {
              max_missed_rsvps,
              rules_quiz_channel_id,
              rules_quiz_interval_days,
-             TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time
+             TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time,
+             require_complete_profile
       FROM team_settings
       WHERE team_id = ${teamId}
     `,
@@ -234,7 +240,8 @@ const make = Effect.gen(function* () {
                                  max_missed_rsvps,
                                  rules_quiz_channel_id,
                                  rules_quiz_interval_days,
-                                 rules_quiz_time)
+                                 rules_quiz_time,
+                                 require_complete_profile)
       VALUES (${input.team_id}, ${input.event_horizon_days},
               ${input.min_players_threshold},
               ${input.rsvp_reminders_enabled},
@@ -257,7 +264,8 @@ const make = Effect.gen(function* () {
               ${input.max_missed_rsvps},
               ${input.rules_quiz_channel_id},
               ${input.rules_quiz_interval_days},
-              ${input.rules_quiz_time})
+              ${input.rules_quiz_time},
+              ${input.require_complete_profile})
       ON CONFLICT (team_id) DO UPDATE SET
         event_horizon_days = ${input.event_horizon_days},
         min_players_threshold = ${input.min_players_threshold},
@@ -285,6 +293,7 @@ const make = Effect.gen(function* () {
         rules_quiz_channel_id = ${input.rules_quiz_channel_id},
         rules_quiz_interval_days = ${input.rules_quiz_interval_days},
         rules_quiz_time = ${input.rules_quiz_time},
+        require_complete_profile = ${input.require_complete_profile},
         updated_at = now()
       RETURNING team_id, event_horizon_days,
                 min_players_threshold,
@@ -308,7 +317,8 @@ const make = Effect.gen(function* () {
                 max_missed_rsvps,
                 rules_quiz_channel_id,
                 rules_quiz_interval_days,
-                TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time
+                TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time,
+                require_complete_profile
     `,
   });
 
@@ -450,6 +460,7 @@ const make = Effect.gen(function* () {
     rulesQuizChannelId = Option.none<Discord.Snowflake>(),
     rulesQuizIntervalDays = 7,
     rulesQuizTime = '18:00',
+    requireCompleteProfile = false,
   }: {
     teamId: Team.TeamId;
     eventHorizonDays: number;
@@ -478,6 +489,7 @@ const make = Effect.gen(function* () {
     rulesQuizChannelId?: Option.Option<Discord.Snowflake>;
     rulesQuizIntervalDays?: number;
     rulesQuizTime?: string;
+    requireCompleteProfile?: boolean;
   }) =>
     _upsertSettings({
       team_id: teamId,
@@ -507,6 +519,7 @@ const make = Effect.gen(function* () {
       rules_quiz_channel_id: rulesQuizChannelId,
       rules_quiz_interval_days: rulesQuizIntervalDays,
       rules_quiz_time: rulesQuizTime,
+      require_complete_profile: requireCompleteProfile,
     }).pipe(catchSqlErrors);
 
   const getHorizonDays = (teamId: Team.TeamId) =>

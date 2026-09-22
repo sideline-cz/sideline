@@ -67,6 +67,10 @@ export const requireReadAccess = <E>(
                       active: true,
                       role_names: ['Global Admin'],
                       permissions: VIEW_PERMISSIONS,
+                      // Synthetic membership — no real `users`/`team_settings` row behind it.
+                      // The profile gate never applies to a global admin's read access.
+                      is_profile_complete: true,
+                      require_complete_profile: Option.none(),
                     }),
                   )
                 : Effect.fail(forbidden).pipe(

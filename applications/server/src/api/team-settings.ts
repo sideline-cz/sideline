@@ -60,6 +60,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordPersonalEventsGroupId: Option.none(),
                     discordPersonalEventsChannelFormat: DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
                     discordEventsChannelId: Option.none(),
+                    requireCompleteProfile: false,
                   }),
                 onSome: (s) =>
                   new TeamSettingsApi.TeamSettingsInfo({
@@ -90,6 +91,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordPersonalEventsGroupId: s.discord_personal_events_group_id,
                     discordPersonalEventsChannelFormat: s.discord_personal_events_channel_format,
                     discordEventsChannelId: s.discord_events_channel_id,
+                    requireCompleteProfile: s.require_complete_profile,
                   }),
               }),
             ),
@@ -195,6 +197,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                             // Transitional: kept only so the full-row upsert doesn't NULL this column;
                             // removed in Release B together with the column itself.
                             discordEventsChannelId: Option.flatten(payload.discordEventsChannelId),
+                            requireCompleteProfile: Option.getOrElse(
+                              payload.requireCompleteProfile,
+                              () => false,
+                            ),
                           }),
                         onSome: (s) =>
                           settings.upsert({
@@ -307,6 +313,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                               onNone: () => s.discord_events_channel_id,
                               onSome: (v) => v,
                             }),
+                            requireCompleteProfile: Option.getOrElse(
+                              payload.requireCompleteProfile,
+                              () => s.require_complete_profile,
+                            ),
                           }),
                       }).pipe(
                         // Timezone change re-anchors this team's all-day events —
@@ -426,6 +436,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   discordPersonalEventsGroupId: result.discord_personal_events_group_id,
                   discordPersonalEventsChannelFormat: result.discord_personal_events_channel_format,
                   discordEventsChannelId: result.discord_events_channel_id,
+                  requireCompleteProfile: result.require_complete_profile,
                 }),
             ),
             Effect.catchTag(

@@ -41,6 +41,7 @@ import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
 import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
+import { requireCompleteProfile } from '~/utils/requireCompleteProfile.js';
 import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 import {
   isLeavingRequiredNoteResponse,
@@ -60,6 +61,15 @@ class TeamMemberLookup extends Schema.Class<TeamMemberLookup>('TeamMemberLookup'
   nickname: Schema.OptionFromNullOr(Schema.String),
   display_name: Schema.OptionFromNullOr(Schema.String),
   username: Schema.OptionFromNullOr(Schema.String),
+  // Task 3 (`.work-plans/discord-full-onboarding.md`) — the profile-completeness gate reads both
+  // off this same lookup, so gated writers (`Event/SubmitRsvp`, `Event/ClaimTraining`) add no
+  // extra query. `require_complete_profile` comes from a `LEFT JOIN team_settings`; a team with
+  // no `team_settings` row decodes as `None`, which the helper treats as "off". Every one of this
+  // class's five SELECTs carries both columns — three of them (`UnclaimTraining`,
+  // `Approve`/`DeclineRosterRequest`) are not gated and simply carry unread columns; that is the
+  // price of one shared lookup class.
+  is_profile_complete: Schema.Boolean,
+  require_complete_profile: Schema.OptionFromNullOr(Schema.Boolean),
 }) {}
 
 const getRsvpCounts = (
@@ -423,6 +433,51 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               message,
             }),
           ),
+          // Task 2 (`.work-plans/discord-full-onboarding.md`) — `member` is bound BEFORE `event`
+          // and the deadline tap below, not after. The profile gate (Task 3) reads off `member`
+          // and must report before any other precondition, so an incomplete profile is reported
+          // as itself rather than as `RsvpEventNotFound` / `RsvpDeadlinePassed`. This also matches
+          // `Event/ClaimTraining`'s existing order in this same file (it already binds `member`
+          // first). Behaviour change: a non-member now fails `RsvpMemberNotFound` where they
+          // previously failed `RsvpEventNotFound` (deleted event) or `RsvpDeadlinePassed` (closed
+          // event) — strictly more accurate.
+          Effect.bind('member', () =>
+            SqlSchema.findOne({
+              Request: Schema.Struct({
+                discord_user_id: Schema.String,
+                team_id: Schema.String,
+              }),
+              Result: TeamMemberLookup,
+              execute: (input) => svc.sql`
+                SELECT tm.id,
+                       u.name,
+                       u.discord_nickname AS nickname,
+                       u.discord_display_name AS display_name,
+                       u.username,
+                       u.is_profile_complete,
+                       ts.require_complete_profile
+                FROM team_members tm
+                JOIN users u ON u.id = tm.user_id
+                LEFT JOIN team_settings ts ON ts.team_id = tm.team_id
+                WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
+              `,
+            })({
+              discord_user_id,
+              team_id,
+            }).pipe(
+              Effect.catchTag('NoSuchElementError', () =>
+                Effect.fail(new EventRpcModels.RsvpMemberNotFound()),
+              ),
+              Effect.mapError(() => new EventRpcModels.RsvpMemberNotFound()),
+            ),
+          ),
+          Effect.tap(({ member }) =>
+            requireCompleteProfile({
+              requiredByTeam: Option.getOrElse(member.require_complete_profile, () => false),
+              isProfileComplete: member.is_profile_complete,
+              incomplete: new EventRpcModels.RsvpProfileIncomplete(),
+            }),
+          ),
           Effect.bind('event', () =>
             svc.events.findEventByIdWithDetails(event_id).pipe(
               Effect.tap((event) => Effect.logInfo('Found event by id', event)),
@@ -438,33 +493,6 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
             !eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe())
               ? Effect.fail(new EventRpcModels.RsvpDeadlinePassed())
               : Effect.void,
-          ),
-          Effect.bind('member', () =>
-            SqlSchema.findOne({
-              Request: Schema.Struct({
-                discord_user_id: Schema.String,
-                team_id: Schema.String,
-              }),
-              Result: TeamMemberLookup,
-              execute: (input) => svc.sql`
-                SELECT tm.id,
-                       u.name,
-                       u.discord_nickname AS nickname,
-                       u.discord_display_name AS display_name,
-                       u.username
-                FROM team_members tm
-                JOIN users u ON u.id = tm.user_id
-                WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
-              `,
-            })({
-              discord_user_id,
-              team_id,
-            }).pipe(
-              Effect.catchTag('NoSuchElementError', () =>
-                Effect.fail(new EventRpcModels.RsvpMemberNotFound()),
-              ),
-              Effect.mapError(() => new EventRpcModels.RsvpMemberNotFound()),
-            ),
           ),
           Effect.tap(({ event, member }) =>
             Option.match(event.member_group_id, {
@@ -1224,9 +1252,12 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                        u.name,
                        u.discord_nickname AS nickname,
                        u.discord_display_name AS display_name,
-                       u.username
+                       u.username,
+                       u.is_profile_complete,
+                       ts.require_complete_profile
                 FROM team_members tm
                 JOIN users u ON u.id = tm.user_id
+                LEFT JOIN team_settings ts ON ts.team_id = tm.team_id
                 WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
               `,
             })({
@@ -1238,6 +1269,15 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               ),
               Effect.mapError(() => new EventRpcModels.ClaimNotOwnerGroupMember()),
             ),
+          ),
+          // Task 3 (`.work-plans/discord-full-onboarding.md`) — reads off the `member` bind
+          // above, immediately, before any other precondition.
+          Effect.tap(({ member }) =>
+            requireCompleteProfile({
+              requiredByTeam: Option.getOrElse(member.require_complete_profile, () => false),
+              isProfileComplete: member.is_profile_complete,
+              incomplete: new EventRpcModels.ClaimProfileIncomplete(),
+            }),
           ),
           Effect.bind('event', () =>
             svc.events.findEventByIdWithDetails(event_id).pipe(
@@ -1376,9 +1416,12 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                        u.name,
                        u.discord_nickname AS nickname,
                        u.discord_display_name AS display_name,
-                       u.username
+                       u.username,
+                       u.is_profile_complete,
+                       ts.require_complete_profile
                 FROM team_members tm
                 JOIN users u ON u.id = tm.user_id
+                LEFT JOIN team_settings ts ON ts.team_id = tm.team_id
                 WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
               `,
             })({
@@ -1659,9 +1702,12 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                        u.name,
                        u.discord_nickname AS nickname,
                        u.discord_display_name AS display_name,
-                       u.username
+                       u.username,
+                       u.is_profile_complete,
+                       ts.require_complete_profile
                 FROM team_members tm
                 JOIN users u ON u.id = tm.user_id
+                LEFT JOIN team_settings ts ON ts.team_id = tm.team_id
                 WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
               `,
             })({ discord_user_id: decided_by_discord_id, team_id: event.team_id }).pipe(
@@ -1737,9 +1783,12 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                        u.name,
                        u.discord_nickname AS nickname,
                        u.discord_display_name AS display_name,
-                       u.username
+                       u.username,
+                       u.is_profile_complete,
+                       ts.require_complete_profile
                 FROM team_members tm
                 JOIN users u ON u.id = tm.user_id
+                LEFT JOIN team_settings ts ON ts.team_id = tm.team_id
                 WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
               `,
             })({ discord_user_id: decided_by_discord_id, team_id: event.team_id }).pipe(

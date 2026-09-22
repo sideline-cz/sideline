@@ -212,6 +212,8 @@ const membership = (
     active: true,
     role_names: ['Custom'],
     permissions,
+    is_profile_complete: true,
+    require_complete_profile: Option.none(),
   }) as MembershipWithRole;
 
 const membersStore = new Map<TeamMember.TeamMemberId, MembershipWithRole>([
