@@ -22,21 +22,17 @@
 //     `markStalePersonalMessagesDirty` sweep, each claim-then-act inside one
 //     `sql.withTransaction`.
 //
-// KNOWN GAP, stated explicitly rather than faked: the "crash between claim and
-// act double-penalises" atomicity case (§7.7f case 6 / §7.12 case 9) requires
-// injecting a failure INSIDE the transaction after the claim commits — that
-// needs an implementation-specific seam (e.g. a test-only failing hook) that
-// does not exist yet and cannot be added from the repository's public surface
-// alone. It is not covered here; flag it for the developer to add a
-// unit-level test alongside the real implementation (e.g. by making the
-// per-event increment injectable, or testing the transaction boundary via a
-// raw SQL fault injection). The "old-code-flip-safety" and "idempotent
-// re-run" cases below indirectly build confidence in the same claim-based
-// design without needing that seam.
+// The "crash between claim and act double-penalises" atomicity case (§7.7f
+// case 6 / §7.12 case 9) was long listed here as a known gap, on the reasoning
+// that it needed a test-only seam inside the implementation. It does not: the
+// act half of each sweep is a call into ANOTHER repository, so overriding that
+// one repository with a failing layer injects the failure exactly where it is
+// needed, from the outside (R1/R2 at the bottom of this file). The two-replica
+// race is covered beside it (C1/C2).
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Team, User } from '@sideline/domain';
-import { DateTime, Effect, Layer, Option } from 'effect';
+import { DateTime, Deferred, Effect, Fiber, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
@@ -48,7 +44,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { makeEventStartCronEffect } from '~/services/EventStartCron.js';
-import { cleanDatabase, TestPgClient } from '../helpers.js';
+import { cleanDatabase, secondTestPgClient, TestPgClient } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // FIXED_NOW — one pinned instant, shared by every fixture AND the cron itself
@@ -90,7 +86,12 @@ const FIXED_NOW = new Date('2025-10-15T10:00:00.000Z');
 // every assertion on a stamp below checks only `.not.toBeNull()` /
 // `.toBeNull()`, never a stamp's value.
 
-const TestLayer = Layer.mergeAll(
+// Split from `TestLayer` so the two-replica cases below can rebuild the same
+// repository set over a SECOND Postgres connection (`secondTestPgClient`) —
+// `Layer.provideMerge(TestPgClient)` bakes the suite's connection in, and two
+// fibers sharing one `SqlClient` share one session, which can never observe a
+// real row-lock wait between them (see `helpers.ts`).
+const RepositoryLayers = Layer.mergeAll(
   EventsRepository.Default,
   EventSyncEventsRepository.Default,
   EventRsvpsRepository.Default,
@@ -99,7 +100,9 @@ const TestLayer = Layer.mergeAll(
   TeamMembersRepository.Default,
   TeamsRepository.Default,
   UsersRepository.Default,
-).pipe(Layer.provideMerge(TestPgClient));
+);
+
+const TestLayer = RepositoryLayers.pipe(Layer.provideMerge(TestPgClient));
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
 
@@ -1326,5 +1329,221 @@ describe('EventStartCron — I7-I10: team-local-midnight boundary, missed-RSVP s
         ),
         Effect.provide(TestLayer),
       ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Rollback-after-claim and two-replica concurrency — the two paths the file
+// header above listed as a KNOWN GAP ("no test injects a failure AFTER the
+// claim commits", "no two-replica concurrency test"). Both sweeps claim by
+// stamping inside one `sql.withTransaction`, so:
+//   - if the act half fails, the claim must roll back with it and the event
+//     must be swept again on the next cycle (nothing is silently swallowed);
+//   - if two replicas sweep the same event at once, the conditional
+//     `WHERE … IS NULL` UPDATE must let exactly one of them act.
+// Neither is observable through a mocked repository — both are transaction
+// and row-lock behaviour, so they live here.
+// ---------------------------------------------------------------------------
+
+// Overrides ONLY the method each sweep's "act" half calls. The cron resolves
+// nothing else from these repositories, so the rest of the surface is
+// deliberately absent rather than stubbed.
+const FailingEmitSyncLayer = Layer.succeed(EventSyncEventsRepository, {
+  emitEventStarted: () => Effect.fail(new Error('injected emitEventStarted failure')),
+} as any);
+
+const FailingIncrementRsvpsLayer = Layer.succeed(EventRsvpsRepository, {
+  incrementMissedForEventNonRespondersByEventId: () =>
+    Effect.fail(new Error('injected incrementMissed failure')),
+} as any);
+
+// A second replica: the same cron, over the same database, on a genuinely
+// separate Postgres session. `Effect.scoped` closes that connection when the
+// cycle ends.
+const runCronOnSecondConnection = (now: Date) =>
+  Effect.scoped(
+    secondTestPgClient.pipe(
+      Effect.flatMap((sql2) =>
+        makeEventStartCronEffect(now).pipe(
+          Effect.provide(RepositoryLayers),
+          Effect.provideService(SqlClient.SqlClient, sql2),
+        ),
+      ),
+    ),
+  );
+
+describe('EventStartCron — a failure after the claim rolls the claim back', () => {
+  it.effect(
+    'R1: "Dnes" post sweep — emitEventStarted fails → all_day_post_sent_at stays NULL, and the next cycle posts exactly once',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('490000000000000032', 'cron-owner-r1')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('491010101010101032' as Discord.Snowflake, ownerId),
+        ),
+        Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+        Effect.tap(({ team }) => setAllDayPostTime(team.id, '01:00:00')),
+        Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+        Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
+        Effect.bind('event', ({ team, ownerMember, start }) =>
+          insertStartedAllDayEvent(team.id, (ownerMember as any).id, start),
+        ),
+        // The cron catches the sweep's failure and keeps going, so this run
+        // succeeds — what must NOT survive it is the claim.
+        Effect.tap(() => runCron().pipe(Effect.provide(FailingEmitSyncLayer))),
+        Effect.bind('stampsAfterFailure', ({ event }) => getStamps(event.id)),
+        Effect.bind('emittedAfterFailure', ({ event }) => countStartedSyncEvents(event.id)),
+        Effect.tap(({ stampsAfterFailure, emittedAfterFailure }) =>
+          Effect.sync(() => {
+            expect(stampsAfterFailure.all_day_post_sent_at).toBeNull();
+            expect(emittedAfterFailure).toBe(0);
+          }),
+        ),
+        // Next minute, with the emit working again: the released claim is retaken.
+        Effect.tap(() => runCron()),
+        Effect.bind('stampsAfterRetry', ({ event }) => getStamps(event.id)),
+        Effect.bind('emittedAfterRetry', ({ event }) => countStartedSyncEvents(event.id)),
+        Effect.tap(({ stampsAfterRetry, emittedAfterRetry }) =>
+          Effect.sync(() => {
+            expect(stampsAfterRetry.all_day_post_sent_at).not.toBeNull();
+            expect(emittedAfterRetry).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'R2: missed-RSVP sweep — the increment fails → missed_rsvp_counted_at stays NULL, and the next cycle counts exactly once',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('490000000000000033', 'cron-owner-r2')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('491010101010101033' as Discord.Snowflake, ownerId),
+        ),
+        Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+        Effect.bind('nonResponderId', () => createUser('490000000000000034', 'cron-nonresp-r2')),
+        Effect.bind('nonResponderMember', ({ team, nonResponderId }) =>
+          addTeamMember(team.id, nonResponderId),
+        ),
+        Effect.tap(({ team, nonResponderMember }) =>
+          assignPlayerRole(team.id, (nonResponderMember as any).id),
+        ),
+        Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+        Effect.bind('start', () => localMidnight('Europe/Prague', -2)),
+        Effect.bind('event', ({ team, ownerMember, start }) =>
+          insertStartedAllDayEvent(team.id, (ownerMember as any).id, start),
+        ),
+        Effect.tap(() => runCron().pipe(Effect.provide(FailingIncrementRsvpsLayer))),
+        Effect.bind('stampsAfterFailure', ({ event }) => getStamps(event.id)),
+        Effect.bind('missedAfterFailure', ({ nonResponderMember }) =>
+          getMissedRsvps((nonResponderMember as any).id),
+        ),
+        Effect.tap(({ stampsAfterFailure, missedAfterFailure }) =>
+          Effect.sync(() => {
+            expect(stampsAfterFailure.missed_rsvp_counted_at).toBeNull();
+            expect(missedAfterFailure).toBe(0);
+          }),
+        ),
+        Effect.tap(() => runCron()),
+        Effect.bind('stampsAfterRetry', ({ event }) => getStamps(event.id)),
+        Effect.bind('missedAfterRetry', ({ nonResponderMember }) =>
+          getMissedRsvps((nonResponderMember as any).id),
+        ),
+        Effect.tap(({ stampsAfterRetry, missedAfterRetry }) =>
+          Effect.sync(() => {
+            expect(stampsAfterRetry.missed_rsvp_counted_at).not.toBeNull();
+            expect(missedAfterRetry).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+// `Effect.gen` rather than the file's usual `Effect.Do.pipe`: both cases below
+// choreograph forked fibers, which reads as a sequence, not as a pipeline.
+describe('EventStartCron — two replicas sweeping the same events at once', () => {
+  it.effect(
+    'C1: two full cron cycles, two Postgres sessions, in parallel → one post, one missed-RSVP increment',
+    () =>
+      Effect.gen(function* () {
+        const ownerId = yield* createUser('490000000000000035', 'cron-owner-c1');
+        const team = yield* createTeam('491010101010101034' as Discord.Snowflake, ownerId);
+        yield* setTeamTimezone(team.id, 'Europe/Prague');
+        yield* setAllDayPostTime(team.id, '01:00:00');
+        const nonResponderId = yield* createUser('490000000000000036', 'cron-nonresp-c1');
+        const nonResponderMember: any = yield* addTeamMember(team.id, nonResponderId);
+        yield* assignPlayerRole(team.id, nonResponderMember.id);
+        const ownerMember: any = yield* addTeamMember(team.id, ownerId);
+
+        // One event for each sweep: two local days ago (missed-RSVP counter due)
+        // and today past the post time ("Dnes" post due).
+        const pastStart = yield* localMidnight('Europe/Prague', -2);
+        const todayStart = yield* localMidnight('Europe/Prague', 0);
+        const pastEvent = yield* insertStartedAllDayEvent(team.id, ownerMember.id, pastStart);
+        const todayEvent = yield* insertStartedAllDayEvent(team.id, ownerMember.id, todayStart);
+
+        // End-to-end, but NOT the deterministic half: whether the two cycles
+        // genuinely overlap on the claim is up to the scheduler, and if both
+        // replicas' finders run after the winner has committed, the finder's own
+        // `… IS NULL` filter hides a weakened claim. C2 below pins that directly.
+        yield* Effect.all([runCron(), runCronOnSecondConnection(FIXED_NOW)], {
+          concurrency: 'unbounded',
+        });
+
+        expect(yield* countStartedSyncEvents(todayEvent.id)).toBe(1);
+        expect(yield* getMissedRsvps(nonResponderMember.id)).toBe(1);
+        expect((yield* getStamps(todayEvent.id)).all_day_post_sent_at).not.toBeNull();
+        expect((yield* getStamps(pastEvent.id)).missed_rsvp_counted_at).not.toBeNull();
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'C2: a claim held open by one replica blocks the other, which then finds nothing left to claim',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const ownerId = yield* createUser('490000000000000037', 'cron-owner-c2');
+          const team = yield* createTeam('491010101010101035' as Discord.Snowflake, ownerId);
+          yield* setTeamTimezone(team.id, 'Europe/Prague');
+          const ownerMember: any = yield* addTeamMember(team.id, ownerId);
+          const start = yield* localMidnight('Europe/Prague', 0);
+          const event = yield* insertStartedAllDayEvent(team.id, ownerMember.id, start);
+
+          const repoA = yield* EventsRepository.asEffect();
+          const sql2 = yield* secondTestPgClient;
+          const repoB = yield* EventsRepository.asEffect().pipe(
+            Effect.provide(EventsRepository.Default),
+            Effect.provideService(SqlClient.SqlClient, sql2),
+          );
+
+          const claimed = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+
+          // Replica A claims and parks INSIDE its transaction — exactly the window
+          // in which the real sweep resolves Discord and emits.
+          const fiberA = yield* Effect.forkChild(
+            repoA.withTransaction(
+              repoA.claimStartedPost(event.id).pipe(
+                Effect.tap(() => Deferred.succeed(claimed, undefined)),
+                Effect.tap(() => Deferred.await(release)),
+              ),
+            ),
+          );
+          yield* Deferred.await(claimed);
+
+          // Replica B claims the same row on its own session: it blocks on A's
+          // uncommitted row until A commits, then re-checks `IS NULL` and loses.
+          const fiberB = yield* Effect.forkChild(repoB.claimStartedPost(event.id));
+          yield* Deferred.succeed(release, undefined);
+
+          const resultA = yield* Fiber.join(fiberA);
+          const resultB = yield* Fiber.join(fiberB);
+
+          expect(Option.isSome(resultA)).toBe(true);
+          expect(Option.isNone(resultB)).toBe(true);
+        }),
+      ).pipe(Effect.provide(TestLayer)),
   );
 });
