@@ -681,50 +681,83 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 
 **Czech command name:** `dokoncit`
 
-**Options:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `gender` | String (choices: Male / Female / Other) | Yes | The member's gender |
+**Options:** none. Gender used to be a required command option (`gender:<male|female|other>`); it now lives inside the modal itself (see below) so the command is a single tap that always opens the same modal.
 
 **Constraints:**
 - `dm_permission: false` — the command cannot be used in DMs.
 
 **Flow:**
 
-1. User invokes `/complete gender:<choice>`.
-2. The command handler (`applications/bot/src/commands/complete/handler.ts`) opens a Discord modal with `custom_id` `profile-complete:{gender}` (the chosen gender is round-tripped through the custom ID rather than persisted at this step).
-3. The modal contains three text input fields:
+1. User invokes `/complete`. The same modal is also reachable without the slash command: from the **Finish my profile** button on a blocked-action ephemeral (see "Profile-Completeness Gate" below), on the welcome message (when the gate is on and the profile is incomplete), and on the pinned card of the read-only `#start-here` channel (`ProfileVerifyButton` / `profile-verify`, `applications/bot/src/interactions/profile-verify.ts`).
+2. The handler (`buildProfileCompleteModal`, `applications/bot/src/commands/complete/modal.ts`) opens a Discord modal with the stateless `custom_id` `profile-complete` (previously `profile-complete:{gender}`, with the gender round-tripped through the custom ID; that string is no longer parsed at all).
+3. The modal contains three `type: 1` text input rows plus one `type: 18` Label component wrapping a gender select:
 
-   | Field `custom_id` | Label | Required | Max length | Style |
-   |-------------------|-------|----------|------------|-------|
-   | `profile_name` | Name | Yes | 100 | Single-line |
-   | `profile_birth_date` | Date of birth (YYYY-MM-DD) | Yes | 10 | Single-line (placeholder: `2005-08-24`) |
-   | `profile_jersey_number` | Jersey number (optional) | No | 2 | Single-line (placeholder: `e.g. 7`) |
+   | Field `custom_id` | Label | Required | Shape | Notes |
+   |-------------------|-------|----------|-------|-------|
+   | `profile_name` | Name | Yes | Single-line text, max 100 | — |
+   | `profile_birth_date` | Date of birth | Yes | Single-line text, max 10 | Accepts ISO `YYYY-MM-DD` or Czech `D. M. YYYY` / `D.M.YYYY` (normalised to ISO before validation; a `/` separator is rejected — ambiguous between DD/MM and MM/DD) |
+   | `profile_jersey_number` | Jersey number (optional) | No | Single-line text, max 2 | Blank means "leave unchanged" |
+   | `profile_gender` | Gender | Yes | `type: 3` string select inside a `type: 18` Label, options Male/Female/Other | Replaces the old command option |
 
-4. User submits the modal. The modal submit handler (`ProfileCompleteModal` in `applications/bot/src/interactions/profile-complete.ts`) sends an immediate deferred ephemeral response, then forks a background fiber.
-5. The bot re-decodes the gender from the custom ID (`User.Gender`), the name (non-blank, trimmed), the birth date with the shared `Auth.BirthDateString` schema (strict `YYYY-MM-DD`, real calendar date, after 1900-01-01, at least `Auth.MIN_AGE` years old), and — if provided — the jersey number with `TeamMember.JerseyNumber` (integer 0–99). A blank jersey number field means "leave unchanged". Any parse failure updates the deferred message with a localized error and never reaches the RPC.
-6. On success the fiber calls `Guild/CompleteMemberProfile` RPC with `guild_id`, `discord_user_id`, `name`, `birth_date`, `gender`, and `jersey_number`.
+4. User submits the modal. The modal submit handler (`ProfileCompleteModal` in `applications/bot/src/interactions/profile-complete.ts`, registered on `Ix.id('profile-complete')`) sends an immediate deferred ephemeral response, then forks a background fiber.
+5. The bot re-validates client-side, in this order: the gender select value (missing selection or an undecodable value → `bot_verify_gender_missing`), the name (non-blank, trimmed), the birth date, and the jersey number (`TeamMember.JerseyNumber`, integer 0–99). The birth date is first normalised from the Czech `D. M. YYYY` pattern to ISO if it matches, then decoded with the shared `Auth.BirthDateString` schema (real calendar date, after 1900-01-01, at least `Auth.MIN_AGE` years old); a value that is well-formed but fails only the age floor is tagged `'too_young'` (message `bot_verify_too_young`) rather than the generic `'invalid'` (`bot_verify_invalid_date`). Any parse failure updates the deferred message with a localized error and never reaches the RPC.
+6. On success the fiber calls `Guild/CompleteMemberProfile` RPC with `guild_id`, `discord_user_id`, `name`, `birth_date`, `gender`, and `jersey_number`, then (in parallel with formatting the confirmation) resolves and revokes the caller's "Sideline Unverified" Discord role if held — resolve-only (never creates), best-effort, and never surfaced to the user on failure; a failed revoke self-heals on the member's next guild join or next `/complete` (see "Unverified Role and Verification Channel" below).
 7. The ephemeral message is updated with a localized confirmation echoing the saved name, birth date, gender, and jersey number (if set).
 
 **Behavior notes:**
 - All responses are **ephemeral** — visible only to the invoking user.
-- `/complete` is now a Discord-native alternative to the web onboarding flow (`POST /auth/profile`): it writes `name`, `birth_date`, and `gender` via `UsersRepository.completeProfile` and sets `is_profile_complete = true`, exactly like completing the web onboarding form. It can also be re-run afterwards to update birth date, gender, name, or jersey number.
+- `/complete` is a Discord-native alternative to the web onboarding flow (`POST /auth/profile`): it writes `name`, `birth_date`, and `gender` via `UsersRepository.completeProfile` and sets `is_profile_complete = true`, exactly like completing the web onboarding form. It can also be re-run afterwards to update birth date, gender, name, or jersey number.
 - Server-side validation (via the same `Auth.BirthDateString` and `TeamMember.JerseyNumber` schemas) is authoritative; the RPC payload itself is intentionally permissive (`string`/`number`) so the bot never risks a raw schema-decode defect when calling it.
 - The user's name, birth date, and gender are written to `users` (and `is_profile_complete` is set to `true`) via `completeProfile`; the jersey number (when provided) is written to the caller's `team_members` row for the guild's team via `setJerseyNumber`. Both writes happen in a single database transaction.
+- Reading a modal field now has to walk two component shapes: `modalValueOption` (`applications/bot/src/interactions/profile-complete.ts`) checks `type: 1` action rows for the three text fields and `type: 18` Label components (reading `.component.values[0]`) for the gender select.
 
 **Errors from `Guild/CompleteMemberProfile`:**
 
 | Error tag | User-visible message |
 |-----------|----------------------|
-| `CompleteProfileGuildNotFound` / `CompleteProfileNotMember` | You are not a member of this team. |
+| `CompleteProfileGuildNotFound` | This server isn't connected to Sideline yet — give your captain a nudge. |
+| `CompleteProfileNotMember` | You're not on this team's roster yet — try rejoining with the invite link, or give your captain a nudge. |
 | `CompleteProfileInvalidInput` | Something went wrong while saving your details. Please try again. |
-| `RpcClientError` (or any unexpected defect) | Something went wrong while saving your details. Please try again. |
+| `RpcClientError` (or any unexpected defect) | Sideline isn't answering right now — try again in a minute. |
 
 **Source files:**
-- `applications/bot/src/commands/complete/index.ts` (command registration)
-- `applications/bot/src/commands/complete/handler.ts` (opens the modal)
+- `applications/bot/src/commands/complete/index.ts` (command registration, no options)
+- `applications/bot/src/commands/complete/handler.ts` (opens the modal for the slash command)
+- `applications/bot/src/commands/complete/modal.ts` (`buildProfileCompleteModal`, the single modal builder shared by every entry point)
 - `applications/bot/src/interactions/profile-complete.ts` (modal submit handler, `ProfileCompleteModal`)
+- `applications/bot/src/interactions/profile-verify.ts` (`buildVerifyButton`, `ProfileVerifyButton` — the stateless entry button)
+
+---
+
+## Profile-Completeness Gate
+
+A team can require every member to have a complete profile (name, birth date, gender) before they can commit to anything with a roster-integrity consequence. This is a **per-team opt-in**, off by default: `team_settings.require_complete_profile` (default `false`, migration `1792110000`), toggled by a captain via the "Require a complete profile" checkbox in team settings. It is additionally short-circuited server-wide by the `PROFILE_GATE_ENABLED` env var (default enabled — see `docs/deployment.md`), which exists purely as an incident kill switch; the real off switch is the per-team column, so no existing team is affected unless its captain turns the checkbox on.
+
+**Gated actions** (all check `requiredByTeam && !isProfileComplete` immediately after resolving the member, before any other precondition, via the shared `requireCompleteProfile` server-side helper):
+
+| Surface | RPC / endpoint | Error tag |
+|---|---|---|
+| RSVP (web) | `PUT /teams/:teamId/events/:eventId/rsvp` | `EventRsvpProfileIncomplete` (403) |
+| RSVP (bot) | `Event/SubmitRsvp` | `RsvpProfileIncomplete` |
+| Claim a training | `Event/ClaimTraining` | `ClaimProfileIncomplete` |
+| Reserve a carpool seat | `Carpool/ReserveSeat` | `CarpoolProfileIncomplete` |
+| Add a car to a carpool | `Carpool/AddCar` | `CarpoolProfileIncomplete` |
+
+For `Event/SubmitRsvp`, the member bind (and this check) now happens **before** the event lookup and the deadline check — a behaviour change from before this feature: a non-member RSVPing to a deleted or closed event now gets `RsvpMemberNotFound` where it previously fell through to `RsvpEventNotFound` or `RsvpDeadlinePassed`.
+
+**Deliberately never gated:** un-blocking actions — `Carpool/LeaveCarpool`, `Carpool/RemoveCar`, `Event/UnclaimTraining` — and `Carpool/AssignSeat` (an owner assigning a passenger). An incomplete profile must always be able to back out of a commitment it never should have been able to make; this is intentional, not a gap.
+
+**On Discord**, every gated interaction catches its `*ProfileIncomplete` error tag and replaces the ephemeral response with a short explanation plus a **Finish my profile** button (`buildVerifyButton`, `custom_id: profile-verify`) that opens the same modal as `/complete`. There is no automatic resume — after completing the profile, the member re-taps the original button/re-submits the original command. The nine call sites are: `RsvpButton`, `RsvpClearMessageButton`, `RsvpModal` (`interactions/rsvp.ts`), `UpcomingRsvpButton`, `UpcomingClearMessageButton`, `UpcomingRsvpModal` (`interactions/upcoming-rsvp.ts`), `ClaimButton` (`interactions/claim.ts`), and `CarpoolAddModal`, `CarpoolReserveButton` (`interactions/carpool.ts`).
+
+### Unverified Role and Verification Channel
+
+When the gate is on for a team, a fresh Discord join with an incomplete profile additionally gets a bot-managed **"Sideline Unverified"** Discord role and, if not already created, a permanent, read-only **`#start-here`** channel (Czech: `#nez-zacnes`) with a pinned intro embed carrying the same **Finish my profile** button.
+
+- **Role** (`ensureUnverifiedRole` / `findUnverifiedRole`, `applications/bot/src/rest/roles/ensureUnverifiedRole.ts`): find-or-create by name, `permissions: 0` (never `Administrator` — it exists purely to gate channel visibility via a permission overwrite, not to grant any guild-level capability). Deliberately has **no `discord_role_mappings` row and no Sideline `roles` row** — that absence is what keeps `reconcileMemberDiscordRoles` from ever auto-assigning or stripping it. A create-race that produces two same-named roles resolves deterministically to the oldest (lowest snowflake) everywhere, and logs a warning for manual cleanup.
+- **Channel** (`ensureVerificationChannel`, `applications/bot/src/rest/channels/ensureVerificationChannel.ts`): resolved by name, not by a stored ID — there is no `teams.verify_channel_id` column, so a captain renaming or deleting the channel never desyncs a stored ID. Created once per guild with `@everyone` fully hidden and the unverified role granted view + read-history only (no send/react/threads); the intro embed is pinned and never deleted or garbage-collected.
+- **Caching** (`VerificationChannelCache`, `applications/bot/src/services/VerificationChannelCache.ts`): a 60-second per-guild TTL cache of `{ roleId, channelId }` so a `GUILD_MEMBER_ADD` burst doesn't re-list guild roles and channels on every single join.
+- **Grant/revoke** is evaluated on every `GUILD_MEMBER_ADD`, not just on a successful `/complete`: grant when the gate is on and the profile is incomplete, revoke when the gate is on and the profile is complete. Both directions are idempotent Discord no-ops when already in the target state, so a member who completed their profile on the web self-heals the role on their next join. `/complete`'s own success path also revokes the role directly (see above), so the member doesn't have to rejoin to see it disappear.
+- A Discord permission failure (typically missing `MANAGE_ROLES`/`MANAGE_CHANNELS`) on either path logs a warning and never fails the member's join.
 
 ---
 
@@ -757,6 +790,7 @@ All interaction handlers are registered in `applications/bot/src/interactions/in
 | `RsvpMemberNotFound` | Not a member of this team |
 | `RsvpNotGroupMember` | Not a member of the required group |
 | `RsvpEventNotFound` | Event not found |
+| `RsvpProfileIncomplete` | "We don't know you yet" + a **Finish my profile** button (opens the `/complete` modal). Checked immediately after the member is resolved, before the event or the deadline — see "Profile-Completeness Gate" below |
 
 **Source file:** `applications/bot/src/interactions/rsvp.ts` (`RsvpButton`)
 
@@ -892,6 +926,7 @@ Appears on the training claim-board message posted to the event's owner-group ch
 | `ClaimEventInactive` | The training has been cancelled |
 | `ClaimEventNotFound` | The training has been cancelled |
 | `ClaimNotTraining` | The training has been cancelled |
+| `ClaimProfileIncomplete` | "We don't know you yet" + a **Finish my profile** button. Checked immediately after the member bind, before any other precondition — see "Profile-Completeness Gate" below |
 
 **Source file:** `applications/bot/src/interactions/claim.ts` (`ClaimButton`)
 
@@ -967,6 +1002,7 @@ Handles submission of the car-creation modal. Creates the car, spawns a private 
 | `CarpoolNotFound` | Carpool not found |
 | `CarpoolAlreadyOwnsCar` | You already own a car in this carpool |
 | `CarpoolAlreadyInAnotherCar` | You are already in another car in this carpool |
+| `CarpoolProfileIncomplete` | "We don't know you yet" + a **Finish my profile** button. Adding a car counts as taking a seat (capacity includes the driver), so it is gated the same as reserving one — see "Profile-Completeness Gate" below |
 
 **Source file:** `applications/bot/src/interactions/carpool.ts` (`CarpoolAddModal`)
 
@@ -996,6 +1032,7 @@ Appears on each car entry in the public carpool board. Allows any team member (e
 | `CarpoolCarNotFound` | Car not found |
 | `CarpoolNotMember` | Not a member of this team |
 | `CarpoolGuildNotFound` | Team not found for this Discord server |
+| `CarpoolProfileIncomplete` | "We don't know you yet" + a **Finish my profile** button — see "Profile-Completeness Gate" below |
 
 **Source file:** `applications/bot/src/interactions/carpool.ts` (`CarpoolReserveButton`)
 
@@ -1491,6 +1528,21 @@ Appears on the permanent audit embed posted to the system channel when a team ad
 
 ---
 
+### Profile Verify Button — `profile-verify`
+
+The single, stateless entry point into the profile-completion modal for every non-`/complete` surface: the blocked-action ephemerals (see "Profile-Completeness Gate" above), the welcome message's verify field, and the pinned card in the `#start-here` verification channel.
+
+**Custom ID pattern:** `profile-verify` (exact match, no parameters — safe to place on any number of public messages without a `custom_id` collision, since Discord rejects an entire message with error 50035 on a duplicate id).
+
+**Behavior:**
+
+1. Responds `MODAL` directly with `buildProfileCompleteModal` — the same modal `/complete` opens. A `MODAL` response cannot be deferred, so there is no RPC call and no "already verified" pre-check here; a member who is already complete (or not a guild member at all) is handled the same way `ProfileCompleteModal` already handles any other resubmit.
+2. If the interaction has no `guild_id` (e.g. clicked from a DM copy of a message), replies ephemerally that the command requires a server instead of opening the modal.
+
+**Source file:** `applications/bot/src/interactions/profile-verify.ts` (`buildVerifyButton`, `ProfileVerifyButton`)
+
+---
+
 ### Event Create Autocomplete
 
 Provides training type suggestions for the `/event create training_type` option.
@@ -1594,12 +1646,14 @@ Fired when a new member joins a guild.
 3. Calls `Guild/RegisterMember` RPC with `guild_id`, `discord_id`, `username`, `avatar`, `roles`, `nickname`, `display_name`, and `invite_code` (the matched Discord code or `None`).
    - The server looks up the matched Discord code in `invite_acceptances.discord_code` (via `InviteAcceptancesRepository.findByDiscordCodeWithContext`) to resolve the originating `team_invite`, its `group_id`, and the inviter. It binds the member to that group (`group_members`, `ON CONFLICT DO NOTHING` — `POST /invite/:code/join` may already have written the row) and emits `member_added` channel-sync events for the group and every one of its active (non-archived) ancestors, which is what makes the bot's Channel Sync Worker grant the group's own Discord role (`group_member_added` event, see below) — a group with no explicitly linked Sideline role gets no role from the member-roles diff otherwise. It then renders the welcome message template (substituting `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, `{teamName}`), and returns a `WelcomeMeta` payload.
    - Independently of any invite, and only on this `GUILD_MEMBER_ADD` path (never on `Guild/ReconcileMembers`), the server also calls `emitMemberGroupChannelRoles`: it looks up every non-archived group the member already belongs to (via `group_members`) plus each group's active ancestors (`GroupsRepository.findActiveGroupsWithAncestorsForMember`), diffs that "desired" set against the Discord roles the bot reports the member already holds (`payload.roles`), and emits `member_added` for whichever desired groups the member doesn't already have the role for — skipping any group the invite-driven emit above already covered in this same call, and any group whose `discord_channel_mappings` row has no `discord_role_id` yet. This is what grants a group's own Discord channel role to a member who joins Discord manually, or more than about 15 minutes after accepting a group-scoped invite, without a captain having to click "Sync role members". It does not run for members first observed via `Guild/ReconcileMembers` (see that RPC's row below).
-4. If `WelcomeMeta` is present:
+4. `WelcomeMeta` (when present) now also carries top-level `profile_complete`, `profile_gate_enabled` (the team's `require_complete_profile`), and `verify_locale` (`teams.onboarding_locale`) — populated regardless of whether a `welcome` block is set, since a plain guild join with no matched Sideline invite gets `welcome: None` and no welcome embed at all, and still needs these fields to drive the profile-completeness gate (see "Profile-Completeness Gate" above). `showVerifyPrompt = profile_gate_enabled && !profile_complete`.
+5. If `WelcomeMeta` is present:
    - If `system_log_channel_id` is set: posts a **system log embed** (title "Member joined", fields: member mention + username, invite code, inviter mention, group name) to that channel.
-   - If `welcome_channel_id` and `welcome_message_rendered` are both present: posts a **welcome embed** (rendered message as description, group name field if set, group colour as embed colour, `<@memberId>` as message content) to the welcome channel.
-   - Both posts run concurrently. Errors are logged as warnings and do not abort the handler.
+   - If `welcome_channel_id` and `welcome_message_rendered` are both present: posts a **welcome embed** (rendered message as description, group name field if set, group colour as embed colour, `<@memberId>` as message content) to the welcome channel. When `showVerifyPrompt` is true, the same embed additionally gets a "One more thing 👋" field and a **Finish my profile** button row appended — never a second message.
+   - Independently of whether a welcome embed was sent, if `profile_gate_enabled` is true: grants the member the "Sideline Unverified" role and ensures the `#start-here` verification channel exists when the profile is incomplete, or revokes the role when the profile is complete (see "Unverified Role and Verification Channel" above). This is the catch-all for the plain-invite cohort, which gets no welcome embed and so would otherwise get no verify prompt at all.
+   - All three (system log, welcome message, verification-state grant/revoke) run concurrently. Errors are logged as warnings and do not abort the handler — a Discord permission failure never fails the member's join.
 
-**Source files:** `applications/bot/src/events/index.ts`, `applications/bot/src/services/InviteCache.ts`, `applications/bot/src/services/inviteDiff.ts`, `applications/bot/src/services/welcomeRenderer.ts`
+**Source files:** `applications/bot/src/events/index.ts`, `applications/bot/src/services/InviteCache.ts`, `applications/bot/src/services/inviteDiff.ts`, `applications/bot/src/services/welcomeRenderer.ts`, `applications/bot/src/rest/roles/ensureUnverifiedRole.ts`, `applications/bot/src/rest/channels/ensureVerificationChannel.ts`, `applications/bot/src/services/VerificationChannelCache.ts`
 
 ---
 
@@ -2119,7 +2173,7 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Guild/UpsertChannel` | | Insert or update a single Discord channel row in `discord_channels`; called after the bot auto-creates a channel so the web can display its name |
 | `Guild/DeleteChannel` | | Delete a single channel row from `discord_channels` when a Discord channel is deleted |
 | `Guild/ReconcileMembers` | | Bulk-sync up to 1000 guild members on startup. Deliberately does not run the group-channel-role emit described below for `Guild/RegisterMember` — doing so per-member on every reconcile would re-derive a whole page of already-active members' entire group trees on every bot reconnect. A member first observed here (e.g. one who joined the guild while the bot was disconnected past the gateway resume window) gets no group-channel-role emit from this path; the remedy today is the per-group "Sync role members" action. |
-| `Guild/RegisterMember` | | Register a single new member; accepts `invite_code: Option<string>` (the Discord code matched by the invite diff) and returns `Option<WelcomeMeta>` (system log channel, optional welcome detail including rendered message, group colour, inviter Discord ID). The server resolves the invite code via `invite_acceptances.discord_code` (not `team_invites.discord_code`) to look up the team, group, and inviter, binds the member to that group and emits `member_added` channel-sync events for it and its active ancestors (see the `GUILD_MEMBER_ADD` flow above), then renders the welcome metadata. Only when the payload's `source` is `member_add` (i.e. called from the `GUILD_MEMBER_ADD` gateway handler, not from `Guild/ReconcileMembers`), it additionally calls `emitMemberGroupChannelRoles` to grant Discord channel roles for every group the member already belongs to (plus active ancestors) whose role the member doesn't already hold, independent of any invite — this closes the gap where a member who joined Discord manually or too late for the invite-acceptance recency window never received the group's role. |
+| `Guild/RegisterMember` | | Register a single new member; accepts `invite_code: Option<string>` (the Discord code matched by the invite diff) and returns `Option<WelcomeMeta>` (system log channel, optional welcome detail including rendered message, group colour, inviter Discord ID; plus top-level `profile_complete`, `profile_gate_enabled`, and `verify_locale` — present even when `welcome` is `None`). The server resolves the invite code via `invite_acceptances.discord_code` (not `team_invites.discord_code`) to look up the team, group, and inviter, binds the member to that group and emits `member_added` channel-sync events for it and its active ancestors (see the `GUILD_MEMBER_ADD` flow above), then renders the welcome metadata. Only when the payload's `source` is `member_add` (i.e. called from the `GUILD_MEMBER_ADD` gateway handler, not from `Guild/ReconcileMembers`), it additionally calls `emitMemberGroupChannelRoles` to grant Discord channel roles for every group the member already belongs to (plus active ancestors) whose role the member doesn't already hold, independent of any invite — this closes the gap where a member who joined Discord manually or too late for the invite-acceptance recency window never received the group's role. `profile_gate_enabled` costs one extra query (`team_settings` lookup) and is skipped (forced `false`) on the `Guild/ReconcileMembers` path, whose caller discards the whole `WelcomeMeta` result anyway. |
 | `Guild/RemoveMember` | `guild_id`, `discord_id` | Deactivate a member who left the guild. Resolves the team by `guild_id` and the user by `discord_id`. No-op when the member is not found or is already inactive. Protected: the last active `team:manage` holder is never deactivated. On success, runs `deactivateMemberAndCascade` in a transaction: emits `member_removed` channel-sync events for all rosters and groups (including ancestor groups), deactivates the `team_members` row, and hard-deletes all group and roster memberships. Called from the `GUILD_MEMBER_REMOVE` gateway handler; errors are caught and logged without crashing the handler. |
 | `Guild/GetGuildsNeedingPersonalProvisioning` | `limit` → `Snowflake[]` | Returns guild IDs where personal events are enabled and at least one active member is missing a personal channel |
 | `Guild/IdentifyEventsChannel` | `guild_id`, `channel_id`, `discord_user_id` → `{ kind, team_id, team_member_id, owner_discord_id, is_admin }` | Classifies a channel as `'personal'` (a member's personal events channel) or `'none'`. For `'personal'` channels, `owner_discord_id` is the Discord snowflake of the channel's owner — the bot compares this to the caller to tell an own-channel refresh apart from an admin refreshing someone else's. `is_admin` is `true` if the caller holds `team:manage`. As of the remove-global-events-board Release A, `kind: 'global'` (the removed shared events board) is never returned; the literal stays in the schema only for wire compatibility. |
@@ -2190,13 +2244,13 @@ As of the remove-global-events-board Release A, the bot no longer calls the shar
 | `Event/GetUpcomingGuildEvents` | Fetch paginated upcoming events (guild-scoped, no per-user RSVP data; used by the event sync worker embed builder) |
 | `Event/GetUpcomingEventsForUser` | Fetch paginated (`limit`/`offset`) upcoming events with the invoking user's RSVP status; used by `/event list`. Each entry carries `my_response` (the true stored response, `yes`/`no`/`maybe`/`coming_later`), `maybe_count`/`coming_later_count` counted separately, and `my_response_actual` — now an exact duplicate of `my_response` against a server on this release, kept one more release for rolling-deploy safety against an older server that still projects `coming_later` down to `my_response: 'maybe'`. `UpcomingRsvpButton`/`UpcomingClearMessageButton`/`UpcomingRsvpModal` use the unpaginated `Guild/GetAllUpcomingEventsForUser` instead, not this RPC |
 | `Event/GetTrainingTypesByGuild` | Fetch training type choices for autocomplete |
-| `Event/SubmitRsvp` | Record a member's RSVP response (`yes`, `no`, `maybe`, or `coming_later` — `coming_later` and `maybe` both require a non-blank `message`, per `EventRsvp.rsvpResponseRequiresMessage`, or fail with `RsvpMessageRequired`); leaving a note-requiring response for a different one clears its stored message unless the caller supplies a new one (`isLeavingRequiredNoteResponse`), and since the destination may itself require a note, that clear is fed into the required-message check BEFORE it runs — switching between two note-requiring responses with no new message is rejected with `RsvpMessageRequired`, not silently blanked; payload includes `clearMessage: boolean`; returns `SubmitRsvpResult` with late-RSVP flag, optional notification channel, and `message: Option<string>` |
+| `Event/SubmitRsvp` | Record a member's RSVP response (`yes`, `no`, `maybe`, or `coming_later` — `coming_later` and `maybe` both require a non-blank `message`, per `EventRsvp.rsvpResponseRequiresMessage`, or fail with `RsvpMessageRequired`); leaving a note-requiring response for a different one clears its stored message unless the caller supplies a new one (`isLeavingRequiredNoteResponse`), and since the destination may itself require a note, that clear is fed into the required-message check BEFORE it runs — switching between two note-requiring responses with no new message is rejected with `RsvpMessageRequired`, not silently blanked; payload includes `clearMessage: boolean`; returns `SubmitRsvpResult` with late-RSVP flag, optional notification channel, and `message: Option<string>` Binds and profile-gate-checks the member (`RsvpProfileIncomplete`) before resolving the event or the deadline — see "Profile-Completeness Gate" above. |
 | `Event/GetRsvpCounts` | Fetch yes/no/maybe counts for an event; `maybeCount` counts only `maybe` responses — `coming_later` is not included and has no count field on this result |
 | `Event/GetRsvpAttendees` | Fetch paginated attendee list (each entry's response is the true stored value, `yes`/`no`/`maybe`/`coming_later`) |
 | `Event/GetRsvpReminderSummary` | Fetch counts and non-responder list for a reminder; the non-responder list excludes members who set `rsvp_reminder_dms = false` |
 | `Event/GetEventEmbedInfo` | Fetch event fields needed to rebuild the embed |
 | `Event/GetYesAttendeesForEmbed` | Fetch attending-member display names for the embed (`yes` and `coming_later` only — `maybe` is not attendance and is excluded); accepts an optional `member_group_id` to filter results to the event's member group and its descendants via `WITH RECURSIVE descendant_groups` (used to rebuild personal-channel and upcoming-RSVP embeds; no longer called by `handleStarted.ts`, which posts nothing) |
-| `Event/ClaimTraining` | Atomically claim a training for the invoking coach; returns `EventClaimInfo` or a typed error (`ClaimEventNotFound`, `ClaimNotTraining`, `ClaimEventInactive`, `ClaimNotOwnerGroupMember`, `ClaimAlreadyClaimed`) |
+| `Event/ClaimTraining` | Atomically claim a training for the invoking coach; returns `EventClaimInfo` or a typed error (`ClaimEventNotFound`, `ClaimNotTraining`, `ClaimEventInactive`, `ClaimNotOwnerGroupMember`, `ClaimAlreadyClaimed`, `ClaimProfileIncomplete`) |
 | `Event/UnclaimTraining` | Release a coach's claim on a training; returns `EventClaimInfo` or a typed error (`ClaimEventNotFound`, `ClaimEventInactive`, `ClaimNotClaimer`) |
 | `Event/SaveClaimDiscordMessageId` | Persist the Discord channel and message IDs for the claim-board message after posting |
 | `Event/GetClaimInfo` | Fetch current claim state (`EventClaimInfo`) for a training; returns `None` if the event does not exist |
@@ -2221,8 +2275,8 @@ As of the remove-global-events-board Release A, the bot no longer calls the shar
 | `Carpool/SaveCarpoolMessageId` | `carpool_id`, `discord_message_id` | Persist the Discord message ID of the public board message after it is posted. |
 | `Carpool/SaveCarThreadId` | `car_id`, `thread_id` | Persist the Discord thread ID of a car's private thread after it is created. |
 | `Carpool/GetCarpoolView` | `carpool_id` | Fetch the current `CarpoolView` (cars + passengers, plus the team's `language` for rendering the board embed) for a carpool; returns `Option<CarpoolView>`. `view.cars` is ordered by `created_at` (oldest first); the bot derives each car's display number (`#1`, `#2`, …) from this order, so newly added cars always append as the next number instead of appearing at a random position. |
-| `Carpool/AddCar` | `guild_id`, `discord_user_id`, `carpool_id`, `capacity: Int[1–8]`, `note: Option<string>[≤200 chars]` | Add a new car to a carpool; the owner occupies seat #1. If set, `note` renders on the board as `📍 *note*` below the car's title row. Returns `AddCarResult` (new `car_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolNotFound`, `CarpoolAlreadyOwnsCar`, `CarpoolAlreadyInAnotherCar`. |
-| `Carpool/ReserveSeat` | `guild_id`, `discord_user_id`, `car_id` | Reserve a seat in a car (any member except the owner). Returns `ReserveResult` (`thread_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolFull`, `CarpoolAlreadyInThisCar`, `CarpoolAlreadyInAnotherCar`, `CarpoolOwnerCannotReserve`. |
+| `Carpool/AddCar` | `guild_id`, `discord_user_id`, `carpool_id`, `capacity: Int[1–8]`, `note: Option<string>[≤200 chars]` | Add a new car to a carpool; the owner occupies seat #1. If set, `note` renders on the board as `📍 *note*` below the car's title row. Returns `AddCarResult` (new `car_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolNotFound`, `CarpoolAlreadyOwnsCar`, `CarpoolAlreadyInAnotherCar`, `CarpoolProfileIncomplete` (adding a car counts as taking a seat, gated the same as `ReserveSeat` — see "Profile-Completeness Gate" above). |
+| `Carpool/ReserveSeat` | `guild_id`, `discord_user_id`, `car_id` | Reserve a seat in a car (any member except the owner). Returns `ReserveResult` (`thread_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolFull`, `CarpoolAlreadyInThisCar`, `CarpoolAlreadyInAnotherCar`, `CarpoolOwnerCannotReserve`, `CarpoolProfileIncomplete`. |
 | `Carpool/AssignSeat` | `guild_id`, `discord_user_id`, `car_id`, `target_discord_user_id` | Owner assigns a seat to another team member. Returns `ReserveResult`. Errors: same as `ReserveSeat` plus `CarpoolNotCarOwner`, `CarpoolTargetNotMember`. |
 | `Carpool/LeaveSeat` | `guild_id`, `discord_user_id`, `car_id` | Release a reserved seat (passengers only; owner cannot leave). Returns updated `CarpoolView`. Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolNotInCar`, `CarpoolOwnerCannotLeave`. |
 | `Carpool/LeaveCarpool` | `guild_id`, `discord_user_id`, `carpool_id` | Release a reserved seat by carpool ID — the server resolves the specific car. Returns `LeaveCarpoolResult` (`car_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolNotInCar`, `CarpoolOwnerCannotLeave`. |

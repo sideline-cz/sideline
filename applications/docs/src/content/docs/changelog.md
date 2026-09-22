@@ -36,6 +36,15 @@ A new **My events in Discord** card on your profile page lets you control three 
 
 See [Notifications](/guides/notifications/#per-user-preferences) and [Discord integration](/guides/discord-integration/#personal-event-channels) for details.
 
+## 2026-09-22 — New: join and set up your profile entirely from Discord
+
+Joining your team's Discord server was already enough to become a Sideline team member — even through a plain server invite, with no Sideline sign-up step. What was missing was any prompt to finish your profile. Now:
+
+- `/complete` no longer asks for your gender as a command option — it's a dropdown inside the same pop-up form as your name, date of birth, and jersey number, so the command is a single tap.
+- Date of birth now also accepts the Czech format (`24. 8. 2005`), not just ISO (`2005-08-24`).
+- Captains can turn on **Require a complete profile** (**Team settings → General Settings**, off by default) to block RSVPing, claiming a training, or reserving a carpool seat until a member's profile is finished. Leaving a carpool, removing a car, or releasing a claimed training always works regardless of profile status.
+- When blocked, the bot replies with a short explanation and a **Finish my profile** button that opens the same form as `/complete` — there's no need to remember the command name. A member who joins with an unfinished profile while this setting is on also sees a temporary, read-only `#start-here` channel with the same button; it disappears automatically once their profile is done.
+
 ## 2026-09-22 — Fix: recurring event series could not be edited at all
 
 Recurring event series created before Sideline started storing series times in each team's own timezone kept their times in the older format. Any attempt to edit one of those series failed with an error instead of saving — not just changing its start or end time, but renaming it, changing its location, or changing which days it runs, because the schedule form always submits the series' start time along with whatever else you changed. Retrying never helped, since a rejected save left the series exactly as it was. Series created after that change were unaffected. Every existing series has now been converted to the current format, so editing any series works regardless of when it was created. Times on those series are unchanged — they keep the same wall-clock time they have always shown. No action is needed.

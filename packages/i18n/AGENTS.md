@@ -49,6 +49,22 @@ Rules:
 2. **When adding a new discriminator-label key**, decide once at key-creation time whether the emoji belongs in the value (preferred for short labels) or stays at the call site (preferred when the same label is reused in plain-text contexts without emoji). Mixing both for the same key family is forbidden — every `<feature>_embed_kind_*` sibling must agree.
 3. **English and Czech values must agree on the emoji.** If `cs.json` puts `🥏` at the start, `en.json` must put the same `🥏` at the start. Drift breaks visual parity across locales.
 
+### Czech Tone and Vocabulary (`messages/cs.json`)
+
+Czech has a formal/informal split English does not, and the catalogue serves two audiences from one file. Get this wrong and the tone flips mid-product.
+
+| Surface | Form | Reference key |
+|---------|------|---------------|
+| Bot strings shown to a member (embeds, ephemerals, buttons, modals, channel topics) | **tykání** (informal "ty": *dokonči*, *zkus*, *klepni*) | `bot_verify_blocked_rsvp` |
+| Web strings (`applications/web/`) | **vykání** (formal "vy": *dokončete*, *zapíšete*) | `rsvp_profileIncomplete` |
+| Product docs site (`applications/docs/`) | **vykání** — see `applications/docs/AGENTS.md` | — |
+
+Rules:
+
+1. **The shipped Czech word for an RSVP is `účast`.** Never `docházka` (that reads as school attendance-taking). This holds in every surface: `rsvp_profileIncomplete`, `bot_verify_blocked_rsvp`, `teamSettings_requireCompleteProfile_help`.
+2. **Never use the word `ověření` / `ověřit` (verify/verification) in member-facing Czech copy.** The internals are named "verification" (`profile-verify`, `VerificationChannelCache`, `Sideline Unverified`), but a member is asked to *dokončit profil* — finish their profile. The channel is `nez-zacnes`, not `overeni`. Identifier names and user-visible strings deliberately disagree here.
+3. **A new `bot_*` key is tykání and a new web key is vykání, even when they render the same sentence.** Do not reuse one key across both surfaces to save a line — `rsvp_profileIncomplete` and `bot_verify_blocked_rsvp` say the same thing twice on purpose.
+
 ### Rules When Modifying `pack.js`
 
 1. **`scripts/pack.js` runs in the same `build` script as Paraglide** (`paraglide-js compile ... && node scripts/pack.js`). Never split them — `registry.js` depends on `messages.js` already existing in `dist/`.

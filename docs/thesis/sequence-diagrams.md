@@ -211,6 +211,10 @@ sequenceDiagram
     alt Member not found
         Server-->>Bot: RPC error RsvpMemberNotFound
         Bot->>Discord: Edit original ephemeral → "You are not a member of this team"
+    else Team requires a complete profile and member's profile is incomplete
+        Note over Server: Checked immediately after resolving the member,<br/>before the event or the deadline — see docs/thesis/use-cases.md UC-41
+        Server-->>Bot: RPC error RsvpProfileIncomplete
+        Bot->>Discord: Edit original ephemeral → "We don't know you yet" + [Finish my profile] button<br/>(opens the same modal as /complete, UC-34)
     else Event not found
         Server-->>Bot: RPC error RsvpEventNotFound
         Bot->>Discord: Edit original ephemeral → "Event not found"
@@ -607,6 +611,8 @@ sequenceDiagram
 ```
 
 **Late or manual join.** This diagram assumes the invite code is still matched at `GUILD_MEMBER_ADD` time. If the new player instead joins the Discord server manually, or more than about 15 minutes after accepting the invite (past `invite_acceptances`' recency window), no invite context resolves and the steps above that bind the group and emit its `member_added` events do not run. `Guild/RegisterMember` closes that gap independently: for every `GUILD_MEMBER_ADD`-sourced call, it separately diffs the member's already-existing group memberships (and their active ancestors) against the Discord roles reported in the join payload, and emits `member_added` for whichever groups the member is missing the role for — regardless of whether an invite was matched this time. This does not run for members first observed via `Guild/ReconcileMembers` (e.g. a member who joined while the bot was disconnected past the gateway resume window); a captain's per-group "Sync role members" action remains the remedy for that cohort.
+
+**Profile-completeness gate on a manual join (UC-41).** `Guild/RegisterMember`'s response also carries top-level `profile_complete`, `profile_gate_enabled`, and `verify_locale` — populated regardless of whether an invite matched, since a manual join gets `welcome: None` and no welcome embed at all. When the team's gate is on and the new member's profile is incomplete, the bot grants a "Sideline Unverified" Discord role (auto-created on first use) and ensures a permanent, read-only `#start-here` channel exists with a pinned **Finish my profile** button; if a welcome embed *was* sent (the invite-matched case), that same button is appended to it instead of posting a second message. Both the role grant and the channel creation are best-effort: a Discord permission failure is logged and never fails the join. Completing the profile (UC-34) revokes the role on success; a member who is already complete never receives it.
 
 ---
 
