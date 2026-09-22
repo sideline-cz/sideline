@@ -731,7 +731,7 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 
 ## Profile-Completeness Gate
 
-A team can require every member to have a complete profile (name, birth date, gender) before they can commit to anything with a roster-integrity consequence. This is a **per-team opt-in**, off by default: `team_settings.require_complete_profile` (default `false`, migration `1792110000`), toggled by a captain via the "Require a complete profile" checkbox in team settings. It is additionally short-circuited server-wide by the `PROFILE_GATE_ENABLED` env var (default enabled — see `docs/deployment.md`), which exists purely as an incident kill switch; the real off switch is the per-team column, so no existing team is affected unless its captain turns the checkbox on.
+A team can require every member to have a complete profile (name, birth date, gender) before they can commit to anything with a roster-integrity consequence. This is a **per-team opt-in**, off by default: `team_settings.require_complete_profile` (default `false`, migration `1792300001`), toggled by a captain via the "Require a complete profile" checkbox in team settings. It is additionally short-circuited server-wide by the `PROFILE_GATE_ENABLED` env var (default enabled — see `docs/deployment.md`), which exists purely as an incident kill switch; the real off switch is the per-team column, so no existing team is affected unless its captain turns the checkbox on.
 
 **Gated actions** (all check `requiredByTeam && !isProfileComplete` immediately after resolving the member, before any other precondition, via the shared `requireCompleteProfile` server-side helper):
 

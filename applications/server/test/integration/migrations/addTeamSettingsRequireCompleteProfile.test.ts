@@ -1,4 +1,4 @@
-// `1792110000_add_team_settings_require_complete_profile.ts` — the per-team switch for the
+// `1792300001_add_team_settings_require_complete_profile.ts` — the per-team switch for the
 // profile-completeness gate (`.work-plans/discord-full-onboarding.md`, Task 1).
 //
 // This column's `DEFAULT false` is the ENTIRE anti-lockout guarantee for the feature. The gate
@@ -15,7 +15,7 @@
 // the way `teamSettingsTimezoneCheck.test.ts` does.
 
 import { describe, expect, it } from '@effect/vitest';
-import addTeamSettingsRequireCompleteProfile from '@sideline/migrations/before/1792110000_add_team_settings_require_complete_profile';
+import addTeamSettingsRequireCompleteProfile from '@sideline/migrations/before/1792300001_add_team_settings_require_complete_profile';
 import { Effect, Layer } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
@@ -77,7 +77,7 @@ const readRequireCompleteProfile = (teamId: string) =>
     }),
   );
 
-describe('migration 1792110000 — team_settings.require_complete_profile', () => {
+describe('migration 1792300001 — team_settings.require_complete_profile', () => {
   it.effect('1. adds the column, defaulting FALSE for a row inserted without naming it', () =>
     Effect.gen(function* () {
       const team = yield* seedTeam;

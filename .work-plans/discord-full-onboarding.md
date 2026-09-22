@@ -419,9 +419,9 @@ Domain + migration only, so the server/bot/web tasks all compile against one reb
 
 **Files**
 
-* `packages/migrations/src/before/1792110000_add_team_settings_require_complete_profile.ts` — **new**.
+* `packages/migrations/src/before/1792300001_add_team_settings_require_complete_profile.ts` — **new**.
   `ALTER TABLE team_settings ADD COLUMN IF NOT EXISTS require_complete_profile BOOLEAN NOT NULL DEFAULT false;`
-  **Implemented as `1792110000`, not the `1792060000` this plan originally named.** By the time the
+  **Implemented as `1792300001`, not the `1792060000` this plan originally named.** By the time the
   task was built, `1792100000_series_time_is_team_local.ts` had *landed* on `origin/main` — this plan
   and `.work-plans/series-time-conversion.md:41` both still described that id as merely "reserved".
   `scripts/check-migration-ids.mjs` requires every new id to be strictly greater than every id on
