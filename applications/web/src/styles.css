@@ -151,12 +151,27 @@ code {
 
 @media (pointer: coarse) {
   /* Ensure minimum 44x44px touch targets on touch devices */
-  button,
+  button:not([role="switch"], [role="checkbox"]),
   a[role="button"],
-  [role="checkbox"],
   [role="radio"] {
     min-height: 44px;
     min-width: 44px;
+  }
+  /* Switches and checkboxes are deliberately small: inflating the
+   * box turns a switch into a circle. Grow the tap target instead. */
+  [role="switch"],
+  [role="checkbox"] {
+    position: relative;
+  }
+  [role="switch"]::after,
+  [role="checkbox"]::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
   }
   /* Larger form inputs on mobile — prevents iOS zoom on focus */
   input,
