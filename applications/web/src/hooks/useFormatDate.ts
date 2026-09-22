@@ -59,12 +59,19 @@ export function useFormatDate() {
       return relativeFormatter.format(diffDay, 'day');
     };
 
+    // For values that are already a whole number of CALENDAR days (e.g. an all-day event's
+    // date minus today's date), rather than an instant-based diff. `formatRelative` only
+    // reaches day granularity past ±24h, which reads tomorrow's all-day event as "in 16 hours"
+    // instead of "tomorrow" — this skips straight to 'day' granularity.
+    const formatRelativeDays = (days: number) => relativeFormatter.format(days, 'day');
+
     return {
       formatDate,
       formatDayMonth,
       formatTime,
       formatDateTime,
       formatRelative,
+      formatRelativeDays,
       formatMonthYear,
     };
   }, [locale]);

@@ -11,17 +11,18 @@ import type {
 } from '@sideline/domain';
 import { Event, EventSeries, EventType, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
-import { type DateTime, Effect, Option, Schema } from 'effect';
+import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 
-import { EventLocation } from '~/components/atoms/EventLocation.js';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { EventFactBar } from '~/components/molecules/EventFactBar.js';
 import { EventTypePicker } from '~/components/molecules/EventTypePicker';
 import { EventAttendanceRosterSection } from '~/components/organisms/EventAttendanceRosterSection.js';
 import { EventRsvpPanel } from '~/components/organisms/EventRsvpPanel.js';
 import { TeamGeneratorSection } from '~/components/organisms/TeamGeneratorSection.js';
 import { TrainingResultSection } from '~/components/organisms/TrainingResultSection.js';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { DatePicker } from '~/components/ui/date-picker';
 import {
@@ -38,13 +39,13 @@ import { Switch } from '~/components/ui/switch';
 import { Textarea } from '~/components/ui/textarea';
 import {
   dateOnlyToUtcNoon,
-  formatEventDateRange,
   formatLocalDate,
   formatLocalTime,
   formatTimeInZone,
   formatUtcDate,
   localToUtc,
 } from '~/lib/datetime.js';
+import { getEventColor } from '~/lib/event-colors';
 import { eventStatusClasses, eventStatusLabels, eventTypeName } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
@@ -123,63 +124,6 @@ interface EventDetailPageProps {
   initialTrainingGames: ReadonlyArray<PlayerRatingApi.LoggedGameEntry>;
 }
 
-interface EventDateRangeProps {
-  startAt: DateTime.Utc;
-  endAt: Option.Option<DateTime.Utc>;
-  allDay: boolean;
-  startDate: Option.Option<string>;
-  endDate: Option.Option<string>;
-  labelStart: string;
-  labelEnd: string;
-}
-
-const EventDateRange = ({
-  startAt,
-  endAt,
-  allDay,
-  startDate: startDateOption,
-  endDate: endDateOption,
-  labelStart,
-  labelEnd,
-}: EventDateRangeProps) => {
-  const { startDate, startTime, end, sameDay } = formatEventDateRange(
-    startAt,
-    endAt,
-    allDay,
-    startDateOption,
-    endDateOption,
-  );
-  const start = allDay ? startDate : `${startDate} ${startTime}`;
-  const allDayBadge = allDay ? (
-    <span className='rounded bg-muted px-1 py-0.5 text-[10px]'>{tr('event_allDayLabel')}</span>
-  ) : null;
-  if (sameDay) {
-    return (
-      <p>
-        <span className='text-sm font-medium'>{labelStart}: </span>
-        {start}
-        {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
-        {allDayBadge !== null && <> {allDayBadge}</>}
-      </p>
-    );
-  }
-  return (
-    <>
-      <p>
-        <span className='text-sm font-medium'>{labelStart}: </span>
-        {start}
-        {allDayBadge !== null && <> {allDayBadge}</>}
-      </p>
-      {Option.isSome(end) && (
-        <p>
-          <span className='text-sm font-medium'>{labelEnd}: </span>
-          {end.value}
-        </p>
-      )}
-    </>
-  );
-};
-
 export function EventDetailPage({
   teamId,
   eventId,
@@ -210,10 +154,16 @@ export function EventDetailPage({
   // wall-clock projection instead of silently guessing the browser's zone.
   const teamTimezone = Option.getOrElse(eventDetail.timezone, () => 'Europe/Prague');
 
-  const form = useForm<EventEditValues>({
-    resolver: standardSchemaResolver(Schema.toStandardSchemaV1(EventEditSchema)),
-    mode: 'onChange',
-    defaultValues: {
+  // `values` (not `defaultValues`): the route renders this page with no `key`, so
+  // `router.invalidate()` (fired from RSVP submit and the roster/rating/generator `onRefresh`
+  // callbacks) refetches `eventDetail` without remounting. RHF deep-compares `values` every
+  // render and only touches its internal defaults when they actually changed, so an in-progress
+  // edit isn't clobbered by an unrelated refetch. `keepDirtyValues` stops a background refetch
+  // from overwriting fields the user is actively editing.
+  //
+  // Held in a variable because Discard resets to it explicitly.
+  const formValues: EventEditValues = React.useMemo(
+    () => ({
       title: eventDetail.title,
       eventType: eventDetail.eventType,
       eventTypeId: Option.getOrElse(eventDetail.eventTypeId, () => ''),
@@ -242,7 +192,15 @@ export function EventDetailPage({
       locationUrl: Option.getOrElse(eventDetail.locationUrl, () => ''),
       ownerGroupId: Option.getOrElse(eventDetail.ownerGroupId, () => NONE_VALUE),
       memberGroupId: Option.getOrElse(eventDetail.memberGroupId, () => NONE_VALUE),
-    },
+    }),
+    [eventDetail],
+  );
+
+  const form = useForm<EventEditValues>({
+    resolver: standardSchemaResolver(Schema.toStandardSchemaV1(EventEditSchema)),
+    mode: 'onChange',
+    values: formValues,
+    resetOptions: { keepDirtyValues: true },
   });
 
   const watchedEventTypeId = form.watch('eventTypeId');
@@ -266,9 +224,24 @@ export function EventDetailPage({
   }, [watchedLocation, form]);
 
   const [saving, setSaving] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
   const [showEditScope, setShowEditScope] = React.useState(false);
   const [showCancelScope, setShowCancelScope] = React.useState(false);
   const hasSeries = Option.isSome(eventDetail.seriesId);
+  const status = eventDetail.status;
+  const eventTypeColor = getEventColor(eventDetail.eventTypeColor, eventDetail.eventType);
+  const canEditNow = eventDetail.canEdit && status === 'active';
+
+  const handleDiscard = React.useCallback(() => {
+    // `keepDirtyValues: false` is REQUIRED here, not redundant: RHF's public `reset` merges the
+    // form-level `resetOptions` into every explicit call (`reset(v, {...options.resetOptions,
+    // ...arg})`), so without this override the form-level `keepDirtyValues: true` survives and
+    // Discard keeps the very edits it is meant to throw away — they reappear on reopen.
+    form.reset(formValues, { keepDirtyValues: false });
+    setShowEditScope(false);
+    setShowCancelScope(false);
+    setEditing(false);
+  }, [form, formValues]);
 
   const doSaveThisOnly = React.useCallback(async () => {
     const values = form.getValues();
@@ -316,6 +289,7 @@ export function EventDetailPage({
     );
     setSaving(false);
     if (Option.isSome(result)) {
+      setEditing(false);
       router.invalidate();
     }
   }, [form, teamIdBranded, eventIdBranded, run, router]);
@@ -384,6 +358,7 @@ export function EventDetailPage({
     );
     setSaving(false);
     if (Option.isSome(result)) {
+      setEditing(false);
       router.invalidate();
     }
   }, [form, teamIdBranded, eventDetail.seriesId, run, router, teamTimezone]);
@@ -469,36 +444,55 @@ export function EventDetailPage({
     [teamIdBranded, eventIdBranded, router],
   );
 
-  const status = eventDetail.status;
-
   return (
     <div>
-      <header className='mb-8'>
-        <Button asChild variant='ghost' size='sm' className='mb-2'>
+      <header className='mb-4 flex items-start justify-between gap-4'>
+        <Button asChild variant='ghost' size='sm'>
           <Link to='/teams/$teamId/events' params={{ teamId }}>
             ← {tr('event_backToEvents')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{eventDetail.title}</h1>
-        <div className='flex flex-wrap gap-2 sm:gap-4 text-sm text-muted-foreground mt-1'>
-          <span>{eventTypeName(eventDetail.eventTypeName, eventDetail.eventType)}</span>
-          <span className={eventStatusClasses[status]}>{eventStatusLabels[status]()}</span>
-          {Option.isSome(eventDetail.createdByName) && (
-            <span>
-              {tr('event_createdBy')}: {eventDetail.createdByName.value}
-            </span>
+        <div className='flex shrink-0 gap-2'>
+          {canEditNow && !editing && (
+            <Button
+              variant='outline'
+              size='sm'
+              aria-expanded={editing}
+              aria-controls='event-edit-form'
+              onClick={() => setEditing(true)}
+            >
+              {tr('event_edit')}
+            </Button>
+          )}
+          {eventDetail.canCancel && status === 'active' && (
+            <Button variant='destructive' size='sm' onClick={handleCancel}>
+              {tr('event_cancelEvent')}
+            </Button>
           )}
         </div>
       </header>
 
-      {hasSeries && (
-        <div className='mb-4 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800'>
-          {tr('event_partOfSeries')}
-        </div>
-      )}
+      <div className='mb-2 flex flex-wrap items-center gap-2'>
+        <Badge variant='outline' className={eventStatusClasses[status]}>
+          {eventStatusLabels[status]()}
+        </Badge>
+        <Badge
+          variant='outline'
+          className={`${eventTypeColor.bg} ${eventTypeColor.text} ${eventTypeColor.border}`}
+        >
+          {eventTypeName(eventDetail.eventTypeName, eventDetail.eventType)}
+        </Badge>
+        {hasSeries && <Badge variant='outline'>{tr('event_recurring')}</Badge>}
+      </div>
+
+      <h1 className='mb-4 text-2xl font-bold'>{eventDetail.title}</h1>
+
+      <div className='mb-6'>
+        <EventFactBar eventDetail={eventDetail} />
+      </div>
 
       {Option.isSome(eventDetail.imageUrl) && (
-        <div className='mb-6 overflow-hidden rounded-lg border bg-muted aspect-video max-h-[360px]'>
+        <div className='mb-6 h-[180px] overflow-hidden rounded-lg border bg-muted'>
           <img
             src={eventDetail.imageUrl.value}
             alt=''
@@ -517,9 +511,9 @@ export function EventDetailPage({
       <div className='flex flex-col gap-6 lg:grid lg:grid-cols-[1fr_380px]'>
         <div className='order-2 lg:order-1'>
           <div className='flex flex-col gap-6 max-w-lg'>
-            {eventDetail.canEdit && status === 'active' ? (
+            {canEditNow && editing ? (
               <Form {...form}>
-                <form onSubmit={handleSave} className='flex flex-col gap-4'>
+                <form id='event-edit-form' onSubmit={handleSave} className='flex flex-col gap-4'>
                   <FormField
                     {...form.register('title')}
                     render={({ field }) => (
@@ -811,95 +805,66 @@ export function EventDetailPage({
                     </div>
                   )}
 
-                  {showCancelScope && (
-                    <div className='rounded-md border border-destructive/30 p-4 space-y-2'>
-                      <p className='font-medium'>{tr('event_cancelScopeTitle')}</p>
-                      <div className='flex gap-2'>
-                        <Button
-                          type='button'
-                          size='sm'
-                          variant='outline'
-                          onClick={doCancelThisOnly}
-                        >
-                          {tr('event_cancelThisOnly')}
-                        </Button>
-                        <Button
-                          type='button'
-                          size='sm'
-                          variant='destructive'
-                          onClick={doCancelAllFuture}
-                        >
-                          {tr('event_cancelAllFuture')}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
                   <div className='flex gap-2'>
                     <Button type='submit' disabled={saving}>
                       {saving ? tr('event_saving') : tr('event_saveChanges')}
                     </Button>
-                    {eventDetail.canCancel && (
-                      <Button type='button' variant='destructive' onClick={handleCancel}>
-                        {tr('event_cancelEvent')}
-                      </Button>
-                    )}
+                    <Button type='button' variant='outline' onClick={handleDiscard}>
+                      {tr('event_editCancel')}
+                    </Button>
                   </div>
                 </form>
               </Form>
             ) : (
-              <>
-                {eventDetail.eventType === 'training' &&
-                  Option.isSome(eventDetail.trainingTypeName) && (
-                    <p>
-                      <span className='text-sm font-medium'>{tr('event_trainingType')}: </span>
-                      {eventDetail.trainingTypeName.value}
-                    </p>
-                  )}
-                <EventDateRange
-                  startAt={eventDetail.startAt}
-                  endAt={eventDetail.endAt}
-                  allDay={eventDetail.allDay}
-                  startDate={eventDetail.startDate}
-                  endDate={eventDetail.endDate}
-                  labelStart={tr('event_startDate')}
-                  labelEnd={tr('event_endDate')}
-                />
-                {Option.isSome(eventDetail.location) && (
-                  <p>
-                    <span className='text-sm font-medium'>{tr('event_location')}: </span>
-                    <EventLocation
-                      text={eventDetail.location.value}
-                      url={eventDetail.locationUrl}
-                    />
-                  </p>
-                )}
+              <div className='flex flex-col gap-4'>
                 {Option.isSome(eventDetail.description) && (
-                  <p>
-                    <span className='text-sm font-medium'>{tr('event_description')}: </span>
-                    {eventDetail.description.value}
-                  </p>
-                )}
-                {Option.isSome(eventDetail.ownerGroupName) && (
-                  <p>
-                    <span className='text-sm font-medium'>{tr('event_ownerGroup')}: </span>
-                    {eventDetail.ownerGroupName.value}
-                  </p>
-                )}
-                {Option.isSome(eventDetail.memberGroupName) && (
-                  <p>
-                    <span className='text-sm font-medium'>{tr('event_memberGroup')}: </span>
-                    {eventDetail.memberGroupName.value}
-                  </p>
-                )}
-                {eventDetail.canCancel && status === 'active' && (
                   <div>
-                    <Button variant='destructive' onClick={handleCancel}>
-                      {tr('event_cancelEvent')}
-                    </Button>
+                    <h2 className='text-sm font-semibold'>{tr('event_description')}</h2>
+                    <p className='mt-1 whitespace-pre-wrap text-sm text-muted-foreground'>
+                      {eventDetail.description.value}
+                    </p>
                   </div>
                 )}
-              </>
+                {Option.isSome(eventDetail.ownerGroupName) && (
+                  <div>
+                    <h2 className='text-sm font-semibold'>{tr('event_ownerGroup')}</h2>
+                    <p className='mt-1 text-sm text-muted-foreground'>
+                      {eventDetail.ownerGroupName.value}
+                    </p>
+                  </div>
+                )}
+                {Option.isSome(eventDetail.memberGroupName) && (
+                  <div>
+                    <h2 className='text-sm font-semibold'>{tr('event_memberGroup')}</h2>
+                    <p className='mt-1 text-sm text-muted-foreground'>
+                      {eventDetail.memberGroupName.value}
+                    </p>
+                  </div>
+                )}
+                {Option.isSome(eventDetail.createdByName) && (
+                  <p className='text-sm text-muted-foreground'>
+                    {tr('event_createdBy')}: {eventDetail.createdByName.value}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Hoisted out of the form: the "Cancel Event" button lives in the header now and is
+                reachable whether or not the edit form is open, so this scope picker must be too —
+                otherwise cancelling a recurring event while not editing would set state nobody
+                renders. */}
+            {showCancelScope && (
+              <div className='rounded-md border border-destructive/30 p-4 space-y-2'>
+                <p className='font-medium'>{tr('event_cancelScopeTitle')}</p>
+                <div className='flex gap-2'>
+                  <Button type='button' size='sm' variant='outline' onClick={doCancelThisOnly}>
+                    {tr('event_cancelThisOnly')}
+                  </Button>
+                  <Button type='button' size='sm' variant='destructive' onClick={doCancelAllFuture}>
+                    {tr('event_cancelAllFuture')}
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </div>

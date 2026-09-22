@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — Redesigned event detail page
+
+The event page (web) has a cleaner layout — nothing about RSVPing or editing an event has functionally changed, but a few things moved:
+
+- Date/time, the location link, and the training type now sit together in one strip right under the title, always visible whether or not you can edit the event. Upcoming events also show a relative chip like "in 2 days".
+- If you can edit the event, an **Edit** button now opens the edit form — it's no longer shown by default. **Cancel Event** is now always in the header, whether or not you're currently editing.
+- Under RSVP, the response counts now sit directly under the answer buttons, so you can see at a glance whether enough people are coming. The full list of who answered what — plus the non-responders list, for captains — moved behind a **Responses** toggle; click it to expand.
+- The status, event type, and "recurring" badges moved above the title as small chips, replacing the old blue "part of a recurring series" banner.
+
 ## 2026-09-22 — New: customize your team's event types
 
 Event types were previously a fixed list of six — training, match, tournament, meeting, social, other. Admins can now rename, recolour, add, and reorder them per team from **Team → Event types**.
