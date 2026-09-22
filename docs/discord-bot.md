@@ -174,6 +174,42 @@ Eleven top-level commands are registered globally: `/carpool`, `/complete`, `/ev
 
 ---
 
+### /report
+
+**Description:** File a bug report or feature request as a GitHub issue without leaving Discord. Czech name: `/nahlasit`.
+
+**Options:**
+
+| Option | Type | Required | Values |
+|--------|------|----------|--------|
+| `type` (cs: `typ`) | STRING | Yes | `bug`, `feature` |
+
+**Flow:**
+
+1. User invokes `/report type:<bug\|feature>`. Allowed in DMs as well as guilds — a report is not team-scoped.
+2. The handler (`applications/bot/src/commands/report/handler.ts`) responds with a MODAL whose `custom_id` is `report:{type}`, carrying two text inputs: `report_title` (SHORT, required, max 150) and `report_description` (PARAGRAPH, required, max 3000). Placeholders differ per type.
+3. `ReportModal` (`applications/bot/src/interactions/report.ts`) handles the submission:
+   - If `GITHUB_REPORT_TOKEN` is unset it replies immediately (no defer) with `bot_report_not_configured` and logs a warning. The command is disabled, not broken — the bot still boots without the token.
+   - Blank title or description reply with `bot_report_invalid_title` / `bot_report_invalid_description`.
+   - Otherwise it defers ephemerally and forks the work, mirroring `profile-complete`.
+4. `createIssue` (`applications/bot/src/services/githubIssue.ts`) POSTs to `https://api.github.com/repos/{GITHUB_REPORT_REPO}/issues` with the token as a bearer header, labelling the issue `bug` or `enhancement` — GitHub's two default labels, so neither needs creating first.
+5. On HTTP 201 the user gets `bot_report_success` with the issue URL; any other status, transport failure or undecodable body logs the error and replies with `bot_report_error`.
+
+**Issue body:** `buildIssueBody` puts the reporter's description first, then appends the Discord display name and **user id**, the guild id (or `direct message`), and the bot's `APP_VERSION`. The reporter never sees the issue body, so everything a triager needs has to be baked in at write time — the display name alone is unresolvable a week later, which is why the id is included.
+
+**Environment:**
+
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `GITHUB_REPORT_TOKEN` | No | — | Fine-grained PAT with **Issues: read & write** on the target repo. Absent = the command replies "not set up". |
+| `GITHUB_REPORT_REPO` | No | `sideline-cz/sideline` | `owner/repo` the issues are filed against. |
+
+**Security:** the token travels only in the `Authorization` header. `createIssue` builds the JSON body from explicit fields and never spreads its input, and a regression test asserts the token string is absent from the serialised body.
+
+**Source files:** `applications/bot/src/commands/report/handler.ts`, `applications/bot/src/interactions/report.ts`, `applications/bot/src/services/githubIssue.ts`
+
+---
+
 ### /summon
 
 **Description:** Add a user and/or a role's members to the Discord thread this command is invoked in.

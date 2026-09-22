@@ -12,10 +12,10 @@ src/
 ├── env.ts           — Environment config (token, intents, health port)
 ├── run.ts           — Runtime entrypoint (config, logging, NodeRuntime)
 ├── schemas.ts       — Dfx decode schemas (DfxTextChannel, DfxSyncableChannel, DfxGuildMember, DfxUser incl. global_name)
-├── commands/        — Slash command registry (event/create, event/list, event/refresh, training/*, carpool/*, makanicko/*, finance/*, poll, info, summon, summarize)
+├── commands/        — Slash command registry (event/create, event/list, event/refresh, training/*, carpool/*, makanicko/*, finance/*, poll, info, summon, summarize, report)
 ├── interactions/    — Component interaction registry (buttons/selects/modals)
 ├── events/          — Gateway event handler registry (guild, member, invite, channel lifecycle)
-├── services/        — Sync services (RoleSyncService, ChannelSyncService) and welcome helpers (InviteCache, inviteDiff, welcomeRenderer)
+├── services/        — Caches (GuildRolesCache, OnboardingRoleCache), sync RPC client (SyncRpc), welcome helpers (InviteCache, inviteDiff, welcomeRenderer), and outbound non-Discord HTTP clients (githubIssue)
 ├── rcp/channel/     — Channel sync event handlers
 │   ├── ProcessorService.ts    — Match.tag dispatcher for channel events; classifies failures as transient vs permanent
 │   ├── channelUtils.ts        — Shared Discord helpers (deleteRole, deleteChannelAndRole)
@@ -67,6 +67,7 @@ Follows the **AppLive + run.ts** pattern.
 | `src/rcp/<feature>/` | Sync-event processors (`ProcessorService.ts`, `handle*.ts`). | Folder is named `rcp`, NOT `rpc` — historical typo carried through every feature. Do NOT rename, split, or alias. New sync workers go under `src/rcp/<feature>/`. |
 | `src/rest/<feature>/` | Discord-REST-calling helpers and embed builders (`build<Name>Embed.ts`, send/edit helpers). | Embed builders MUST live here, NEVER under `src/rcp/`. The processor in `src/rcp/<feature>/` imports the embed builder from `src/rest/<feature>/`, never the reverse. |
 | `src/rest/utils.ts` | Bot-wide shared helpers (`retryPolicy`, `allow`/`deny`, `formatName`/`formatNamePlain`/`formatNameWithMention`, `joinEntriesWithLimit`) and shared numeric limits (`POLL_BATCH_SIZE = 50`, `EMBED_FIELD_VALUE_LIMIT = 1024`, `YES_EMBED_LIMIT = 20`). | A constant or helper consumed by more than one feature MUST live here, NEVER in a `build<Name>Embed.ts` or a `handle*.ts`. Import it; never re-declare the value at a call site. `YES_EMBED_LIMIT` moved here from the deleted `src/rest/events/buildEventEmbed.ts` for exactly this reason — its four consumers span `src/rest/events/`, `src/rcp/personalEvents/`, and `src/interactions/`. |
+| `src/services/` | Long-lived caches, the sync RPC client, welcome helpers, and **every outbound HTTP client that does not talk to the Discord API** (`githubIssue.ts`). | An outbound non-Discord HTTP client MUST live here as a flat lowercase-filename module exporting plain functions — NEVER under `src/rest/<feature>/`, which is reserved for Discord-REST callers, and never wrapped in an Effect service unless it holds state. `HttpClient.execute` does NOT fail on a non-2xx response; check `response.status` explicitly and raise a tagged error, or a rejected request decodes as a success (same manual check as `applications/server/src/services/FioApiClient.ts`). |
 | `test/rcp/<feature>/` | Tests for the matching processor. | Mirrors `src/rcp/<feature>/` 1:1. |
 
 ## Building Message Components

@@ -648,6 +648,7 @@ flowchart LR
         UC_EVT_OVERVIEW["\/event overview\nPosts a persistent overview button in the channel\nrequires Manage Server permission"]
         UC_EVT_CREATE["\/event create\nCreates a new event for the team\nrequires event:create permission"]
         UC_INFO["\/info\nShows bot and server version information\nephemeral embed · no permission required"]
+        UC_REPORT["\/report\nOpens a modal, files a GitHub issue (bug/enhancement)\nephemeral · no permission required · DMs allowed\nrequires GITHUB_REPORT_TOKEN or replies 'not set up'"]
         UC_MAK_LOG["\/makanicko log\nLogs an activity for the invoking user\nactivity type · optional duration · optional note"]
         UC_MAK_STATS["\/makanicko stats\nDisplays personal activity stats and streak"]
         UC_MAK_LB["\/makanicko leaderboard\nDisplays top-10 leaderboard embed\nshows requesting user's own rank in footer"]
@@ -676,6 +677,7 @@ flowchart LR
     DU --> UC_EVT_OVERVIEW
     DU --> UC_EVT_CREATE
     DU --> UC_INFO
+    DU --> UC_REPORT
     DU --> UC_MAK_LOG
     DU --> UC_MAK_STATS
     DU --> UC_MAK_LB
@@ -691,6 +693,7 @@ flowchart LR
     BOT --> UC_EVT_OVERVIEW
     BOT --> UC_EVT_CREATE
     BOT --> UC_INFO
+    BOT --> UC_REPORT
     BOT --> UC_MAK_LOG
     BOT --> UC_MAK_STATS
     BOT --> UC_MAK_LB
@@ -1265,3 +1268,17 @@ The following structured descriptions cover the most significant use cases in th
 | **Postcondition** | The actor downloads a document listing every movement in the range with its match outcome, suitable as accounting evidence for a municipal grant audit. |
 | **Alternate Flow** | If the range is not fully covered by ingested statement periods (or a recorded period's balances don't reconcile), the CSV endpoint fails with `ExportCoverageIncomplete` (409, carrying the gaps) unless the actor passes `acknowledgeGaps=true`, in which case the file is still generated with a warning header. The PDF export never fails on a gap — it prints a visible warning banner instead. |
 | **Notes** | The CSV is formatted for Czech Excel (`;` delimiter, comma decimal separator) but Excel can silently drop leading zeros from the variable-symbol and account-number columns on open — the PDF is the authoritative document for the municipality; a treasurer who needs the raw CSV data intact can re-import it via Excel's Data → From Text/CSV wizard with the affected column set to Text. |
+
+---
+
+### UC-40: File a Bug Report or Feature Request via Discord (Any Discord User)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Any Discord user (DMs allowed — a report is not team-scoped) |
+| **Precondition** | The bot is installed in the Discord server, or the user can DM it. `GITHUB_REPORT_TOKEN` must be configured on the bot for the command to actually file anything. |
+| **Main Flow** | 1. The user invokes `/report type:<bug\|feature>`. 2. The bot opens a modal with two required fields: a short title and a longer description. 3. On submit, the bot defers ephemerally and posts a new GitHub issue to `GITHUB_REPORT_REPO` (default `sideline-cz/sideline`) via the REST API, labelled `bug` or `enhancement`, with the description plus the reporter's Discord display name and id, guild id, and bot version appended. 4. On success the user gets an ephemeral reply with a link to the created issue. |
+| **Postcondition** | A new GitHub issue exists in the target repository, labelled by report type, traceable back to the reporting Discord user and guild. |
+| **Alternate Flow** | If `GITHUB_REPORT_TOKEN` is unset, the modal submission replies immediately with a "not set up" message instead of deferring — the command is disabled, not broken. A blank title or description is rejected before any GitHub call. A non-2xx GitHub response, transport failure, or undecodable response logs the error and replies with a generic failure message. |
+
+---

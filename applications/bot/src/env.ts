@@ -27,6 +27,14 @@ export const env = createEnv({
     SERVER_URL: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),
     LOG_LEVEL: Schema.toStandardSchemaV1(Schema.OptionFromNullishOr(Schemas.LogLevelFromString)),
     WEB_URL: Schema.toStandardSchemaV1(Schema.OptionFromNullishOr(Schema.NonEmptyString)),
+    /** Absent = `/report` is disabled and says so; the bot still boots. */
+    GITHUB_REPORT_TOKEN: Schema.toStandardSchemaV1(
+      Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
+    ),
+    GITHUB_REPORT_REPO: Schema.NonEmptyString.pipe(
+      Schemas.Optional(() => 'sideline-cz/sideline'),
+      Schema.toStandardSchemaV1,
+    ),
     APP_ENV: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),
     APP_ORIGIN: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),
     OTEL_EXPORTER_OTLP_ENDPOINT: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),

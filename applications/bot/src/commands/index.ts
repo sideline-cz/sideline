@@ -6,6 +6,7 @@ import { FinanceCommand } from '~/commands/finance/index.js';
 import { InfoCommand } from '~/commands/info/index.js';
 import { MakanickoCommand } from '~/commands/makanicko/index.js';
 import { PollCommand } from '~/commands/poll/index.js';
+import { ReportCommand } from '~/commands/report/index.js';
 import { RulesCommand } from '~/commands/rules/index.js';
 import { SudoCommand } from '~/commands/sudo/index.js';
 import { SummarizeCommand } from '~/commands/summarize/index.js';
@@ -24,4 +25,5 @@ export const commandBuilder = Ix.builder
   .add(PollCommand)
   .add(RulesCommand)
   .add(SudoCommand)
-  .add(CompleteCommand);
+  .add(CompleteCommand)
+  .add(ReportCommand);
