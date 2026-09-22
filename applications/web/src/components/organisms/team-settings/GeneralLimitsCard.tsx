@@ -57,6 +57,22 @@ export function GeneralLimitsCard({ form: { values, setField } }: GeneralLimitsC
               className='max-w-32'
             />
           </div>
+          <Separator />
+          <div className='flex items-center gap-2'>
+            <input
+              id='require-complete-profile'
+              type='checkbox'
+              checked={values.requireCompleteProfile}
+              onChange={(e) => setField('requireCompleteProfile', e.target.checked)}
+              className='h-4 w-4'
+            />
+            <label htmlFor='require-complete-profile' className='text-sm font-medium'>
+              {tr('teamSettings_requireCompleteProfile')}
+            </label>
+          </div>
+          <p className='text-xs text-muted-foreground'>
+            {tr('teamSettings_requireCompleteProfile_help')}
+          </p>
         </div>
       </CardContent>
     </Card>
