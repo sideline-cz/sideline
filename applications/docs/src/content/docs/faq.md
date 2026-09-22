@@ -54,7 +54,7 @@ There is no per-member opt-out at this time. Reminders are sent automatically to
 
 ### How do I change my RSVP after I submitted it?
 
-Click a different button — Yes, Coming later, Not sure, or No. The new answer overwrites the old one. You can change it as many times as you like until the event starts. Switching to **Coming later** requires a short note (reason/ETA); switching away from **Coming later** clears that note, since it only answers "when will you arrive".
+Click a different button — Yes, Coming later, Not sure, or No. The new answer overwrites the old one. You can change it as many times as you like until the event starts. Switching to **Coming later** or **Not sure** requires a short note (an ETA for "Coming later", or what your decision depends on for "Not sure"); switching away from either clears that note, since it only makes sense for the response it was written for.
 
 ### What does "Not sure" mean, and does it count as attending?
 

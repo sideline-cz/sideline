@@ -206,12 +206,11 @@ describe('EventRsvpPanel', () => {
   });
 
   // A "coming later" note is mandatory and answers "when will you arrive", so it must not survive
-  // leaving that response — on ANY target, not just "maybe". The server enforces the same rule via
-  // `effectiveClear` in `Event/SubmitRsvp` for clients that send no message; the web must send the
-  // empty-string clear signal explicitly, because a `coming_later` note is never blank and would
-  // otherwise always be re-sent.
+  // leaving that response for a note-FREE target (yes/no) — instant-submit clears it client-side.
+  // The server enforces the same rule via `effectiveClear` in `Event/SubmitRsvp` for clients that
+  // send no message; the web must send the empty-string clear signal explicitly, because a
+  // `coming_later` note is never blank and would otherwise always be re-sent.
   it.each([
-    ['Not sure', 'maybe'],
     ['No', 'no'],
     ['Yes', 'yes'],
   ])('leaving "Coming later" for "%s" clears its mandatory note', async (label, response) => {
@@ -227,6 +226,25 @@ describe('EventRsvpPanel', () => {
     await waitFor(() => {
       expect(onRsvpSubmit).toHaveBeenCalledWith(response, '');
     });
+  });
+
+  // "Not sure" is a note-requiring target now too, so leaving "Coming later" for it does NOT
+  // instant-submit (and therefore does not go through the client-side note-clearing branch
+  // above, which only fires for yes/no) — it opens the note field exactly like clicking "Coming
+  // later" itself does, and leaves the submit to an explicit Save.
+  it('leaving "Coming later" for "Not sure" does not instant-submit; it reveals the note field instead', () => {
+    const { onRsvpSubmit } = renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        myResponse: Option.some('coming_later'),
+        myMessage: Option.some('dorazím v 19:00'),
+      }),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Not sure' }));
+
+    expect(onRsvpSubmit).not.toHaveBeenCalled();
+    const textarea = screen.getByLabelText(/Message/) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(textarea);
   });
 
   it('clicking "Coming later" does NOT submit immediately; it reveals and focuses the note field', () => {
@@ -327,41 +345,36 @@ describe('EventRsvpPanel', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // maybe ("Not sure") — instant-submits like yes/no, and does NOT steal focus
-  // the way "Coming later" does (no mandatory comment, so no textarea reveal).
+  // maybe ("Not sure") — now REQUIRES a note too, exactly like "Coming later"
+  // (see `EventRsvp.rsvpResponseRequiresMessage`), so it no longer
+  // instant-submits: it reveals and focuses the note field instead.
   // ---------------------------------------------------------------------------
 
-  it('clicking "Not sure" instant-submits with response "maybe", does not force-reveal the textarea, and keeps focus on the button', async () => {
-    const { onRsvpSubmit } = renderPanel({
-      rsvpDetail: makeRsvpDetail({ myResponse: Option.none(), myMessage: Option.none() }),
-    });
+  it('clicking "Not sure" does NOT submit immediately; it reveals and focuses the note field', () => {
+    const { onRsvpSubmit } = renderPanel();
 
-    const notSureButton = screen.getByRole('button', { name: 'Not sure' });
-    fireEvent.click(notSureButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Not sure' }));
 
-    await waitFor(() => {
-      expect(onRsvpSubmit).toHaveBeenCalledWith('maybe', '');
-    });
+    expect(onRsvpSubmit).not.toHaveBeenCalled();
 
-    // No textarea was force-revealed by this click (targetResponse stays null —
-    // "maybe" doesn't set a pending response the way "Coming later" does).
-    expect(screen.queryByLabelText(/Message/)).toBeNull();
-    // Focus stays on the clicked button — INVERTS the "Coming later" focus
-    // expectation, which moves focus into the (mandatory-comment) textarea.
-    expect(document.activeElement).toBe(notSureButton);
+    const textarea = screen.getByLabelText(/Message/) as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    // Focus is moved to the note field in a `useEffect` keyed on `pendingResponse`, which runs
+    // after React commits the re-render that reveals the textarea.
+    expect(document.activeElement).toBe(textarea);
   });
 
-  it('Save is enabled with a blank note when the current response is "maybe"', () => {
+  it('Save is blocked with a blank note when the current response is "maybe"', () => {
     renderPanel({
       rsvpDetail: makeRsvpDetail({ myResponse: Option.some('maybe'), myMessage: Option.none() }),
     });
 
     const textarea = screen.getByLabelText(/Message/) as HTMLTextAreaElement;
     expect(textarea.value).toBe('');
-    expect(textarea.getAttribute('aria-required')).toBe('false');
+    expect(textarea.getAttribute('aria-required')).toBe('true');
 
     const saveButton = screen.getByRole('button', { name: 'Save note' }) as HTMLButtonElement;
-    expect(saveButton.disabled).toBe(false);
+    expect(saveButton.disabled).toBe(true);
   });
 
   // ---------------------------------------------------------------------------

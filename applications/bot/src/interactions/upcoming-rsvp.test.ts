@@ -101,6 +101,7 @@ type TextInputComponent = {
   style: number;
   required: boolean;
   max_length: number;
+  min_length?: number;
 };
 
 describe('UpcomingAddMessageButton modal shape', () => {
@@ -149,11 +150,11 @@ describe('UpcomingAddMessageButton modal shape', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // maybe ("Nevím") — docs/plans/rsvp-maybe-restore.md: `maybe` stays a
-  // non-mandatory-comment response (mirrors yes/no), unlike coming_later.
+  // maybe ("Nevím") — `maybe` now REQUIRES a comment too, exactly like
+  // coming_later (see `EventRsvp.rsvpResponseRequiresMessage`), unlike yes/no.
   // ---------------------------------------------------------------------------
 
-  it('builds the text input with required: false and no min_length for maybe', async () => {
+  it('builds the text input with required: true and min_length: 1 for maybe', async () => {
     const response = await runHandler(`u-add-msg:${TEAM_ID}:${EVENT_ID}:maybe`);
     const typed = response as {
       data: {
@@ -161,8 +162,8 @@ describe('UpcomingAddMessageButton modal shape', () => {
       };
     };
     const input = typed.data.components[0]?.components[0];
-    expect(input?.required).toBe(false);
-    expect(input).not.toHaveProperty('min_length');
+    expect(input?.required).toBe(true);
+    expect(input?.min_length).toBe(1);
   });
   // ---------------------------------------------------------------------------
   // Prefill — the modal must show the member's existing note so "Edit message"
@@ -430,18 +431,22 @@ describe('UpcomingRsvpModal — reads the unpaginated upcoming-events RPC', () =
 });
 
 // ---------------------------------------------------------------------------
-// docs/plans/rsvp-maybe-restore.md — `maybe` ("Nevím") is a first-class,
-// instant-submit RSVP response. `UpcomingRsvpButton` already decodes any of
-// the four `RsvpResponse` literals from `parts[3]` generically, so pressing
-// `upcoming-rsvp:<event>:<team>:maybe` must call `Event/SubmitRsvp` with
-// `response: 'maybe'`, `message: none`, `clearMessage: false` — exactly like
-// `yes`/`no` — and must NOT return a MODAL callback type (that is reserved
-// for `coming_later`'s mandatory-comment button, a different custom_id
-// prefix entirely: `u-add-msg:...`).
+// `maybe` no longer instant-submits — the embed builder now always mints
+// `u-add-msg:...:maybe:v` for the row-1 button (see
+// buildUpcomingEventEmbed.test.ts). `UpcomingRsvpButton` itself still decodes
+// any of the four `RsvpResponse` literals from `parts[3]` generically and
+// forwards them to `Event/SubmitRsvp` unconditionally — the mandatory-note
+// rejection is enforced server-side (`RsvpMessageRequired`, covered in
+// EventRsvp.test.ts), not by this button decoder. This test exercises that
+// generic forward path via a STALE `upcoming-rsvp:<event>:<team>:maybe`
+// custom_id — one that may still be sitting on a Discord message rendered
+// before this deploy — and pins that the handler keeps working for it
+// (message none, clearMessage false, DEFERRED_UPDATE_MESSAGE not MODAL);
+// it says nothing about what a freshly-rendered card offers today.
 // ---------------------------------------------------------------------------
 
-describe('UpcomingRsvpButton — maybe is an instant-submit response, not a modal', () => {
-  it("pressing upcoming-rsvp:<event>:<team>:maybe calls Event/SubmitRsvp with response 'maybe', message none, clearMessage false, and returns DEFERRED_UPDATE_MESSAGE (not MODAL)", async () => {
+describe('UpcomingRsvpButton — stale upcoming-rsvp:...:maybe custom_id still forwards to Event/SubmitRsvp', () => {
+  it("pressing a stale upcoming-rsvp:<event>:<team>:maybe button calls Event/SubmitRsvp with response 'maybe', message none, clearMessage false, and returns DEFERRED_UPDATE_MESSAGE (not MODAL)", async () => {
     const submitRsvpSpy = vi.fn(() =>
       Effect.succeed({
         yesCount: 2,

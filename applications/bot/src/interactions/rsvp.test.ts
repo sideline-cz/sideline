@@ -95,6 +95,7 @@ type TextInputComponent = {
   style: number;
   required: boolean;
   max_length: number;
+  min_length?: number;
 };
 
 describe('RsvpAddMessageButton modal shape', () => {
@@ -177,11 +178,11 @@ describe('RsvpAddMessageButton modal shape', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // maybe ("Nevím") — docs/plans/rsvp-maybe-restore.md: `maybe` stays a
-  // non-mandatory-comment response (mirrors yes/no), unlike coming_later.
+  // maybe ("Nevím") — `maybe` now REQUIRES a comment too, exactly like
+  // coming_later (see `EventRsvp.rsvpResponseRequiresMessage`), unlike yes/no.
   // ---------------------------------------------------------------------------
 
-  it('builds the text input with required: false and no min_length for maybe', async () => {
+  it('builds the text input with required: true and min_length: 1 for maybe', async () => {
     const response = await runHandler(`rsvp-add-msg:${TEAM_ID}:${EVENT_ID}:maybe`);
     const typed = response as {
       data: {
@@ -189,8 +190,8 @@ describe('RsvpAddMessageButton modal shape', () => {
       };
     };
     const input = typed.data.components[0]?.components[0];
-    expect(input?.required).toBe(false);
-    expect(input).not.toHaveProperty('min_length');
+    expect(input?.required).toBe(true);
+    expect(input?.min_length).toBe(1);
   });
   // ---------------------------------------------------------------------------
   // Prefill — the modal must show the member's existing note so "Edit message"

@@ -1,4 +1,5 @@
-import type { EventRpcModels, EventRsvp } from '@sideline/domain';
+import type { EventRpcModels } from '@sideline/domain';
+import { EventRsvp } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
@@ -180,8 +181,9 @@ export const buildUpcomingEventEmbed = (params: {
       : Discord.ButtonStyleTypes.SECONDARY;
 
   // custom_id: upcoming-rsvp:<event_id>:<team_id>:<response> — except the
-  // coming_later button, which always opens the required-comment modal
-  // instead of instant-submitting (custom_id: u-add-msg:...).
+  // coming_later and maybe buttons, which both mandate a comment and so always
+  // open the required-comment modal instead of instant-submitting
+  // (custom_id: u-add-msg:...:{response}:v).
   const rsvpRow: Discord.ActionRowComponentForMessageRequest = UI.row([
     UI.button({
       style: styleFor('yes'),
@@ -209,10 +211,14 @@ export const buildUpcomingEventEmbed = (params: {
     UI.button({
       style: styleFor('maybe'),
       label: m.bot_btn_maybe({}, { locale }),
-      // Instant-submit, unlike coming_later above: `maybe` never mandates a
-      // comment, so it reuses the plain `upcoming-rsvp:` prefix — a prefix
-      // row 2 never mints, so this adds zero new 50035 collision surface.
-      custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:maybe`,
+      // `maybe` mandates a comment too, so it opens the modal exactly like
+      // coming_later above — and therefore needs its OWN `:v` marker for the
+      // same reason: row 2's edit button mints
+      // `u-add-msg:{team}:{event}:maybe` verbatim once the member's response
+      // IS `maybe`, and two identical custom_ids on one message is a 50035
+      // that kills the whole card. 91 chars with two UUIDs, inside the 100
+      // budget (the coming_later id above is the longest at 98).
+      custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:maybe:v`,
     }),
     UI.button({
       style: styleFor('no'),
@@ -232,10 +238,10 @@ export const buildUpcomingEventEmbed = (params: {
                 label: m.bot_rsvp_edit_message({}, { locale }),
                 custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:${response}`,
               }),
-              // coming_later requires a message, so clearing it is illegal —
-              // never render the "clear message" button for that response
-              // (mirrors rsvp.ts's buildMessageActionRow).
-              ...(response === 'coming_later'
+              // coming_later and maybe both require a message, so clearing it is
+              // illegal — never render the "clear message" button for those
+              // responses (mirrors rsvp.ts's buildMessageActionRow).
+              ...(EventRsvp.rsvpResponseRequiresMessage(response)
                 ? []
                 : [
                     UI.button({

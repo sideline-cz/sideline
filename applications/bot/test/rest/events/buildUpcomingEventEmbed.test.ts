@@ -437,19 +437,21 @@ describe('buildUpcomingEventEmbed', () => {
       expect(yesBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:yes');
       // coming_later always opens the required-comment modal instead of an
       // instant submit — see the dedicated "message action row" describe
-      // block below for full coverage.
+      // block below for full coverage. Note the argument order: `u-add-msg:`
+      // is `{team}:{event}`, while `upcoming-rsvp:` is `{event}:{team}`.
       expect(comingLaterBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
-      // maybe ("Nevím") INSTANT-SUBMITS, unlike coming_later.
-      expect(maybeBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:maybe');
+      // maybe ("Nevím") now ALSO requires a comment, so it opens the modal
+      // exactly like coming_later — no more instant submit.
+      expect(maybeBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:maybe:v');
       expect(noBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:no');
     });
 
-    it('the maybe button instant-submits: custom_id starts with upcoming-rsvp:, NOT u-add-msg:', () => {
+    it('the maybe button opens the modal: custom_id starts with u-add-msg:, NOT upcoming-rsvp:', () => {
       const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const maybeBtn = components[0].components[2] as { custom_id: string };
-      expect(maybeBtn.custom_id.startsWith('upcoming-rsvp:')).toBe(true);
-      expect(maybeBtn.custom_id.startsWith('u-add-msg:')).toBe(false);
+      expect(maybeBtn.custom_id.startsWith('u-add-msg:')).toBe(true);
+      expect(maybeBtn.custom_id.startsWith('upcoming-rsvp:')).toBe(false);
     });
 
     it('the coming_later button keeps the :v marker (ends with :coming_later:v)', () => {
@@ -578,11 +580,11 @@ describe('buildUpcomingEventEmbed', () => {
       expect(secondBtn.custom_id).not.toBe('upcoming-rsvp:ev-42:tm-7:coming_later');
     });
 
-    it('row 1 third button (maybe) instant-submits via upcoming-rsvp:...:maybe', () => {
+    it('row 1 third button (maybe) opens the modal via u-add-msg:...:maybe:v', () => {
       const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const [, , thirdBtn] = components[0].components as ReadonlyArray<{ custom_id: string }>;
-      expect(thirdBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:maybe');
+      expect(thirdBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:maybe:v');
     });
 
     it('row 1 still has exactly FOUR buttons regardless of my_response/my_message state', () => {
@@ -662,7 +664,7 @@ describe('buildUpcomingEventEmbed', () => {
       expect(secondRow.some((b) => b.custom_id.startsWith('u-clear-msg:'))).toBe(false);
     });
 
-    it('still renders the clear-message button when the true response is a legacy maybe', () => {
+    it('does not render a clear-message button when the true response is maybe (its note is mandatory too)', () => {
       const entry = makeEntry({
         event_id: 'ev-42',
         team_id: 'tm-7',
@@ -672,8 +674,7 @@ describe('buildUpcomingEventEmbed', () => {
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const secondRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
-      const clearBtn = secondRow.find((b) => b.custom_id.startsWith('u-clear-msg:'));
-      expect(clearBtn?.custom_id).toBe('u-clear-msg:tm-7:ev-42:maybe');
+      expect(secondRow.some((b) => b.custom_id.startsWith('u-clear-msg:'))).toBe(false);
     });
 
     it('falls back to the legacy my_response when my_response_actual is absent (rolling-deploy safety)', () => {

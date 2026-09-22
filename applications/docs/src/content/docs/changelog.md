@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — "Not sure" now needs a note too
+
+Update to the entry below: **Not sure** no longer submits instantly. Like **Coming later**, it now opens a required note field (web) or a pop-up (Discord) asking what your answer depends on, and won't save until you fill it in.
+
+- **Not sure** still does **not** count as attending — that part is unchanged. The only difference left between **Coming later** and **Not sure** is attendance: both now require a note and both open the same kind of pop-up/note field before saving.
+- Switching away from **Coming later** or **Not sure** still clears its note — and if you switch straight from one to the other without typing a new note, the switch is now rejected instead of silently leaving the note blank. Type a new note first.
+- Clicking **Edit message**/**Clear message** on an existing RSVP: the **Clear message** button is no longer offered for **Not sure**, same as it already wasn't for **Coming later** — a mandatory note can't be cleared, only replaced.
+- See the [RSVP guide](/guides/rsvp-to-an-event/) for the full rundown.
+- API integrators: `SubmitRsvpRequest.message` is now required (non-blank, after falling back to any existing stored message) for `response: "maybe"` as well as `"coming_later"` — a blank/whitespace submission fails with `400 EventRsvpMessageRequired`. Leaving either of those two responses for the other with no new message also now fails with `EventRsvpMessageRequired` instead of clearing the message.
+
 ## 2026-09-22 — "Not sure" is back as a fourth RSVP option
 
 RSVP now offers four responses instead of three: **Yes**, **Coming later**, **Not sure**, **No**.
