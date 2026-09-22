@@ -1,4 +1,9 @@
 // PR-9 test list item 23 — MyProfilePage renders DiscordConnectCard, not the PR-5 row (CC-11).
+// Nastavitelná docházka (design.md §A.1, plan §10.3) — EXTENDED: MyProfilePage also renders a
+// local EventPreferencesSection({ teams, prefs, onRefresh }) next to DiscordConnectSection,
+// filtered on the POSITIVE literal `discordJoined === 'connected'` — a DIFFERENT predicate than
+// DiscordConnectSection's `!== 'unknown'` (design.md §A.1's correction: a member who is not in
+// the guild has no personal channel and receives no DM, so every control would be inert).
 
 import { render, screen } from '@testing-library/react';
 import { Option } from 'effect';
@@ -18,12 +23,20 @@ vi.mock('~/components/organisms/ProfileEditForm', () => ({
   ProfileEditForm: () => null,
 }));
 
-const { DiscordConnectCardSpy } = vi.hoisted(() => ({
-  DiscordConnectCardSpy: vi.fn((_props: { readonly team: { readonly teamId: string } }) => null),
-}));
+const { DiscordConnectCardSpy, EventPreferencesCardSpy, EventPreferencesLoadFailedSpy } =
+  vi.hoisted(() => ({
+    DiscordConnectCardSpy: vi.fn((_props: { readonly team: { readonly teamId: string } }) => null),
+    EventPreferencesCardSpy: vi.fn((_props: { readonly teamId: string }) => null),
+    EventPreferencesLoadFailedSpy: vi.fn(() => null),
+  }));
 
 vi.mock('~/components/organisms/DiscordConnectCard.js', () => ({
   DiscordConnectCard: DiscordConnectCardSpy,
+}));
+
+vi.mock('~/components/organisms/EventPreferencesCard.js', () => ({
+  EventPreferencesCard: EventPreferencesCardSpy,
+  EventPreferencesLoadFailed: EventPreferencesLoadFailedSpy,
 }));
 
 const { MyProfilePage } = await import('./MyProfilePage.js');
@@ -60,6 +73,29 @@ const unknownTeam = {
   discordJoined: 'unknown' as const,
 };
 
+const notConnectedTeam = {
+  teamId: 'team-3',
+  teamName: 'Masters',
+  logoUrl: Option.none(),
+  roleNames: [],
+  permissions: [],
+  discordJoined: 'not_connected' as const,
+};
+
+// EventPreferencesSection renders `EventPreferencesLoadFailed` — a DIFFERENT component — for a
+// team whose preferences are absent, so an empty map is NOT a neutral default: it would route
+// every team down the failure path. Supply real prefs for every team id used in this file.
+const basePrefs = {
+  showAttendeeList: true,
+  rsvpReminderDms: true,
+  personalChannelsSplit: false,
+  personalChannelsAvailable: true,
+};
+const noPrefs = Object.fromEntries(
+  ['team-1', 'team-2', 'team-3', 'team-4'].map((id) => [id, basePrefs]),
+);
+const onRefresh = () => undefined;
+
 describe('MyProfilePage', () => {
   it('renders DiscordConnectCard for each connectable team, not a bespoke row', () => {
     render(
@@ -67,6 +103,8 @@ describe('MyProfilePage', () => {
         user={user as never}
         teams={[connectedTeam as never, unknownTeam as never]}
         onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
       />,
     );
 
@@ -85,6 +123,8 @@ describe('MyProfilePage', () => {
         user={user as never}
         teams={[connectedTeam as never]}
         onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
       />,
     );
     expect(screen.queryByText('invite_joinDiscordBannerDescription')).toBeNull();
@@ -97,8 +137,114 @@ describe('MyProfilePage', () => {
         user={user as never}
         teams={[unknownTeam as never]}
         onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
       />,
     );
     expect(DiscordConnectCardSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nastavitelná docházka (design.md §A.1, plan §10.3): EventPreferencesSection
+// filtering — one card per team with discordJoined === 'connected'; none for
+// 'not_connected' or 'unknown'; renders null (no EventPreferencesCard calls)
+// when no team qualifies.
+// ---------------------------------------------------------------------------
+
+describe('MyProfilePage — EventPreferencesSection filtering (design.md §A.1)', () => {
+  it('renders one EventPreferencesCard per team with discordJoined === "connected"', () => {
+    render(
+      <MyProfilePage
+        user={user as never}
+        teams={[connectedTeam as never, unknownTeam as never, notConnectedTeam as never]}
+        onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(EventPreferencesCardSpy).toHaveBeenCalledTimes(1);
+    expect(EventPreferencesCardSpy.mock.calls[0]?.[0]).toMatchObject({ teamId: 'team-1' });
+  });
+
+  it('does NOT render a card for "not_connected" — unlike DiscordConnectSection, which explicitly targets that state', () => {
+    render(
+      <MyProfilePage
+        user={user as never}
+        teams={[notConnectedTeam as never]}
+        onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(EventPreferencesCardSpy).not.toHaveBeenCalled();
+    // The DiscordConnectSection DOES render for not_connected — confirms the two
+    // sections use genuinely different predicates, not a shared filter.
+    expect(DiscordConnectCardSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT render a card for "unknown"', () => {
+    render(
+      <MyProfilePage
+        user={user as never}
+        teams={[unknownTeam as never]}
+        onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(EventPreferencesCardSpy).not.toHaveBeenCalled();
+  });
+
+  it('a team whose preferences failed to load gets EventPreferencesLoadFailed, never the card', () => {
+    // The two are DIFFERENT components on purpose: `useCardForm` seeds its state once, so a
+    // card mounted against a failed load would keep those defaults after a successful retry
+    // and arm Save to overwrite the member's real settings.
+    render(
+      <MyProfilePage
+        user={user as never}
+        teams={[connectedTeam as never]}
+        onUpdated={() => undefined}
+        prefs={{} as never}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(EventPreferencesCardSpy).not.toHaveBeenCalled();
+    expect(EventPreferencesLoadFailedSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders nothing from the section when no team is connected', () => {
+    render(
+      <MyProfilePage
+        user={user as never}
+        teams={[unknownTeam as never, notConnectedTeam as never]}
+        onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(EventPreferencesCardSpy).not.toHaveBeenCalled();
+  });
+
+  it('multiple connected teams → one EventPreferencesCard per team, each with its own teamId', () => {
+    const secondConnectedTeam = { ...connectedTeam, teamId: 'team-4', teamName: 'Seniors' };
+    render(
+      <MyProfilePage
+        user={user as never}
+        teams={[connectedTeam as never, secondConnectedTeam as never]}
+        onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(EventPreferencesCardSpy).toHaveBeenCalledTimes(2);
+    const teamIds = EventPreferencesCardSpy.mock.calls.map((c) => (c[0] as any).teamId).sort();
+    expect(teamIds).toEqual(['team-1', 'team-4']);
   });
 });

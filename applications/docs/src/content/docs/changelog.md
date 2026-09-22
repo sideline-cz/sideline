@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — New: control your own attendee list, reminders, and event channels
+
+A new **My events in Discord** card on your profile page lets you control three things about your own Discord experience, per team:
+
+- **Show who's going** — hide the attendee-name list on your own event cards. The ✅/❌/🕒 counts and the **Attendees** button stay either way.
+- **Remind me by DM** — turn off the RSVP reminder DM entirely. There's no fallback channel, so if you rely on the reminder, leave this on.
+- **My event channels** — switch from one combined personal events channel to three, split by training / tournament (matches count as tournaments) / everything else. Switching either direction rebuilds your channel(s) in Discord and deletes anything written in the old one(s) — nothing is moved.
+
+See [Notifications](/guides/notifications/#per-user-preferences) and [Discord integration](/guides/discord-integration/#personal-event-channels) for details.
+
 ## 2026-09-22 — Fix: recurring event series could not be edited at all
 
 Recurring event series created before Sideline started storing series times in each team's own timezone kept their times in the older format. Any attempt to edit one of those series failed with an error instead of saving — not just changing its start or end time, but renaming it, changing its location, or changing which days it runs, because the schedule form always submits the series' start time along with whatever else you changed. Retrying never helped, since a rejected save left the series exactly as it was. Series created after that change were unaffected. Every existing series has now been converted to the current format, so editing any series works regardless of when it was created. Times on those series are unchanged — they keep the same wall-clock time they have always shown. No action is needed.

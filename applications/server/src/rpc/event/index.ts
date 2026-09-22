@@ -725,12 +725,19 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
           Effect.bind('counts', () => svc.rsvps.countRsvpsByEventId(event_id)),
           Effect.bind('nonResponders', ({ event, settings }) =>
             event
-              ? svc.rsvps.findNonRespondersByEventId(
-                  event_id,
-                  event.team_id,
-                  event.member_group_id,
-                  Option.match(settings, { onNone: () => 4, onSome: (s) => s.max_missed_rsvps }),
-                )
+              ? svc.rsvps
+                  .findNonRespondersByEventId(
+                    event_id,
+                    event.team_id,
+                    event.member_group_id,
+                    Option.match(settings, { onNone: () => 4, onSome: (s) => s.max_missed_rsvps }),
+                  )
+                  // Setting 2: this RPC exists solely to drive the reminder DM
+                  // (handleRsvpReminder.ts is its only consumer). Members who opted out
+                  // of reminder DMs are dropped HERE, not in findNonResponders — the
+                  // admin-facing getNonResponders endpoint and the missed-RSVP
+                  // accounting must keep seeing them. See plan §6.7.
+                  .pipe(Effect.map(Array.filter((nr) => nr.rsvp_reminder_dms)))
               : Effect.succeed([]),
           ),
           Effect.bind('yesAttendees', ({ event }) =>
@@ -893,9 +900,10 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               Request: Schema.Struct({ discord_user_id: Schema.String, team_id: Schema.String }),
               Result: Schema.Struct({
                 id: TeamMember.TeamMemberId,
+                show_attendee_list: Schema.Boolean,
               }),
               execute: (input) => svc.sql`
-                SELECT tm.id FROM team_members tm
+                SELECT tm.id, tm.show_attendee_list FROM team_members tm
                 JOIN users u ON u.id = tm.user_id
                 WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
                   AND tm.active = true
@@ -1046,7 +1054,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
             ),
           ),
           Effect.map(
-            ({ rows, total, teamId }) =>
+            ({ rows, total, teamId, member }) =>
               new EventRpcModels.UpcomingEventsForUserResult({
                 events: Array.map(
                   rows,
@@ -1076,6 +1084,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                 ),
                 total,
                 team_id: teamId,
+                show_attendee_list: member.show_attendee_list,
               }),
           ),
         ),

@@ -79,6 +79,7 @@ export const listHandler = Interaction.asEffect().pipe(
               events: result.events,
               total: result.total,
               locale,
+              showAttendeeList: result.show_attendee_list,
             });
           }),
           Effect.catchTag('GuildNotFound', () =>

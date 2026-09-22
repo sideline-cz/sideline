@@ -6,6 +6,7 @@ import {
   type GroupModel,
   GuildRpcGroup,
   GuildRpcModels,
+  type PersonalEventChannel,
   type Team,
   TeamMember,
   type User,
@@ -990,6 +991,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     readonly discord_id: Discord.Snowflake;
                     readonly name: string;
                     readonly channel_format: string;
+                    readonly bucket: PersonalEventChannel.PersonalChannelBucket;
                   }>
                 >([]),
               onSome: (team) =>
@@ -1013,6 +1015,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                             discord_id: m.discord_id,
                             name: m.name,
                             channel_format: channelFormat,
+                            bucket: m.bucket,
                           })),
                         ),
                       );
@@ -1038,6 +1041,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     readonly team_id: Team.TeamId;
                     readonly team_member_id: TeamMember.TeamMemberId;
                     readonly discord_channel_id: Discord.Snowflake;
+                    readonly bucket: PersonalEventChannel.PersonalChannelBucket;
                   }>
                 >([]),
               onSome: (team) =>
@@ -1048,40 +1052,54 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       (s) => s.discord_personal_events_group_id,
                     );
                     // Group-based de-provision: active members who left the configured group.
+                    // NOT gated by B3 — a member out of the group loses every channel.
                     const groupBased = Option.match(groupId, {
                       onNone: () =>
                         Effect.succeed<
                           ReadonlyArray<{
                             readonly team_member_id: TeamMember.TeamMemberId;
                             readonly discord_channel_id: Discord.Snowflake;
+                            readonly bucket: PersonalEventChannel.PersonalChannelBucket;
                           }>
                         >([]),
                       onSome: (gId) =>
                         deps.personalChannels.getMembersToDeprovision(team.id, gId, limit),
                     });
                     // Inactive-member de-provision: always, regardless of group config.
+                    // NOT gated by B3 — an inactive member loses every channel.
                     const inactiveBased = deps.personalChannels.getInactiveMembersToDeprovision(
                       team.id,
                       limit,
                     );
-                    return Effect.all([groupBased, inactiveBased], {
+                    // Mode-flip de-provision: channels outside the member's current
+                    // desired bucket set. Gated by B3 inside the repository — a member
+                    // mid-switch never loses a channel before its replacement exists.
+                    const obsoleteBucketBased =
+                      deps.personalChannels.getObsoleteBucketsToDeprovision(team.id, limit);
+                    return Effect.all([groupBased, inactiveBased, obsoleteBucketBased], {
                       concurrency: 'unbounded',
                     }).pipe(
-                      Effect.map(([groupRows, inactiveRows]) => {
-                        // Merge and deduplicate by team_member_id
+                      Effect.map(([groupRows, inactiveRows, obsoleteRows]) => {
+                        // Merge and deduplicate by `team_member_id:bucket` — NOT by
+                        // team_member_id alone. A split member can have up to three
+                        // obsolete channels in the same tick; a member-only key would
+                        // silently drop two of them every tick.
                         const seen = new Set<string>();
                         const merged: Array<{
                           readonly team_id: Team.TeamId;
                           readonly team_member_id: TeamMember.TeamMemberId;
                           readonly discord_channel_id: Discord.Snowflake;
+                          readonly bucket: PersonalEventChannel.PersonalChannelBucket;
                         }> = [];
-                        for (const m of [...groupRows, ...inactiveRows]) {
-                          if (!seen.has(m.team_member_id)) {
-                            seen.add(m.team_member_id);
+                        for (const m of [...groupRows, ...inactiveRows, ...obsoleteRows]) {
+                          const key = `${m.team_member_id}:${m.bucket}`;
+                          if (!seen.has(key)) {
+                            seen.add(key);
                             merged.push({
                               team_id: team.id,
                               team_member_id: m.team_member_id,
                               discord_channel_id: m.discord_channel_id,
+                              bucket: m.bucket,
                             });
                           }
                         }
@@ -1097,12 +1115,14 @@ export const GuildsRpcLive = Effect.Do.pipe(
       'Guild/ReservePersonalChannel': ({
         team_id,
         team_member_id,
+        bucket,
       }: {
         readonly team_id: Team.TeamId;
         readonly team_member_id: TeamMember.TeamMemberId;
+        readonly bucket: PersonalEventChannel.PersonalChannelBucket;
       }) =>
         deps.personalChannels
-          .reservePersonalChannel(team_id, team_member_id)
+          .reservePersonalChannel(team_id, team_member_id, bucket)
           .pipe(Effect.map((reserved) => ({ reserved }))),
 
       'Guild/SavePersonalChannelId': ({
@@ -1110,29 +1130,39 @@ export const GuildsRpcLive = Effect.Do.pipe(
         team_member_id,
         discord_channel_id,
         channel_format,
+        bucket,
       }: {
         readonly team_id: Team.TeamId;
         readonly team_member_id: TeamMember.TeamMemberId;
         readonly discord_channel_id: Discord.Snowflake;
         readonly channel_format: string;
+        readonly bucket: PersonalEventChannel.PersonalChannelBucket;
       }) =>
         deps.personalChannels.savePersonalChannelId(
           team_id,
           team_member_id,
           discord_channel_id,
           channel_format,
+          bucket,
         ),
 
       'Guild/SavePersonalChannelFormat': ({
         team_id,
         team_member_id,
         channel_format,
+        bucket,
       }: {
         readonly team_id: Team.TeamId;
         readonly team_member_id: TeamMember.TeamMemberId;
         readonly channel_format: string;
+        readonly bucket: PersonalEventChannel.PersonalChannelBucket;
       }) =>
-        deps.personalChannels.savePersonalChannelFormat(team_id, team_member_id, channel_format),
+        deps.personalChannels.savePersonalChannelFormat(
+          team_id,
+          team_member_id,
+          channel_format,
+          bucket,
+        ),
 
       'Guild/MarkTeamPersonalEventsDirty': ({ team_id }: { readonly team_id: Team.TeamId }) =>
         deps.events.markTeamUpcomingEventsPersonalMessagesDirty(team_id),
@@ -1404,6 +1434,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     readonly discord_channel_id: Discord.Snowflake;
                     readonly name: string;
                     readonly channel_format: string;
+                    readonly bucket: PersonalEventChannel.PersonalChannelBucket;
                   }>
                 >([]),
               onSome: (team) =>
@@ -1416,6 +1447,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       discord_channel_id: m.discord_channel_id,
                       name: m.name,
                       channel_format: m.channel_format,
+                      bucket: m.bucket,
                     })),
                   ),
                 ),
@@ -1423,24 +1455,20 @@ export const GuildsRpcLive = Effect.Do.pipe(
           ),
         ),
 
-      'Guild/GetPersonalChannel': ({
-        team_id,
-        team_member_id,
-      }: {
-        readonly team_id: Team.TeamId;
-        readonly team_member_id: TeamMember.TeamMemberId;
-      }) =>
-        deps.personalChannels
-          .getPersonalChannel(team_id, team_member_id)
-          .pipe(Effect.map(Option.flatMap((row) => row.discord_channel_id))),
+      // Nastavitelná docházka (plan §6.6, S5): `Guild/GetPersonalChannel` is deleted.
+      // `findOneOption` on `(team_id, team_member_id)` would return an arbitrary one
+      // of up to three rows in split mode — silently wrong — and it has zero
+      // consumers (verified by grep across `applications/bot`).
 
       'Guild/DeletePersonalChannel': ({
         team_id,
         team_member_id,
+        bucket,
       }: {
         readonly team_id: Team.TeamId;
         readonly team_member_id: TeamMember.TeamMemberId;
-      }) => deps.personalChannels.deletePersonalChannel(team_id, team_member_id),
+        readonly bucket: PersonalEventChannel.PersonalChannelBucket;
+      }) => deps.personalChannels.deletePersonalChannel(team_id, team_member_id, bucket),
 
       'Guild/ListPersonalChannelsForEvent': ({ event_id }: { readonly event_id: string }) =>
         deps.personalChannels.listPersonalChannelsForEvent(event_id),
@@ -1542,10 +1570,10 @@ export const GuildsRpcLive = Effect.Do.pipe(
           Effect.bind('member', ({ team }) =>
             SqlSchema.findOne({
               Request: Schema.Struct({ discord_user_id: Schema.String, team_id: Schema.String }),
-              Result: Schema.Struct({ id: Schema.String }),
+              Result: Schema.Struct({ id: Schema.String, show_attendee_list: Schema.Boolean }),
               execute: (input) =>
                 deps.sql`
-                  SELECT tm.id FROM team_members tm
+                  SELECT tm.id, tm.show_attendee_list FROM team_members tm
                   JOIN users u ON u.id = tm.user_id
                   WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
                     AND tm.active = true
@@ -1644,7 +1672,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
             ),
           ),
           Effect.map(
-            ({ rows, team }) =>
+            ({ rows, team, member }) =>
               new EventRpcModels.UpcomingEventsForUserResult({
                 events: Array.map(
                   rows,
@@ -1674,6 +1702,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 ),
                 total: rows.length,
                 team_id: team.id,
+                show_attendee_list: member.show_attendee_list,
               }),
           ),
         ),

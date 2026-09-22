@@ -4,6 +4,7 @@ import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission, requireReadAccess } from '~/api/permissions.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 
@@ -95,7 +96,8 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('teams', () => TeamsRepository.asEffect()),
     Effect.bind('botGuilds', () => BotGuildsRepository.asEffect()),
-    Effect.map(({ members, teams, botGuilds }) =>
+    Effect.bind('events', () => EventsRepository.asEffect()),
+    Effect.map(({ members, teams, botGuilds, events }) =>
       handlers
         .handle('getTeamInfo', ({ params: { teamId } }) =>
           Effect.Do.pipe(
@@ -198,6 +200,70 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
               getIsCommunityEnabled(botGuilds, team.guild_id),
             ),
             Effect.map(({ team, isCommunityEnabled }) => teamToInfo(team, isCommunityEnabled)),
+          ),
+        )
+        .handle('getMyEventPreferences', ({ params: { teamId } }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            Effect.bind('prefs', ({ membership }) =>
+              members.findEventPreferences(membership.id).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () => Effect.fail(forbidden),
+                    onSome: Effect.succeed,
+                  }),
+                ),
+              ),
+            ),
+            Effect.map(
+              ({ prefs }) =>
+                new TeamApi.MemberEventPreferences({
+                  showAttendeeList: prefs.show_attendee_list,
+                  rsvpReminderDms: prefs.rsvp_reminder_dms,
+                  personalChannelsSplit: prefs.personal_channels_split,
+                  personalChannelsAvailable: prefs.personal_channels_available,
+                }),
+            ),
+          ),
+        )
+        .handle('updateMyEventPreferences', ({ params: { teamId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            // Already needed for the response, and for the S6 conditional dirty mark below.
+            Effect.bind('current', ({ membership }) =>
+              members.findEventPreferences(membership.id).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () => Effect.fail(forbidden),
+                    onSome: Effect.succeed,
+                  }),
+                ),
+              ),
+            ),
+            Effect.tap(({ membership }) => members.updateEventPreferences(membership.id, payload)),
+            // Only `showAttendeeList` changes a rendered card — dirtying every upcoming
+            // event of the whole team for the other two toggles would be ~1200 pointless
+            // reconcile round trips per toggle (plan §6.5/S6).
+            Effect.tap(({ current }) =>
+              current.show_attendee_list !== payload.showAttendeeList
+                ? events.markTeamUpcomingEventsPersonalMessagesDirty(teamId)
+                : Effect.void,
+            ),
+            Effect.map(
+              ({ current }) =>
+                new TeamApi.MemberEventPreferences({
+                  showAttendeeList: payload.showAttendeeList,
+                  rsvpReminderDms: payload.rsvpReminderDms,
+                  personalChannelsSplit: payload.personalChannelsSplit,
+                  personalChannelsAvailable: current.personal_channels_available,
+                }),
+            ),
           ),
         ),
     ),

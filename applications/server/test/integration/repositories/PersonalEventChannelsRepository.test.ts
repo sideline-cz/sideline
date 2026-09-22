@@ -1,17 +1,17 @@
 // Integration tests for PersonalEventChannelsRepository (real Postgres).
 // Key methods under test:
-//   reservePersonalChannel(teamId, teamMemberId) → lease-based INSERT ON CONFLICT
+//   reservePersonalChannel(teamId, teamMemberId, bucket) → lease-based INSERT ON CONFLICT
 //     DO UPDATE: re-claims a NULL reservation only once its updated_at lease expires
-//   savePersonalChannelId(teamId, teamMemberId, discordChannelId) → UPDATE
-//   getMembersNeedingPersonalChannel(teamId, limit) → rows with discord_channel_id IS NULL
-//   getPersonalChannel(teamId, teamMemberId) → Option<{id, discord_channel_id}>
-//   deletePersonalChannel(teamId, teamMemberId) → Option<Snowflake> (returns channel id)
+//   savePersonalChannelId(teamId, teamMemberId, discordChannelId, format, bucket) → UPDATE
+//   getMembersNeedingPersonalChannel(teamId, limit) → one row per unprovisioned desired bucket
+//   deletePersonalChannel(teamId, teamMemberId, bucket) → Option<Snowflake> (returns channel id)
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, GroupModel, Team, TeamMember, User } from '@sideline/domain';
-import { Effect, Exit, Layer, Option } from 'effect';
+import { DateTime, Effect, Exit, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
+import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 // TDD: implement PersonalEventChannelsRepository
 import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
@@ -23,6 +23,7 @@ import { cleanDatabase, TestPgClient } from '../helpers.js';
 
 const TestLayer = Layer.mergeAll(
   // TDD: implement PersonalEventChannelsRepository.Default
+  EventsRepository.Default,
   PersonalEventChannelsRepository.Default,
   TeamMembersRepository.Default,
   TeamsRepository.Default,
@@ -611,55 +612,15 @@ describe('PersonalEventChannelsRepository — getMembersNeedingPersonalChannel',
   );
 });
 
-// ---------------------------------------------------------------------------
-// Tests: savePersonalChannelId then getPersonalChannel
-// ---------------------------------------------------------------------------
-
-describe('PersonalEventChannelsRepository — savePersonalChannelId / getPersonalChannel', () => {
-  it.effect('save then get returns Some with correct discord_channel_id', () =>
-    Effect.Do.pipe(
-      Effect.bind('seed', () =>
-        seedTeamWithMember(
-          '406000000000000001',
-          'save-get-1',
-          '406060606060606060' as Discord.Snowflake,
-        ),
-      ),
-      Effect.tap(({ seed }) =>
-        PersonalEventChannelsRepository.asEffect().pipe(
-          Effect.andThen((repo) =>
-            Effect.all([
-              repo.reservePersonalChannel(seed.team.id, seed.member.id),
-              repo.savePersonalChannelId(
-                seed.team.id,
-                seed.member.id,
-                '406111111111111111' as Discord.Snowflake,
-                'events-{discord_id}',
-              ),
-            ]),
-          ),
-        ),
-      ),
-      Effect.bind('channel', ({ seed }) =>
-        PersonalEventChannelsRepository.asEffect().pipe(
-          Effect.andThen((repo) =>
-            // TDD: implement getPersonalChannel(teamId, memberId) → Option<row>
-            repo.getPersonalChannel(seed.team.id, seed.member.id),
-          ),
-        ),
-      ),
-      Effect.tap(({ channel }) =>
-        Effect.sync(() => {
-          expect(Option.isSome(channel)).toBe(true);
-          const row = Option.getOrThrow(channel);
-          expect(Option.isSome(row.discord_channel_id)).toBe(true);
-          expect(Option.getOrNull(row.discord_channel_id)).toBe('406111111111111111');
-        }),
-      ),
-      Effect.provide(TestLayer),
-    ),
-  );
-});
+// Nastavitelná docházka (plan §6.6, S5): `Guild/GetPersonalChannel` /
+// `getPersonalChannel` / `_getChannel` are DELETED. `findOneOption` on
+// `(team_id, team_member_id)` returns an arbitrary one of up to three rows in
+// split mode — silently wrong — and grep confirms zero consumers. The
+// `savePersonalChannelId / getPersonalChannel` describe block that used to
+// live here is removed for the same reason; bucket-aware coverage of
+// `savePersonalChannelId` lives in the new bucket describe blocks below,
+// verified via `getMembersNeedingPersonalChannel` / `listPersonalChannelsForEvent`
+// instead of the deleted single-row getter.
 
 // ---------------------------------------------------------------------------
 // Tests: UNIQUE constraint on discord_channel_id
@@ -1146,5 +1107,977 @@ describe('PersonalEventChannelsRepository — findPersonalChannelOwner', () => {
       ),
       Effect.provide(TestLayer),
     ),
+  );
+});
+// ---------------------------------------------------------------------------
+// Nastavitelná docházka (plan §3, §6.2, §10.2). Bucket-aware coverage:
+// per-bucket reservation, split provisioning, the B3 atomic-switch gate for
+// deprovisioning, atomic deletePersonalChannel scoping, bucket on rename rows,
+// bucket routing (incl. the transitional one-row invariant), and the guild
+// poll waking on a mode flip in either direction.
+//
+// NOTE ON TYPES: the repository signatures below do not yet accept a `bucket`
+// argument (that is the developer's job, plan §6.2). These tests call the
+// FUTURE signature and cast to `any` at the call site to avoid a premature
+// TypeScript "expected N arguments" error blocking `it.effect` compilation —
+// the same convention used in the bot's `formatPersonalChannelName.test.ts`.
+// ---------------------------------------------------------------------------
+
+const setTeamPersonalEventsCategory = (teamId: Team.TeamId, categoryId: Discord.Snowflake) =>
+  TeamSettingsRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.upsert({
+        teamId,
+        eventHorizonDays: 30,
+        minPlayersThreshold: 0,
+        discordPersonalEventsCategoryId: Option.some(categoryId),
+      }),
+    ),
+  );
+
+const setPersonalChannelsSplit = (memberId: TeamMember.TeamMemberId, value: boolean) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) =>
+      sql`UPDATE team_members SET personal_channels_split = ${value} WHERE id = ${memberId}`.pipe(
+        Effect.asVoid,
+      ),
+    ),
+  );
+
+describe('PersonalEventChannelsRepository — bucket-aware reservePersonalChannel (plan §3/§6.2)', () => {
+  it.effect(
+    'reservePersonalChannel(team, member, "training") then "tournament" both succeed; a second "training" reservation fails',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '420000000000000001',
+            'bucket-reserve-1',
+            '420050505050505050' as Discord.Snowflake,
+          ),
+        ),
+        Effect.bind('training1', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.reservePersonalChannel(seed.team.id, seed.member.id, 'training'),
+            ),
+          ),
+        ),
+        Effect.bind('tournament1', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.reservePersonalChannel(seed.team.id, seed.member.id, 'tournament'),
+            ),
+          ),
+        ),
+        Effect.bind('training2', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.reservePersonalChannel(seed.team.id, seed.member.id, 'training'),
+            ),
+          ),
+        ),
+        Effect.tap(({ training1, tournament1, training2 }) =>
+          Effect.sync(() => {
+            expect(training1).toBe(true);
+            expect(tournament1).toBe(true);
+            // Already reserved (fresh, not stale) → the ON CONFLICT DO UPDATE guard
+            // does not re-claim it → false.
+            expect(training2).toBe(false);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+describe('PersonalEventChannelsRepository — getMembersNeedingPersonalChannel per desired bucket (plan §6.2)', () => {
+  it.effect('personal_channels_split = false → exactly one row, bucket "all"', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '421000000000000001',
+          'bucket-needed-combined',
+          '421050505050505050' as Discord.Snowflake,
+        ),
+      ),
+      Effect.bind('results', ({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.getMembersNeedingPersonalChannel(seed.team.id, Option.none(), 100),
+          ),
+        ),
+      ),
+      Effect.tap(({ results, seed }) =>
+        Effect.sync(() => {
+          const rows = (results as any[]).filter((r) => r.team_member_id === seed.member.id);
+          expect(rows).toHaveLength(1);
+          expect(rows[0]?.bucket).toBe('all');
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'flipped to personal_channels_split = true → three rows (training/tournament/other), and NO "all" row',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '421000000000000002',
+            'bucket-needed-split',
+            '421050505050505051' as Discord.Snowflake,
+          ),
+        ),
+        Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, true)),
+        Effect.bind('results', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.getMembersNeedingPersonalChannel(seed.team.id, Option.none(), 100),
+            ),
+          ),
+        ),
+        Effect.tap(({ results, seed }) =>
+          Effect.sync(() => {
+            const rows = (results as any[]).filter((r) => r.team_member_id === seed.member.id);
+            const buckets = rows.map((r) => r.bucket).sort();
+            expect(buckets).toEqual(['other', 'tournament', 'training']);
+            expect(buckets).not.toContain('all');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+describe('PersonalEventChannelsRepository — getObsoleteBucketsToDeprovision (B3 atomic switch, plan §6.2)', () => {
+  it.effect(
+    'one → three: after all three split buckets are provisioned, the obsolete "all" row is returned',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '422000000000000001',
+            'bucket-obsolete-1to3',
+            '422050505050505050' as Discord.Snowflake,
+          ),
+        ),
+        // Member starts combined, with a provisioned "all" channel.
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo
+                .reservePersonalChannel(seed.team.id, seed.member.id, 'all')
+                .pipe(
+                  Effect.andThen(() =>
+                    repo.savePersonalChannelId(
+                      seed.team.id,
+                      seed.member.id,
+                      '422111111111111111' as Discord.Snowflake,
+                      'events-{discord_id}',
+                      'all',
+                    ),
+                  ),
+                ),
+            ),
+          ),
+        ),
+        // Flip to split and provision all three new buckets.
+        Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, true)),
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              Effect.forEach(
+                ['training', 'tournament', 'other'] as const,
+                (bucket, i) =>
+                  repo
+                    .reservePersonalChannel(seed.team.id, seed.member.id, bucket)
+                    .pipe(
+                      Effect.andThen(() =>
+                        repo.savePersonalChannelId(
+                          seed.team.id,
+                          seed.member.id,
+                          `42212000000000000${i}` as Discord.Snowflake,
+                          'events-{discord_id}',
+                          bucket,
+                        ),
+                      ),
+                    ),
+                { concurrency: 1 },
+              ),
+            ),
+          ),
+        ),
+        Effect.bind('obsolete', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.getObsoleteBucketsToDeprovision(seed.team.id, 100)),
+          ),
+        ),
+        Effect.tap(({ obsolete, seed }) =>
+          Effect.sync(() => {
+            const rows = (obsolete as any[]).filter((r) => r.team_member_id === seed.member.id);
+            expect(rows).toHaveLength(1);
+            expect(rows[0]?.bucket).toBe('all');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'B3 gate: 2 of 3 desired buckets provisioned, third still unreserved → returns NOTHING for this member',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '422000000000000002',
+            'bucket-obsolete-gate',
+            '422050505050505051' as Discord.Snowflake,
+          ),
+        ),
+        // Provisioned "all" channel (about to become obsolete once the switch completes).
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo
+                .reservePersonalChannel(seed.team.id, seed.member.id, 'all')
+                .pipe(
+                  Effect.andThen(() =>
+                    repo.savePersonalChannelId(
+                      seed.team.id,
+                      seed.member.id,
+                      '422211111111111111' as Discord.Snowflake,
+                      'events-{discord_id}',
+                      'all',
+                    ),
+                  ),
+                ),
+            ),
+          ),
+        ),
+        Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, true)),
+        // Only training + tournament are FULLY provisioned; "other" is not even reserved.
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              Effect.forEach(
+                ['training', 'tournament'] as const,
+                (bucket, i) =>
+                  repo
+                    .reservePersonalChannel(seed.team.id, seed.member.id, bucket)
+                    .pipe(
+                      Effect.andThen(() =>
+                        repo.savePersonalChannelId(
+                          seed.team.id,
+                          seed.member.id,
+                          `42222000000000000${i}` as Discord.Snowflake,
+                          'events-{discord_id}',
+                          bucket,
+                        ),
+                      ),
+                    ),
+                { concurrency: 1 },
+              ),
+            ),
+          ),
+        ),
+        Effect.bind('obsolete', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.getObsoleteBucketsToDeprovision(seed.team.id, 100)),
+          ),
+        ),
+        Effect.tap(({ obsolete, seed }) =>
+          Effect.sync(() => {
+            const rows = (obsolete as any[]).filter((r) => r.team_member_id === seed.member.id);
+            // The old "all" channel and history must survive until every new bucket
+            // exists — a stuck provision degrades to "you keep the channel you had",
+            // never to a deletion.
+            expect(rows).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'three → one: after the combined "all" bucket is (re)provisioned, all three split rows are returned as obsolete',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '422000000000000003',
+            'bucket-obsolete-3to1',
+            '422050505050505052' as Discord.Snowflake,
+          ),
+        ),
+        Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, true)),
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              Effect.forEach(
+                ['training', 'tournament', 'other'] as const,
+                (bucket, i) =>
+                  repo
+                    .reservePersonalChannel(seed.team.id, seed.member.id, bucket)
+                    .pipe(
+                      Effect.andThen(() =>
+                        repo.savePersonalChannelId(
+                          seed.team.id,
+                          seed.member.id,
+                          `42232000000000000${i}` as Discord.Snowflake,
+                          'events-{discord_id}',
+                          bucket,
+                        ),
+                      ),
+                    ),
+                { concurrency: 1 },
+              ),
+            ),
+          ),
+        ),
+        // Flip back to combined, and fully provision the "all" bucket.
+        Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, false)),
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo
+                .reservePersonalChannel(seed.team.id, seed.member.id, 'all')
+                .pipe(
+                  Effect.andThen(() =>
+                    repo.savePersonalChannelId(
+                      seed.team.id,
+                      seed.member.id,
+                      '422399999999999999' as Discord.Snowflake,
+                      'events-{discord_id}',
+                      'all',
+                    ),
+                  ),
+                ),
+            ),
+          ),
+        ),
+        Effect.bind('obsolete', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.getObsoleteBucketsToDeprovision(seed.team.id, 100)),
+          ),
+        ),
+        Effect.tap(({ obsolete, seed }) =>
+          Effect.sync(() => {
+            const rows = (obsolete as any[]).filter((r) => r.team_member_id === seed.member.id);
+            expect(rows.map((r) => r.bucket).sort()).toEqual(['other', 'tournament', 'training']);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+describe('PersonalEventChannelsRepository — deletePersonalChannel is bucket-scoped and atomic (S3, plan §6.2)', () => {
+  it.effect(
+    'deletePersonalChannel(team, member, "training") deletes only that row and only that channel\'s messages — the member\'s other channels survive',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '423000000000000001',
+            'bucket-delete-scope',
+            '423050505050505050' as Discord.Snowflake,
+          ),
+        ),
+        Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, true)),
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              Effect.forEach(
+                ['training', 'tournament'] as const,
+                (bucket, i) =>
+                  repo
+                    .reservePersonalChannel(seed.team.id, seed.member.id, bucket)
+                    .pipe(
+                      Effect.andThen(() =>
+                        repo.savePersonalChannelId(
+                          seed.team.id,
+                          seed.member.id,
+                          `42310000000000000${i}` as Discord.Snowflake,
+                          'events-{discord_id}',
+                          bucket,
+                        ),
+                      ),
+                    ),
+                { concurrency: 1 },
+              ),
+            ),
+          ),
+        ),
+        Effect.bind('deleted', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.deletePersonalChannel(seed.team.id, seed.member.id, 'training'),
+            ),
+          ),
+        ),
+        Effect.bind('remainingRows', ({ seed }) =>
+          SqlClient.SqlClient.asEffect().pipe(
+            Effect.andThen((sql) =>
+              sql.unsafe<{ bucket: string }>(
+                `SELECT bucket FROM personal_event_channels WHERE team_member_id = '${seed.member.id}'`,
+              ),
+            ),
+          ),
+        ),
+        Effect.tap(({ deleted, remainingRows }) =>
+          Effect.sync(() => {
+            expect(Option.getOrNull(deleted)).toBe('423100000000000000');
+            const buckets = remainingRows.map((r) => r.bucket);
+            expect(buckets).toEqual(['tournament']);
+            expect(buckets).not.toContain('training');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'atomicity (S3): after delete, ZERO personal_event_messages rows remain for the deleted channel, checked in one read',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '423000000000000002',
+            'bucket-delete-atomic',
+            '423050505050505051' as Discord.Snowflake,
+          ),
+        ),
+        Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, true)),
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo
+                .reservePersonalChannel(seed.team.id, seed.member.id, 'training')
+                .pipe(
+                  Effect.andThen(() =>
+                    repo.savePersonalChannelId(
+                      seed.team.id,
+                      seed.member.id,
+                      '423200000000000000' as Discord.Snowflake,
+                      'events-{discord_id}',
+                      'training',
+                    ),
+                  ),
+                ),
+            ),
+          ),
+        ),
+        // Seed a personal_event_messages row addressed to that channel directly via SQL
+        // (no EventsRepository dependency needed for this narrow atomicity check).
+        Effect.tap(({ seed }) =>
+          SqlClient.SqlClient.asEffect().pipe(
+            Effect.andThen((sql) =>
+              sql
+                .unsafe(`
+              INSERT INTO personal_event_messages
+                (event_id, team_member_id, personal_channel_id, discord_message_id, payload_hash)
+              SELECT e.id, '${seed.member.id}', '423200000000000000', '423200000000000001', 'h'
+              FROM events e WHERE e.team_id = '${seed.team.id}' LIMIT 1
+            `)
+                .pipe(Effect.catch(() => Effect.void)),
+            ),
+          ),
+        ),
+        Effect.bind('deleted', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.deletePersonalChannel(seed.team.id, seed.member.id, 'training'),
+            ),
+          ),
+        ),
+        Effect.bind('check', () =>
+          SqlClient.SqlClient.asEffect().pipe(
+            Effect.andThen((sql) =>
+              sql.unsafe<{ pec_count: string; pem_count: string }>(`
+              SELECT
+                (SELECT COUNT(*) FROM personal_event_channels WHERE discord_channel_id = '423200000000000000')::text AS pec_count,
+                (SELECT COUNT(*) FROM personal_event_messages WHERE personal_channel_id = '423200000000000000')::text AS pem_count
+            `),
+            ),
+          ),
+        ),
+        Effect.tap(({ deleted, check }) =>
+          Effect.sync(() => {
+            expect(Option.getOrNull(deleted)).toBe('423200000000000000');
+            expect(check[0]?.pec_count).toBe('0');
+            expect(check[0]?.pem_count).toBe('0');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+describe('PersonalEventChannelsRepository — getChannelsToRename carries bucket (plan §6.2)', () => {
+  it.effect('every row returned by getChannelsToRename includes its bucket', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '424000000000000001',
+          'bucket-rename',
+          '424050505050505050' as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) => setTeamChannelFormat(seed.team.id, 'events-{discord_id}')),
+      Effect.tap(({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo
+              .reservePersonalChannel(seed.team.id, seed.member.id, 'all')
+              .pipe(
+                Effect.andThen(() =>
+                  repo.savePersonalChannelId(
+                    seed.team.id,
+                    seed.member.id,
+                    '424111111111111111' as Discord.Snowflake,
+                    'events-{discord_id}',
+                    'all',
+                  ),
+                ),
+              ),
+          ),
+        ),
+      ),
+      // Drift the team format so this row is flagged for rename.
+      Effect.tap(({ seed }) => setTeamChannelFormat(seed.team.id, 'club-{discord_id}')),
+      Effect.bind('toRename', ({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.getChannelsToRename(seed.team.id, 100)),
+        ),
+      ),
+      Effect.tap(({ toRename, seed }) =>
+        Effect.sync(() => {
+          const row = (toRename as any[]).find((r) => r.team_member_id === seed.member.id);
+          expect(row).toBeDefined();
+          expect(row?.bucket).toBe('all');
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+describe('PersonalEventChannelsRepository — listPersonalChannelsForEvent bucket routing (plan §6.2, the transitional one-row invariant)', () => {
+  /** Seed a team + member + an event of the given type, wired to the "all" channel. */
+  const seedCombinedMemberWithEvent = (
+    suffix: string,
+    eventType: 'training' | 'match' | 'tournament' | 'meeting' | 'social' | 'other',
+  ) =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          `4250000000000${suffix}`,
+          `bucket-route-combined-${suffix}`,
+          `42505050505050${suffix}` as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo
+              .reservePersonalChannel(seed.team.id, seed.member.id, 'all')
+              .pipe(
+                Effect.andThen(() =>
+                  repo.savePersonalChannelId(
+                    seed.team.id,
+                    seed.member.id,
+                    `4251${suffix}0000000000` as Discord.Snowflake,
+                    'events-{discord_id}',
+                    'all',
+                  ),
+                ),
+              ),
+          ),
+        ),
+      ),
+      Effect.bind('event', ({ seed }) =>
+        EventsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insertEvent({
+              teamId: seed.team.id,
+              eventType,
+              title: `Route test ${eventType}`,
+              description: Option.none(),
+              startAt: DateTime.fromDateUnsafe(new Date('2099-12-31T18:00:00Z')),
+              endAt: Option.none(),
+              location: Option.none(),
+              ownerGroupId: Option.none(),
+              memberGroupId: Option.none(),
+              trainingTypeId: Option.none(),
+              seriesId: Option.none(),
+              createdBy: seed.member.id,
+            }),
+          ),
+        ),
+      ),
+    );
+
+  for (const eventType of [
+    'training',
+    'match',
+    'tournament',
+    'meeting',
+    'social',
+    'other',
+  ] as const) {
+    it.effect(`combined member → routed to the "all" channel for a "${eventType}" event`, () =>
+      seedCombinedMemberWithEvent(eventType, eventType).pipe(
+        Effect.bind('rows', ({ seed, event }) =>
+          PersonalEventChannelsRepository.asEffect()
+            .pipe(Effect.andThen((repo) => repo.listPersonalChannelsForEvent(event.id)))
+            .pipe(Effect.map((rows) => rows.filter((r) => r.team_member_id === seed.member.id))),
+        ),
+        Effect.tap(({ rows }) =>
+          Effect.sync(() => {
+            expect(rows).toHaveLength(1);
+            expect(rows[0]?.personal_channel_id).toBe(`4251${eventType}0000000000`);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+    );
+  }
+
+  const seedSplitMemberWithBuckets = (
+    suffix: string,
+    provisionedBuckets: ReadonlyArray<'all' | 'training' | 'tournament' | 'other'>,
+  ) =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          `4260000000000${suffix}`,
+          `bucket-route-split-${suffix}`,
+          `42605050505050${suffix}` as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, true)),
+      Effect.tap(({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            Effect.forEach(
+              provisionedBuckets,
+              (bucket) =>
+                repo
+                  .reservePersonalChannel(seed.team.id, seed.member.id, bucket)
+                  .pipe(
+                    Effect.andThen(() =>
+                      repo.savePersonalChannelId(
+                        seed.team.id,
+                        seed.member.id,
+                        `4261${suffix}${bucket.slice(0, 4)}0000` as Discord.Snowflake,
+                        'events-{discord_id}',
+                        bucket,
+                      ),
+                    ),
+                  ),
+              { concurrency: 1 },
+            ),
+          ),
+        ),
+      ),
+    );
+
+  const insertEventOfType = (
+    teamId: Team.TeamId,
+    createdBy: TeamMember.TeamMemberId,
+    eventType: 'training' | 'match' | 'tournament' | 'meeting' | 'social' | 'other',
+  ) =>
+    EventsRepository.asEffect().pipe(
+      Effect.andThen((repo) =>
+        repo.insertEvent({
+          teamId,
+          eventType,
+          title: `Split route test ${eventType}`,
+          description: Option.none(),
+          startAt: DateTime.fromDateUnsafe(new Date('2099-12-31T18:00:00Z')),
+          endAt: Option.none(),
+          location: Option.none(),
+          ownerGroupId: Option.none(),
+          memberGroupId: Option.none(),
+          trainingTypeId: Option.none(),
+          seriesId: Option.none(),
+          createdBy,
+        }),
+      ),
+    );
+
+  const splitRouting: ReadonlyArray<
+    [
+      eventType: 'training' | 'match' | 'tournament' | 'meeting' | 'social' | 'other',
+      expectedBucket: string,
+    ]
+  > = [
+    ['training', 'trai'],
+    ['match', 'tour'],
+    ['tournament', 'tour'],
+    ['meeting', 'othe'],
+    ['social', 'othe'],
+    ['other', 'othe'],
+  ];
+
+  for (const [eventType, expectedBucketPrefix] of splitRouting) {
+    it.effect(
+      `split member (all three provisioned) → "${eventType}" event routes to the ${expectedBucketPrefix === 'trai' ? 'training' : expectedBucketPrefix === 'tour' ? 'tournament' : 'other'} channel`,
+      () =>
+        seedSplitMemberWithBuckets(`s${eventType}`, ['training', 'tournament', 'other']).pipe(
+          Effect.bind('event', ({ seed }) =>
+            insertEventOfType(seed.team.id, seed.member.id, eventType),
+          ),
+          Effect.bind('rows', ({ seed, event }) =>
+            PersonalEventChannelsRepository.asEffect()
+              .pipe(Effect.andThen((repo) => repo.listPersonalChannelsForEvent(event.id)))
+              .pipe(Effect.map((rows) => rows.filter((r) => r.team_member_id === seed.member.id))),
+          ),
+          Effect.tap(({ rows }) =>
+            Effect.sync(() => {
+              expect(rows).toHaveLength(1);
+              expect(rows[0]?.personal_channel_id).toBe(
+                `4261s${eventType}${expectedBucketPrefix}0000`,
+              );
+            }),
+          ),
+          Effect.provide(TestLayer),
+        ),
+    );
+  }
+
+  it.effect(
+    'half-provisioned split member (training exists, tournament does not) → NO row for a "match" event; the training channel for a "training" event',
+    () =>
+      seedSplitMemberWithBuckets('half', ['training']).pipe(
+        Effect.bind('matchEvent', ({ seed }) =>
+          insertEventOfType(seed.team.id, seed.member.id, 'match'),
+        ),
+        Effect.bind('trainingEvent', ({ seed }) =>
+          insertEventOfType(seed.team.id, seed.member.id, 'training'),
+        ),
+        Effect.bind('matchRows', ({ seed, matchEvent }) =>
+          PersonalEventChannelsRepository.asEffect()
+            .pipe(Effect.andThen((repo) => repo.listPersonalChannelsForEvent(matchEvent.id)))
+            .pipe(Effect.map((rows) => rows.filter((r) => r.team_member_id === seed.member.id))),
+        ),
+        Effect.bind('trainingRows', ({ seed, trainingEvent }) =>
+          PersonalEventChannelsRepository.asEffect()
+            .pipe(Effect.andThen((repo) => repo.listPersonalChannelsForEvent(trainingEvent.id)))
+            .pipe(Effect.map((rows) => rows.filter((r) => r.team_member_id === seed.member.id))),
+        ),
+        Effect.tap(({ matchRows, trainingRows }) =>
+          Effect.sync(() => {
+            expect(matchRows).toHaveLength(0);
+            expect(trainingRows).toHaveLength(1);
+            expect(trainingRows[0]?.personal_channel_id).toBe('4261halftrai0000');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'TRANSITIONAL STATE: a member holding an "all" row AND all three split rows simultaneously → listPersonalChannelsForEvent returns EXACTLY ONE row for any event type (two rows would make reconcile double-post)',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '427000000000000001',
+            'bucket-transitional',
+            '427050505050505050' as Discord.Snowflake,
+          ),
+        ),
+        // Provision the "all" row FIRST, while still combined...
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo
+                .reservePersonalChannel(seed.team.id, seed.member.id, 'all')
+                .pipe(
+                  Effect.andThen(() =>
+                    repo.savePersonalChannelId(
+                      seed.team.id,
+                      seed.member.id,
+                      '427111111111111111' as Discord.Snowflake,
+                      'events-{discord_id}',
+                      'all',
+                    ),
+                  ),
+                ),
+            ),
+          ),
+        ),
+        // ...then flip to split and provision all three NEW channels too, WITHOUT
+        // deprovisioning "all" — the transitional window the B3 gate deliberately
+        // holds open until every new bucket exists.
+        Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, true)),
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              Effect.forEach(
+                ['training', 'tournament', 'other'] as const,
+                (bucket, i) =>
+                  repo
+                    .reservePersonalChannel(seed.team.id, seed.member.id, bucket)
+                    .pipe(
+                      Effect.andThen(() =>
+                        repo.savePersonalChannelId(
+                          seed.team.id,
+                          seed.member.id,
+                          `42721000000000000${i}` as Discord.Snowflake,
+                          'events-{discord_id}',
+                          bucket,
+                        ),
+                      ),
+                    ),
+                { concurrency: 1 },
+              ),
+            ),
+          ),
+        ),
+        Effect.bind('event', ({ seed }) =>
+          EventsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insertEvent({
+                teamId: seed.team.id,
+                eventType: 'training',
+                title: 'Transitional routing test',
+                description: Option.none(),
+                startAt: DateTime.fromDateUnsafe(new Date('2099-12-31T18:00:00Z')),
+                endAt: Option.none(),
+                location: Option.none(),
+                ownerGroupId: Option.none(),
+                memberGroupId: Option.none(),
+                trainingTypeId: Option.none(),
+                seriesId: Option.none(),
+                createdBy: seed.member.id,
+              }),
+            ),
+          ),
+        ),
+        Effect.bind('rows', ({ seed, event }) =>
+          PersonalEventChannelsRepository.asEffect()
+            .pipe(Effect.andThen((repo) => repo.listPersonalChannelsForEvent(event.id)))
+            .pipe(Effect.map((rows) => rows.filter((r) => r.team_member_id === seed.member.id))),
+        ),
+        Effect.tap(({ rows }) =>
+          Effect.sync(() => {
+            // The CASE expression yields exactly one bucket value (the member's
+            // CURRENT preference decides which of the two provisioned rows counts) —
+            // never two rows for the same member, even while both physically exist.
+            expect(rows).toHaveLength(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+describe('PersonalEventChannelsRepository — getGuildsNeedingPersonalProvisioning wakes on a mode flip (plan §6.2)', () => {
+  it.effect(
+    'a mode flip (one → three) surfaces the guild; the guild drops out once every desired bucket is provisioned and no obsolete bucket remains',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '428000000000000001',
+            'bucket-guild-poll',
+            '428050505050505050' as Discord.Snowflake,
+          ),
+        ),
+        Effect.tap(({ seed }) =>
+          setTeamPersonalEventsCategory(seed.team.id, '428999999999999999' as Discord.Snowflake),
+        ),
+        // Fully provisioned combined member → guild NOT in the needing-provisioning set.
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo
+                .reservePersonalChannel(seed.team.id, seed.member.id, 'all')
+                .pipe(
+                  Effect.andThen(() =>
+                    repo.savePersonalChannelId(
+                      seed.team.id,
+                      seed.member.id,
+                      '428111111111111111' as Discord.Snowflake,
+                      'events-{discord_id}',
+                      'all',
+                    ),
+                  ),
+                ),
+            ),
+          ),
+        ),
+        Effect.bind('guildsBeforeFlip', () =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.getGuildsNeedingPersonalProvisioning(1000)),
+          ),
+        ),
+        Effect.tap(({ guildsBeforeFlip, seed }) =>
+          Effect.sync(() => {
+            expect(guildsBeforeFlip).not.toContain(seed.team.guild_id);
+          }),
+        ),
+        // Flip to split — the desired set changes, the guild must reappear even though
+        // nothing about discord_channel_id has changed yet.
+        Effect.tap(({ seed }) => setPersonalChannelsSplit(seed.member.id, true)),
+        Effect.bind('guildsAfterFlip', () =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.getGuildsNeedingPersonalProvisioning(1000)),
+          ),
+        ),
+        Effect.tap(({ guildsAfterFlip, seed }) =>
+          Effect.sync(() => {
+            expect(guildsAfterFlip).toContain(seed.team.guild_id);
+          }),
+        ),
+        // Fully provision the three new buckets — the desired set is now satisfied AND
+        // (once the B3 gate clears) the obsolete "all" row is gone too.
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              Effect.forEach(
+                ['training', 'tournament', 'other'] as const,
+                (bucket, i) =>
+                  repo
+                    .reservePersonalChannel(seed.team.id, seed.member.id, bucket)
+                    .pipe(
+                      Effect.andThen(() =>
+                        repo.savePersonalChannelId(
+                          seed.team.id,
+                          seed.member.id,
+                          `42821000000000000${i}` as Discord.Snowflake,
+                          'events-{discord_id}',
+                          bucket,
+                        ),
+                      ),
+                    ),
+                { concurrency: 1 },
+              ),
+            ),
+          ),
+        ),
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.deletePersonalChannel(seed.team.id, seed.member.id, 'all'),
+            ),
+          ),
+        ),
+        Effect.bind('guildsAfterConverge', () =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.getGuildsNeedingPersonalProvisioning(1000)),
+          ),
+        ),
+        Effect.tap(({ guildsAfterConverge, seed }) =>
+          Effect.sync(() => {
+            expect(guildsAfterConverge).not.toContain(seed.team.guild_id);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
   );
 });

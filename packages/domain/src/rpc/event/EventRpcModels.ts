@@ -234,6 +234,9 @@ export class UpcomingEventsForUserResult extends Schema.Class<UpcomingEventsForU
   events: Schema.Array(UpcomingEventForUserEntry),
   total: Schema.Number,
   team_id: Schema.String,
+  // Member-level preference (plan §5.3): defaults to `true` (today's behaviour) so a
+  // rolling deploy where the server hasn't shipped this key yet still decodes.
+  show_attendee_list: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => true)),
 }) {}
 
 export class EventClaimInfo extends Schema.Class<EventClaimInfo>('EventClaimInfo')({

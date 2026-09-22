@@ -216,7 +216,21 @@ This is where events actually live in Discord: when the **Personal events catego
 
 ### Going list and Attendees button
 
-Each event message in a personal channel displays a **Going** attendee list and an **Attendees** button, so members always see who else has responded "yes" without switching channels.
+Each event message in a personal channel displays a **Going** attendee list and an **Attendees** button, so members always see who else has responded "yes" without switching channels. Any member can turn off the **Going** list on their own cards — see **Show who's going** in [Per-user preferences](/guides/notifications/#per-user-preferences) below. This only hides names on that member's own cards; the RSVP counts and the **Attendees** button (which anyone can still click to see the full list) are unaffected, and nobody else's cards change.
+
+### Splitting your channel by event type
+
+By default, all of a member's events post into one combined personal channel. Any member can instead split their own channel into three from their profile — see **My event channels** in [Per-user preferences](/guides/notifications/#per-user-preferences). Split mode creates:
+
+- `{format}-trainings` — training events
+- `{format}-tournaments` — matches **and** tournaments
+- `{format}-others` — everything else (meetings, socials, etc.)
+
+Each event posts into exactly one of the three channels, based on its type.
+
+<Aside type="caution" title="Switching rebuilds your channels">
+  Changing this setting (either direction) deletes your old channel(s) and creates new ones — anything written in the old channel(s) is gone, it is not moved. The rebuild happens within a few minutes, not instantly, since it runs on the bot's regular provisioning pass.
+</Aside>
 
 ### Mention on unanswered events
 
@@ -236,6 +250,8 @@ The default channel name is `events-{discord_id}` (e.g. `events-123456789`). Cap
 | `{discord_id}` | Member's Discord user snowflake (always unique) |
 
 Example formats: `events-{name}`, `{name}-{discord_id}`, `my-events-{discord_id}`.
+
+For a member who has split their channel into three (see [Splitting your channel by event type](#splitting-your-channel-by-event-type) above), the format is rendered once and then a suffix (`-trainings`, `-tournaments`, or `-others`) is appended to each of the three channel names.
 
 <Aside type="note" title="Changing the format renames existing channels">
   When you save a new channel-name format, the bot automatically renames all existing personal channels to match. Channels are processed one at a time to respect Discord rate limits, so renaming a large team may take a few seconds. New channels created after the change will also use the updated format from the start.

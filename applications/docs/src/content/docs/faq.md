@@ -64,6 +64,7 @@ RSVP reminders are sent as a direct message, not a channel post. Common causes:
 - Your Discord privacy settings block DMs from server members (see [What happens if I have Discord DMs disabled?](#what-happens-if-i-have-discord-dms-disabled) above).
 - You already RSVPed — reminders only go to members who haven't responded yet.
 - Your team has reminders disabled in their notification settings.
+- You turned off **Remind me by DM** in your own profile settings — see [Per-user preferences](/guides/notifications/#per-user-preferences). There's no other channel it falls back to, so turning it off means no reminder at all.
 
 ### Can I hide events from groups I'm not in?
 

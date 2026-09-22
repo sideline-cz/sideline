@@ -35,6 +35,7 @@ const renderUpcomingPagePayload = (params: {
   events: ReadonlyArray<EventRpcModels.UpcomingEventForUserEntry>;
   discordUserId: DiscordSchemas.Snowflake;
   locale: Locale;
+  showAttendeeList: boolean;
 }) => {
   const entry = params.events.find((e) => e.event_id === params.eventId);
   if (entry === undefined) {
@@ -60,7 +61,7 @@ const renderUpcomingPagePayload = (params: {
       (yesAttendees) =>
         buildPersonalMessage({
           entry,
-          yesAttendees,
+          yesAttendees: params.showAttendeeList ? yesAttendees : [],
           discordId: params.discordUserId,
           locale: params.locale,
         }).editPayload,
@@ -166,6 +167,7 @@ export const UpcomingRsvpButton = Ix.messageComponent(
                 events: result.events,
                 discordUserId,
                 locale,
+                showAttendeeList: result.show_attendee_list,
               }),
             ),
           ),
@@ -335,6 +337,7 @@ export const UpcomingClearMessageButton = Ix.messageComponent(
                 events: result.events,
                 discordUserId,
                 locale,
+                showAttendeeList: result.show_attendee_list,
               }),
             ),
           ),
@@ -499,6 +502,7 @@ export const UpcomingRsvpModal = Ix.modalSubmit(
                 events: result.events,
                 discordUserId,
                 locale,
+                showAttendeeList: result.show_attendee_list,
               }),
             ),
           ),

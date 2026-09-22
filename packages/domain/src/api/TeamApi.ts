@@ -52,6 +52,27 @@ export const UpdateTeamRequest = Schema.Struct({
 });
 export type UpdateTeamRequest = Schema.Schema.Type<typeof UpdateTeamRequest>;
 
+// Nastavitelná docházka (plan §5.6): the calling member's own event preferences for a team.
+export class MemberEventPreferences extends Schema.Class<MemberEventPreferences>(
+  'MemberEventPreferences',
+)({
+  showAttendeeList: Schema.Boolean,
+  rsvpReminderDms: Schema.Boolean,
+  personalChannelsSplit: Schema.Boolean,
+  // False when the team has no discord_personal_events_category_id — there are no
+  // personal channels to configure, so the UI hides the channel block (design.md §A.8).
+  // Response-only; the PATCH payload is a separate schema without it.
+  personalChannelsAvailable: Schema.Boolean,
+}) {}
+
+export class UpdateMemberEventPreferences extends Schema.Class<UpdateMemberEventPreferences>(
+  'UpdateMemberEventPreferences',
+)({
+  showAttendeeList: Schema.Boolean,
+  rsvpReminderDms: Schema.Boolean,
+  personalChannelsSplit: Schema.Boolean,
+}) {}
+
 export class TeamApiGroup extends HttpApiGroup.make('team')
   .add(
     HttpApiEndpoint.get('getTeamInfo', '/teams/:teamId', {
@@ -72,6 +93,21 @@ export class TeamApiGroup extends HttpApiGroup.make('team')
     HttpApiEndpoint.post('retryOnboardingSync', '/teams/:teamId/onboarding/retry', {
       success: TeamInfo,
       error: Forbidden.pipe(HttpApiSchema.status(403)),
+      params: { teamId: TeamId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get('getMyEventPreferences', '/teams/:teamId/me/event-preferences', {
+      success: MemberEventPreferences,
+      error: Forbidden.pipe(HttpApiSchema.status(403)),
+      params: { teamId: TeamId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.patch('updateMyEventPreferences', '/teams/:teamId/me/event-preferences', {
+      success: MemberEventPreferences,
+      error: Forbidden.pipe(HttpApiSchema.status(403)),
+      payload: UpdateMemberEventPreferences,
       params: { teamId: TeamId },
     }).middleware(AuthMiddleware),
   ) {}

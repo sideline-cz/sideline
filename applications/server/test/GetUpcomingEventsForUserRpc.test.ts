@@ -261,6 +261,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             events: [entry],
             total: 1,
             team_id: TEST_TEAM_ID,
+            show_attendee_list: true,
           }),
       ),
       Effect.tap(({ result }) =>
@@ -295,6 +296,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             events: [],
             total: 0,
             team_id: TEST_TEAM_ID,
+            show_attendee_list: true,
           }),
       ),
       Effect.tap(({ result }) =>
