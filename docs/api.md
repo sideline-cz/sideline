@@ -46,6 +46,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Rules Trainer](#35-rules-trainer)
    - [AI Assistant](#36-ai-assistant)
    - [Bank Sync](#37-bank-sync)
+   - [Event Type](#38-event-type)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -1931,7 +1932,7 @@ Lists all known Discord channels for the team's linked guild.
 
 #### Enums
 
-**EventType:** `"training"`, `"match"`, `"tournament"`, `"meeting"`, `"social"`, `"other"`
+**EventType:** `"training"`, `"match"`, `"tournament"`, `"meeting"`, `"social"`, `"other"` — the immutable `kind` every team-customizable event type is built on. See [38. Event Type](#38-event-type) for the per-team catalogue (`name`/`color`/`position`) that now sits on top of this fixed set; `eventType` on this resource is always the underlying `kind`, never the free-text name.
 
 **EventStatus:** `"active"`, `"cancelled"`, `"started"`
 
@@ -1970,7 +1971,10 @@ Lists events for a team. By default the response is filtered to events that belo
 | `eventId` | `EventId` | No | Event ID |
 | `teamId` | `TeamId` | No | Team ID |
 | `title` | `string` | No | Event title |
-| `eventType` | `EventType` | No | Type of event |
+| `eventType` | `EventType` | No | Type of event (the underlying `kind`) |
+| `eventTypeId` | `EventTypeId \| null` | Optional key | The resolved [event type](#38-event-type) row; omitted (not merely `null`) only against an old server that predates this feature, or when the trigger resolved no type at all |
+| `eventTypeName` | `string \| null` | Optional key, nullable | Team's custom name; `null` means "render the built-in translated label for `eventType`" (a never-renamed seeded row) |
+| `eventTypeColor` | `EventTypeColor \| null` | Optional key | The event type's display colour |
 | `trainingTypeName` | `string \| null` | Yes | Training type name (for training events) |
 | `description` | `string \| null` | Yes | Description |
 | `imageUrl` | `string \| null` | Yes | Cover image URL (must be `https://`, max 2048 chars, public host only) |
@@ -2007,7 +2011,8 @@ Creates a new event.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `title` | `string` | Yes | Non-empty event title |
-| `eventType` | `EventType` | Yes | Type of event |
+| `eventType` | `EventType` | No\* | Type of event (the `kind`) |
+| `eventTypeId` | `EventTypeId` | No\* | The [event type](#38-event-type) row to use |
 | `trainingTypeId` | `TrainingTypeId \| null` | Yes | Training type (for training events; null otherwise) |
 | `description` | `string \| null` | Yes | Optional description |
 | `imageUrl` | `string \| null` | No | Optional cover image URL (must be `https://`, max 2048 chars, public host only) |
@@ -2017,6 +2022,8 @@ Creates a new event.
 | `locationUrl` | `string \| null` | No | Optional location URL (public `https://`, max 2048 chars); requires `location` to be non-empty |
 | `ownerGroupId` | `GroupId \| null` | Yes | Group that owns/manages the event |
 | `memberGroupId` | `GroupId \| null` | Yes | Group whose members are eligible to RSVP |
+
+\* At least one of `eventType`/`eventTypeId` is required (a request with neither is rejected at the schema level); sending both is safe and recommended — the server derives whichever is missing (an id resolves its `kind`; a bare `kind` resolves the team's oldest matching event type). `eventTypeId` must name an [event type](#38-event-type) belonging to `teamId`; a foreign or unknown id falls back to resolving from `eventType` alone.
 
 **Response:** `201 Created` — `EventInfo`
 
@@ -2050,7 +2057,10 @@ Members without the `team:manage` permission can only retrieve events belonging 
 | `eventId` | `EventId` | No | Event ID |
 | `teamId` | `TeamId` | No | Team ID |
 | `title` | `string` | No | Event title |
-| `eventType` | `EventType` | No | Type of event |
+| `eventType` | `EventType` | No | Type of event (the underlying `kind`) |
+| `eventTypeId` | `EventTypeId \| null` | Optional key | The resolved [event type](#38-event-type) row; same optionality as on `EventInfo` above |
+| `eventTypeName` | `string \| null` | Optional key, nullable | Team's custom name; `null` means "render the built-in translated label for `eventType`" |
+| `eventTypeColor` | `EventTypeColor \| null` | Optional key | The event type's display colour |
 | `trainingTypeId` | `TrainingTypeId \| null` | Yes | Training type ID |
 | `trainingTypeName` | `string \| null` | Yes | Training type name |
 | `description` | `string \| null` | Yes | Description |
@@ -2099,7 +2109,8 @@ Updates an event's fields. All fields are optional.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `title` | `string` | No | Non-empty event title |
-| `eventType` | `EventType` | No | Type of event |
+| `eventType` | `EventType` | No | Type of event (the `kind`) |
+| `eventTypeId` | `EventTypeId` | No | The [event type](#38-event-type) row to switch to |
 | `trainingTypeId` | `TrainingTypeId \| null` | No | Training type ID |
 | `description` | `string \| null` | No | Description |
 | `imageUrl` | `string \| null` | No | Cover image URL (must be `https://`, max 2048 chars, public host only) |
@@ -2109,6 +2120,8 @@ Updates an event's fields. All fields are optional.
 | `locationUrl` | `string \| null` | No | Optional location URL (public `https://`, max 2048 chars); requires `location` to be non-empty when setting a URL |
 | `ownerGroupId` | `GroupId \| null` | No | Owner group ID |
 | `memberGroupId` | `GroupId \| null` | No | Member group ID |
+
+Omitting both `eventType` and `eventTypeId` leaves the event's type entirely unchanged (a title-only edit never silently re-types the event, even if the event's current type was later archived). `eventType` **cannot be changed on its own** to a different `kind` from what `eventTypeId` resolves to — the id wins when both disagree.
 
 **Response:** `200 OK` — `EventDetail`
 
@@ -7348,6 +7361,178 @@ Renders a SPAYD payment QR code (PNG) for one fee assignment, sized to the assig
 
 ---
 
+### 38. Event Type
+
+**Source:** `packages/domain/src/api/EventTypeApi.ts`
+
+The per-team catalogue of event types. Every team is seeded with six default rows — one per `kind` (`training`, `match`, `tournament`, `meeting`, `social`, `other`), each with `name: null` (renders the built-in translated label). Teams can add more rows of any `kind`, rename any row, recolour it, and reorder the list; `kind` itself is immutable once a row is created — it is what drives behaviour (personal-channel bucket routing, training-type/claim flows, workout generation), while `name`/`color`/`position` are presentation only. See the root `AGENTS.md` "Event Types" section for the full ownership model.
+
+The `canAdmin` flag in the list response tells the caller whether the authenticated user holds `team:manage` (event type management reuses that permission — there is no separate `event-type:*` permission set, so Captains cannot reach event type management even though they can manage training/activity types).
+
+#### Schemas
+
+`EventTypeInfo`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `eventTypeId` | `EventTypeId` | No | Event type ID |
+| `teamId` | `TeamId` | No | Owning team |
+| `name` | `string \| null` | Yes | Team's custom name; `null` means "render the built-in translated label for `kind`" |
+| `kind` | `EventTypeKind` | No | `"training"`, `"match"`, `"tournament"`, `"meeting"`, `"social"`, or `"other"` — immutable once the row exists |
+| `color` | `EventTypeColor` | No | One of 13 named colours (`blue`, `emerald`, `purple`, `amber`, `cyan`, `rose`, `indigo`, `teal`, `red`, `orange`, `slate`, `pink`, `gray`) |
+| `position` | `number` | No | Display order; presentation only — never used to resolve a `kind` to a row |
+| `usageCount` | `number` | No | Number of events currently pointing at this row |
+
+---
+
+#### `GET /teams/:teamId/event-types`
+
+Lists a team's active (non-archived) event types, ordered by `position`. Membership-only (no `team:manage` requirement) so the event create/edit pickers can load the catalogue without a second, permission-gated call.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `EventTypeListResponse`
+
+| Field | Type | Description |
+|---|---|---|
+| `canAdmin` | `boolean` | Whether the caller holds `team:manage` and may create/update/delete/reorder |
+| `eventTypes` | `EventTypeInfo[]` | Active event types only — an archived-but-still-referenced type is rendered client-side from the event's own denormalised fields, not returned here |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventTypeForbidden` | 403 | Not a member of this team |
+
+---
+
+#### `POST /teams/:teamId/event-types`
+
+Creates a new team event type. Requires `team:manage`.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `CreateEventTypeRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `EventTypeName` | Yes | 1–50 characters; unique within the team, case-insensitive, among active types |
+| `kind` | `EventTypeKind` | Yes | Immutable once created — cannot be changed by a later update |
+| `color` | `EventTypeColor` | Yes | Display colour |
+
+**Response:** `201 Created` — `EventTypeInfo` (placed at `position = max + 1`)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventTypeForbidden` | 403 | Missing `team:manage` permission |
+| `EventTypeNameAlreadyTaken` | 409 | Name already used by an active type in this team (case-insensitive) |
+
+---
+
+#### `PATCH /teams/:teamId/event-types/:eventTypeId`
+
+Updates a team event type's name and/or color. Requires `team:manage`. There is no `kind` field on this request — `kind` cannot be changed once a type exists.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `eventTypeId` | `EventTypeId` (string) | Event type ID |
+
+**Request Body:** `UpdateEventTypeRequest` (all fields optional)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `EventTypeName` | No | New display name |
+| `color` | `EventTypeColor` | No | New display colour |
+
+**Response:** `200 OK` — `EventTypeInfo`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventTypeForbidden` | 403 | Missing `team:manage` permission |
+| `EventTypeNotFound` | 404 | Event type does not exist, or does not belong to `teamId` |
+| `EventTypeNameAlreadyTaken` | 409 | Name already used by another active type in this team (case-insensitive) |
+
+---
+
+#### `DELETE /teams/:teamId/event-types/:eventTypeId`
+
+Archives (never hard-deletes) a team event type. Requires `team:manage`. Rejected when this is the team's last active type — archiving it would make event creation impossible. An archived type still renders correctly on every event that references it; it just disappears from the create/edit pickers and from `GET /teams/:teamId/event-types`.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `eventTypeId` | `EventTypeId` (string) | Event type ID |
+
+**Request Body:** None
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventTypeForbidden` | 403 | Missing `team:manage` permission |
+| `EventTypeNotFound` | 404 | Event type does not exist, or does not belong to `teamId` |
+| `EventTypeLastRemaining` | 409 | This is the team's last active event type |
+
+---
+
+#### `POST /teams/:teamId/event-types/reorder`
+
+Reorders a team's active event types. Requires `team:manage`.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `ReorderEventTypesRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `eventTypeIds` | `EventTypeId[]` | Yes | The full list of the team's active event type IDs, in the desired display order |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventTypeForbidden` | 403 | Missing `team:manage` permission |
+| `EventTypeReorderInvalid` | 400 | The list contains a duplicate id, a foreign/unknown id, or a length that doesn't match the team's current active-type count |
+
+`position` is presentation only — reordering never changes which row a bare `kind` resolves to on event create/update (see `events_sync_event_type()` in `docs/database.md`).
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -7407,6 +7592,8 @@ Handles Discord guild lifecycle events.
 
 Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-global-events-board Release A, the shared "global" events board no longer exists — events live only in personal event channels and the web app. The board/divider RPC methods below (`SaveDiscordMessageId`, `GetDiscordMessageId`, `GetChannelEvents`, `GetChannelDivider`/`SaveChannelDivider`/`DeleteChannelDivider`, `RepointChannelEvents`, `GetUnpostedUpcomingByChannel`, `GetChannelsWithStoredMessages`) are no longer called by the current bot; they are kept server-side only so an older, not-yet-updated bot instance can keep functioning during the rollout, and are removed in Release B.
 
+`EventEmbedInfo`, `ChannelEventEntry`, `GuildEventListEntry`, `UpcomingEventForUserEntry`, and `EventClaimInfo` each additionally carry `event_type_name` (`string \| null`, optional key) and `event_type_color` (`EventTypeColor`, optional key) — wire-compatible additions so a peer on either side of the bot-ships-before-server rollout simply omits/ignores the key. `event_type_name: null` means "render the built-in translated label for the entry's `event_type` kind", the same convention as `EventApi.EventInfo.eventTypeName`.
+
 | Method | Payload / Returns | Description |
 |---|---|---|
 | `Event/GetUnprocessedEvents` | `limit` → `UnprocessedEventSyncEvent[]` | Polls for outbox events to process |
@@ -7424,7 +7611,8 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/GetUpcomingGuildEvents` | `guild_id`, `offset`, `limit` → `GuildEventListResult` | Lists upcoming events for a guild (guild-scoped, no per-user RSVP data) |
 | `Event/GetUpcomingEventsForUser` | `guild_id`, `discord_user_id`, `offset`, `limit` → `UpcomingEventsForUserResult` | Lists upcoming events with the invoking user's RSVP status; used by `/event list`, the overview show button, and per-user embed pagination. Each entry's `my_response` carries the true stored response (`"yes" \| "no" \| "maybe" \| "coming_later"`); `maybe_count` counts only `"maybe"` and `coming_later_count` (defaults to `0` if absent) counts `"coming_later"` separately. Result also carries the caller's `show_attendee_list` preference, same as `Guild/GetAllUpcomingEventsForUser` above. |
 | `Event/GetTrainingTypesByGuild` | `guild_id` → `TrainingTypeChoice[]` | Lists training types for a guild (for autocomplete) |
-| `Event/CreateEvent` | `guild_id`, `discord_user_id`, `event_type`, `title`, `start_at`, ... → `CreateEventResult` | Creates an event from the bot slash command |
+| `Event/GetEventTypesByGuild` | `guild_id` → `EventTypeChoice[]` | Lists the team's active [event types](#38-event-type) for the `/event create` `type` autocomplete (per-team, custom types cannot be static Discord slash-command `choices`); each entry carries `id`, `kind`, and `name` (`null` = fall back to the kind's built-in translated label) |
+| `Event/CreateEvent` | `guild_id`, `discord_user_id`, `event_type`, `event_type_id?`, `title`, `start_at`, ... → `CreateEventResult` | Creates an event from the bot slash command. `event_type` (a `kind` literal) stays **required** — the bot ships before the server, so a new bot may still be talking to an old server that has never heard of `event_type_id`. `event_type_id` is optional (an old bot omits the key entirely, decoded as absent, not an error) |
 | `Event/GetChannelDivider` | `discord_channel_id` → `Snowflake \| null` | Returns the stored divider message ID for a channel |
 | `Event/SaveChannelDivider` | `discord_channel_id`, `discord_message_id` | Persists or updates the divider message ID |
 | `Event/DeleteChannelDivider` | `discord_channel_id` | Removes the stored divider message ID |
@@ -7771,3 +7959,8 @@ The following table consolidates all error tags across all API groups.
 | `BankSyncBusy` | 409 | Bank Sync | A poll or another `/rematch` already holds the distributed lease |
 | `InvalidBankAccount` | 400 | Bank Sync | `account_prefix`/`account_number`/`bank_code` do not form a valid CZ IBAN |
 | `ExportCoverageIncomplete` | 409 | Bank Sync | The CSV export range is not fully covered by ingested statement periods (or a period's balances don't reconcile), and `acknowledgeGaps` was not set; carries `gaps` and `continuityViolations` |
+| `EventTypeForbidden` | 403 | Event Type | Missing `team:manage` permission (or not a team member, for the list endpoint) |
+| `EventTypeNotFound` | 404 | Event Type | Event type does not exist, or does not belong to `teamId` |
+| `EventTypeNameAlreadyTaken` | 409 | Event Type | Name already used by an active type in this team (case-insensitive) |
+| `EventTypeLastRemaining` | 409 | Event Type | Attempted to archive the team's last active event type |
+| `EventTypeReorderInvalid` | 400 | Event Type | Reorder list has a duplicate, a foreign/unknown id, or the wrong length |

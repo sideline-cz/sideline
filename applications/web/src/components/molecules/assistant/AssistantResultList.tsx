@@ -7,7 +7,6 @@ import type { AiChatApi } from '@sideline/domain';
 import React from 'react';
 import { AssistantResultCard } from '~/components/molecules/assistant/AssistantResultCard.js';
 import { Button } from '~/components/ui/button.js';
-import type { TrainingTypeColorMap } from '~/lib/event-colors.js';
 import { tr } from '~/lib/translations.js';
 
 const VISIBLE_LIMIT = 5;
@@ -15,10 +14,9 @@ const VISIBLE_LIMIT = 5;
 interface AssistantResultListProps {
   references: ReadonlyArray<AiChatApi.EntityRef>;
   teamId: string;
-  colorMap: TrainingTypeColorMap;
 }
 
-export function AssistantResultList({ references, teamId, colorMap }: AssistantResultListProps) {
+export function AssistantResultList({ references, teamId }: AssistantResultListProps) {
   const [expanded, setExpanded] = React.useState(false);
   const listRef = React.useRef<HTMLUListElement>(null);
 
@@ -41,7 +39,7 @@ export function AssistantResultList({ references, teamId, colorMap }: AssistantR
       <ul ref={listRef} className='flex flex-col gap-1.5'>
         {visible.map((reference) => (
           <li key={reference.ref}>
-            <AssistantResultCard reference={reference} teamId={teamId} colorMap={colorMap} />
+            <AssistantResultCard reference={reference} teamId={teamId} />
           </li>
         ))}
       </ul>

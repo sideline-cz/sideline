@@ -469,10 +469,22 @@ erDiagram
 
 ### Events
 
-`events` are individual scheduled occurrences. `event_series` are recurring schedules that generate individual event rows on a rolling horizon. `event_rsvps` capture each team member's attendance response for a given event.
+`events` are individual scheduled occurrences. `event_series` are recurring schedules that generate individual event rows on a rolling horizon. `event_rsvps` capture each team member's attendance response for a given event. `event_types` is the per-team catalogue of event kinds: every team is seeded with six rows (one per immutable `kind` — `training`/`match`/`tournament`/`meeting`/`social`/`other`) and may add more, rename, recolour, and reorder them. `events.event_type` (the `kind`) is trigger-owned: a `BEFORE INSERT OR UPDATE` trigger on `events` resolves it from `event_type_id` whenever that id names a same-team, non-deleted `event_types` row, and resolves `event_type_id` from `event_type` otherwise (ordered by creation, never `event_types.position`, which is presentation only) — this is what lets the pre-existing series-generation and RSVP/claim/training flows keep routing off `event_type` unchanged. Deleting an event type archives it (`archived_at`); it is never hard-deleted, because `event_type_id`'s `ON DELETE SET NULL` would otherwise fire the same trigger and silently re-point historical events onto a sibling type of the same `kind`.
 
 ```mermaid
 erDiagram
+    event_types {
+        UUID id PK
+        UUID team_id FK
+        TEXT name "nullable"
+        TEXT kind
+        TEXT color
+        INTEGER position
+        TIMESTAMPTZ archived_at "nullable"
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
     events {
         UUID id PK
         UUID team_id FK
@@ -482,6 +494,7 @@ erDiagram
         UUID member_group_id FK
         UUID created_by FK
         TEXT event_type
+        UUID event_type_id FK "nullable, trigger-derived"
         TEXT title
         TEXT description
         TIMESTAMPTZ start_at
@@ -541,6 +554,8 @@ erDiagram
         TIMESTAMPTZ updated_at
     }
 
+    teams ||--o{ event_types : "customizes"
+    event_types o|--o{ events : "types"
     teams ||--o{ events : "schedules"
     teams ||--o{ event_series : "schedules"
     event_series ||--o{ events : "generates"

@@ -5,6 +5,18 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — New: customize your team's event types
+
+Event types were previously a fixed list of six — training, match, tournament, meeting, social, other. Admins can now rename, recolour, add, and reorder them per team from **Team → Event types**.
+
+- Each custom type still "behaves like" one of the six original kinds (its scheduling rules, Discord channel routing, and reminder settings), but its display name and colour badge are entirely up to your team — rename "Tournament" to "Cup game", or add a second type such as "Friendly" that also behaves like a match.
+- The **event type** field when creating or editing an event (web and Discord's `/event create`) now lists your team's own types instead of a fixed six, with `/event create`'s `type` option becoming an auto-suggest as you type (Discord no longer lets that list vary per team any other way).
+- A type can be archived once it's no longer needed, but not deleted outright — events that already used it keep showing its name and colour. A team must always keep at least one active type, so the last one can't be archived.
+- This page is admin-only, unlike training types and activity types, which captains can also manage.
+- Discord embed colours for events change to match: some kinds (e.g. training) render in a different colour than before, since the web badge and the Discord embed used to disagree on colour and now share one source.
+- See [Key concepts](/introduction/key-concepts/#event-type) for the difference between an event type and a training type.
+- API integrators: `EventInfo`/`EventDetail` gain `eventTypeId`, `eventTypeName`, and `eventTypeColor`. `CreateEventRequest`/`UpdateEventRequest` accept an `eventTypeId` alongside the existing `eventType`; at least one is required on create. A new `/teams/:teamId/event-types` resource (list/create/update/archive/reorder) manages the catalogue itself — see the API reference for the full shape.
+
 ## 2026-09-22 — New: different reminder lead times per event type
 
 **Team settings → Notifications** now lets a team set how many days before an event the RSVP reminder fires **per event type**, instead of one number for everything. A tournament can get three days' notice while a training keeps one.

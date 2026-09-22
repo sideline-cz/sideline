@@ -1,10 +1,11 @@
 import * as Schemas from '@sideline/effect-lib/Schemas';
-import { Schema, SchemaGetter } from 'effect';
+import { Option, Schema, SchemaGetter } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import { fieldState } from '~/api/RequestFilters.js';
 import { EventId, EventStatus, EventType } from '~/models/Event.js';
 import { EventSeriesId } from '~/models/EventSeries.js';
+import { EventTypeColor, EventTypeId } from '~/models/EventType.js';
 import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
 import { TrainingTypeId } from '~/models/TrainingType.js';
@@ -110,6 +111,15 @@ export class EventInfo extends Schema.Class<EventInfo>('EventInfo')({
   title: Schema.String,
   eventType: EventType,
   trainingTypeName: Schema.OptionFromNullOr(Schema.String),
+  // The resolved event_types row, None only during a rolling deploy against an old server
+  // (or an event trigger-resolved to no type at all). All three are deliberately
+  // OptionFromOptionalKey, never OptionFromNullOr alone: a *missing* key on OptionFromNullOr
+  // is a decode ERROR, not none, which would fail the whole event list against an old
+  // server. eventTypeName's inner OptionFromNullOr carries the real "seeded row, no name"
+  // signal -- collapse the pair with eventTypeName() in lib/event-labels.ts.
+  eventTypeId: Schema.OptionFromOptionalKey(EventTypeId),
+  eventTypeName: Schema.OptionFromOptionalKey(Schema.OptionFromNullOr(Schema.String)),
+  eventTypeColor: Schema.OptionFromOptionalKey(EventTypeColor),
   description: Schema.OptionFromNullOr(Schema.String),
   imageUrl: Schema.OptionFromNullOr(Schema.String),
   startAt: Schemas.DateTimeFromIsoString,
@@ -139,6 +149,10 @@ export class EventDetail extends Schema.Class<EventDetail>('EventDetail')({
   eventType: EventType,
   trainingTypeId: Schema.OptionFromNullOr(TrainingTypeId),
   trainingTypeName: Schema.OptionFromNullOr(Schema.String),
+  // See EventInfo.eventTypeId above -- same three-field, all-OptionFromOptionalKey shape.
+  eventTypeId: Schema.OptionFromOptionalKey(EventTypeId),
+  eventTypeName: Schema.OptionFromOptionalKey(Schema.OptionFromNullOr(Schema.String)),
+  eventTypeColor: Schema.OptionFromOptionalKey(EventTypeColor),
   description: Schema.OptionFromNullOr(Schema.String),
   imageUrl: Schema.OptionFromNullOr(Schema.String),
   startAt: Schemas.DateTimeFromIsoString,
@@ -188,7 +202,11 @@ export class EventListResponse extends Schema.Class<EventListResponse>('EventLis
 
 const CreateEventRequestStruct = Schema.Struct({
   title: Schema.NonEmptyString,
-  eventType: EventType,
+  // Legacy path — kept required-shaped on the wire type but optional at decode so an old web
+  // build (kind-only) and a new one (id, kind, or both) both validate. The struct-level filter
+  // below requires at least one of eventType/eventTypeId.
+  eventType: Schema.OptionFromOptional(EventType),
+  eventTypeId: Schema.OptionFromOptional(EventTypeId),
   trainingTypeId: Schema.OptionFromNullOr(TrainingTypeId),
   description: Schema.OptionFromNullOr(Schema.String),
   imageUrl: Schema.OptionFromOptionalNullOr(EventImageUrl),
@@ -205,6 +223,8 @@ export const CreateEventRequest = CreateEventRequestStruct.pipe(
     Schema.makeFilter<Schema.Schema.Type<typeof CreateEventRequestStruct>>((req) => {
       if (fieldState(req.locationUrl) === 'setting' && fieldState(req.location) !== 'setting')
         return 'Location URL requires location text';
+      if (Option.isNone(req.eventType) && Option.isNone(req.eventTypeId))
+        return 'One of eventType or eventTypeId is required';
       return true;
     }),
   ),
@@ -214,6 +234,9 @@ export type CreateEventRequest = Schema.Schema.Type<typeof CreateEventRequest>;
 const UpdateEventRequestStruct = Schema.Struct({
   title: Schema.OptionFromOptional(Schema.NonEmptyString),
   eventType: Schema.OptionFromOptional(EventType),
+  // B3: the web always sends both id and kind together (create and update); B4/D7: omitting
+  // both here (a title-only update) leaves the event's type entirely unchanged.
+  eventTypeId: Schema.OptionFromOptional(EventTypeId),
   trainingTypeId: Schema.OptionFromOptional(Schema.OptionFromNullOr(TrainingTypeId)),
   description: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   imageUrl: Schema.OptionFromOptional(Schema.OptionFromNullOr(EventImageUrl)),

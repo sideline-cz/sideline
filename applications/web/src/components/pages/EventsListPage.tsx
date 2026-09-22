@@ -1,12 +1,13 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
-import type { EventApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
-import { Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
+import type { EventApi, EventTypeApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
+import { Event, EventSeries, EventType, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import { CalendarDays, List, Loader2, ShieldCheck } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { EventTypePicker } from '~/components/molecules/EventTypePicker';
 import { EventCalendarView } from '~/components/organisms/EventCalendarView';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -43,7 +44,7 @@ import {
   dayShortLabels,
   eventStatusClasses,
   eventStatusLabels,
-  eventTypeLabels,
+  eventTypeName,
   sortDays,
 } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
@@ -54,7 +55,10 @@ const NONE_VALUE = '__none__';
 
 const CreateEventSchema = Schema.Struct({
   title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  // B3: always submit both — `eventType` (the selected type's `kind`) is kept in sync by
+  // `EventTypePicker`'s `onChange`, never picked directly by the user.
   eventType: Event.EventType.annotate({ message: tr('validation_invalidOption') }),
+  eventTypeId: Schema.String,
   trainingTypeId: Schema.String,
   description: Schema.String,
   imageUrl: Schema.String.pipe(
@@ -118,6 +122,7 @@ interface EventsListPageProps {
   showAllGroups: boolean;
   onShowAllGroupsChange: (value: boolean) => void;
   trainingTypes: ReadonlyArray<TrainingTypeApi.TrainingTypeInfo>;
+  eventTypes: ReadonlyArray<EventTypeApi.EventTypeInfo>;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
   /**
    * The team's `team_settings.timezone`, used to label the recurring-schedule time inputs —
@@ -137,6 +142,7 @@ export function EventsListPage({
   showAllGroups,
   onShowAllGroupsChange,
   trainingTypes,
+  eventTypes,
   groups,
   teamTimezone,
 }: EventsListPageProps) {
@@ -160,6 +166,7 @@ export function EventsListPage({
     defaultValues: {
       title: '',
       eventType: 'training' as Event.EventType,
+      eventTypeId: '',
       trainingTypeId: NONE_VALUE,
       description: '',
       imageUrl: '',
@@ -175,7 +182,13 @@ export function EventsListPage({
     },
   });
 
-  const watchedEventType = form.watch('eventType');
+  const watchedEventTypeId = form.watch('eventTypeId');
+  // Routed off `kind`, never off the name (plan §4/§5) — the picker keeps `eventType` in sync
+  // with whichever type is actually selected, but the gate reads the LIVE lookup so a stale
+  // `eventType` value (e.g. before the picker's mount-time auto-select effect has run) never
+  // lets the training-type field show for a non-training selection or vice-versa.
+  const selectedEventType = eventTypes.find((t) => t.eventTypeId === watchedEventTypeId);
+  const isTrainingSelected = (selectedEventType?.kind ?? form.watch('eventType')) === 'training';
   const watchedAllDay = form.watch('allDay');
 
   const seriesForm = useForm({
@@ -202,10 +215,10 @@ export function EventsListPage({
   const watchedSeriesLocation = seriesForm.watch('location');
 
   React.useEffect(() => {
-    if (watchedEventType !== 'training') {
+    if (!isTrainingSelected) {
       form.setValue('trainingTypeId', NONE_VALUE);
     }
-  }, [watchedEventType, form]);
+  }, [isTrainingSelected, form]);
 
   React.useEffect(() => {
     if (!watchedLocation) {
@@ -240,7 +253,11 @@ export function EventsListPage({
           params: { teamId: teamIdBranded },
           payload: {
             title: values.title,
-            eventType: values.eventType,
+            // B3: always submit both — the id is the authoritative selection, and `eventType`
+            // (the selected type's `kind`) rides along so an old server mid-rollout that only
+            // understands `eventType` still buckets the event correctly.
+            eventType: Option.some(values.eventType),
+            eventTypeId: Option.some(Schema.decodeSync(EventType.EventTypeId)(values.eventTypeId)),
             trainingTypeId:
               values.trainingTypeId && values.trainingTypeId !== NONE_VALUE
                 ? Option.some(Schema.decodeSync(TrainingType.TrainingTypeId)(values.trainingTypeId))
@@ -397,30 +414,30 @@ export function EventsListPage({
                         )}
                       />
                       <div className='flex flex-col gap-4 sm:flex-row'>
-                        <FormField
-                          {...form.register('eventType')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_eventType')}</FormLabel>
-                              <Select onValueChange={field.onChange} value={field.value}>
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {Event.EventType.literals.map((type) => (
-                                    <SelectItem key={type} value={type}>
-                                      {eventTypeLabels[type]()}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        {watchedEventType === 'training' && (
+                        <FormItem className='flex-1'>
+                          <FormLabel>{tr('event_eventType')}</FormLabel>
+                          <EventTypePicker
+                            eventTypes={eventTypes}
+                            event={{
+                              eventType: form.watch('eventType'),
+                              eventTypeId: Option.none(),
+                              eventTypeName: Option.none(),
+                              eventTypeColor: Option.none(),
+                            }}
+                            value={
+                              watchedEventTypeId
+                                ? Option.some(
+                                    Schema.decodeSync(EventType.EventTypeId)(watchedEventTypeId),
+                                  )
+                                : Option.none()
+                            }
+                            onChange={({ eventTypeId, kind }) => {
+                              form.setValue('eventTypeId', eventTypeId, { shouldValidate: true });
+                              form.setValue('eventType', kind, { shouldValidate: true });
+                            }}
+                          />
+                        </FormItem>
+                        {isTrainingSelected && (
                           <FormField
                             {...form.register('trainingTypeId')}
                             render={({ field }) => (
@@ -1056,7 +1073,7 @@ export function EventsListPage({
                           )}
                         </div>
                         <div className='flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground'>
-                          <span>{eventTypeLabels[event.eventType]()}</span>
+                          <span>{eventTypeName(event.eventTypeName, event.eventType)}</span>
                           <span>·</span>
                           <span>
                             {startDate}

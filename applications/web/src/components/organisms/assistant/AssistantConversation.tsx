@@ -44,7 +44,6 @@ import { toChatMessages } from '~/lib/assistant/chatMessages.js';
 import { degradedReasonLabels } from '~/lib/assistant/entityRoutes.js';
 import { buildHistory, type HistoryTurn } from '~/lib/assistant/history.js';
 import { parseAnswer } from '~/lib/assistant/parseAnswer.js';
-import { buildTrainingTypeColorMap } from '~/lib/event-colors.js';
 import { ApiClient, SilentClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
@@ -435,20 +434,6 @@ function AssistantTurnView({ turn, teamId }: AssistantTurnViewProps) {
     () => turn.references.filter((_, index) => !cited.has(index)),
     [turn.references, cited],
   );
-  const trainingTypeNames = React.useMemo(
-    () =>
-      turn.references.flatMap((reference) =>
-        reference.kind === 'event' && Option.isSome(reference.event.trainingTypeName)
-          ? [reference.event.trainingTypeName.value]
-          : [],
-      ),
-    [turn.references],
-  );
-  const colorMap = React.useMemo(
-    () => buildTrainingTypeColorMap(trainingTypeNames),
-    [trainingTypeNames],
-  );
-
   return (
     <li className='flex flex-col gap-3'>
       <TurnSpeakerRow at={turn.at} />
@@ -462,9 +447,7 @@ function AssistantTurnView({ turn, teamId }: AssistantTurnViewProps) {
       {turn.content.length > 0 && (
         <AssistantAnswer text={turn.content} references={turn.references} teamId={teamId} />
       )}
-      {uncited.length > 0 && (
-        <AssistantResultList references={uncited} teamId={teamId} colorMap={colorMap} />
-      )}
+      {uncited.length > 0 && <AssistantResultList references={uncited} teamId={teamId} />}
     </li>
   );
 }

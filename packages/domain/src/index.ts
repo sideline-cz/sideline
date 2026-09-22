@@ -75,6 +75,8 @@ export * as EventRsvpApi from './api/EventRsvpApi.js';
 
 export * as EventSeriesApi from './api/EventSeriesApi.js';
 
+export * as EventTypeApi from './api/EventTypeApi.js';
+
 export * as ExpenseApi from './api/ExpenseApi.js';
 
 export * as FinanceApi from './api/FinanceApi.js';
@@ -336,6 +338,8 @@ export * as EventRosterModel from './models/EventRosterModel.js';
 export * as EventRsvp from './models/EventRsvp.js';
 
 export * as EventSeries from './models/EventSeries.js';
+
+export * as EventType from './models/EventType.js';
 
 export * as Expense from './models/Expense.js';
 

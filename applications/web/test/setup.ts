@@ -3,6 +3,10 @@ import { cleanup } from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeAll, vi } from 'vitest';
 
+// `.toBeDisabled()`/`.toBeInTheDocument()`/etc. — plain `expect` (vitest's chai-based default)
+// has no DOM matchers on its own; this registers them project-wide, once.
+import '@testing-library/jest-dom/vitest';
+
 // React Query's `notifyManager` defers every observer notification (fetch-start, success,
 // error) through `setTimeout(fn, 0)` (`@tanstack/query-core`'s `systemSetTimeoutZero`), late-
 // bound so it correctly picks up `vi.useFakeTimers()`'s patched `setTimeout` rather than a

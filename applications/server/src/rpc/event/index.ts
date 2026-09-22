@@ -4,6 +4,7 @@ import {
   EventRpcGroup,
   EventRpcModels,
   EventRsvp,
+  type EventType,
   type GroupModel,
   type RosterModel,
   Team,
@@ -18,6 +19,7 @@ import {
   DateTime,
   Effect,
   flow,
+  Layer,
   Metric,
   Option,
   Schema,
@@ -32,6 +34,7 @@ import { EventRostersRepository } from '~/repositories/EventRostersRepository.js
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { EventTypesRepository } from '~/repositories/EventTypesRepository.js';
 import { eventDayOrder, eventVisibleNow } from '~/repositories/eventVisibility.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -142,6 +145,7 @@ const createEvent = (
     readonly guild_id: Discord.Snowflake;
     readonly discord_user_id: Discord.Snowflake;
     readonly event_type: Event.EventType;
+    readonly event_type_id: Option.Option<EventType.EventTypeId>;
     readonly title: string;
     readonly start_at: string;
     readonly end_at: Option.Option<string>;
@@ -278,6 +282,11 @@ const createEvent = (
             teamId,
             trainingTypeId: validatedTrainingTypeId,
             eventType: input.event_type,
+            // Kept required on the wire (bot ships before server) — see
+            // `EventRpcGroup.CreateEvent`'s doc comment. A foreign/deleted id is discarded by
+            // the trigger regardless (AGENTS.md ownership statement), so no app-side
+            // team-ownership re-check is needed here either.
+            eventTypeId: input.event_type_id,
             title: input.title,
             description: input.description,
             startAt: parsedStartAt,
@@ -344,6 +353,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
     groups: GroupsRepository.asEffect(),
     sql: SqlClient.SqlClient.asEffect(),
     trainingTypesRepo: TrainingTypesRepository.asEffect(),
+    eventTypesRepo: EventTypesRepository.asEffect(),
     teamsRepo: TeamsRepository.asEffect(),
     teamSettings: TeamSettingsRepository.asEffect(),
     channelDividers: ChannelEventDividersRepository.asEffect(),
@@ -673,6 +683,8 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   event_type: row.event_type,
                   all_day: row.all_day,
                   status: row.status,
+                  event_type_name: Option.map(row.event_type_id, () => row.event_type_name),
+                  event_type_color: row.event_type_color,
                 }),
             ),
           ),
@@ -701,6 +713,8 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   status: row.status,
                   discord_message_id: row.discord_message_id,
                   all_day: row.all_day,
+                  event_type_name: Option.map(row.event_type_id, () => row.event_type_name),
+                  event_type_color: row.event_type_color,
                 }),
             ),
           ),
@@ -876,6 +890,8 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       no_count: row.no_count,
                       maybe_count: row.maybe_count,
                       all_day: row.all_day,
+                      event_type_name: Option.map(row.event_type_id, () => row.event_type_name),
+                      event_type_color: row.event_type_color,
                     }),
                 ),
                 total,
@@ -910,6 +926,11 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   no_count: row.no_count,
                   maybe_count: row.maybe_count,
                   all_day: row.all_day,
+                  // `findLoggableTrainingsByGuild` already gates `event_type = 'training'` and
+                  // is kind-routed behaviour, not rendering — deliberately left unjoined (see
+                  // AGENTS.md ownership statement).
+                  event_type_name: Option.none(),
+                  event_type_color: Option.none(),
                 }),
             ),
           ),
@@ -1126,6 +1147,11 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       status: row.status,
                       start_date: Option.some(row.start_date),
                       end_date: Option.some(row.end_date),
+                      // ponytail: this raw inline query isn't one of task 3's six
+                      // render-feeding `EventsRepository` queries and isn't joined to
+                      // `event_types` — add the join here if this surface needs the name/color.
+                      event_type_name: Option.none(),
+                      event_type_color: Option.none(),
                     }),
                 ),
                 total,
@@ -1161,6 +1187,32 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
           ),
         ),
 
+      'Event/GetEventTypesByGuild': ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
+        svc.teamsRepo.findByGuildId(guild_id).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.succeed(Array.empty<EventRpcModels.EventTypeChoice>()),
+              onSome: (team) =>
+                svc.eventTypesRepo.findEventTypesByTeamId(team.id).pipe(
+                  Effect.map(
+                    Array.map(
+                      (et) =>
+                        new EventRpcModels.EventTypeChoice({
+                          id: et.id,
+                          kind: et.kind,
+                          name: et.name,
+                        }),
+                    ),
+                  ),
+                ),
+            }),
+          ),
+          // An autocomplete must never fail the interaction.
+          Effect.catchDefect((defect) =>
+            Effect.logError(defect).pipe(Effect.as(Array.empty<EventRpcModels.EventTypeChoice>())),
+          ),
+        ),
+
       'Event/GetYesAttendeesForEmbed': ({
         event_id,
         limit,
@@ -1191,6 +1243,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
         readonly guild_id: Discord.Snowflake;
         readonly discord_user_id: Discord.Snowflake;
         readonly event_type: Event.EventType;
+        readonly event_type_id: Option.Option<EventType.EventTypeId>;
         readonly title: string;
         readonly start_at: string;
         readonly end_at: Option.Option<string>;
@@ -1828,4 +1881,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
         ),
     })),
   ),
-);
+  // Provided internally (never listed as an external `AppLive` dependency of this RPC group)
+  // so existing tests that build a custom layer stack for `EventsRpcLive` don't all need a new
+  // `EventTypesRepository` mock just because one new handler (`GetEventTypesByGuild`) needs it.
+).pipe(Layer.provide(EventTypesRepository.Default));

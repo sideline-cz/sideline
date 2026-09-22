@@ -252,6 +252,8 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             status: 'active',
             start_date: Option.none(),
             end_date: Option.none(),
+            event_type_name: Option.none(),
+            event_type_color: Option.none(),
           }),
       ),
       Effect.let(
@@ -336,6 +338,8 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             status: 'active',
             start_date: Option.none(),
             end_date: Option.none(),
+            event_type_name: Option.none(),
+            event_type_color: Option.none(),
           }),
       ),
       Effect.tap(({ entry }) =>
@@ -387,6 +391,8 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
               status: 'active',
               start_date: Option.none(),
               end_date: Option.none(),
+              event_type_name: Option.none(),
+              event_type_color: Option.none(),
             }),
         ),
         Effect.tap(({ entry }) =>

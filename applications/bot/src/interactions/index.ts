@@ -30,6 +30,7 @@ import {
 } from './email-pages.js';
 import { EventCreateModal } from './event-create.js';
 import { EventCreateAutocomplete } from './event-create-autocomplete.js';
+import { EventTypeAutocomplete } from './event-type-autocomplete.js';
 import { MakanickoLogAutocomplete } from './makanicko-log-autocomplete.js';
 import {
   PollAddButtonReg,
@@ -69,6 +70,7 @@ export const interactionBuilder = Ix.builder
   .add(UpcomingClearMessageButton)
   .add(UpcomingRsvpModal)
   .add(EventCreateAutocomplete)
+  .add(EventTypeAutocomplete)
   .add(MakanickoLogAutocomplete)
   .add(TrainingResultAutocomplete)
   .add(ClaimButton)

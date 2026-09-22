@@ -473,9 +473,37 @@ Controls which roles have access to a given training type.
 
 ### 6. Events
 
+#### `event_types`
+
+The per-team catalogue of event types. Every team is seeded with six rows (one per `kind`) on creation; teams can add more rows of any `kind`, rename, recolour, and reorder them. `kind` is immutable once a row exists.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `name` | TEXT | — | — |
+| `kind` | TEXT | NOT NULL, CHECK (`'training'`, `'match'`, `'tournament'`, `'meeting'`, `'social'`, `'other'`) | — |
+| `color` | TEXT | NOT NULL, CHECK (`'blue'`, `'emerald'`, `'purple'`, `'amber'`, `'cyan'`, `'rose'`, `'indigo'`, `'teal'`, `'red'`, `'orange'`, `'slate'`, `'pink'`, `'gray'`) | — |
+| `position` | INTEGER | NOT NULL | `0` |
+| `archived_at` | TIMESTAMPTZ | — | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Indexes**:
+- `idx_event_types_team_position` — partial index on `(team_id, position) WHERE archived_at IS NULL`.
+- `idx_event_types_team_kind_created` on `(team_id, kind, created_at)` — the kind→id resolution path used by `events_sync_event_type()` below; **not** ordered by `position`.
+
+**Unique**:
+- `idx_event_types_team_name` — partial unique index on `(team_id, lower(name)) WHERE archived_at IS NULL AND name IS NOT NULL`, case-insensitive name uniqueness among active, custom-named types only.
+- `idx_event_types_team_default_kind` — partial unique index on `(team_id, kind) WHERE name IS NULL AND archived_at IS NULL`, ensuring at most one active "un-renamed default" per `kind` per team.
+
+**Notes**: Added in migration `1792400000_create_event_types`, alongside `events.event_type_id` below. `name IS NULL` means "render the built-in translated label for `kind`" — seed rows are always `NULL`; a team's `teams.onboarding_locale` may not be set at seed time, and seeding a literal English/Czech string would freeze one locale per team regardless of who later views it, whereas the bot renders the translated label per *viewer* locale. `color` is presentation only; the CHECK list is kept in lockstep with the domain `EventTypeColor` literal set — an unrecognised colour renders no Tailwind class (an invisible badge) rather than failing closed. `position` is presentation only and is **never** read by a query that resolves a `kind` to a row (see `events_sync_event_type()` below) — reordering the list (a display-only action, e.g. pressing a ▲/▼ arrow) must never silently re-target which row a bare `kind` write on `events` resolves to. Deleting a type from the UI archives it (`archived_at`) — it is never hard-deleted; a hard delete would fire `events.event_type_id`'s `ON DELETE SET NULL` as an internal `UPDATE`, tripping `events_sync_event_type()` and silently re-pointing every historical event referencing that row onto a *different, sibling* row of the same `kind`. An archived type still renders correctly on any event that references it (the read-side `LEFT JOIN` is unfiltered) — it only disappears from the create/edit pickers and from `GET /teams/:teamId/event-types` (see `docs/api.md` § 38). Seeding for existing teams is a one-time backfill `INSERT ... WHERE NOT EXISTS` in the same migration; seeding for new teams is an `AFTER INSERT ON teams` trigger (`seed_default_event_types()`), so onboarding, tests, and every integration fixture get the six rows without any application-side seeding call.
+
+---
+
 #### `events`
 
-Individual scheduled occurrences (training, match, tournament, meeting, social, other).
+Individual scheduled occurrences (training, match, tournament, meeting, social, other — or any team-custom event type built on one of those six `kind`s).
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
@@ -487,6 +515,7 @@ Individual scheduled occurrences (training, match, tournament, meeting, social, 
 | `member_group_id` | UUID | FK → `groups(id)` ON DELETE SET NULL | — |
 | `created_by` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
 | `event_type` | TEXT | NOT NULL, CHECK (`'training'`, `'match'`, `'tournament'`, `'meeting'`, `'social'`, `'other'`) | — |
+| `event_type_id` | UUID | FK → `event_types(id)` ON DELETE SET NULL | — |
 | `title` | TEXT | NOT NULL | — |
 | `description` | TEXT | — | — |
 | `start_at` | TIMESTAMPTZ | NOT NULL | — |
@@ -510,7 +539,7 @@ Individual scheduled occurrences (training, match, tournament, meeting, social, 
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
-**Indexes**: `idx_events_team` on `(team_id)`, `idx_events_team_date` on `(team_id, start_at)`, `idx_events_training_type` on `(training_type_id)`, `idx_events_series` on `(series_id)`
+**Indexes**: `idx_events_team` on `(team_id)`, `idx_events_team_date` on `(team_id, start_at)`, `idx_events_training_type` on `(training_type_id)`, `idx_events_series` on `(series_id)`, `idx_events_event_type_id` on `(event_type_id)`
 
 **Unique**: `idx_events_series_date` — partial unique index on `(series_id, (start_at AT TIME ZONE 'UTC')::date) WHERE series_id IS NOT NULL`, preventing duplicate series-generated events for the same day
 
@@ -521,6 +550,8 @@ Individual scheduled occurrences (training, match, tournament, meeting, social, 
 - `idx_events_personal_messages_dirty_at` on `(personal_messages_dirty_at) WHERE personal_messages_dirty_at IS NOT NULL` — used by the Personal Events Reconcile worker (`PersonalEvents/GetEventsNeedingReconcile`) to efficiently find events whose per-member channel embeds need refreshing. Added in migration `1790300006_add_personal_messages_dirty_at`.
 
 **Notes**: Original date/time columns (`event_date DATE`, `start_time TIME`, `end_time TIME`) were consolidated into `start_at` and `end_at` in migration `1741800000`. `discord_channel_id` and `discord_message_id` used to track where the shared "global" event embed was posted; the shared-board feature was removed from code in the remove-global-events-board Release A — the server no longer writes either column (event create/update/cancel no longer resolve or post to a shared channel) and the bot no longer reads them. Both columns are kept for one more release (skew safety with old rows / old bots) and are dropped in the Release B follow-up migration. `personal_messages_dirty_at` is a reconcile-trigger timestamp; when non-null it means one or more per-member personal-channel event embeds need to be updated. The personal-events sync worker reads events with a non-null value, refreshes the embed for each member who has a personal channel, then clears the timestamp. Set by the server on event create, update, cancel, on any RSVP change, when a recurring event series is created, updated, or cancelled (all future unmodified occurrences within the series are marked dirty), and by `EventStartCron` immediately after an `active` event transitions to `started` (so the reconcile worker removes the now-finished event from members' personal channels). `EventStartCron` also runs a once-per-cycle self-healing sweep (`markStalePersonalMessagesDirty`) that re-marks any event which is no longer `active`/upcoming but still has `personal_event_messages` rows and isn't already dirty — a best-effort backstop in case the per-event mark was missed in a prior cycle. `auto_logged_at` is set by `TrainingAutoLogCron` when training attendance is auto-logged. `status` was extended to include `'started'` in migration `1744000000`; events transition to `started` automatically when their `start_at` time passes (set by `EventStartCron`). `claimed_by` is the team member who has claimed the training (NULL = unclaimed); set atomically via a conditional UPDATE. `claim_discord_channel_id` and `claim_discord_message_id` track the claim-board message posted to the owner-group's channel (added in migration `1745900000`). `claim_request_sent_at` is an idempotency marker set by `TrainingClaimRequestCron` once the claim-request message has been posted; NULL means the cron has not yet processed this training. `coaching_status_sent_at` is an idempotency marker set by `CoachingStatusCron` once the "today's coach is X" announcement has been posted on the training day; NULL means the announcement has not yet been sent. `claim_thread_id` is the Discord snowflake of the thread created from the claim-board message; populated by `handleTrainingClaimRequest` after the thread is created. All three columns were added in migration `1789300000_improve_coach_assigning`. Backfill in the same migration sets `claim_request_sent_at = now()` and `coaching_status_sent_at = now()` on all existing training rows so the two new crons skip them on first deploy. `image_url` is an optional public `https://` URL for a cover image shown on the event detail page and as a thumbnail in Discord embeds (added in migration `1746000000`). `location_url` is an optional public `https://` URL attached to the location text; requires `location` to be non-empty (added in migration `1746100000`).
+
+`event_type_id` was added, alongside the `event_types` table above, in migration `1792400000_create_event_types` (backfilled from `event_type` on the same migration). **`events.event_type` is trigger-owned; `event_type_id` is app-owned only when it names a row of the event's own team, and trigger-derived otherwise.** A `BEFORE INSERT OR UPDATE OF event_type, event_type_id, team_id ON events` trigger, `events_sync_event_type()`, is the single place all four independent writers of `event_type` (`EventsRepository.insert`/`update`, `api/event-series.ts` — which writes `event_type` alone at two sites and is otherwise untouched by this feature, RPC `Event/CreateEvent`, and raw test fixtures) pass through, and it resolves in both directions: given a same-team `event_type_id` it overwrites `event_type` with that row's `kind`; given only `event_type` (or an `event_type_id` naming a foreign/archived-and-gone/nonexistent row) it resolves `event_type_id` from the team's oldest active `event_types` row of that `kind` (`ORDER BY (archived_at IS NOT NULL), created_at, id` — **never `position`**, see the `event_types` notes above). This is why `event-series.ts`'s two kind-only writes and every pre-existing test fixture needed zero changes. The `team_id` scope on the id lookup is the real authorization boundary — a foreign id is silently discarded, not adopted, which also covers the bot's RPC writer without a duplicate app-side check. The trigger is additionally guarded `WHEN (pg_trigger_depth() = 0)`, so a team-delete cascade does not re-fire it once per row, and a hand-deleted `event_types` row's `ON DELETE SET NULL` does not re-point history through it either (see the `event_types` notes above for what that would otherwise do). App code may still write `event_type`/`event_type_id` directly — that write is a *request to resolve a type*, never the value that ends up stored.
 
 ---
 
@@ -2228,6 +2259,7 @@ All 109 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1792200000 | `add_team_member_event_preferences` | Adds `show_attendee_list BOOLEAN NOT NULL DEFAULT true`, `rsvp_reminder_dms BOOLEAN NOT NULL DEFAULT true`, and `personal_channels_split BOOLEAN NOT NULL DEFAULT false` to `team_members` (all `IF NOT EXISTS`). Per-member preferences for the Nastavitelná docházka / configurable attendance feature. |
 | 1792200001 | `personal_event_channels_bucket` | Adds `bucket TEXT NOT NULL DEFAULT 'all'` to `personal_event_channels` (every pre-existing row becomes `'all'`, the combined channel it already was); adds CHECK constraint `personal_event_channels_bucket_valid` (`bucket IN ('all','training','tournament','other')`); creates the unique index `uq_personal_event_channels_member_bucket` on `(team_id, team_member_id, bucket)` *before* dropping the old `(team_id, team_member_id)` unique constraint, so the table is never left without a uniqueness guard. The old constraint's Postgres-generated name (`personal_event_channels_team_id_team_member_id_key`) is dropped in the same migration, which breaks an old server pod's `ON CONFLICT (team_id, team_member_id)` clause in `Guild/ReservePersonalChannel` for the remainder of the rollout window — deploy the server before the bot. |
 | 1792300001 | `add_team_settings_require_complete_profile` | Adds `require_complete_profile BOOLEAN NOT NULL DEFAULT false` (`IF NOT EXISTS`) to `team_settings` — the captain's opt-in for the profile-completeness gate (RSVP / training claim / carpool seat) and the join-time unverified role/channel. `DEFAULT false` so nothing changes for any existing team on deploy. |
+| 1792400000 | `create_event_types` | Creates `event_types` (see [6. Events](#6-events) above), seeds all pre-existing teams with the six default rows (`NULL` name, colours matching the previous hardcoded web palette), and creates `seed_default_event_types()` — an `AFTER INSERT ON teams` trigger seeding the same six rows for every future team. Adds `events.event_type_id UUID REFERENCES event_types(id) ON DELETE SET NULL`, index `idx_events_event_type_id`, and backfills it from `event_type`. Creates `events_sync_event_type()` and its `BEFORE INSERT OR UPDATE OF event_type, event_type_id, team_id ON events` trigger — see the ownership notes under `events` above and the root `AGENTS.md` "Event Types" section. |
 
 ### After Migrations (seed data)
 

@@ -2,6 +2,7 @@ import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { Model } from 'effect/unstable/schema';
 import { EventSeriesId } from '~/models/EventSeries.js';
+import { EventTypeKind } from '~/models/EventType.js';
 import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
@@ -10,14 +11,9 @@ import { TrainingTypeId } from '~/models/TrainingType.js';
 export const EventId = Schema.String.pipe(Schema.brand('EventId'));
 export type EventId = typeof EventId.Type;
 
-export const EventType = Schema.Literals([
-  'training',
-  'match',
-  'tournament',
-  'meeting',
-  'social',
-  'other',
-]);
+// The literal set is now owned by EventType.EventTypeKind (packages/domain/src/models/EventType.ts).
+// Re-exported here under its historical name — all ~548 call sites keep routing off Event.EventType.
+export const EventType = EventTypeKind;
 export type EventType = typeof EventType.Type;
 
 export const EventStatus = Schema.Literals(['active', 'cancelled', 'started']);

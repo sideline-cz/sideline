@@ -4,6 +4,7 @@ import {
   Activity,
   BookOpen,
   Calendar,
+  CalendarCog,
   CreditCard,
   Dumbbell,
   Hash,
@@ -186,6 +187,15 @@ function getTeamNavGroups(
           to: '/teams/$teamId/activity-types',
           params: { teamId },
           requiredPermission: 'activity-type:create' satisfies Role.Permission,
+        },
+        {
+          // Reuses `team:manage`, unlike training-types/activity-types above — captains do NOT
+          // see this entry (plan §0 trade-off, reversible with a 4-line grant migration).
+          title: tr('eventType_title'),
+          icon: CalendarCog,
+          to: '/teams/$teamId/event-types',
+          params: { teamId },
+          requiredPermission: 'team:manage' satisfies Role.Permission,
         },
         {
           title: tr('finance_navTitle'),

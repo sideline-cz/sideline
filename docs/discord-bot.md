@@ -334,25 +334,17 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `type` | String (choices) | Yes | Event type |
-| `training_type` | String (autocomplete) | No | Training type ID; only relevant when `type=training` |
+| `type` | String (autocomplete) | Yes | Event type |
+| `training_type` | String (autocomplete) | No | Training type ID; only relevant when the selected event type's `kind` is `training` |
 
-**`type` choices:**
-
-| Value | Display name | Czech |
-|-------|-------------|-------|
-| `training` | Training | Trénink |
-| `match` | Match | Zápas |
-| `tournament` | Tournament | Turnaj |
-| `meeting` | Meeting | Schůzka |
-| `social` | Social | Společenská |
-| `other` | Other | Jiné |
+**`type` is per-team and dynamic, not static `choices`.** Event types (`training`/`match`/`tournament`/`meeting`/`social`/`other` `kind`, plus any custom types a team adds — see [API docs § 38. Event Type](./api.md#38-event-type)) are configured per team, but Discord registers slash-command `choices` globally and identically for every guild at deploy time — they cannot vary per team. So `type` is `autocomplete: true` instead, backed by `interactions/event-type-autocomplete.ts` (`Event/GetEventTypesByGuild` RPC, no client-side sort — the RPC already orders by the team's `position`), and Discord does **not** constrain what a user ultimately submits to a suggested value.
 
 **Flow:**
 
-1. User invokes `/event create type:training training_type:Strength`.
-2. The command handler (`applications/bot/src/commands/event/create.ts`) opens a Discord modal with `custom_id` `event-create:{eventType}:{trainingTypeId}`.
-3. The modal contains five text input fields:
+1. User invokes `/event create type:<event-type-id> training_type:Strength`.
+2. The command handler (`applications/bot/src/commands/event/create.ts`) validates `type`: it must be either a real event-type UUID or (for an in-flight command started before a deploy) a legacy `kind` literal — anything else is rejected with an ephemeral `bot_event_unknown_type` message and no modal is opened. There is no silent fallback to `other`.
+3. It then opens a Discord modal with `custom_id` `event-create:{type}:{trainingTypeId}` (86 characters at full length: `event-create:` (13) + a UUID (36) + `:` (1) + a UUID (36) — do not add another field to this id; 97+ characters leaves no margin and Discord's `50035` rejects the whole message on overflow).
+4. The modal contains five text input fields:
 
    | Field `custom_id` | Label | Required | Max length | Style |
    |-------------------|-------|----------|------------|-------|
@@ -362,11 +354,14 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
    | `event_location` | Location | No | 200 | Single-line |
    | `event_description` | Description | No | 1000 | Multi-line |
 
-4. User submits the modal. The modal submit handler (`applications/bot/src/interactions/event-create.ts`) sends an immediate ephemeral "thinking" response, then forks a background fiber.
-5. The background fiber calls `Event/CreateEvent` RPC with the parsed fields.
-6. On success the ephemeral message is updated with the event title. On error an appropriate error message is shown.
+5. User submits the modal. The modal submit handler (`applications/bot/src/interactions/event-create.ts`) sends an immediate ephemeral "thinking" response, then forks a background fiber.
+6. The handler splits `custom_id`'s second segment: a `kind` literal means a modal opened against the *old* bot (before this feature) — the id is left `None` for the server-side migration trigger to resolve; a UUID means the *current* modal, and the handler does one extra `Event/GetEventTypesByGuild` lookup to resolve the id's `kind` (still required on the wire) before calling `Event/CreateEvent`. Neither shape reaching an unrecognised value falls back to a guess — it replies `bot_event_unknown_type`.
+7. The background fiber calls `Event/CreateEvent` RPC with the parsed fields, sending both `event_type` (kind) and `event_type_id` when known.
+8. On success the ephemeral message is updated with the event title. On error an appropriate error message is shown.
 
-**Autocomplete:** When the focused option is `training_type` and the event `type` is `training`, the autocomplete handler (`applications/bot/src/interactions/event-create-autocomplete.ts`) calls `Event/GetTrainingTypesByGuild` RPC, filters results case-insensitively by the user's current input, takes up to 24 matches, and appends a fixed `{ name: "Other", value: "" }` entry. If `type` is not `training` the handler returns an empty choices list immediately.
+**Autocomplete for `type`:** `interactions/event-type-autocomplete.ts` calls `Event/GetEventTypesByGuild`, maps each active event type to `{ name: name ?? <translated kind label>, value: id }` (no client-side filter/sort beyond the 25-entry cap — the RPC already orders by `position`), and returns `{ choices: [] }` on any RPC failure or defect rather than failing the interaction.
+
+**Autocomplete for `training_type`:** When the focused option is `training_type`, the autocomplete handler (`applications/bot/src/interactions/event-create-autocomplete.ts`) first resolves the submitted `type` value against `Event/GetEventTypesByGuild` to check whether its `kind` is `training` (the raw `type` value is an id now, not the literal `"training"`); only then does it call `Event/GetTrainingTypesByGuild`, filter results case-insensitively by the user's current input, take up to 24 matches, and append a fixed `{ name: "Other", value: "" }` entry. If the resolved kind is not `training` (or `type` doesn't resolve to a known event type at all) the handler returns an empty choices list immediately.
 
 **Errors from `Event/CreateEvent`:**
 
@@ -380,6 +375,8 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 - `applications/bot/src/commands/event/create.ts`
 - `applications/bot/src/interactions/event-create.ts`
 - `applications/bot/src/interactions/event-create-autocomplete.ts`
+- `applications/bot/src/interactions/event-type-autocomplete.ts`
+- `applications/bot/src/rest/events/eventTypeKindLabel.ts` — renders the built-in translated label for a `kind` (per invoking user's locale) when an event type's `name` is absent
 
 ---
 
@@ -396,7 +393,7 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 1. User invokes `/event list`.
 2. The handler (`applications/bot/src/commands/event/list.ts`) immediately returns an ephemeral acknowledgement and forks a background fiber.
 3. The background fiber delegates to `sendUpcomingEventFollowups`, which calls `Event/GetUpcomingEventsForUser` RPC with `discord_user_id` (resolved via `interactionUserId` helper) and `limit=10`.
-4. For each event in the response (up to 10), a separate ephemeral follow-up message is sent. Each message shows: event title, description, Discord dynamic timestamps, optional location, RSVP counts, and the invoking user's own RSVP status, with inline RSVP buttons. The response also carries the invoking user's `show_attendee_list` preference (`team_members.show_attendee_list`, Nastavitelná docházka); when `false`, the "Going" attendee-name list is omitted from every card — the RSVP counts and the **Attendees** button are unaffected.
+4. For each event in the response (up to 10), a separate ephemeral follow-up message is sent. Each message shows: event title, description, Discord dynamic timestamps, optional location, an inline **Type** field (the event's custom `name` if set, otherwise the built-in translated label for its `kind` — see `eventTypeKindLabel.ts`), RSVP counts, and the invoking user's own RSVP status, with inline RSVP buttons. The embed's colour comes from the event type's `color` (`eventTypeColorHex` in `packages/domain/src/models/EventType.ts`), falling back to `eventTypeColorHex[defaultColorForKind[kind]]` — the seeded default for the entry's `kind` — when the wire carries no colour at all or an unrecognised value (e.g. against an old server). This is a **deliberate** change from the previous hardcoded per-`event_type` colour table (e.g. `training` was green, `0x57f287`, and is now blue) — a custom-recoloured type must render its own colour, not the old built-in one, and one colour column cannot preserve both the web's and Discord's pre-existing (and already disagreeing) palettes. The response also carries the invoking user's `show_attendee_list` preference (`team_members.show_attendee_list`, Nastavitelná docházka); when `false`, the "Going" attendee-name list is omitted from every card — the RSVP counts and the **Attendees** button are unaffected.
 5. If there are no upcoming events, a single ephemeral "no events" message is sent instead.
 
 **Errors from `Event/GetUpcomingEventsForUser`:**
@@ -1543,6 +1540,18 @@ The single, stateless entry point into the profile-completion modal for every no
 
 ---
 
+### Event Type Autocomplete
+
+Provides per-team event type suggestions for the `/event create type` option.
+
+**Trigger condition:** command name is `event` and the focused option name is `type`.
+
+**Behavior:** Calls `Event/GetEventTypesByGuild` and maps each active event type to `{ name: name ?? <translated kind label, per-user locale>, value: id }`. No client-side filter or sort — the RPC already orders by the team's `position` — beyond the standard 25-choice cap. Returns `{ choices: [] }` on `RpcClientError` or on any decode defect, never throws out of the interaction. This replaces what used to be a static 6-entry `choices` list on the `type` option — event types are per-team and Discord's slash-command `choices` are registered globally and identically for every guild.
+
+**Source file:** `applications/bot/src/interactions/event-type-autocomplete.ts`
+
+---
+
 ### Event Create Autocomplete
 
 Provides training type suggestions for the `/event create training_type` option.
@@ -2240,7 +2249,8 @@ As of the remove-global-events-board Release A, the bot no longer calls the shar
 | `Event/GetUnprocessedEvents` | Poll for pending event outbox events |
 | `Event/MarkEventProcessed` | Acknowledge successful processing |
 | `Event/MarkEventFailed` | Record a processing failure |
-| `Event/CreateEvent` | Create a new event (from `/event create`) |
+| `Event/CreateEvent` | Create a new event (from `/event create`). `event_type` (the `kind`) stays required for bot→server compatibility during a rolling deploy; `event_type_id` is optional |
+| `Event/GetEventTypesByGuild` | Fetch a team's active event types (`EventTypeChoice[]`: `id`, `kind`, `name`) for the `/event create` `type` autocomplete and for resolving a submitted id back to its `kind` |
 | `Event/GetUpcomingGuildEvents` | Fetch paginated upcoming events (guild-scoped, no per-user RSVP data; used by the event sync worker embed builder) |
 | `Event/GetUpcomingEventsForUser` | Fetch paginated (`limit`/`offset`) upcoming events with the invoking user's RSVP status; used by `/event list`. Each entry carries `my_response` (the true stored response, `yes`/`no`/`maybe`/`coming_later`) and `maybe_count`/`coming_later_count` counted separately. `UpcomingRsvpButton`/`UpcomingClearMessageButton`/`UpcomingRsvpModal` use the unpaginated `Guild/GetAllUpcomingEventsForUser` instead, not this RPC |
 | `Event/GetTrainingTypesByGuild` | Fetch training type choices for autocomplete |

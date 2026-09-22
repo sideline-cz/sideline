@@ -1,4 +1,5 @@
 import type { Event } from '@sideline/domain';
+import { Option } from 'effect';
 import { tr } from '~/lib/translations.js';
 
 export const eventTypeLabels: Record<Event.EventType, () => string> = {
@@ -9,6 +10,18 @@ export const eventTypeLabels: Record<Event.EventType, () => string> = {
   social: () => tr('event_type_social'),
   other: () => tr('event_type_other'),
 };
+
+/**
+ * Collapses `EventInfo`/`EventDetail`'s `eventTypeName: Option<Option<string>>` (the outer
+ * Option is a rolling-deploy `OptionFromOptionalKey` — an old server omits the key entirely;
+ * the inner Option is the real "seeded row, no custom name" signal) down to a single
+ * renderable string: the team's custom name when set, otherwise the translated label for the
+ * event's `kind`. Never returns a blank cell.
+ */
+export const eventTypeName = (
+  name: Option.Option<Option.Option<string>>,
+  kind: Event.EventType,
+): string => Option.getOrElse(Option.flatten(name), () => eventTypeLabels[kind]());
 
 export const eventStatusLabels: Record<Event.EventStatus, () => string> = {
   active: () => tr('event_status_active'),

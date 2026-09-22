@@ -17,6 +17,7 @@ import { EventApiLive } from '~/api/event.js';
 import { EventRosterApiLive } from '~/api/event-roster.js';
 import { EventRsvpApiLive } from '~/api/event-rsvp.js';
 import { EventSeriesApiLive } from '~/api/event-series.js';
+import { EventTypeApiLive } from '~/api/event-type.js';
 import { ExpenseApiLive } from '~/api/expenses.js';
 import { FinanceApiLive } from '~/api/finance.js';
 import { GlobalAdminApiLive } from '~/api/global-admin.js';
@@ -82,6 +83,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(DashboardLayoutApiLive),
     Layer.provide(EmailForwardingApiLive),
     Layer.provide(BankSyncApiLive),
+    Layer.provide(EventTypeApiLive),
   );
 
 export { Redirect } from '~/api/redirect.js';

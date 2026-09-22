@@ -1,17 +1,16 @@
-import { Discord as DiscordSchemas, Event, TrainingType } from '@sideline/domain';
+import { Discord as DiscordSchemas, Event, type EventType, TrainingType } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, ModalSubmitData } from 'dfx/Interactions/index';
 import * as Discord from 'dfx/types';
-import { Effect, Metric, Option, Schema } from 'effect';
+import { Array, Effect, Metric, Option, pipe, Schema } from 'effect';
 import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 const decodeSnowflake = Schema.decodeUnknownSync(DiscordSchemas.Snowflake);
-const decodeEventType = Schema.decodeUnknownSync(Event.EventType);
 const decodeTrainingTypeId = Schema.decodeUnknownSync(TrainingType.TrainingTypeId);
 
 const modalValueOption = (
@@ -47,7 +46,18 @@ export const EventCreateModalSubmit = Effect.Do.pipe(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
     const parts = data.custom_id.split(':');
-    const eventType = parts[1] ?? 'other';
+    const raw = parts[1] ?? '';
+    // A modal opened against the OLD bot carries `event-create:training:<uuid>` (a `kind`
+    // literal); one opened against the CURRENT bot carries an event-type id instead. Across a
+    // bot deploy both can arrive at this handler, so neither is trusted blindly — anything
+    // that's neither is rejected outright rather than defaulted (B6).
+    const selected: { kind: Event.EventType } | { id: string } | null = Schema.is(Event.EventType)(
+      raw,
+    )
+      ? { kind: raw }
+      : isValidUuid(raw)
+        ? { id: raw }
+        : null;
     const rawTrainingTypeIdInput =
       parts[2] && parts[2].length > 0 && isValidUuid(parts[2])
         ? Option.some(parts[2])
@@ -99,23 +109,23 @@ export const EventCreateModalSubmit = Effect.Do.pipe(
       );
     }
 
-    // Decode inside the effect (via `Effect.suspend`) rather than eagerly in
-    // this handler body. `decodeUnknownSync` throws on malformed input; doing it
-    // eagerly here would throw *before* the deferred reply is forked below,
-    // killing the whole handler ("This interaction failed") and bypassing the
-    // `catchCause` backstop. Suspending turns any decode throw into a defect on
-    // the forked fiber, which the backstop resolves with `bot_event_error`.
-    const work = Effect.suspend(() => {
-      const decodedEventType = decodeEventType(eventType);
+    // One `event_type`/`event_type_id` pair, regardless of which branch of `selected`
+    // resolved it — sending both is what keeps a new bot working against a not-yet-deployed
+    // new server (rolling order is bot → server → web).
+    const createEvent = (
+      eventType: Event.EventType,
+      eventTypeId: Option.Option<EventType.EventTypeId>,
+    ) => {
       const training_type_id =
-        decodedEventType === 'training'
+        eventType === 'training'
           ? Option.map(rawTrainingTypeIdInput, decodeTrainingTypeId)
           : Option.none<TrainingType.TrainingTypeId>();
 
       return rpc['Event/CreateEvent']({
         guild_id: decodeSnowflake(guildId),
         discord_user_id: decodeSnowflake(discordUserId.value),
-        event_type: decodedEventType,
+        event_type: eventType,
+        event_type_id: eventTypeId,
         title: title.value,
         start_at: startAt.value,
         end_at: endAt,
@@ -123,19 +133,56 @@ export const EventCreateModalSubmit = Effect.Do.pipe(
         location_url: Option.none(),
         description,
         training_type_id,
-      });
+      }).pipe(
+        Effect.map((result) => m.bot_event_created({ title: result.title }, { locale })),
+        Effect.catchTag('CreateEventNotMember', () =>
+          Effect.succeed(m.bot_event_not_member({}, { locale })),
+        ),
+        Effect.catchTag('CreateEventForbidden', () =>
+          Effect.succeed(m.bot_event_no_permission({}, { locale })),
+        ),
+        Effect.catchTag('CreateEventInvalidDate', () =>
+          Effect.succeed(m.bot_event_invalid_date({}, { locale })),
+        ),
+        Effect.catchTag('RpcClientError', () => Effect.succeed(m.bot_event_error({}, { locale }))),
+      );
+    };
+
+    // Decode/resolve inside the effect (via `Effect.suspend`) rather than eagerly in
+    // this handler body. `decodeUnknownSync` throws on malformed input; doing it
+    // eagerly here would throw *before* the deferred reply is forked below,
+    // killing the whole handler ("This interaction failed") and bypassing the
+    // `catchCause` backstop. Suspending turns any decode throw into a defect on
+    // the forked fiber, which the backstop resolves with `bot_event_error`.
+    const work = Effect.suspend(() => {
+      if (selected === null) {
+        return Effect.succeed(m.bot_event_unknown_type({}, { locale }));
+      }
+
+      // Legacy modal: only `event_type` is known, the id is left for the migration
+      // trigger to resolve.
+      if ('kind' in selected) {
+        return createEvent(selected.kind, Option.none());
+      }
+
+      // Current modal: the id is authoritative, but `event_type` is still required (an old
+      // server may not know about `event_type_id` yet), so its `kind` has to be resolved via
+      // one extra lookup. A miss (archived/deleted mid-flight, or simply bogus) is rejected
+      // outright — never defaulted to a guessed kind.
+      return rpc['Event/GetEventTypesByGuild']({ guild_id: decodeSnowflake(guildId) }).pipe(
+        Effect.flatMap((types) =>
+          pipe(
+            types,
+            Array.findFirst((t) => t.id === selected.id),
+            Option.match({
+              onNone: () => Effect.succeed(m.bot_event_unknown_type({}, { locale })),
+              onSome: (found) => createEvent(found.kind, Option.some(found.id)),
+            }),
+          ),
+        ),
+        Effect.catchTag('RpcClientError', () => Effect.succeed(m.bot_event_error({}, { locale }))),
+      );
     }).pipe(
-      Effect.map((result) => m.bot_event_created({ title: result.title }, { locale })),
-      Effect.catchTag('CreateEventNotMember', () =>
-        Effect.succeed(m.bot_event_not_member({}, { locale })),
-      ),
-      Effect.catchTag('CreateEventForbidden', () =>
-        Effect.succeed(m.bot_event_no_permission({}, { locale })),
-      ),
-      Effect.catchTag('CreateEventInvalidDate', () =>
-        Effect.succeed(m.bot_event_invalid_date({}, { locale })),
-      ),
-      Effect.catchTag('RpcClientError', () => Effect.succeed(m.bot_event_error({}, { locale }))),
       Effect.flatMap((content) =>
         rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
           payload: { content },

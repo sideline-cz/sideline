@@ -4,6 +4,7 @@ import { DateTime, Option } from 'effect';
 import {
   Activity,
   Calendar,
+  CalendarCog,
   ChevronRight,
   Clock,
   Flame,
@@ -469,6 +470,11 @@ function TeamManagementCard({ teamId }: { teamId: string }) {
       icon: Activity,
     },
     { to: '/teams/$teamId/training-types' as const, label: tr('team_trainingTypes'), icon: Zap },
+    {
+      to: '/teams/$teamId/event-types' as const,
+      label: tr('eventType_title'),
+      icon: CalendarCog,
+    },
     {
       to: '/teams/$teamId/age-thresholds' as const,
       label: tr('team_ageThresholds'),
