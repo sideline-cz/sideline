@@ -21,6 +21,16 @@ const isCategoryFullError = (data: { readonly code: number; readonly errors?: un
   JSON.stringify(data.errors ?? {}).includes('CHANNEL_PARENT_MAX_CHANNELS');
 
 /**
+ * Discord HTTP 400 code 30013: "Maximum number of guild channels reached" (the
+ * guild-wide 500-channel cap, distinct from a single category's 50-channel cap).
+ * A full guild is an operator problem, not a transient one — no retry can fix it,
+ * so it is worth an error-level log instead of the generic warning every other
+ * provisioning failure gets (S4). The 15-minute reservation lease already throttles
+ * the retry rate; this is a visibility fix, not a rate fix.
+ */
+const MAX_GUILD_CHANNELS = 30013;
+
+/**
  * Idempotent provisioner: for each guild, find members without a personal
  * channel and create one for them.
  *
@@ -77,6 +87,7 @@ export const provisionPersonalChannels = (guildId: DiscordSchemas.Snowflake) =>
                       rpc['Guild/ReservePersonalChannel']({
                         team_id: member.team_id,
                         team_member_id: member.team_member_id,
+                        bucket: member.bucket,
                       }),
                     ),
                     Effect.flatMap(({ reservation }) => {
@@ -89,6 +100,7 @@ export const provisionPersonalChannels = (guildId: DiscordSchemas.Snowflake) =>
                         member.channel_format,
                         member.name,
                         member.discord_id,
+                        member.bucket,
                       );
 
                       const createAndSave = (catId: DiscordSchemas.Snowflake) =>
@@ -104,6 +116,7 @@ export const provisionPersonalChannels = (guildId: DiscordSchemas.Snowflake) =>
                               team_member_id: member.team_member_id,
                               discord_channel_id,
                               channel_format: member.channel_format,
+                              bucket: member.bucket,
                             }),
                           ),
                           // Populate the new channel with the member's existing events: mark the
@@ -127,6 +140,14 @@ export const provisionPersonalChannels = (guildId: DiscordSchemas.Snowflake) =>
                       // Discord category, persist its ID, then retry once.
                       return createAndSave(categoryId).pipe(
                         Effect.catchTag('ErrorResponse', (e) => {
+                          // Guild-wide 500-channel cap (S4): not transient, not a
+                          // category-full retry candidate. Log at error level so it
+                          // is distinguishable from every other swallowed warning.
+                          if (e.data.code === MAX_GUILD_CHANNELS) {
+                            return Effect.logError(
+                              `Guild ${guildId} has hit Discord's 500-channel limit; cannot provision ${member.bucket} channel for member ${member.team_member_id}`,
+                            );
+                          }
                           // Only handle the category-full condition (50035 with a
                           // nested CHANNEL_PARENT_MAX_CHANNELS). Any other error
                           // (e.g. 403 Missing Access = 50013) must propagate so

@@ -36,12 +36,14 @@ export const renamePersonalChannels = (guildId: DiscordSchemas.Snowflake) =>
             member.channel_format,
             member.name,
             member.discord_id,
+            member.bucket,
           );
           // Record the applied format so this channel is no longer flagged as drifted.
           const markApplied = rpc['Guild/SavePersonalChannelFormat']({
             team_id: member.team_id,
             team_member_id: member.team_member_id,
             channel_format: member.channel_format,
+            bucket: member.bucket,
           }).pipe(
             Effect.catchTag('RpcClientError', (e) =>
               Effect.logWarning(

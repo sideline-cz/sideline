@@ -11,7 +11,7 @@ import { guildLocale, type Locale } from '~/locale.js';
 import type { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js';
 import { isUnknownMessageError } from '~/rest/discordErrors.js';
 import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
-import { YES_EMBED_LIMIT } from '~/rest/utils.js';
+import { retryPolicy, YES_EMBED_LIMIT } from '~/rest/utils.js';
 import { DfxGuild } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { reorderPersonalChannel } from './reorderPersonalChannel.js';
@@ -59,10 +59,10 @@ const reconcileMemberMessage = (params: {
         discord_user_id: member.discord_id,
       }).pipe(
         Effect.catchTag('RsvpMemberNotFound', () =>
-          Effect.succeed({ events: [], total: 0, team_id: '' }),
+          Effect.succeed({ events: [], total: 0, team_id: '', show_attendee_list: true }),
         ),
         Effect.catchTag('GuildNotFound', () =>
-          Effect.succeed({ events: [], total: 0, team_id: '' }),
+          Effect.succeed({ events: [], total: 0, team_id: '', show_attendee_list: true }),
         ),
       ),
     ),
@@ -85,7 +85,15 @@ const reconcileMemberMessage = (params: {
           `Deleting personal event message ${stored.value.discord_message_id} for member ${member.team_member_id} — event ${event.event_id} left the member's upcoming window`,
         ).pipe(
           Effect.andThen(
-            rest.deleteMessage(member.personal_channel_id, stored.value.discord_message_id),
+            // Address the channel the message actually lives in, not the member's
+            // CURRENT channel — `event_type` is mutable, so a bucket move can leave
+            // those two values pointing at different channels (plan §7.4/B4).
+            rest
+              .deleteMessage(stored.value.personal_channel_id, stored.value.discord_message_id)
+              // Retry for the same reason as the bucket-move delete below: the row is
+              // dropped straight after, so a swallowed transient failure orphans the
+              // message in a channel nothing will ever look at again.
+              .pipe(Effect.retry(retryPolicy)),
           ),
           Effect.catch(() => Effect.void),
           Effect.andThen(
@@ -100,16 +108,15 @@ const reconcileMemberMessage = (params: {
 
       const render = buildPersonalMessage({
         entry,
-        yesAttendees,
+        // Setting 1 (plan §7.4): hide the attendee names, not the turnout — the
+        // RSVPs counts field and the Attendees button both stay regardless.
+        yesAttendees: userResult.show_attendee_list ? yesAttendees : [],
         discordId: member.discord_id,
         locale,
       });
       const hash = render.hash;
 
       const storedHash = Option.isSome(stored) ? stored.value.payload_hash : null;
-      if (storedHash === hash) {
-        return Effect.succeed(Option.none<PersonalChannelMember>());
-      }
 
       // CREATE the message (new member, new event, or a stored row whose Discord
       // message has since been deleted). A create appends at the bottom, so the
@@ -180,6 +187,42 @@ const reconcileMemberMessage = (params: {
           ),
         );
 
+      // Bucket move (event_type edited, or the member switched one↔three, plan §7.4/B4):
+      // the STORED message lives in a different channel than the member's CURRENT one.
+      // Must precede the hash skip below — the payload is usually unchanged across a
+      // move, so the skip would otherwise strand the card in the old channel forever.
+      if (Option.isSome(stored)) {
+        const storedChannelId = stored.value.personal_channel_id;
+        const storedMessageId = stored.value.discord_message_id;
+        if (storedChannelId !== member.personal_channel_id) {
+          // CREATE FIRST, then delete the old message. createFlow swallows Discord
+          // failures into Option.none and ProcessorService clears the dirty flag
+          // regardless, so delete-then-create would leave the member with NO card on
+          // a transient 429/5xx. Create-then-delete degrades to a duplicate instead.
+          //
+          // The delete MUST retry. Once createFlow succeeds the row points at the NEW
+          // channel, so the next pass sees storedChannelId === member.personal_channel_id,
+          // takes no move branch, matches the hash and skips — nothing ever revisits the
+          // old channel, and reorderPersonalChannel only knows DB-tracked messages. A
+          // single swallowed 429 would therefore strand a live, fully interactive card in
+          // the member's old bucket channel permanently, not transiently.
+          return createFlow().pipe(
+            Effect.tap((created) =>
+              Option.isSome(created)
+                ? rest.deleteMessage(storedChannelId, storedMessageId).pipe(
+                    Effect.retry(retryPolicy),
+                    Effect.catch(() => Effect.void),
+                  )
+                : Effect.void,
+            ),
+          );
+        }
+      }
+
+      if (storedHash === hash) {
+        return Effect.succeed(Option.none<PersonalChannelMember>());
+      }
+
       if (Option.isNone(stored)) {
         return createFlow();
       }
@@ -188,47 +231,49 @@ const reconcileMemberMessage = (params: {
       // message (rather than creating) means an unanswered-event mention in
       // editPayload registers + highlights but never pings.
       const messageId = stored.value.discord_message_id;
-      return rest.updateMessage(member.personal_channel_id, messageId, render.editPayload).pipe(
-        Effect.tap(() =>
-          rpc['PersonalEvents/UpsertPersonalEventMessage']({
-            event_id: event.event_id,
-            team_member_id: member.team_member_id,
-            personal_channel_id: member.personal_channel_id,
-            discord_message_id: messageId,
-            payload_hash: hash,
-          }).pipe(
-            Effect.catchTag('RpcClientError', (e) =>
-              Effect.logWarning(
-                `Failed to upsert personal event message for member ${member.team_member_id}`,
-                e,
+      return rest
+        .updateMessage(stored.value.personal_channel_id, messageId, render.editPayload)
+        .pipe(
+          Effect.tap(() =>
+            rpc['PersonalEvents/UpsertPersonalEventMessage']({
+              event_id: event.event_id,
+              team_member_id: member.team_member_id,
+              personal_channel_id: member.personal_channel_id,
+              discord_message_id: messageId,
+              payload_hash: hash,
+            }).pipe(
+              Effect.catchTag('RpcClientError', (e) =>
+                Effect.logWarning(
+                  `Failed to upsert personal event message for member ${member.team_member_id}`,
+                  e,
+                ),
               ),
             ),
           ),
-        ),
-        Effect.as(Option.none<PersonalChannelMember>()),
-        Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>
-          // The row points at a message Discord no longer has — someone deleted it
-          // by hand, or a reorder's delete-then-recreate raced us. Without this
-          // branch the row survives forever, every later pass re-PATCHes the same
-          // dead id, and the member's card is gone for good (it is never recreated,
-          // because `stored` keeps insisting it exists).
-          //
-          // Post a fresh message and let `persist`'s upsert (ON CONFLICT
-          // (event_id, team_member_id) DO UPDATE) repoint the row. Deliberately NOT
-          // deleting the row first: that would open a window where a create failure
-          // (rate limit, 5xx) leaves the member with no message AND no row, while
-          // the processor clears the dirty flag regardless — the "live event, zero
-          // cards, nothing left to retry" state seen in production.
-          isUnknownMessageError(e)
-            ? Effect.logWarning(
-                `Personal event message ${messageId} is gone from Discord (member ${member.team_member_id}, event ${event.event_id}) — recreating`,
-              ).pipe(Effect.andThen(createFlow()))
-            : Effect.logWarning(
-                `Failed to update personal channel message for member ${member.team_member_id}`,
-                e,
-              ).pipe(Effect.as(Option.none<PersonalChannelMember>())),
-        ),
-      );
+          Effect.as(Option.none<PersonalChannelMember>()),
+          Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>
+            // The row points at a message Discord no longer has — someone deleted it
+            // by hand, or a reorder's delete-then-recreate raced us. Without this
+            // branch the row survives forever, every later pass re-PATCHes the same
+            // dead id, and the member's card is gone for good (it is never recreated,
+            // because `stored` keeps insisting it exists).
+            //
+            // Post a fresh message and let `persist`'s upsert (ON CONFLICT
+            // (event_id, team_member_id) DO UPDATE) repoint the row. Deliberately NOT
+            // deleting the row first: that would open a window where a create failure
+            // (rate limit, 5xx) leaves the member with no message AND no row, while
+            // the processor clears the dirty flag regardless — the "live event, zero
+            // cards, nothing left to retry" state seen in production.
+            isUnknownMessageError(e)
+              ? Effect.logWarning(
+                  `Personal event message ${messageId} is gone from Discord (member ${member.team_member_id}, event ${event.event_id}) — recreating`,
+                ).pipe(Effect.andThen(createFlow()))
+              : Effect.logWarning(
+                  `Failed to update personal channel message for member ${member.team_member_id}`,
+                  e,
+                ).pipe(Effect.as(Option.none<PersonalChannelMember>())),
+          ),
+        );
     }),
     Effect.catchTag('RpcClientError', (e) =>
       Effect.logWarning(

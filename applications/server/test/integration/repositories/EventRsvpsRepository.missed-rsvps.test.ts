@@ -617,6 +617,89 @@ describe('EventRsvpsRepository — incrementMissedForEventNonRespondersByEventId
 });
 
 // ---------------------------------------------------------------------------
+// Nastavitelná docházka (plan §6.8, §10.2, Setting 2 accounting). The
+// `rsvp_reminder_dms` opt-out is a DM-delivery preference (§6.7) — it must NOT
+// change who accrues `missed_rsvps`. `incrementMissedForEventNonResponders`
+// is a standalone re-derivation (`EventRsvpsRepository.ts:288`) that never
+// calls `findNonResponders` and shares no code with the reminder-summary
+// filter, so an opted-out member must accrue exactly like an opted-in one.
+// ---------------------------------------------------------------------------
+
+const setReminderDms = (memberId: TeamMember.TeamMemberId, value: boolean) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) =>
+      sql`UPDATE team_members SET rsvp_reminder_dms = ${value} WHERE id = ${memberId}`.pipe(
+        Effect.asVoid,
+      ),
+    ),
+  );
+
+describe('EventRsvpsRepository — incrementMissedForEventNonRespondersByEventId is unaffected by rsvp_reminder_dms (Setting 2 accounting)', () => {
+  it.effect(
+    'a Player non-responder with rsvp_reminder_dms = false still gets missed_rsvps + 1, identical to an opted-in member',
+    () =>
+      seedTeamWithRoles('20').pipe(
+        Effect.tap(({ playerMember }) => setReminderDms(playerMember.id, false)),
+        Effect.bind('event', ({ team, playerMember }) => createEvent(team.id, playerMember.id)),
+        Effect.tap(({ event, team }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.incrementMissedForEventNonRespondersByEventId(event.id, team.id, Option.none()),
+            ),
+          ),
+        ),
+        Effect.bind('missed', ({ playerMember }) => getMissedRsvps(playerMember.id)),
+        Effect.tap(({ missed }) =>
+          Effect.sync(() => {
+            expect(missed).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'at missed_rsvps >= max_missed_rsvps, an opted-out member still accrues on the NEXT increment (accounting keeps counting even once excluded from the reminder list)',
+    () =>
+      seedTeamWithRoles('21').pipe(
+        Effect.tap(({ playerMember }) => setReminderDms(playerMember.id, false)),
+        Effect.tap(({ playerMember }) => setMissedRsvps(playerMember.id, 4)), // at the default threshold
+        Effect.bind('event', ({ team, playerMember }) => createEvent(team.id, playerMember.id)),
+        // findNonRespondersByEventId (feeding the reminder DM / org view) already
+        // excludes members at/over the threshold — confirmed unaffected by the opt-out.
+        Effect.bind('nonResponders', ({ event, team }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.findNonRespondersByEventId(event.id, team.id, Option.none(), 4),
+            ),
+          ),
+        ),
+        Effect.tap(({ nonResponders, playerMember }) =>
+          Effect.sync(() => {
+            expect(nonResponders.map((r) => r.team_member_id)).not.toContain(playerMember.id);
+          }),
+        ),
+        // But `incrementMissedForEventNonResponders` re-derives independently and has NO
+        // upper-bound guard — it keeps accruing regardless of the reminder threshold.
+        Effect.tap(({ event, team }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.incrementMissedForEventNonRespondersByEventId(event.id, team.id, Option.none()),
+            ),
+          ),
+        ),
+        Effect.bind('missed', ({ playerMember }) => getMissedRsvps(playerMember.id)),
+        Effect.tap(({ missed }) =>
+          Effect.sync(() => {
+            expect(missed).toBe(5);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // TeamMembersRepository.resetMissedRsvps
 // ---------------------------------------------------------------------------
 

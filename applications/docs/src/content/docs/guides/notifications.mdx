@@ -27,9 +27,9 @@ The exact timing is configurable per team from **Team settings → Notifications
 
 ## Who gets pinged
 
-Only players who are members of the event's **member group** (and any of its sub-groups) who haven't RSVPed yet. Once someone clicks Yes / No / Coming later, they drop off the reminder list.
+Only players who are members of the event's **member group** (and any of its sub-groups) who haven't RSVPed yet. Once someone clicks Yes / No / Coming later, they drop off the reminder list. Members who turned off **Remind me by DM** in their own [event preferences](#per-user-preferences) are skipped too, regardless of whether they've responded.
 
-The bot sends a direct message to each non-responder who has a linked Discord account. The DM links to that member's own personal events channel; if they don't have one, it falls back to the team's configured reminders channel, and finally to a generic link into the Discord server if neither is available.
+The bot sends a direct message to each remaining non-responder who has a linked Discord account. The DM links to that member's own personal events channel; if they don't have one, it falls back to the team's configured reminders channel, and finally to a generic link into the Discord server if neither is available.
 
 ## Disabling reminders
 
@@ -41,8 +41,17 @@ Per-team: from **Team settings → Notifications**, set **Days before** to `0`.
 
 ## Per-user preferences
 
+The timing (days before, time of day) is still team-wide, but you control your own reminder DM from your Sideline profile: open your **profile page** on the web app and find the **My events in Discord** card for the team (shown for every team you're connected to via Discord). Turn off **Remind me by DM** and the bot stops sending you the reminder entirely — there's no other channel it falls back to, so if you rely on the reminder, leave this on.
+
+The same card has two more toggles that affect how events look in Discord:
+
+- **Show who's going** — turn this off to hide the list of names on your own event cards (in your personal channel and in `/event list`). The ✅/❌/🕒 counts and the **Attendees** button stay either way — this only hides names, and only on cards only you see.
+- **My event channels** — switch from one combined events channel to three (trainings, tournaments, and everything else). See [Personal event channels](/guides/discord-integration/#personal-event-channels) for what this does and its one-way trade-off.
+
+Changes take a few minutes to apply — the bot picks them up on its next pass rather than instantly.
+
 <Aside type="caution" title="Coming soon">
-  Per-user preferences (e.g. choosing your own reminder lead time) are on the roadmap. For now, reminder settings are team-wide.
+  Choosing your own reminder lead time (days before / time of day) is on the roadmap. For now, only the timing is team-wide — whether you get the reminder at all is up to you.
 </Aside>
 
 ## See also

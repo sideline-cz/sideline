@@ -79,10 +79,10 @@ const reorderWithMessages = (
         discord_user_id: params.discord_id,
       }).pipe(
         Effect.catchTag('RsvpMemberNotFound', () =>
-          Effect.succeed({ events: [], total: 0, team_id: '' }),
+          Effect.succeed({ events: [], total: 0, team_id: '', show_attendee_list: true }),
         ),
         Effect.catchTag('GuildNotFound', () =>
-          Effect.succeed({ events: [], total: 0, team_id: '' }),
+          Effect.succeed({ events: [], total: 0, team_id: '', show_attendee_list: true }),
         ),
         Effect.flatMap((userResult) => {
           const entryById = new Map<string, EventRpcModels.UpcomingEventForUserEntry>(
@@ -114,7 +114,10 @@ const reorderWithMessages = (
                 Effect.flatMap((yesAttendees) => {
                   const render = buildPersonalMessage({
                     entry,
-                    yesAttendees,
+                    // A recreate must respect the member's preference the same way the
+                    // reconcile pass does — otherwise a hidden attendee list reappears on
+                    // every reorder and fights the reconcile pass forever.
+                    yesAttendees: userResult.show_attendee_list ? yesAttendees : [],
                     discordId: params.discord_id,
                     locale: params.locale,
                   });
@@ -193,13 +196,28 @@ export const reorderPersonalChannel = (params: {
         Effect.catchTag('RpcClientError', () => Effect.succeed([] as ReadonlyArray<MemberMessage>)),
       ),
     ),
-    Effect.flatMap(({ semaphore, messages }) =>
-      messages.length <= 1
-        ? Effect.void
-        : semaphore.withChannelLock(messages[0].personal_channel_id)(
-            reorderWithMessages(params, messages[0].personal_channel_id, messages),
-          ),
-    ),
+    // A split member's messages can span up to three personal channels — group them
+    // before locking/reordering instead of hardcoding messages[0]'s channel for the
+    // whole list, which would drive one channel's messages through another's lock
+    // and delete/recreate cycle.
+    Effect.flatMap(({ semaphore, messages }) => {
+      const byChannel = Arr.groupBy(messages, (m) => m.personal_channel_id);
+      const groups = Object.values(byChannel);
+      // Per-channel guard, not a member-wide one: a split member's singleton channel
+      // has nothing to reorder, so it must not take a lock just because a SIBLING
+      // channel does (mirrors the pre-split "messages.length <= 1" guard, applied to
+      // each channel independently).
+      return Effect.forEach(
+        groups,
+        (group) =>
+          group.length <= 1
+            ? Effect.void
+            : semaphore.withChannelLock(group[0].personal_channel_id)(
+                reorderWithMessages(params, group[0].personal_channel_id, group),
+              ),
+        { concurrency: 1 },
+      );
+    }),
     Effect.catchCause((cause) =>
       Effect.logWarning(
         `Unexpected error reordering personal channel for member ${params.team_member_id}`,

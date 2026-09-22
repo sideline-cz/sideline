@@ -54,6 +54,10 @@ class NonResponderRow extends Schema.Class<NonResponderRow>('NonResponderRow')({
   username: Schema.OptionFromNullOr(Schema.String),
   display_name: Schema.OptionFromNullOr(Schema.String),
   discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  // Nastavitelná docházka (plan §6.7): carried through so the reminder-DM handler
+  // (and only that handler) can filter opt-outs. No filtering happens here — this
+  // query is shared with the event:edit-gated organiser view.
+  rsvp_reminder_dms: Schema.Boolean,
 }) {}
 
 class TotalCount extends Schema.Class<TotalCount>('TotalCount')({
@@ -252,7 +256,7 @@ const make = Effect.gen(function* () {
     Result: NonResponderRow,
     execute: (input) => sql`
       WITH eligible_members AS (
-        SELECT tm.id AS team_member_id, tm.user_id
+        SELECT tm.id AS team_member_id, tm.user_id, tm.rsvp_reminder_dms
         FROM team_members tm
         WHERE tm.team_id = ${input.team_id}
           AND tm.active = true
@@ -276,7 +280,7 @@ const make = Effect.gen(function* () {
               AND eff.name = 'Player' AND eff.is_built_in = true
           )
       )
-      SELECT em.team_member_id, u.name AS member_name, u.discord_nickname AS nickname, u.username, u.discord_display_name AS display_name, u.discord_id
+      SELECT em.team_member_id, u.name AS member_name, u.discord_nickname AS nickname, u.username, u.discord_display_name AS display_name, u.discord_id, em.rsvp_reminder_dms
       FROM eligible_members em
       LEFT JOIN users u ON u.id = em.user_id
       LEFT JOIN event_rsvps er ON er.team_member_id = em.team_member_id AND er.event_id = ${input.event_id}

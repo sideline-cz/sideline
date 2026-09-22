@@ -29,4 +29,10 @@ export class TeamMember extends Model.Class<TeamMember>('TeamMember')({
   discord_joined_at: Model.FieldExcept(['insert'])(
     Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   ),
+  // Nastavitelná docházka (plan §5.1): never set on insert (DB DEFAULT handles new rows),
+  // always set afterwards via TeamMembersRepository.updateEventPreferences. Mirrors
+  // jersey_number / variable_symbol / discord_joined_at above.
+  show_attendee_list: Model.FieldExcept(['insert'])(Schema.Boolean),
+  rsvp_reminder_dms: Model.FieldExcept(['insert'])(Schema.Boolean),
+  personal_channels_split: Model.FieldExcept(['insert'])(Schema.Boolean),
 }) {}

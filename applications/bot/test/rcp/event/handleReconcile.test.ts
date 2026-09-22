@@ -122,6 +122,8 @@ const makeTestLayers = (opts: ReconcileMockOptions = {}) => {
                 : (opts.storedHashB ?? 'stale-hash-b');
             return Effect.succeed(
               Option.some({
+                personal_channel_id:
+                  memberId === MEMBER_A_ID ? PERSONAL_CHANNEL_A : PERSONAL_CHANNEL_B,
                 discord_message_id: memberId === MEMBER_A_ID ? PERSONAL_MSG_A : PERSONAL_MSG_B,
                 payload_hash: hash,
               }),
@@ -710,7 +712,11 @@ describe('handleReconcile — PR 4: all-day started event stays visible → edit
             }
             if (method === 'PersonalEvents/GetPersonalEventMessage') {
               return Effect.succeed(
-                Option.some({ discord_message_id: PERSONAL_MSG_A, payload_hash: 'some-hash' }),
+                Option.some({
+                  personal_channel_id: PERSONAL_CHANNEL_A,
+                  discord_message_id: PERSONAL_MSG_A,
+                  payload_hash: 'some-hash',
+                }),
               );
             }
             if (method === 'PersonalEvents/DeletePersonalEventMessage') {
@@ -820,6 +826,7 @@ const makeUnknownMessageLayers = (error: unknown) => {
           if (method === 'PersonalEvents/GetPersonalEventMessage') {
             return Effect.succeed(
               Option.some({
+                personal_channel_id: PERSONAL_CHANNEL_A,
                 discord_message_id: PERSONAL_MSG_A,
                 payload_hash: 'SENTINEL-WILL-NEVER-MATCH',
               }),
@@ -957,5 +964,475 @@ describe('handleReconcile — updateMessage 404s on a stored row (message delete
     expect(updateMessageCalls).toHaveLength(1);
     expect(deleteRpcCalls).toHaveLength(0);
     expect(createMessageCalls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nastavitelná docházka (plan §7.4, §10.1, B4). `event_type` is mutable, so
+// editing an event training→tournament moves it between live channels for
+// every split member. `handleReconcile.ts` must address STORED messages by
+// their STORED channel (`stored.value.personal_channel_id`), not by the
+// member's CURRENT channel (`member.personal_channel_id`) — those two can
+// legitimately differ when the routing bucket has moved.
+// ---------------------------------------------------------------------------
+
+describe('handleReconcile — B4: event_type edit moves a split member between channels', () => {
+  it('bucket move: stored row in TRAINING_CH, ListPersonalChannelsForEvent now resolves TOURNAMENT_CH, payload hash UNCHANGED → deleteMessage(TRAINING_CH), createMessage(TOURNAMENT_CH), row repointed', async () => {
+    const TRAINING_CH = '550000000000000001';
+    const TOURNAMENT_CH = '550000000000000002';
+
+    const event = makeUpcomingEvent('yes');
+    // The hash the renderer will ACTUALLY produce for this event/member — seeding the
+    // stored hash to match this is the whole point of the test: the move must be
+    // detected and applied even though the hash-diff would otherwise skip it entirely.
+    const matchingHash = computeExpectedHash({ event, discordId: DISCORD_ID_A });
+
+    const createMessageCalls: Array<{ channelId: string }> = [];
+    const updateMessageCalls: Array<{ channelId: string; messageId: string }> = [];
+    const deleteMessageCalls: Array<{ channelId: string; messageId: string }> = [];
+    const upsertCalls: Array<{ personal_channel_id: string }> = [];
+
+    const rpcLayer = Layer.succeed(
+      SyncRpc,
+      new Proxy({} as any, {
+        get: (_target: unknown, method: string) => {
+          if (typeof method !== 'string' || method === 'then') return undefined;
+          return (args: any) => {
+            if (method === 'Guild/ListPersonalChannelsForEvent') {
+              // The member's CURRENT channel for this event is now the tournament
+              // channel — the event moved buckets.
+              return Effect.succeed([
+                {
+                  team_member_id: MEMBER_A_ID as any,
+                  discord_id: DISCORD_ID_A as any,
+                  personal_channel_id: TOURNAMENT_CH as any,
+                },
+              ]);
+            }
+            if (method === 'Guild/GetAllUpcomingEventsForUser') {
+              return Effect.succeed({ events: [event], total: 1, team_id: TEAM_ID });
+            }
+            if (method === 'PersonalEvents/GetPersonalEventMessage') {
+              // The STORED row still points at the OLD (training) channel.
+              return Effect.succeed(
+                Option.some({
+                  personal_channel_id: TRAINING_CH as any,
+                  discord_message_id: PERSONAL_MSG_A as any,
+                  payload_hash: matchingHash,
+                }),
+              );
+            }
+            if (method === 'PersonalEvents/UpsertPersonalEventMessage') {
+              upsertCalls.push({ personal_channel_id: args?.personal_channel_id });
+              return Effect.succeed(undefined);
+            }
+            if (method === 'Event/GetYesAttendeesForEmbed') {
+              return Effect.succeed([]);
+            }
+            return Effect.succeed(null);
+          };
+        },
+      }),
+    );
+
+    const restLayer = Layer.succeed(
+      DiscordREST,
+      new Proxy({} as any, {
+        get: (_target: unknown, prop: string) => {
+          if (prop === 'createMessage') {
+            return (channelId: string) => {
+              createMessageCalls.push({ channelId });
+              return Effect.succeed({ id: 'new-msg-id' });
+            };
+          }
+          if (prop === 'updateMessage') {
+            return (channelId: string, messageId: string) => {
+              updateMessageCalls.push({ channelId, messageId });
+              return Effect.succeed({});
+            };
+          }
+          if (prop === 'deleteMessage') {
+            return (channelId: string, messageId: string) => {
+              deleteMessageCalls.push({ channelId, messageId });
+              return Effect.succeed(undefined);
+            };
+          }
+          if (prop === 'getGuild') {
+            return () => Effect.succeed({ preferred_locale: 'en-US', system_channel_id: null });
+          }
+          return () => Effect.succeed({ id: 'mock-id' });
+        },
+      }),
+    );
+
+    await run(
+      reconcileEvent({
+        event_id: EVENT_ID as any,
+        team_id: TEAM_ID as any,
+        guild_id: GUILD_ID as any,
+      }),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    // Delete addresses the OLD (stored) channel.
+    expect(deleteMessageCalls).toHaveLength(1);
+    expect(deleteMessageCalls[0]?.channelId).toBe(TRAINING_CH);
+    expect(deleteMessageCalls[0]?.messageId).toBe(PERSONAL_MSG_A);
+
+    // Create addresses the NEW (current) channel — the move happened despite an
+    // unchanged payload hash, proving the hash-skip was bypassed for this branch.
+    expect(createMessageCalls).toHaveLength(1);
+    expect(createMessageCalls[0]?.channelId).toBe(TOURNAMENT_CH);
+
+    // The row is repointed at the new channel.
+    expect(upsertCalls).toHaveLength(1);
+    expect(upsertCalls[0]?.personal_channel_id).toBe(TOURNAMENT_CH);
+  });
+
+  it("stale-message delete addresses the STORED channel, not the current one, when the event left the member's window", async () => {
+    const TRAINING_CH = '550000000000000011';
+    const TOURNAMENT_CH = '550000000000000012';
+
+    const deleteMessageCalls: Array<{ channelId: string; messageId: string }> = [];
+
+    const rpcLayer = Layer.succeed(
+      SyncRpc,
+      new Proxy({} as any, {
+        get: (_target: unknown, method: string) => {
+          if (typeof method !== 'string' || method === 'then') return undefined;
+          return () => {
+            if (method === 'Guild/ListPersonalChannelsForEvent') {
+              // Member's CURRENT channel (e.g. after a bucket move) differs from where
+              // the stale message actually lives.
+              return Effect.succeed([
+                {
+                  team_member_id: MEMBER_A_ID as any,
+                  discord_id: DISCORD_ID_A as any,
+                  personal_channel_id: TOURNAMENT_CH as any,
+                },
+              ]);
+            }
+            if (method === 'Guild/GetAllUpcomingEventsForUser') {
+              // Event vanished from the member's upcoming window entirely.
+              return Effect.succeed({ events: [], total: 0, team_id: TEAM_ID });
+            }
+            if (method === 'PersonalEvents/GetPersonalEventMessage') {
+              return Effect.succeed(
+                Option.some({
+                  personal_channel_id: TRAINING_CH as any,
+                  discord_message_id: PERSONAL_MSG_A as any,
+                  payload_hash: 'some-hash',
+                }),
+              );
+            }
+            if (method === 'PersonalEvents/DeletePersonalEventMessage') {
+              return Effect.succeed(undefined);
+            }
+            if (method === 'Event/GetYesAttendeesForEmbed') {
+              return Effect.succeed([]);
+            }
+            return Effect.succeed(null);
+          };
+        },
+      }),
+    );
+
+    const restLayer = Layer.succeed(
+      DiscordREST,
+      new Proxy({} as any, {
+        get: (_target: unknown, prop: string) => {
+          if (prop === 'deleteMessage') {
+            return (channelId: string, messageId: string) => {
+              deleteMessageCalls.push({ channelId, messageId });
+              return Effect.succeed(undefined);
+            };
+          }
+          if (prop === 'getGuild') {
+            return () => Effect.succeed({ preferred_locale: 'en-US', system_channel_id: null });
+          }
+          return () => Effect.succeed({ id: 'mock-id' });
+        },
+      }),
+    );
+
+    await run(
+      reconcileEvent({
+        event_id: EVENT_ID as any,
+        team_id: TEAM_ID as any,
+        guild_id: GUILD_ID as any,
+      }),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(deleteMessageCalls).toHaveLength(1);
+    expect(deleteMessageCalls[0]?.channelId).toBe(TRAINING_CH);
+    expect(deleteMessageCalls[0]?.messageId).toBe(PERSONAL_MSG_A);
+  });
+
+  it('update-in-place addresses the STORED channel — pins the call site so a later refactor cannot silently reintroduce member.personal_channel_id', async () => {
+    // Stored and current channel are EQUAL here (the common case — no move happened).
+    // The call must still be made against stored.value.personal_channel_id, not
+    // member.personal_channel_id, even though the two values are equal in this case —
+    // this pins the call site itself, not just its accidental correctness.
+    const SAME_CHANNEL = '550000000000000021';
+
+    const updateMessageCalls: Array<{ channelId: string; messageId: string }> = [];
+
+    const rpcLayer = Layer.succeed(
+      SyncRpc,
+      new Proxy({} as any, {
+        get: (_target: unknown, method: string) => {
+          if (typeof method !== 'string' || method === 'then') return undefined;
+          return () => {
+            if (method === 'Guild/ListPersonalChannelsForEvent') {
+              return Effect.succeed([
+                {
+                  team_member_id: MEMBER_A_ID as any,
+                  discord_id: DISCORD_ID_A as any,
+                  personal_channel_id: SAME_CHANNEL as any,
+                },
+              ]);
+            }
+            if (method === 'Guild/GetAllUpcomingEventsForUser') {
+              return Effect.succeed({
+                events: [makeUpcomingEvent('yes')],
+                total: 1,
+                team_id: TEAM_ID,
+              });
+            }
+            if (method === 'PersonalEvents/GetPersonalEventMessage') {
+              return Effect.succeed(
+                Option.some({
+                  personal_channel_id: SAME_CHANNEL as any,
+                  discord_message_id: PERSONAL_MSG_A as any,
+                  payload_hash: 'SENTINEL-WILL-NEVER-MATCH',
+                }),
+              );
+            }
+            if (method === 'PersonalEvents/UpsertPersonalEventMessage') {
+              return Effect.succeed(undefined);
+            }
+            if (method === 'Event/GetYesAttendeesForEmbed') {
+              return Effect.succeed([]);
+            }
+            return Effect.succeed(null);
+          };
+        },
+      }),
+    );
+
+    const restLayer = Layer.succeed(
+      DiscordREST,
+      new Proxy({} as any, {
+        get: (_target: unknown, prop: string) => {
+          if (prop === 'updateMessage') {
+            return (channelId: string, messageId: string) => {
+              updateMessageCalls.push({ channelId, messageId });
+              return Effect.succeed({});
+            };
+          }
+          if (prop === 'getGuild') {
+            return () => Effect.succeed({ preferred_locale: 'en-US', system_channel_id: null });
+          }
+          return () => Effect.succeed({ id: 'mock-id' });
+        },
+      }),
+    );
+
+    await run(
+      reconcileEvent({
+        event_id: EVENT_ID as any,
+        team_id: TEAM_ID as any,
+        guild_id: GUILD_ID as any,
+      }),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(updateMessageCalls).toHaveLength(1);
+    expect(updateMessageCalls[0]?.channelId).toBe(SAME_CHANNEL);
+    expect(updateMessageCalls[0]?.messageId).toBe(PERSONAL_MSG_A);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nastavitelná docházka (plan §7.4, §10.1): Setting 1 (show_attendee_list)
+// must reach the personal-channel reconcile pass, and must NOT regress the
+// unanswered-event mention-edit flow for members who keep the default (on).
+// ---------------------------------------------------------------------------
+
+describe('handleReconcile — show_attendee_list wiring', () => {
+  it('show_attendee_list: false → the created embed has no Going field even though GetYesAttendeesForEmbed returned names', async () => {
+    const createMessageCalls: Array<{ channelId: string; payload: unknown }> = [];
+
+    const rpcLayer = Layer.succeed(
+      SyncRpc,
+      new Proxy({} as any, {
+        get: (_target: unknown, method: string) => {
+          if (typeof method !== 'string' || method === 'then') return undefined;
+          return () => {
+            if (method === 'Guild/ListPersonalChannelsForEvent') {
+              return Effect.succeed([
+                {
+                  team_member_id: MEMBER_A_ID as any,
+                  discord_id: DISCORD_ID_A as any,
+                  personal_channel_id: PERSONAL_CHANNEL_A as any,
+                },
+              ]);
+            }
+            if (method === 'Guild/GetAllUpcomingEventsForUser') {
+              return Effect.succeed({
+                events: [makeUpcomingEvent('yes')],
+                total: 1,
+                team_id: TEAM_ID,
+                show_attendee_list: false,
+              });
+            }
+            if (method === 'PersonalEvents/GetPersonalEventMessage') {
+              return Effect.succeed(Option.none());
+            }
+            if (method === 'PersonalEvents/UpsertPersonalEventMessage') {
+              return Effect.succeed(undefined);
+            }
+            if (method === 'Event/GetYesAttendeesForEmbed') {
+              return Effect.succeed([
+                {
+                  discord_id: Option.none(),
+                  name: Option.some('Alice'),
+                  nickname: Option.none(),
+                  username: Option.none(),
+                  display_name: Option.none(),
+                  response: 'yes',
+                  message: Option.none(),
+                },
+              ]);
+            }
+            return Effect.succeed(null);
+          };
+        },
+      }),
+    );
+
+    const restLayer = Layer.succeed(
+      DiscordREST,
+      new Proxy({} as any, {
+        get: (_target: unknown, prop: string) => {
+          if (prop === 'createMessage') {
+            return (channelId: string, payload: unknown) => {
+              createMessageCalls.push({ channelId, payload });
+              return Effect.succeed({ id: 'new-msg-id' });
+            };
+          }
+          if (prop === 'getGuild') {
+            return () => Effect.succeed({ preferred_locale: 'en-US', system_channel_id: null });
+          }
+          return () => Effect.succeed({ id: 'mock-id' });
+        },
+      }),
+    );
+
+    await run(
+      reconcileEvent({
+        event_id: EVENT_ID as any,
+        team_id: TEAM_ID as any,
+        guild_id: GUILD_ID as any,
+      }),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(createMessageCalls).toHaveLength(1);
+    const json = JSON.stringify(createMessageCalls[0]?.payload);
+    expect(json).not.toContain('Alice');
+  });
+
+  it('regression: show_attendee_list: true (default), same channel → byte-identical payload to today, including the unanswered mention edit', async () => {
+    const updateMessageCalls: Array<{ channelId: string; messageId: string; payload: unknown }> =
+      [];
+    const attendee = {
+      discord_id: Option.none(),
+      name: Option.some('Alice'),
+      nickname: Option.none(),
+      username: Option.none(),
+      display_name: Option.none(),
+      response: 'yes' as const,
+      message: Option.none(),
+    };
+
+    const rpcLayer = Layer.succeed(
+      SyncRpc,
+      new Proxy({} as any, {
+        get: (_target: unknown, method: string) => {
+          if (typeof method !== 'string' || method === 'then') return undefined;
+          return () => {
+            if (method === 'Guild/ListPersonalChannelsForEvent') {
+              return Effect.succeed([
+                {
+                  team_member_id: MEMBER_A_ID as any,
+                  discord_id: DISCORD_ID_A as any,
+                  personal_channel_id: PERSONAL_CHANNEL_A as any,
+                },
+              ]);
+            }
+            if (method === 'Guild/GetAllUpcomingEventsForUser') {
+              return Effect.succeed({
+                events: [makeUpcomingEvent(null)],
+                total: 1,
+                team_id: TEAM_ID,
+                show_attendee_list: true,
+              });
+            }
+            if (method === 'PersonalEvents/GetPersonalEventMessage') {
+              return Effect.succeed(
+                Option.some({
+                  personal_channel_id: PERSONAL_CHANNEL_A as any,
+                  discord_message_id: PERSONAL_MSG_A as any,
+                  payload_hash: 'SENTINEL-WILL-NEVER-MATCH',
+                }),
+              );
+            }
+            if (method === 'PersonalEvents/UpsertPersonalEventMessage') {
+              return Effect.succeed(undefined);
+            }
+            if (method === 'Event/GetYesAttendeesForEmbed') {
+              return Effect.succeed([attendee]);
+            }
+            return Effect.succeed(null);
+          };
+        },
+      }),
+    );
+
+    const restLayer = Layer.succeed(
+      DiscordREST,
+      new Proxy({} as any, {
+        get: (_target: unknown, prop: string) => {
+          if (prop === 'updateMessage') {
+            return (channelId: string, messageId: string, payload: unknown) => {
+              updateMessageCalls.push({ channelId, messageId, payload });
+              return Effect.succeed({});
+            };
+          }
+          if (prop === 'getGuild') {
+            return () => Effect.succeed({ preferred_locale: 'en-US', system_channel_id: null });
+          }
+          return () => Effect.succeed({ id: 'mock-id' });
+        },
+      }),
+    );
+
+    await run(
+      reconcileEvent({
+        event_id: EVENT_ID as any,
+        team_id: TEAM_ID as any,
+        guild_id: GUILD_ID as any,
+      }),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(updateMessageCalls).toHaveLength(1);
+    // Attendee list stays (Setting 1 defaults to on) …
+    const json = JSON.stringify(updateMessageCalls[0]?.payload);
+    expect(json).toContain('Alice');
+    // … and the unanswered-event mention edit still fires (Setting 2 out of scope here).
+    expect((updateMessageCalls[0]?.payload as any)?.content).toBe(`<@${DISCORD_ID_A}>`);
   });
 });

@@ -468,4 +468,43 @@ describe('handleRsvpReminder — no reminder-channel summary post', () => {
     const dmCalls = createMessageCalls.filter(([channelId]) => channelId === 'dm-channel-id');
     expect(dmCalls).toHaveLength(1);
   });
+
+  // Nastavitelná docházka (plan §6.7, §7.8, §10.1): Setting 2 (rsvp_reminder_dms) is
+  // filtered SERVER-SIDE, inside Event/GetRsvpReminderSummary — handleRsvpReminder.ts
+  // itself is NOT modified at all. This test DMs exactly one member per stubbed
+  // `summary.nonResponders` entry with no filtering of its own — a future bot-side
+  // filter (e.g. re-checking a reminder-preference flag before sending) would have to
+  // change this handler's behaviour and break this test to land.
+  it('Setting 2 tripwire: DMs exactly one member per stubbed nonResponders entry — no client-side filtering', async () => {
+    const threeNonResponders = [
+      {
+        discord_id: Option.some('600000000000000010' as any),
+        name: Option.some('Alice'),
+        nickname: Option.none(),
+        username: Option.none(),
+        display_name: Option.none(),
+      },
+      {
+        discord_id: Option.some('600000000000000011' as any),
+        name: Option.some('Bob'),
+        nickname: Option.none(),
+        username: Option.none(),
+        display_name: Option.none(),
+      },
+      {
+        discord_id: Option.some('600000000000000012' as any),
+        name: Option.some('Carol'),
+        nickname: Option.none(),
+        username: Option.none(),
+        display_name: Option.none(),
+      },
+    ];
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: threeNonResponders });
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(handleRsvpReminder(makeEvent()), Layer.merge(rpcLayer, restLayer));
+
+    const dmCalls = createMessageCalls.filter(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCalls).toHaveLength(3);
+  });
 });

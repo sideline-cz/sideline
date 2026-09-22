@@ -2,6 +2,7 @@ import { Schema } from 'effect';
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import * as Discord from '~/models/Discord.js';
 import { OnboardingLocale, OnboardingSyncErrorCode } from '~/models/Onboarding.js';
+import { PersonalChannelBucket } from '~/models/PersonalEventChannel.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 import * as User from '~/models/User.js';
@@ -264,6 +265,9 @@ export const GuildRpcGroup = RpcGroup.make(
         name: Schema.String,
         // The team's discord_personal_events_channel_format template.
         channel_format: Schema.String,
+        // Nastavitelná docházka (plan §5.4): which bucket this member still needs.
+        // Rolling-deploy default so an older server/bot decodes as the combined channel.
+        bucket: PersonalChannelBucket.pipe(Schema.withDecodingDefaultKey(() => 'all')),
       }),
     ),
   }),
@@ -276,11 +280,16 @@ export const GuildRpcGroup = RpcGroup.make(
         team_id: TeamId,
         team_member_id: TeamMemberId,
         discord_channel_id: Discord.Snowflake,
+        bucket: PersonalChannelBucket.pipe(Schema.withDecodingDefaultKey(() => 'all')),
       }),
     ),
   }),
   Rpc.make('ReservePersonalChannel', {
-    payload: { team_id: TeamId, team_member_id: TeamMemberId },
+    payload: {
+      team_id: TeamId,
+      team_member_id: TeamMemberId,
+      bucket: PersonalChannelBucket.pipe(Schema.withDecodingDefaultKey(() => 'all')),
+    },
     success: Schema.Struct({ reserved: Schema.Boolean }),
   }),
   Rpc.make('SavePersonalChannelId', {
@@ -290,6 +299,7 @@ export const GuildRpcGroup = RpcGroup.make(
       discord_channel_id: Discord.Snowflake,
       // The channel-name format applied when creating the channel.
       channel_format: Schema.String,
+      bucket: PersonalChannelBucket.pipe(Schema.withDecodingDefaultKey(() => 'all')),
     },
   }),
   // Records the channel-name format last applied to a member's channel (after a
@@ -299,6 +309,7 @@ export const GuildRpcGroup = RpcGroup.make(
       team_id: TeamId,
       team_member_id: TeamMemberId,
       channel_format: Schema.String,
+      bucket: PersonalChannelBucket.pipe(Schema.withDecodingDefaultKey(() => 'all')),
     },
   }),
   // Members whose personal channel name was rendered with a now-outdated format
@@ -313,6 +324,7 @@ export const GuildRpcGroup = RpcGroup.make(
         discord_channel_id: Discord.Snowflake,
         name: Schema.String,
         channel_format: Schema.String,
+        bucket: PersonalChannelBucket.pipe(Schema.withDecodingDefaultKey(() => 'all')),
       }),
     ),
   }),
@@ -379,12 +391,12 @@ export const GuildRpcGroup = RpcGroup.make(
       ),
     }),
   }),
-  Rpc.make('GetPersonalChannel', {
-    payload: { team_id: TeamId, team_member_id: TeamMemberId },
-    success: Schema.OptionFromNullOr(Discord.Snowflake),
-  }),
   Rpc.make('DeletePersonalChannel', {
-    payload: { team_id: TeamId, team_member_id: TeamMemberId },
+    payload: {
+      team_id: TeamId,
+      team_member_id: TeamMemberId,
+      bucket: PersonalChannelBucket.pipe(Schema.withDecodingDefaultKey(() => 'all')),
+    },
     success: Schema.OptionFromNullOr(Discord.Snowflake),
   }),
   Rpc.make('ListPersonalChannelsForEvent', {

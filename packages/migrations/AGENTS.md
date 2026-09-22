@@ -199,6 +199,34 @@ Always use the exact constraint name. Check the original migration that created 
 
 **Rolling-deploy-safe enum widening.** When the new value cannot yet appear on the wire for already-deployed clients (see `packages/domain/AGENTS.md` → wire-value projection), widen the CHECK to a permissive **superset** that keeps every legacy value AND the new one (`CHECK (response IN ('yes', 'no', 'maybe', 'coming_later'))`), use `DROP CONSTRAINT IF EXISTS` so the widening is idempotent, and do NOT rewrite historical rows in this migration. Eagerly converting historical rows would expose an old still-running instance's legacy decode to every historical row (not just newly-written ones) during the rolling deploy, for no functional benefit — the app already tolerates both the legacy and new values this release. Drop the legacy value from the CHECK and convert any leftover rows in the Release B follow-up, once no client relies on the old value. Reference: `1790300016_rename_rsvp_maybe_to_coming_later.ts`.
 
+### Widening a UNIQUE Constraint (Add the Wider Index BEFORE Dropping the Narrower One)
+
+Widening uniqueness from `(a, b)` to `(a, b, c)` is not a `DROP` followed by a `CREATE`. Order the statements so the table is never unprotected, and account for the fact that dropping the old constraint breaks in-flight `ON CONFLICT` clauses.
+
+```typescript
+// 1. Column, with a DEFAULT that makes every existing row a valid member of the new key.
+Effect.tap(() => sql`ALTER TABLE personal_event_channels ADD COLUMN IF NOT EXISTS bucket TEXT NOT NULL DEFAULT 'all'`),
+// 2. Value guard (see "Updating CHECK Constraints" above).
+// 3. Wider unique index FIRST — CREATE UNIQUE INDEX IF NOT EXISTS, so the re-run is a no-op.
+Effect.tap(() => sql`
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_personal_event_channels_member_bucket
+    ON personal_event_channels (team_id, team_member_id, bucket)
+`),
+// 4. Only then drop the narrower one, by its exact generated name, with IF EXISTS.
+Effect.tap(() => sql`
+  ALTER TABLE personal_event_channels
+    DROP CONSTRAINT IF EXISTS personal_event_channels_team_id_team_member_id_key
+`),
+```
+
+1. **Create the wider index before dropping the narrower constraint, never the other way round.** Between the two statements the table must be protected by at least one of them. The reverse order opens a window in which duplicate rows can be written and the subsequent `CREATE UNIQUE INDEX` then aborts the migration — and `MigrateBefore` runs inside server boot (`applications/server/src/run.ts`), so an aborted migration means the container never starts, for every team.
+2. **The DEFAULT on the new column must make every existing row a valid member of the new key.** `bucket TEXT NOT NULL DEFAULT 'all'` turns each pre-existing `(team_id, team_member_id)` row into exactly one `(team_id, team_member_id, 'all')` row, so the wider index can be built without a repair `UPDATE`.
+3. **An inline `CREATE TABLE ... UNIQUE (a, b)` constraint carries a Postgres-generated name** — `<table>_<col1>_<col2>_key`. Look it up in the migration that created the table; do not guess, and always pair the `DROP` with `IF EXISTS` so a re-run is a no-op.
+4. **Dropping the narrower constraint breaks OLD application pods' `ON CONFLICT (a, b)` clause** — Postgres needs a unique index matching the inferred conflict target exactly and raises `42P10` (`there is no unique or exclusion constraint matching the ON CONFLICT specification`) otherwise. During a rolling deploy the still-running old pods therefore fail every upsert on that table until they are replaced. Deploy the server before the bot, expect a gap on whatever the upsert feeds, and say so in a comment on the `DROP` statement. When that gap is not acceptable, split the widening across two releases: this migration plus the new code in Release A, and the `DROP CONSTRAINT` in Release B.
+5. **Idempotently ADDING a brand-new constraint** (as opposed to replacing one) needs a guard, because `ADD CONSTRAINT` has no `IF NOT EXISTS`: wrap it in `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '<name>') THEN ... END IF; END $$`. Use the `DROP CONSTRAINT IF EXISTS` + `ADD CONSTRAINT` pair from "Updating CHECK Constraints" only when you are REPLACING an existing constraint of a known name.
+
+Reference: `1792200001_personal_event_channels_bucket.ts`; coverage in `applications/server/test/integration/migrations/personalEventChannelsBucket.test.ts`.
+
 ### Trigger-Maintained Denormalized Aggregates
 
 When a derived aggregate (e.g. `fee_assignments.paid_minor = SUM(payments.amount_minor) WHERE voided_at IS NULL`) is read on every status query, prefer a **trigger-maintained denormalized column** over re-aggregating with `SUM(...)` on each read. Reference implementation: `recompute_paid_minor` + `payments_recompute_trigger` in `1783000000_create_finance.ts`.

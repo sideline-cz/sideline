@@ -751,6 +751,61 @@ const make = Effect.gen(function* () {
   const resetMissedRsvps = (teamMemberId: TeamMember.TeamMemberId) =>
     resetMissedRsvpsQuery(teamMemberId).pipe(catchSqlErrors);
 
+  // Nastavitelná docházka (plan §6.4). `personal_channels_available` is advisory only
+  // (`ts.discord_personal_events_category_id IS NOT NULL` via a LEFT JOIN — one extra
+  // expression, no extra round trip) — it must NOT reject a `personal_channels_split`
+  // write for a team with no personal-events category configured (plan §6.5).
+  const findEventPreferencesQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({ member_id: Schema.String }),
+    Result: Schema.Struct({
+      show_attendee_list: Schema.Boolean,
+      rsvp_reminder_dms: Schema.Boolean,
+      personal_channels_split: Schema.Boolean,
+      personal_channels_available: Schema.Boolean,
+    }),
+    execute: (input) => sql`
+      SELECT tm.show_attendee_list, tm.rsvp_reminder_dms, tm.personal_channels_split,
+        (ts.discord_personal_events_category_id IS NOT NULL) AS personal_channels_available
+      FROM team_members tm
+      LEFT JOIN team_settings ts ON ts.team_id = tm.team_id
+      WHERE tm.id = ${input.member_id}
+    `,
+  });
+
+  const findEventPreferences = (teamMemberId: TeamMember.TeamMemberId) =>
+    findEventPreferencesQuery({ member_id: teamMemberId }).pipe(catchSqlErrors);
+
+  const updateEventPreferencesQuery = SqlSchema.void({
+    Request: Schema.Struct({
+      member_id: Schema.String,
+      show_attendee_list: Schema.Boolean,
+      rsvp_reminder_dms: Schema.Boolean,
+      personal_channels_split: Schema.Boolean,
+    }),
+    execute: (input) => sql`
+      UPDATE team_members
+      SET show_attendee_list = ${input.show_attendee_list},
+          rsvp_reminder_dms = ${input.rsvp_reminder_dms},
+          personal_channels_split = ${input.personal_channels_split}
+      WHERE id = ${input.member_id}
+    `,
+  });
+
+  const updateEventPreferences = (
+    teamMemberId: TeamMember.TeamMemberId,
+    prefs: {
+      readonly showAttendeeList: boolean;
+      readonly rsvpReminderDms: boolean;
+      readonly personalChannelsSplit: boolean;
+    },
+  ) =>
+    updateEventPreferencesQuery({
+      member_id: teamMemberId,
+      show_attendee_list: prefs.showAttendeeList,
+      rsvp_reminder_dms: prefs.rsvpReminderDms,
+      personal_channels_split: prefs.personalChannelsSplit,
+    }).pipe(catchSqlErrors);
+
   // Test helper — bypasses soft-delete to exercise FK constraints.
   // Intentionally does NOT use catchSqlErrors so FK violations propagate as Effect failures.
   const hardDelete = (id: TeamMember.TeamMemberId) =>
@@ -789,6 +844,8 @@ const make = Effect.gen(function* () {
     findByTeamAndVariableSymbol,
     resetMissedRsvps,
     hasOtherActiveManager,
+    findEventPreferences,
+    updateEventPreferences,
     // test helper
     hardDelete,
   };

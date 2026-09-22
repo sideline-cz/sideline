@@ -1,16 +1,19 @@
-import { Discord, type GroupModel, Team, TeamMember } from '@sideline/domain';
+import {
+  Discord,
+  type GroupModel,
+  PersonalEventChannel,
+  type Team,
+  TeamMember,
+} from '@sideline/domain';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
-
-class PersonalEventChannelRow extends Schema.Class<PersonalEventChannelRow>(
-  'PersonalEventChannelRow',
-)({
-  id: Schema.String,
-  team_id: Team.TeamId,
-  team_member_id: TeamMember.TeamMemberId,
-  discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
-}) {}
+import {
+  deprovisionableBucketSql,
+  desiredBucketsSql,
+  eventBucketSql,
+  missingDesiredBucketSql,
+} from '~/repositories/personalChannelBucket.js';
 
 class MemberNeedingPersonalChannel extends Schema.Class<MemberNeedingPersonalChannel>(
   'MemberNeedingPersonalChannel',
@@ -18,11 +21,13 @@ class MemberNeedingPersonalChannel extends Schema.Class<MemberNeedingPersonalCha
   team_member_id: TeamMember.TeamMemberId,
   discord_id: Discord.Snowflake,
   name: Schema.String,
+  bucket: PersonalEventChannel.PersonalChannelBucket,
 }) {}
 
 class MemberToDeprovision extends Schema.Class<MemberToDeprovision>('MemberToDeprovision')({
   team_member_id: TeamMember.TeamMemberId,
   discord_channel_id: Discord.Snowflake,
+  bucket: PersonalEventChannel.PersonalChannelBucket,
 }) {}
 
 class MemberToRename extends Schema.Class<MemberToRename>('MemberToRename')({
@@ -31,6 +36,7 @@ class MemberToRename extends Schema.Class<MemberToRename>('MemberToRename')({
   discord_channel_id: Discord.Snowflake,
   name: Schema.String,
   channel_format: Schema.String,
+  bucket: PersonalEventChannel.PersonalChannelBucket,
 }) {}
 
 class PersonalChannelForEvent extends Schema.Class<PersonalChannelForEvent>(
@@ -48,6 +54,7 @@ const make = Effect.Do.pipe(
       Request: Schema.Struct({
         team_id: Schema.String,
         team_member_id: Schema.String,
+        bucket: PersonalEventChannel.PersonalChannelBucket,
       }),
       Result: Schema.Struct({ id: Schema.String }),
       // Re-claimable lease: a fresh NULL reservation (mutual exclusion) or an already
@@ -56,9 +63,9 @@ const make = Effect.Do.pipe(
       // A NULL reservation left stale for more than 15 minutes (e.g. a crashed worker) can
       // be re-claimed by bumping updated_at, which returns the row.
       execute: (input) => sql`
-        INSERT INTO personal_event_channels (team_id, team_member_id)
-        VALUES (${input.team_id}, ${input.team_member_id})
-        ON CONFLICT (team_id, team_member_id) DO UPDATE
+        INSERT INTO personal_event_channels (team_id, team_member_id, bucket)
+        VALUES (${input.team_id}, ${input.team_member_id}, ${input.bucket})
+        ON CONFLICT (team_id, team_member_id, bucket) DO UPDATE
           SET updated_at = now()
           WHERE personal_event_channels.discord_channel_id IS NULL
             AND personal_event_channels.updated_at < now() - interval '15 minutes'
@@ -72,6 +79,7 @@ const make = Effect.Do.pipe(
         team_member_id: Schema.String,
         discord_channel_id: Discord.Snowflake,
         channel_format: Schema.String,
+        bucket: PersonalEventChannel.PersonalChannelBucket,
       }),
       execute: (input) => sql`
         UPDATE personal_event_channels
@@ -79,6 +87,7 @@ const make = Effect.Do.pipe(
             applied_channel_format = ${input.channel_format},
             updated_at = now()
         WHERE team_id = ${input.team_id} AND team_member_id = ${input.team_member_id}
+          AND bucket = ${input.bucket}
       `,
     });
 
@@ -87,49 +96,43 @@ const make = Effect.Do.pipe(
         team_id: Schema.String,
         team_member_id: Schema.String,
         channel_format: Schema.String,
+        bucket: PersonalEventChannel.PersonalChannelBucket,
       }),
       execute: (input) => sql`
         UPDATE personal_event_channels
         SET applied_channel_format = ${input.channel_format}, updated_at = now()
         WHERE team_id = ${input.team_id} AND team_member_id = ${input.team_member_id}
+          AND bucket = ${input.bucket}
       `,
     });
 
-    const _getChannel = SqlSchema.findOneOption({
+    // Single CTE (plan §6.2/S3): a failure between two unwrapped statements used to be
+    // able to orphan message rows forever. This is atomic AND scopes the message delete
+    // to the dying channel only — a member-wide delete would, during a combined→split
+    // switch, wipe rows the three new channels just created.
+    const _deletePersonalChannel = SqlSchema.findOneOption({
       Request: Schema.Struct({
         team_id: Schema.String,
         team_member_id: Schema.String,
-      }),
-      Result: PersonalEventChannelRow,
-      execute: (input) => sql`
-        SELECT id, team_id, team_member_id, discord_channel_id
-        FROM personal_event_channels
-        WHERE team_id = ${input.team_id} AND team_member_id = ${input.team_member_id}
-      `,
-    });
-
-    const _deleteChannel = SqlSchema.findOneOption({
-      Request: Schema.Struct({
-        team_id: Schema.String,
-        team_member_id: Schema.String,
+        bucket: PersonalEventChannel.PersonalChannelBucket,
       }),
       Result: Schema.Struct({
         discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
       }),
       execute: (input) => sql`
-        DELETE FROM personal_event_channels
-        WHERE team_id = ${input.team_id} AND team_member_id = ${input.team_member_id}
-        RETURNING discord_channel_id
-      `,
-    });
-
-    // Clears any rendered personal message rows for a member (used on de-provision;
-    // the Discord channel and its messages are deleted separately by the bot).
-    const _deleteMemberMessages = SqlSchema.void({
-      Request: Schema.Struct({ team_member_id: Schema.String }),
-      execute: (input) => sql`
-        DELETE FROM personal_event_messages
-        WHERE team_member_id = ${input.team_member_id}
+        WITH gone AS (
+          DELETE FROM personal_event_channels
+          WHERE team_id = ${input.team_id}
+            AND team_member_id = ${input.team_member_id}
+            AND bucket = ${input.bucket}
+          RETURNING discord_channel_id
+        ), purged AS (
+          DELETE FROM personal_event_messages pem
+          USING gone
+          WHERE pem.team_member_id = ${input.team_member_id}
+            AND pem.personal_channel_id = gone.discord_channel_id
+        )
+        SELECT discord_channel_id FROM gone
       `,
     });
 
@@ -141,7 +144,7 @@ const make = Effect.Do.pipe(
       }),
       Result: MemberNeedingPersonalChannel,
       execute: (input) => sql`
-        SELECT tm.id AS team_member_id, u.discord_id,
+        SELECT tm.id AS team_member_id, u.discord_id, b.bucket,
           COALESCE(
             NULLIF(u.discord_display_name, ''),
             NULLIF(u.discord_nickname, ''),
@@ -150,7 +153,9 @@ const make = Effect.Do.pipe(
           ) AS name
         FROM team_members tm
         JOIN users u ON u.id = tm.user_id
-        LEFT JOIN personal_event_channels pec ON pec.team_member_id = tm.id AND pec.team_id = tm.team_id
+        CROSS JOIN LATERAL unnest(${sql.unsafe(desiredBucketsSql('tm'))}) AS b(bucket)
+        LEFT JOIN personal_event_channels pec
+          ON pec.team_member_id = tm.id AND pec.team_id = tm.team_id AND pec.bucket = b.bucket
         WHERE tm.team_id = ${input.team_id}
           AND tm.active = true
           AND u.discord_id IS NOT NULL
@@ -170,7 +175,7 @@ const make = Effect.Do.pipe(
                 AND gm.team_member_id = tm.id
             )
           )
-        ORDER BY tm.id
+        ORDER BY tm.id, b.bucket
         LIMIT ${input.limit}
       `,
     });
@@ -183,7 +188,7 @@ const make = Effect.Do.pipe(
       }),
       Result: MemberToDeprovision,
       execute: (input) => sql`
-        SELECT tm.id AS team_member_id, pec.discord_channel_id
+        SELECT tm.id AS team_member_id, pec.discord_channel_id, pec.bucket
         FROM personal_event_channels pec
         JOIN team_members tm ON tm.id = pec.team_member_id AND tm.team_id = pec.team_id
         WHERE pec.team_id = ${input.team_id}
@@ -212,7 +217,7 @@ const make = Effect.Do.pipe(
       }),
       Result: MemberToDeprovision,
       execute: (input) => sql`
-        SELECT tm.id AS team_member_id, pec.discord_channel_id
+        SELECT tm.id AS team_member_id, pec.discord_channel_id, pec.bucket
         FROM personal_event_channels pec
         JOIN team_members tm ON tm.id = pec.team_member_id AND tm.team_id = pec.team_id
         WHERE pec.team_id = ${input.team_id}
@@ -223,11 +228,26 @@ const make = Effect.Do.pipe(
       `,
     });
 
+    // B3-gated — see `deprovisionableBucketSql`.
+    const _getObsoleteBuckets = SqlSchema.findAll({
+      Request: Schema.Struct({ team_id: Schema.String, limit: Schema.Number }),
+      Result: MemberToDeprovision,
+      execute: (input) => sql`
+        SELECT tm.id AS team_member_id, pec.discord_channel_id, pec.bucket
+        FROM personal_event_channels pec
+        JOIN team_members tm ON tm.id = pec.team_member_id AND tm.team_id = pec.team_id
+        WHERE pec.team_id = ${input.team_id}
+          AND ${sql.unsafe(deprovisionableBucketSql('tm', 'pec'))}
+        ORDER BY tm.id
+        LIMIT ${input.limit}
+      `,
+    });
+
     const _getChannelsToRename = SqlSchema.findAll({
       Request: Schema.Struct({ team_id: Schema.String, limit: Schema.Number }),
       Result: MemberToRename,
       execute: (input) => sql`
-        SELECT tm.id AS team_member_id, u.discord_id, pec.discord_channel_id,
+        SELECT tm.id AS team_member_id, u.discord_id, pec.discord_channel_id, pec.bucket,
           COALESCE(
             NULLIF(u.discord_display_name, ''),
             NULLIF(u.discord_nickname, ''),
@@ -261,9 +281,9 @@ const make = Effect.Do.pipe(
           AND t.guild_id IS NOT NULL
           AND tm.active = true
           AND (
-            -- (a) an eligible member still missing a channel
+            -- (a) an eligible member still missing a channel for some desired bucket
             (
-              (pec.id IS NULL OR pec.discord_channel_id IS NULL)
+              ${sql.unsafe(missingDesiredBucketSql('tm', 'tm.team_id', 'tm.id'))}
               AND (
                 ts.discord_personal_events_group_id IS NULL
                 OR EXISTS (
@@ -304,6 +324,10 @@ const make = Effect.Do.pipe(
               pec.discord_channel_id IS NOT NULL
               AND pec.applied_channel_format IS DISTINCT FROM ts.discord_personal_events_channel_format
             )
+            -- (e) an existing channel outside the desired bucket set. Shares the exact
+            --     predicate _getObsoleteBuckets uses, B3 gate included, so a mode flip
+            --     wakes the poll exactly when deprovision would be safe to run.
+            OR (${sql.unsafe(deprovisionableBucketSql('tm', 'pec'))})
           )
         UNION
         -- (d) inactive members still holding a personal channel (unreachable via the active-member
@@ -341,6 +365,11 @@ const make = Effect.Do.pipe(
       `,
     });
 
+    // Bucket routing (plan §3/§6.2) — the leverage point that keeps the bot almost
+    // entirely bucket-unaware. The CASE yields exactly one bucket value per member,
+    // so this returns exactly one row per member even in the transitional state
+    // where a member holds an 'all' row AND split rows simultaneously (reachable
+    // for a full tick under the B3 gate) — two rows would make reconcile double-post.
     const _listForEvent = SqlSchema.findAll({
       Request: Schema.Struct({ event_id: Schema.String }),
       Result: PersonalChannelForEvent,
@@ -353,11 +382,18 @@ const make = Effect.Do.pipe(
         WHERE e.id = ${input.event_id}
           AND pec.discord_channel_id IS NOT NULL
           AND u.discord_id IS NOT NULL
+          AND pec.bucket = CASE WHEN tm.personal_channels_split
+                                THEN ${sql.unsafe(eventBucketSql('e'))}
+                                ELSE 'all' END
       `,
     });
 
-    const reservePersonalChannel = (teamId: Team.TeamId, teamMemberId: TeamMember.TeamMemberId) =>
-      _reserve({ team_id: teamId, team_member_id: teamMemberId }).pipe(
+    const reservePersonalChannel = (
+      teamId: Team.TeamId,
+      teamMemberId: TeamMember.TeamMemberId,
+      bucket: PersonalEventChannel.PersonalChannelBucket = 'all',
+    ) =>
+      _reserve({ team_id: teamId, team_member_id: teamMemberId, bucket }).pipe(
         Effect.map(Option.isSome),
         catchSqlErrors,
       );
@@ -367,34 +403,38 @@ const make = Effect.Do.pipe(
       teamMemberId: TeamMember.TeamMemberId,
       discordChannelId: Discord.Snowflake,
       channelFormat: string,
+      bucket: PersonalEventChannel.PersonalChannelBucket = 'all',
     ) =>
       _saveChannelId({
         team_id: teamId,
         team_member_id: teamMemberId,
         discord_channel_id: discordChannelId,
         channel_format: channelFormat,
+        bucket,
       }).pipe(catchSqlErrors);
 
     const savePersonalChannelFormat = (
       teamId: Team.TeamId,
       teamMemberId: TeamMember.TeamMemberId,
       channelFormat: string,
+      bucket: PersonalEventChannel.PersonalChannelBucket = 'all',
     ) =>
       _saveChannelFormat({
         team_id: teamId,
         team_member_id: teamMemberId,
         channel_format: channelFormat,
+        bucket,
       }).pipe(catchSqlErrors);
 
     const getChannelsToRename = (teamId: Team.TeamId, limit: number) =>
       _getChannelsToRename({ team_id: teamId, limit }).pipe(catchSqlErrors);
 
-    const getPersonalChannel = (teamId: Team.TeamId, teamMemberId: TeamMember.TeamMemberId) =>
-      _getChannel({ team_id: teamId, team_member_id: teamMemberId }).pipe(catchSqlErrors);
-
-    const deletePersonalChannel = (teamId: Team.TeamId, teamMemberId: TeamMember.TeamMemberId) =>
-      _deleteMemberMessages({ team_member_id: teamMemberId }).pipe(
-        Effect.andThen(_deleteChannel({ team_id: teamId, team_member_id: teamMemberId })),
+    const deletePersonalChannel = (
+      teamId: Team.TeamId,
+      teamMemberId: TeamMember.TeamMemberId,
+      bucket: PersonalEventChannel.PersonalChannelBucket = 'all',
+    ) =>
+      _deletePersonalChannel({ team_id: teamId, team_member_id: teamMemberId, bucket }).pipe(
         Effect.map(Option.flatMap((row) => row.discord_channel_id)),
         catchSqlErrors,
       );
@@ -420,6 +460,9 @@ const make = Effect.Do.pipe(
     const getInactiveMembersToDeprovision = (teamId: Team.TeamId, limit: number) =>
       _getInactiveMembersToDeprovision({ team_id: teamId, limit }).pipe(catchSqlErrors);
 
+    const getObsoleteBucketsToDeprovision = (teamId: Team.TeamId, limit: number) =>
+      _getObsoleteBuckets({ team_id: teamId, limit }).pipe(catchSqlErrors);
+
     const getGuildsNeedingPersonalProvisioning = (limit: number) =>
       _getGuildsNeedingProvisioning({ limit }).pipe(
         Effect.map((rows) => rows.map((r) => r.guild_id)),
@@ -439,11 +482,11 @@ const make = Effect.Do.pipe(
       reservePersonalChannel,
       savePersonalChannelId,
       savePersonalChannelFormat,
-      getPersonalChannel,
       deletePersonalChannel,
       getMembersNeedingPersonalChannel,
       getMembersToDeprovision,
       getInactiveMembersToDeprovision,
+      getObsoleteBucketsToDeprovision,
       getChannelsToRename,
       getGuildsNeedingPersonalProvisioning,
       listPersonalChannelsForEvent,

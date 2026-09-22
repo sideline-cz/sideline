@@ -39,6 +39,7 @@ export const deprovisionPersonalChannels = (guildId: DiscordSchemas.Snowflake) =
           const clearDbRows = rpc['Guild/DeletePersonalChannel']({
             team_id: member.team_id,
             team_member_id: member.team_member_id,
+            bucket: member.bucket,
           }).pipe(
             Effect.catchTag('RpcClientError', (e) =>
               Effect.logWarning(

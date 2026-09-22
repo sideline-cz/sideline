@@ -412,6 +412,67 @@ Updates the team's profile information. All fields are optional.
 
 ---
 
+#### `GET /teams/:teamId/me/event-preferences`
+
+Returns the calling member's own event preferences for this team (Nastavitelná docházka / configurable attendance).
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `MemberEventPreferences`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `showAttendeeList` | `boolean` | No | When `false`, hides the "Going" attendee-name list on the member's own event card (personal-channel embed and `/event list`); RSVP counts and the Attendees button are unaffected |
+| `rsvpReminderDms` | `boolean` | No | When `false`, the member is excluded from the RSVP reminder DM; does not affect the organiser-facing non-responders view or `missed_rsvps` accounting |
+| `personalChannelsSplit` | `boolean` | No | When `true`, the member's personal Discord events channel is split into three (training / tournament / other) instead of one combined channel |
+| `personalChannelsAvailable` | `boolean` | No | `true` when the team has a `discord_personal_events_category_id` configured (i.e. personal channels exist at all for this team); response-only, advisory — a `PATCH` with `personalChannelsSplit` set is accepted even when this is `false` |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventForbidden` | 403 | Not a member of this team |
+
+---
+
+#### `PATCH /teams/:teamId/me/event-preferences`
+
+Updates the calling member's own event preferences for this team. All three fields are required (full replace, not a partial patch).
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `UpdateMemberEventPreferences`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `showAttendeeList` | `boolean` | Yes | See `GET` above |
+| `rsvpReminderDms` | `boolean` | Yes | See `GET` above |
+| `personalChannelsSplit` | `boolean` | Yes | See `GET` above. Toggling this destroys the member's now-undesired personal channel(s) — and anything written in them — once the newly-desired channel(s) are provisioned; see `docs/discord-bot.md`'s Personal Events Provisioning Worker section |
+
+**Response:** `200 OK` — `MemberEventPreferences` (see `GET` above for field descriptions)
+
+Only a change to `showAttendeeList` marks the team's upcoming events' personal-channel messages dirty (`markTeamUpcomingEventsPersonalMessagesDirty`) so open event cards re-render without their attendee list; `rsvpReminderDms` and `personalChannelsSplit` take effect on the next reminder send / provisioning tick respectively, with no dirty-mark needed.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventForbidden` | 403 | Not a member of this team |
+
+---
+
 ### 3. Team Settings
 
 **Source:** `packages/domain/src/api/TeamSettingsApi.ts`
@@ -7321,25 +7382,24 @@ Handles Discord guild lifecycle events.
 | `Guild/RemoveMember` | `guild_id`, `discord_id` | Deactivates a member who left the Discord guild (triggered by `GUILD_MEMBER_REMOVE`). Resolves the team by `guild_id` and the user by `discord_id`. No-op when the member is not found or is already inactive. Protected: the last active `team:manage` holder is never deactivated (logs a warning and skips). On success, runs `deactivateMemberAndCascade` in a per-team advisory-locked transaction: emits `member_removed` channel-sync events for all rosters and groups (including ancestor groups), deactivates the `team_members` row, and hard-deletes all group and roster memberships. |
 | `Guild/GetGuildsNeedingPersonalProvisioning` | `limit` → `Snowflake[]` | Returns guild IDs where `discord_personal_events_category_id` is set in team settings and at least one active member has no personal channel row or no Discord channel ID yet |
 | `Guild/GetPersonalEventsCategory` | `guild_id` → `Snowflake \| null` | Returns the team's configured personal-events category channel ID, or null if the feature is not enabled |
-| `Guild/GetMembersNeedingPersonalChannel` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_id, name, channel_format }[]` | Lists active team members who have no personal channel row or whose channel has not yet been provisioned; respects `discord_personal_events_group_id` restriction when set; `name` is the member's best-effort display name for the `{name}` channel-format placeholder; `channel_format` is the team's configured `discord_personal_events_channel_format` template |
-| `Guild/GetPersonalChannelsToDeprovision` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_channel_id }[]` | Lists members who currently have a personal channel but are no longer eligible. Returns the union of two sets: (a) active members outside the configured `discord_personal_events_group_id` group (empty when no group restriction is set); and (b) inactive members still holding a personal channel (e.g. after `Guild/RemoveMember` cascade deactivation). Results are de-duplicated by `team_member_id`. |
-| `Guild/ReservePersonalChannel` | `team_id`, `team_member_id` → `{ reserved: boolean }` | Lease-based claim: `INSERT ... ON CONFLICT DO UPDATE` on `personal_event_channels`, re-claiming (bumping `updated_at`) a NULL reservation whose `updated_at` is more than 15 minutes old so a member abandoned after a failed provisioning attempt gets retried instead of skipped forever; returns `reserved: true` for a fresh insert or a re-claim, `false` if the row is a recent NULL reservation or already provisioned |
-| `Guild/SavePersonalChannelId` | `team_id`, `team_member_id`, `discord_channel_id`, `channel_format` | Writes the Discord channel snowflake and the applied channel-name format template back to the `personal_event_channels` row after the channel is created |
-| `Guild/SavePersonalChannelFormat` | `team_id`, `team_member_id`, `channel_format` | Records the channel-name format template last applied to a member's channel after a rename, so format-change drift can be detected on subsequent ticks |
-| `Guild/GetPersonalChannelsToRename` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_id, discord_channel_id, name, channel_format }[]` | Lists members whose personal channel name was rendered with a now-outdated format (i.e. `applied_channel_format` differs from the team's current `discord_personal_events_channel_format`); returns the current `channel_format` to apply; empty when all channels are up to date |
+| `Guild/GetMembersNeedingPersonalChannel` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_id, name, channel_format, bucket }[]` | Lists (member, desired bucket) pairs still missing a provisioned channel — one row per missing bucket, so a split member with two missing channels appears twice. `bucket` is `all` for a combined-mode member, or one of `training`/`tournament`/`other` for a split member. Respects `discord_personal_events_group_id` restriction when set; `name` is the member's best-effort display name for the `{name}` channel-format placeholder; `channel_format` is the team's configured `discord_personal_events_channel_format` template |
+| `Guild/GetPersonalChannelsToDeprovision` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_channel_id, bucket }[]` | Lists provisioned channels that should be torn down. Returns the union of three sets: (a) active members outside the configured `discord_personal_events_group_id` group (empty when no group restriction is set) — loses every bucket, not gated; (b) inactive members still holding a personal channel (e.g. after `Guild/RemoveMember` cascade deactivation) — loses every bucket, not gated; and (c) channels outside the member's current desired bucket set (i.e. a `personal_channels_split` mode flip) — gated so a channel is only listed once every desired bucket for that member already has a provisioned channel, so a stuck provisioning pass never leaves a member with neither the old channel nor the new set. Results are de-duplicated by `team_member_id:bucket`, not by `team_member_id` alone — a split member can have multiple obsolete channels in the same tick. |
+| `Guild/ReservePersonalChannel` | `team_id`, `team_member_id`, `bucket` → `{ reserved: boolean }` | Lease-based claim: `INSERT ... ON CONFLICT DO UPDATE` on `personal_event_channels`, re-claiming (bumping `updated_at`) a NULL reservation whose `updated_at` is more than 15 minutes old so a member abandoned after a failed provisioning attempt gets retried instead of skipped forever; returns `reserved: true` for a fresh insert or a re-claim, `false` if the row is a recent NULL reservation or already provisioned. `bucket` defaults to `all` on decode for rollout compatibility with an older bot. |
+| `Guild/SavePersonalChannelId` | `team_id`, `team_member_id`, `discord_channel_id`, `channel_format`, `bucket` | Writes the Discord channel snowflake and the applied channel-name format template back to the `personal_event_channels` row (keyed on `(team_id, team_member_id, bucket)`) after the channel is created |
+| `Guild/SavePersonalChannelFormat` | `team_id`, `team_member_id`, `channel_format`, `bucket` | Records the channel-name format template last applied to a member's channel (identified by `bucket`) after a rename, so format-change drift can be detected on subsequent ticks |
+| `Guild/GetPersonalChannelsToRename` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_id, discord_channel_id, name, channel_format, bucket }[]` | Lists channels whose name was rendered with a now-outdated format (i.e. `applied_channel_format` differs from the team's current `discord_personal_events_channel_format`); one row per outdated channel, so a split member can appear up to three times; returns the current `channel_format` to apply; empty when all channels are up to date |
 | `Guild/MarkTeamPersonalEventsDirty` | `team_id` | Marks all active upcoming events for the team dirty (sets `personal_messages_dirty_at`) so the reconcile loop backfills personal-channel embeds into freshly-provisioned channels; only touches events that are not already dirty |
 | `Guild/IdentifyEventsChannel` | `guild_id`, `channel_id`, `discord_user_id` → `{ kind: 'global' \| 'personal' \| 'none', team_id: TeamId \| null, team_member_id: string \| null, is_admin: boolean }` | Classifies a channel for the `/event refresh` subcommand: `personal` if it is the calling Discord user's own personal events channel (with `team_id` and `team_member_id` populated), otherwise `none`. Also returns `is_admin: true` if the calling Discord user holds Sideline's `team:manage` permission on the team (the same check used by the web team-settings pages). Implemented via `PersonalEventChannelsRepository.findOwnedPersonalChannel` for the personal case. The `'global'` kind is never returned as of the remove-global-events-board Release A (the shared events board no longer exists); the literal stays in the schema only for wire compatibility. |
 | `Guild/CheckTeamAdmin` | `guild_id`, `discord_user_id` → `{ team_id: TeamId \| null, is_admin: boolean }` | Resolves the calling Discord user's team membership and whether they hold the `team:manage` permission (team admin) for the guild's team. Used by the bot's `/sudo` command and its "Leave sudo" button to authorize admin-only actions without requiring a specific channel context |
 | `Guild/BeginSudoSession` | `guild_id`, `discord_user_id`, `system_channel_id`, `audit_message_id`, `started_at` | Persists (upserts) the caller's active `/sudo` session — the audit message's location and start time — in `sudo_sessions`, so the session can later be closed by `Guild/EndSudoSession` via either the "Leave sudo" button or by re-running `/sudo` |
 | `Guild/EndSudoSession` | `guild_id`, `discord_user_id` → `{ session: { started_at: DateTime, system_channel_id: Snowflake, audit_message_id: Snowflake } \| null }` | Deletes and returns the caller's active `/sudo` session row (if any), so the bot can locate and close the audit message and report the elapsed duration; returns `session: null` when there was no active session |
-| `Guild/GetPersonalChannel` | `team_id`, `team_member_id` → `Snowflake \| null` | Returns the stored Discord channel ID for a member, or null if not yet provisioned |
-| `Guild/DeletePersonalChannel` | `team_id`, `team_member_id` → `Snowflake \| null` | Deletes the row and returns the Discord channel ID so the caller can delete it in Discord |
-| `Guild/ListPersonalChannelsForEvent` | `event_id` → `{ team_member_id, discord_id, personal_channel_id }[]` | Lists all members who have a personal channel for the event's team (used during reconcile to know which channels to post/update embeds in, and by the RSVP reminder handler to link each non-responder's DM to their own personal events channel) |
+| `Guild/DeletePersonalChannel` | `team_id`, `team_member_id`, `bucket` → `Snowflake \| null` | Deletes the row for the given bucket and returns the Discord channel ID so the caller can delete it in Discord |
+| `Guild/ListPersonalChannelsForEvent` | `event_id` → `{ team_member_id, discord_id, personal_channel_id }[]` | Lists, for each member who has one, the single personal channel that owns this specific event — a member's `all` channel in combined mode, or whichever of their three channels matches the event's bucket in split mode (used during reconcile to know which channels to post/update embeds in, and by the RSVP reminder handler to link each remaining non-responder's DM to their own personal events channel) |
 | `Guild/GetPersonalChannelTargetCategory` | `team_id` → `{ category_id: Snowflake \| null, is_overflow: boolean }` | Returns the category to place the next personal channel into; prefers the latest overflow category if any exist |
 | `Guild/AllocatePersonalOverflowCategory` | `team_id` → `{ sequence: number, exists: boolean }` | Inserts a new `personal_event_overflow_categories` row (next sequence number) with `ON CONFLICT DO NOTHING`; returns whether a new row was inserted |
 | `Guild/SavePersonalOverflowCategoryId` | `team_id`, `sequence`, `discord_category_id` | Writes the Discord category snowflake back to the overflow row |
 | `Guild/ListPersonalOverflowCategories` | `team_id` → `{ sequence: number, discord_category_id: Snowflake }[]` | Lists all provisioned overflow categories for a team in sequence order |
-| `Guild/GetAllUpcomingEventsForUser` | `guild_id`, `discord_user_id` → `UpcomingEventsForUserResult` | Returns all upcoming active events for the requesting Discord user with their RSVP status; used by the personal-channel reconcile worker to build the member's personal-channel embed list. Same `my_response` / `my_response_actual` projection split as `Event/GetUpcomingEventsForUser` (see the Event RPC group below) |
+| `Guild/GetAllUpcomingEventsForUser` | `guild_id`, `discord_user_id` → `UpcomingEventsForUserResult` | Returns all upcoming active events for the requesting Discord user with their RSVP status; used by the personal-channel reconcile worker to build the member's personal-channel embed list. Same `my_response` / `my_response_actual` projection split as `Event/GetUpcomingEventsForUser` (see the Event RPC group below). Result also carries the caller's `show_attendee_list` preference (decoding default `true` for rollout compatibility) so the reconcile worker knows whether to render the attendee list in the personal-channel embed. |
 
 #### Event
 
@@ -7358,9 +7418,9 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/GetEventEmbedInfo` | `event_id` → `EventEmbedInfo \| null` | Retrieves info needed to render the Discord embed |
 | `Event/GetChannelEvents` | `discord_channel_id` → `ChannelEventEntry[]` | Lists events posted in a Discord channel |
 | `Event/GetRsvpAttendees` | `event_id`, `offset`, `limit` → `RsvpAttendeesResult` | Returns paginated RSVP attendee list; each entry's `response` is projected to the legacy `"yes" \| "no" \| "maybe"` vocabulary (`coming_later` → `maybe`) |
-| `Event/GetRsvpReminderSummary` | `event_id` → `RsvpReminderSummary` | Returns RSVP reminder data including non-responders and yes-attendee list; the yes-attendee list also includes `coming_later` responders (both count as attending) |
+| `Event/GetRsvpReminderSummary` | `event_id` → `RsvpReminderSummary` | Returns RSVP reminder data including non-responders and yes-attendee list; the yes-attendee list also includes `coming_later` responders (both count as attending). `nonResponders` excludes members with `rsvp_reminder_dms = false` — this RPC's only consumer is the reminder DM send, so an opted-out member simply never appears here; the organiser-facing non-responders view and `missed_rsvps` accounting query the table unfiltered. |
 | `Event/GetUpcomingGuildEvents` | `guild_id`, `offset`, `limit` → `GuildEventListResult` | Lists upcoming events for a guild (guild-scoped, no per-user RSVP data) |
-| `Event/GetUpcomingEventsForUser` | `guild_id`, `discord_user_id`, `offset`, `limit` → `UpcomingEventsForUserResult` | Lists upcoming events with the invoking user's RSVP status; used by `/event list`, the overview show button, and per-user embed pagination. Each entry's `my_response` stays projected to the legacy 3-value vocabulary; `my_response_actual` additionally carries the true unprojected response (including `coming_later`) so the bot can build the correct message-management buttons |
+| `Event/GetUpcomingEventsForUser` | `guild_id`, `discord_user_id`, `offset`, `limit` → `UpcomingEventsForUserResult` | Lists upcoming events with the invoking user's RSVP status; used by `/event list`, the overview show button, and per-user embed pagination. Each entry's `my_response` stays projected to the legacy 3-value vocabulary; `my_response_actual` additionally carries the true unprojected response (including `coming_later`) so the bot can build the correct message-management buttons. Result also carries the caller's `show_attendee_list` preference, same as `Guild/GetAllUpcomingEventsForUser` above. |
 | `Event/GetTrainingTypesByGuild` | `guild_id` → `TrainingTypeChoice[]` | Lists training types for a guild (for autocomplete) |
 | `Event/CreateEvent` | `guild_id`, `discord_user_id`, `event_type`, `title`, `start_at`, ... → `CreateEventResult` | Creates an event from the bot slash command |
 | `Event/GetChannelDivider` | `discord_channel_id` → `Snowflake \| null` | Returns the stored divider message ID for a channel |

@@ -724,3 +724,67 @@ describe('buildUpcomingEventEmbed — PR 4: the "Dnes" marker', () => {
     expect(embeds[0].description).toMatch(/<t:\d+:R>/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Nastavitelná docházka (plan §10.1, design.md §B.1): Setting 1
+// (show_attendee_list) is applied by the CALLER passing yesAttendees: [], not
+// by a flag on this function. These tests pin the composed contract: with the
+// list hidden, the RSVPs counts field AND the Attendees button both stay —
+// only the Going field (names) disappears.
+// ---------------------------------------------------------------------------
+
+describe('buildUpcomingEventEmbed — Setting 1 (show_attendee_list): hidden vs shown composition (design.md §B.1)', () => {
+  it('yesAttendees: [] → no Going field, but the RSVPs counts field AND the attendees: button are still present', () => {
+    const entry = makeEntry({ yes_count: 5, no_count: 3, maybe_count: 2 });
+    const { embeds, components } = buildUpcomingEventEmbed({
+      ...baseParams,
+      entry,
+      yesAttendees: [],
+    });
+
+    const fields = embeds[0].fields ?? [];
+    const goingField = fields.find((f) => f.name.includes('Going'));
+    expect(goingField).toBeUndefined();
+
+    const rsvpsField = fields.find((f) => f.name.includes('RSVP'));
+    expect(rsvpsField).toBeDefined();
+    expect(rsvpsField?.value).toContain('5');
+    expect(rsvpsField?.value).toContain('3');
+    expect(rsvpsField?.value).toContain('2');
+
+    const allButtons = components.flatMap((row: any) => row.components ?? []);
+    const attendeesBtn = allButtons.find((b: any) => b.custom_id?.startsWith('attendees:'));
+    expect(attendeesBtn).toBeDefined();
+  });
+
+  it('yesAttendees: [a, b] → the Going field exists with both names, and counts/attendees button are unaffected', () => {
+    const entry = makeEntry({ yes_count: 2 });
+    const { embeds, components } = buildUpcomingEventEmbed({
+      ...baseParams,
+      entry,
+      yesAttendees: [makeAttendee('Alice'), makeAttendee('Bob')],
+    });
+
+    const fields = embeds[0].fields ?? [];
+    const goingField = fields.find((f) => f.name.includes('Going'));
+    expect(goingField).toBeDefined();
+    expect(goingField?.value).toContain('Alice');
+    expect(goingField?.value).toContain('Bob');
+
+    const rsvpsField = fields.find((f) => f.name.includes('RSVP'));
+    expect(rsvpsField).toBeDefined();
+
+    const allButtons = components.flatMap((row: any) => row.components ?? []);
+    const attendeesBtn = allButtons.find((b: any) => b.custom_id?.startsWith('attendees:'));
+    expect(attendeesBtn).toBeDefined();
+  });
+
+  it('regression: the coming_later custom_id still ends ":coming_later:v" and is <= 100 chars, regardless of yesAttendees', () => {
+    const entry = makeEntry({ event_id: 'evt-42', team_id: 'tm-7' });
+    const { components } = buildUpcomingEventEmbed({ ...baseParams, entry, yesAttendees: [] });
+    const allButtons = components.flatMap((row: any) => row.components ?? []);
+    const maybeBtn = allButtons.find((b: any) => b.custom_id?.endsWith(':coming_later:v'));
+    expect(maybeBtn).toBeDefined();
+    expect(maybeBtn.custom_id.length).toBeLessThanOrEqual(100);
+  });
+});

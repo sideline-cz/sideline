@@ -22,8 +22,9 @@ export const sendUpcomingEventFollowups = (params: {
   events: ReadonlyArray<EventRpcModels.UpcomingEventForUserEntry>;
   total: number;
   locale: Locale;
+  showAttendeeList: boolean;
 }) => {
-  const { rest, applicationId, interactionToken, events, total, locale } = params;
+  const { rest, applicationId, interactionToken, events, total, locale, showAttendeeList } = params;
 
   const sendMessages = Effect.forEach(
     events,
@@ -37,7 +38,11 @@ export const sendUpcomingEventFollowups = (params: {
           }),
         ),
         Effect.flatMap((yesAttendees) => {
-          const { embeds, components } = buildUpcomingEventEmbed({ entry, yesAttendees, locale });
+          const { embeds, components } = buildUpcomingEventEmbed({
+            entry,
+            yesAttendees: showAttendeeList ? yesAttendees : [],
+            locale,
+          });
           return rest
             .executeWebhook(applicationId, interactionToken, {
               payload: {

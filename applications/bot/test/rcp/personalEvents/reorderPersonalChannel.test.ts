@@ -296,3 +296,265 @@ describe('reorderPersonalChannel — PR 4 day-grouped ordering', () => {
     expect(deleteMessageCalls).toEqual(['300', '150']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Nastavitelná docházka (plan §7.5, §10.1). A split member's messages now span
+// up to THREE personal channels. `reorderPersonalChannel` must group
+// `ListMessagesForMember`'s rows by `personal_channel_id` before locking and
+// reordering, instead of hardcoding `messages[0].personal_channel_id` for
+// every message regardless of which channel it actually lives in.
+// ---------------------------------------------------------------------------
+
+/** A ChannelReorderSemaphore mock that is a pass-through (no real locking) but
+ * records every channel id it was asked to lock, in call order. */
+const makeRecordingSemaphoreLayer = () => {
+  const lockedChannels: string[] = [];
+  const layer = Layer.succeed(ChannelReorderSemaphore, {
+    withChannelLock: (channelId: string) => {
+      lockedChannels.push(channelId);
+      return <A, E, R>(effect: Effect.Effect<A, E, R>) => effect;
+    },
+  });
+  return { layer, lockedChannels };
+};
+
+const TRAINING_CHANNEL_ID = '540000000000000001';
+const TOURNAMENT_CHANNEL_ID = '540000000000000002';
+
+describe('reorderPersonalChannel — split member: group messages by channel before locking (plan §7.5)', () => {
+  it('messages spanning two personal_channel_ids → withChannelLock once per channel; each channel is reordered using only its own message ids', async () => {
+    const eventTrainingA = 'evt-training-a';
+    const eventTrainingB = 'evt-training-b';
+    const eventTournament = 'evt-tournament-a';
+
+    // Reverse-snowflake trick (as in case 1/2/3 above): every message in a channel is
+    // assigned so the whole channel gets recreated, and the delete SEQUENCE mirrors the
+    // desired create order within that channel.
+    const messages: MockMessage[] = [
+      {
+        event_id: eventTrainingA,
+        personal_channel_id: TRAINING_CHANNEL_ID,
+        discord_message_id: '100',
+        start_at: DateTime.makeUnsafe('2026-07-15T08:00:00Z'),
+        all_day: false,
+        local_date: '2026-07-15',
+      },
+      {
+        event_id: eventTrainingB,
+        personal_channel_id: TRAINING_CHANNEL_ID,
+        discord_message_id: '200',
+        start_at: DateTime.makeUnsafe('2026-07-16T08:00:00Z'),
+        all_day: false,
+        local_date: '2026-07-16',
+      },
+      {
+        event_id: eventTournament,
+        personal_channel_id: TOURNAMENT_CHANNEL_ID,
+        discord_message_id: '300',
+        start_at: DateTime.makeUnsafe('2026-07-17T08:00:00Z'),
+        all_day: false,
+        local_date: '2026-07-17',
+      },
+    ];
+
+    const entries = [
+      makeEntry(eventTrainingA, messages[0].start_at, false),
+      makeEntry(eventTrainingB, messages[1].start_at, false),
+      makeEntry(eventTournament, messages[2].start_at, false),
+    ];
+
+    const { rpcLayer, restLayer, deleteMessageCalls } = makeLayers(messages, entries);
+    const { layer: semaphoreLayer, lockedChannels } = makeRecordingSemaphoreLayer();
+
+    await Effect.runPromise(
+      reorderPersonalChannel({
+        team_member_id: MEMBER_ID as any,
+        discord_id: DISCORD_ID as any,
+        guild_id: GUILD_ID as any,
+        locale: 'en',
+      }).pipe(Effect.provide(Layer.mergeAll(rpcLayer, restLayer, semaphoreLayer))),
+    );
+
+    // Locked at most once per distinct channel — never once per message, never once
+    // for the whole member (which would serialize the two channels needlessly, or
+    // worse, apply one channel's lock to the other's writes). The tournament channel
+    // holds a single message, so it has nothing to reorder and takes NO lock even
+    // though its sibling does.
+    expect(lockedChannels).toEqual([TRAINING_CHANNEL_ID]);
+
+    // The training channel's two messages were deleted/recreated (day 16 before day 15,
+    // per the existing latest-day-first ordering). The assertions below pin that
+    // NEITHER channel's messages leak into the other's delete calls.
+    const trainingDeletes = deleteMessageCalls.filter((id) => id === '100' || id === '200');
+    const tournamentDeletes = deleteMessageCalls.filter((id) => id === '300');
+    // Training channel has 2 messages → gets reordered (both deleted+recreated).
+    expect(trainingDeletes.sort()).toEqual(['100', '200']);
+    // Tournament channel has exactly 1 message → skipped entirely, no delete call.
+    expect(tournamentDeletes).toHaveLength(0);
+  });
+
+  it('a channel holding a single message is skipped entirely (no delete/recreate for that channel)', async () => {
+    const eventTrainingA = 'evt-training-only';
+    const eventTournamentA = 'evt-tournament-only';
+
+    const messages: MockMessage[] = [
+      {
+        event_id: eventTrainingA,
+        personal_channel_id: TRAINING_CHANNEL_ID,
+        discord_message_id: '100',
+        start_at: DateTime.makeUnsafe('2026-07-15T08:00:00Z'),
+        all_day: false,
+        local_date: '2026-07-15',
+      },
+      {
+        event_id: eventTournamentA,
+        personal_channel_id: TOURNAMENT_CHANNEL_ID,
+        discord_message_id: '200',
+        start_at: DateTime.makeUnsafe('2026-07-16T08:00:00Z'),
+        all_day: false,
+        local_date: '2026-07-16',
+      },
+    ];
+    const entries = [
+      makeEntry(eventTrainingA, messages[0].start_at, false),
+      makeEntry(eventTournamentA, messages[1].start_at, false),
+    ];
+
+    const { rpcLayer, restLayer, deleteMessageCalls } = makeLayers(messages, entries);
+    const { layer: semaphoreLayer, lockedChannels } = makeRecordingSemaphoreLayer();
+
+    await Effect.runPromise(
+      reorderPersonalChannel({
+        team_member_id: MEMBER_ID as any,
+        discord_id: DISCORD_ID as any,
+        guild_id: GUILD_ID as any,
+        locale: 'en',
+      }).pipe(Effect.provide(Layer.mergeAll(rpcLayer, restLayer, semaphoreLayer))),
+    );
+
+    // Every channel here holds exactly one message → both are skipped, no lock taken,
+    // no delete/recreate anywhere.
+    expect(lockedChannels).toHaveLength(0);
+    expect(deleteMessageCalls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nastavitelná docházka (plan §7.5, §10.1): recreated payloads must respect
+// the member's show_attendee_list preference — a recreate that re-adds a
+// hidden attendee list would fight the reconcile pass forever.
+// ---------------------------------------------------------------------------
+
+describe('reorderPersonalChannel — recreated payloads respect show_attendee_list: false', () => {
+  it('when the member has show_attendee_list: false, a recreated message has no Going field even though yesAttendees is non-empty', async () => {
+    const eventA = 'evt-hide-a';
+    const eventB = 'evt-hide-b';
+
+    const messages: MockMessage[] = [
+      {
+        event_id: eventA,
+        personal_channel_id: PERSONAL_CHANNEL_ID,
+        discord_message_id: '100',
+        start_at: DateTime.makeUnsafe('2026-07-15T08:00:00Z'),
+        all_day: false,
+        local_date: '2026-07-15',
+      },
+      {
+        event_id: eventB,
+        personal_channel_id: PERSONAL_CHANNEL_ID,
+        discord_message_id: '200',
+        start_at: DateTime.makeUnsafe('2026-07-16T08:00:00Z'),
+        all_day: false,
+        local_date: '2026-07-16',
+      },
+    ];
+    const entries = [
+      makeEntry(eventA, messages[0].start_at, false),
+      makeEntry(eventB, messages[1].start_at, false),
+    ];
+
+    const createMessageCalls: unknown[] = [];
+    const rpcLayer = Layer.succeed(
+      SyncRpc,
+      new Proxy({} as any, {
+        get: (_target: unknown, method: string) => {
+          if (method === 'PersonalEvents/ListMessagesForMember') {
+            return () => Effect.succeed(messages);
+          }
+          if (method === 'Guild/GetAllUpcomingEventsForUser') {
+            // show_attendee_list: false on the wrapper — reorderPersonalChannel must
+            // read this off the same result it already fetches and pass yesAttendees:
+            // [] into buildPersonalMessage when it is false.
+            return () =>
+              Effect.succeed({
+                events: entries,
+                total: entries.length,
+                team_id: TEAM_ID,
+                show_attendee_list: false,
+              });
+          }
+          if (method === 'Event/GetYesAttendeesForEmbed') {
+            // Non-empty — proves the hide is applied by the CALLER, not because the
+            // upstream RPC returned nothing.
+            return () =>
+              Effect.succeed([
+                {
+                  discord_id: Option.none(),
+                  name: Option.some('Alice'),
+                  nickname: Option.none(),
+                  username: Option.none(),
+                  display_name: Option.none(),
+                  response: 'yes',
+                  message: Option.none(),
+                },
+              ]);
+          }
+          if (method === 'PersonalEvents/UpsertPersonalEventMessage') {
+            return () => Effect.succeed(undefined);
+          }
+          return () => Effect.succeed(null);
+        },
+      }),
+    );
+
+    const restLayer = Layer.succeed(
+      DiscordREST,
+      new Proxy({} as any, {
+        get: (_target: unknown, prop: string) => {
+          if (prop === 'createMessage') {
+            return (_channelId: string, payload: unknown) => {
+              createMessageCalls.push(payload);
+              return Effect.succeed({ id: `new-${createMessageCalls.length}` });
+            };
+          }
+          if (prop === 'deleteMessage') {
+            return () => Effect.succeed(undefined);
+          }
+          if (prop === 'updateMessage') {
+            return () => Effect.succeed({});
+          }
+          return () => Effect.succeed(null);
+        },
+      }),
+    );
+
+    await Effect.runPromise(
+      reorderPersonalChannel({
+        team_member_id: MEMBER_ID as any,
+        discord_id: DISCORD_ID as any,
+        guild_id: GUILD_ID as any,
+        locale: 'en',
+      }).pipe(
+        Effect.provide(
+          Layer.merge(rpcLayer, restLayer).pipe(Layer.merge(ChannelReorderSemaphore.Live)),
+        ),
+      ),
+    );
+
+    expect(createMessageCalls.length).toBeGreaterThan(0);
+    for (const payload of createMessageCalls) {
+      const json = JSON.stringify(payload);
+      expect(json).not.toContain('Alice');
+    }
+  });
+});
