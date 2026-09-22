@@ -43,7 +43,7 @@ import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEm
 import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
 import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 import {
-  isLeavingComingLaterWithoutNewMessage,
+  isLeavingRequiredNoteResponse,
   isRsvpMessageRequiredAndMissing,
 } from '~/utils/rsvpMessageRequired.js';
 import { constructEvent } from './events.js';
@@ -484,29 +484,32 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
           Effect.bind('priorRsvp', ({ member }) =>
             svc.rsvps.findRsvpByEventAndMember(event_id, member.id),
           ),
-          Effect.tap(({ priorRsvp }) =>
+          // Leaving a note-requiring response (`coming_later` / `maybe`) for a different one must
+          // not drag its mandatory note along — otherwise "Nevím" renders with a stale
+          // "dorazím v 19:00" nobody wrote for it. Shared with the HTTP `submitRsvp` handler so
+          // both surfaces agree on the transition.
+          // MUST be derived BEFORE the required-note guard below, which consumes it: switching
+          // between two note-requiring responses without a new note has to be rejected, not
+          // silently blanked. See `rsvpMessageRequired.ts` for the full argument.
+          Effect.let(
+            'effectiveClear',
+            ({ priorRsvp }) =>
+              clearMessage ||
+              isLeavingRequiredNoteResponse(
+                response,
+                message,
+                Option.map(priorRsvp, (r) => r.response),
+              ),
+          ),
+          Effect.tap(({ priorRsvp, effectiveClear }) =>
             isRsvpMessageRequiredAndMissing(
               response,
-              clearMessage,
+              effectiveClear,
               message,
               Option.flatMap(priorRsvp, (r) => r.message),
             )
               ? Effect.fail(new EventRpcModels.RsvpMessageRequired())
               : Effect.void,
-          ),
-          // Switching away from `coming_later` (whose note is mandatory) to any other response
-          // must not leave that note attached to the new response — otherwise e.g. "Nevím"
-          // renders with a stale "dorazím v 19:00" note nobody asked for on this submission.
-          // Shared with the HTTP `submitRsvp` handler so both surfaces agree on the transition.
-          Effect.let(
-            'effectiveClear',
-            ({ priorRsvp }) =>
-              clearMessage ||
-              isLeavingComingLaterWithoutNewMessage(
-                response,
-                message,
-                Option.map(priorRsvp, (r) => r.response),
-              ),
           ),
           Effect.bind('upsertResult', ({ member, effectiveClear }) =>
             svc.rsvps.upsertRsvp(event_id, member.id, response, message, effectiveClear).pipe(

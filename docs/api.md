@@ -2154,7 +2154,7 @@ Cancels an event. This action is irreversible.
 
 #### Enums
 
-**RsvpResponse:** `"yes"`, `"no"`, `"maybe"`, `"coming_later"` — used identically on submit and read (no wire projection). `"maybe"` ("Not sure") is a non-attending response, distinct from `"coming_later"` ("Coming later"), which means the member will attend but arrive late; it counts as full attendance (roster auto-provisioning, team generation, training auto-log, player ratings, and the min-players headcount all treat it like `"yes"`) and requires a non-empty `message` (see `RsvpMessageRequired` below).
+**RsvpResponse:** `"yes"`, `"no"`, `"maybe"`, `"coming_later"` — used identically on submit and read (no wire projection). `"maybe"` ("Not sure") is a non-attending response, distinct from `"coming_later"` ("Coming later"), which means the member will attend but arrive late and counts as full attendance (roster auto-provisioning, team generation, training auto-log, player ratings, and the min-players headcount all treat it like `"yes"`; `"maybe"` does not). Both `"coming_later"` and `"maybe"` require a non-empty `message` — `EventRsvp.rsvpResponseRequiresMessage` in `packages/domain/src/models/EventRsvp.ts` is the single source of truth for which responses do (see `RsvpMessageRequired` below); only `"yes"`/`"no"` keep an optional message.
 
 ---
 
@@ -2223,7 +2223,7 @@ Submits or updates the authenticated user's RSVP for an event.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `response` | `RsvpResponse` | Yes | `"yes"`, `"no"`, `"maybe"`, or `"coming_later"` |
-| `message` | `string \| null` | Yes | Message to accompany the RSVP. `null` leaves any already-stored message untouched (an idempotent resubmit keeps it); a blank/whitespace-only string clears it. Optional for `"yes"`/`"no"`/`"maybe"`; required (non-blank, after falling back to any existing stored message) for `"coming_later"` — so a blank/whitespace clear is rejected with `EventRsvpMessageRequired` on that response. Exception: if the member's prior response was `"coming_later"` and the new `response` is not, the stored note is always cleared (even on `null`) — a mandatory "when will you arrive" note must not survive onto another response |
+| `message` | `string \| null` | Yes | Message to accompany the RSVP. `null` leaves any already-stored message untouched (an idempotent resubmit keeps it); a blank/whitespace-only string clears it. Optional for `"yes"`/`"no"`; required (non-blank, after falling back to any existing stored message) for `"coming_later"` and `"maybe"` — so a blank/whitespace clear is rejected with `EventRsvpMessageRequired` on either response. Exception: if the member's prior response required a message (`"coming_later"` or `"maybe"`) and the new `response` is different, the stored note is always cleared (even on `null`) — a mandatory note must not survive onto another response. Because the new `response` may itself require a message, that clear is computed before the required-message check runs, so switching between two note-requiring responses without a new message is rejected with `EventRsvpMessageRequired` rather than silently clearing the note |
 
 **Response:** `204 No Content`
 
@@ -2234,7 +2234,7 @@ Submits or updates the authenticated user's RSVP for an event.
 | `EventRsvpForbidden` | 403 | Not eligible to RSVP (not a group member or not a team member) |
 | `EventRsvpEventNotFound` | 404 | Event does not exist |
 | `RsvpDeadlinePassed` | 400 | The RSVP deadline has passed |
-| `EventRsvpMessageRequired` | 400 | `response` is `"coming_later"` and no non-blank message is present (submitted or previously stored) |
+| `EventRsvpMessageRequired` | 400 | `response` is `"coming_later"` or `"maybe"` and no non-blank message is present (submitted or previously stored) |
 
 ---
 
@@ -7411,7 +7411,7 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/MarkEventFailed` | `id`, `error` | Marks an outbox event as failed |
 | `Event/SaveDiscordMessageId` | `event_id`, `discord_channel_id`, `discord_message_id` | Stores the Discord message ID for an event embed |
 | `Event/GetDiscordMessageId` | `event_id` → `EventDiscordMessage \| null` | Retrieves the stored Discord message for an event |
-| `Event/SubmitRsvp` | `event_id`, `team_id`, `discord_user_id`, `response`, `message` → `SubmitRsvpResult` | Submits an RSVP from the bot; `response` accepts `"coming_later"` (requires a non-blank `message`, or `RsvpMessageRequired` is returned); result includes late-RSVP flag and optional notification channel |
+| `Event/SubmitRsvp` | `event_id`, `team_id`, `discord_user_id`, `response`, `message` → `SubmitRsvpResult` | Submits an RSVP from the bot; `"coming_later"` and `"maybe"` both require a non-blank `message`, or `RsvpMessageRequired` is returned; result includes late-RSVP flag and optional notification channel |
 | `Event/GetRsvpMessage` | `event_id`, `team_id`, `discord_user_id` → `string \| null` | Lean read for the "Add/Edit message" modal prefill: returns the member's stored RSVP note, or `null` if none. Called synchronously before opening the modal (a `MODAL` response cannot be deferred), so the bot falls back to an empty modal on `RpcClientError` |
 | `Event/GetRsvpCounts` | `event_id` → `RsvpCountsResult` | Returns yes/no/maybe counts for an event; `maybeCount` counts only `"maybe"` responses (`coming_later` is not included and has no count field on this result) |
 | `Event/GetEventEmbedInfo` | `event_id` → `EventEmbedInfo \| null` | Retrieves info needed to render the Discord embed |
@@ -7679,7 +7679,7 @@ The following table consolidates all error tags across all API groups.
 | `EventCancelled` | 400 | Event | Attempted to update an already-cancelled event |
 | `EventSeriesCancelled` | 400 | Event Series | Attempted to update an already-cancelled series |
 | `RsvpDeadlinePassed` | 400 | Event RSVP | RSVP deadline has passed for this event |
-| `EventRsvpMessageRequired` | 400 | Event RSVP | Submitted `"coming_later"` without a non-blank message |
+| `EventRsvpMessageRequired` | 400 | Event RSVP | Submitted `"coming_later"` or `"maybe"` without a non-blank message |
 | `AgeThresholdSelfRequired` | 400 | Age Threshold | `requiredGroupId` equals the rule's target `groupId` |
 | `RoleNameAlreadyTaken` | 409 | Role | A role with this name already exists |
 | `GroupNameAlreadyTaken` | 409 | Group | A group with this name already exists |

@@ -1199,7 +1199,7 @@ describe('Event RSVP API', () => {
       expect(response.status).toBe(204);
     });
 
-    it('player can submit RSVP maybe (legacy response, tolerated with no message — stale Discord buttons)', async () => {
+    it('rejects a first-time RSVP maybe with message: null → 400 EventRsvpMessageRequired (maybe now requires a note too)', async () => {
       const response = await handler(
         new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
           method: 'PUT',
@@ -1210,7 +1210,39 @@ describe('Event RSVP API', () => {
           body: JSON.stringify({ response: 'maybe', message: null }),
         }),
       );
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body._tag).toBe('EventRsvpMessageRequired');
+    });
+
+    it('accepts RSVP maybe when a real message is provided → 204', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'maybe', message: 'Depends on work' }),
+        }),
+      );
       expect(response.status).toBe(204);
+    });
+
+    it('rejects RSVP maybe with a whitespace-only message → 400 EventRsvpMessageRequired', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'maybe', message: '   ' }),
+        }),
+      );
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body._tag).toBe('EventRsvpMessageRequired');
     });
 
     // ------------------------------------------------------------
@@ -1548,7 +1580,7 @@ describe('Event RSVP API', () => {
     });
 
     it('keeps maybe and coming_later in separate buckets (no accumulation)', async () => {
-      // User submits maybe ("Nevím")
+      // User submits maybe ("Nevím") — maybe requires a note too, so a real one is provided.
       const maybeResponse = await handler(
         new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
           method: 'PUT',
@@ -1556,7 +1588,7 @@ describe('Event RSVP API', () => {
             Authorization: 'Bearer user-token',
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ response: 'maybe', message: null }),
+          body: JSON.stringify({ response: 'maybe', message: 'Depends on work' }),
         }),
       );
       expect(maybeResponse.status).toBe(204);
@@ -2597,11 +2629,13 @@ describe('Event/SubmitRsvp RPC — resetMissedRsvps', () => {
 });
 
 // ============================================================
-// coming_later — full-attendance response that REQUIRES a
-// non-empty comment (server-side effective-value guard, RPC path)
+// coming_later and maybe — both REQUIRE a non-empty comment
+// (server-side effective-value guard, RPC path). See
+// `EventRsvp.rsvpResponseRequiresMessage` for the single source of truth on
+// which responses mandate a note.
 // ============================================================
 
-describe('Event/SubmitRsvp RPC — coming_later requires a message', () => {
+describe('Event/SubmitRsvp RPC — coming_later and maybe require a message', () => {
   beforeEach(() => {
     resetRpcStores();
   });
@@ -2682,13 +2716,16 @@ describe('Event/SubmitRsvp RPC — coming_later requires a message', () => {
   );
 
   itEffect.effect(
-    'legacy maybe (stale Discord button) with message: none → Success (guard does not apply to maybe)',
+    'first-time maybe with message: none → Failure(RsvpMessageRequired) (maybe now requires a note too)',
     () =>
       makeSubmitRsvp({ response: 'maybe', message: Option.none() }).pipe(
         Effect.result,
         Effect.tap((result) =>
           Effect.sync(() => {
-            expect(result._tag).toBe('Success');
+            expect(result._tag).toBe('Failure');
+            if (result._tag === 'Failure') {
+              expect(JSON.stringify(result.failure)).toContain('RsvpMessageRequired');
+            }
           }),
         ),
         Effect.provide(RpcTestLayer),
@@ -2710,9 +2747,71 @@ describe('Event/SubmitRsvp RPC — coming_later requires a message', () => {
   );
 
   itEffect.effect(
-    'maybe (first-class "Nevím") with message: none, clearMessage: true → Success (instant-submit, no message required)',
+    'maybe with message: none, clearMessage: true → Failure(RsvpMessageRequired) (clearing a mandatory note is illegal)',
     () =>
       makeSubmitRsvp({ response: 'maybe', message: Option.none(), clearMessage: true }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Failure');
+            if (result._tag === 'Failure') {
+              expect(JSON.stringify(result.failure)).toContain('RsvpMessageRequired');
+            }
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  itEffect.effect('maybe with a whitespace-only message → Failure(RsvpMessageRequired)', () =>
+    makeSubmitRsvp({ response: 'maybe', message: Option.some('   ') }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(JSON.stringify(result.failure)).toContain('RsvpMessageRequired');
+          }
+        }),
+      ),
+      Effect.provide(RpcTestLayer),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('maybe with a real note → Success and the note is stored', () =>
+    makeSubmitRsvp({ response: 'maybe', message: Option.some('Depends on work') }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          const key = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
+          const stored = rpcRsvpsStore.get(key);
+          expect(stored?.response).toBe('maybe');
+          expect(Option.getOrNull(stored?.message ?? Option.none())).toBe('Depends on work');
+        }),
+      ),
+      Effect.provide(RpcTestLayer),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect(
+    'idempotent maybe re-click: message: none but a prior non-null message exists → Success (COALESCE-effective value keeps the prior note)',
+    () => {
+      const priorKey = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
+      rpcRsvpsStore.set(priorKey, {
+        id: crypto.randomUUID() as EventRsvp.EventRsvpId,
+        event_id: RPC_TEST_EVENT_ID,
+        team_member_id: RPC_TEST_MEMBER_ID,
+        response: 'maybe',
+        message: Option.some('Depends on work'),
+        member_name: Option.none(),
+        username: Option.none(),
+        nickname: Option.none(),
+        display_name: Option.none(),
+      });
+
+      return makeSubmitRsvp({ response: 'maybe', message: Option.none() }).pipe(
         Effect.result,
         Effect.tap((result) =>
           Effect.sync(() => {
@@ -2721,32 +2820,72 @@ describe('Event/SubmitRsvp RPC — coming_later requires a message', () => {
         ),
         Effect.provide(RpcTestLayer),
         Effect.asVoid,
-      ),
+      );
+    },
+  );
+
+  itEffect.effect(
+    'the symmetric case: prior maybe WITH a note, new response coming_later, message: none → Failure(RsvpMessageRequired)',
+    () => {
+      const priorKey = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
+      rpcRsvpsStore.set(priorKey, {
+        id: crypto.randomUUID() as EventRsvp.EventRsvpId,
+        event_id: RPC_TEST_EVENT_ID,
+        team_member_id: RPC_TEST_MEMBER_ID,
+        response: 'maybe',
+        message: Option.some('Depends on work'),
+        member_name: Option.none(),
+        username: Option.none(),
+        nickname: Option.none(),
+        display_name: Option.none(),
+      });
+
+      return makeSubmitRsvp({ response: 'coming_later', message: Option.none() }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Failure');
+            if (result._tag === 'Failure') {
+              expect(JSON.stringify(result.failure)).toContain('RsvpMessageRequired');
+            }
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
   );
 });
 
 // ============================================================
 // Note-retention guard (docs/plans/rsvp-maybe-restore.md, "Note-retention
-// fix") — `coming_later` mandates a note and the upsert COALESCEs the
-// message, so switching FROM `coming_later` TO any other response with no
-// new message would otherwise keep the old "running late" note attached
-// forever. The guard must clear the note on that specific transition, while
-// an idempotent `coming_later -> coming_later` re-click must NOT regress and
+// fix") — `coming_later` and `maybe` both mandate a note and the upsert
+// COALESCEs the message, so switching between the two note-requiring
+// responses with no new message would otherwise keep the OLD response's note
+// attached to the NEW response — nonsense like "Nevím 💬 dorazím v 19:00".
+//
+// `effectiveClear` is computed BEFORE the required-note guard and fed into
+// it (see `isLeavingRequiredNoteResponse` / `isRsvpMessageRequiredAndMissing`
+// in rsvpMessageRequired.ts), so switching from one note-requiring response
+// to ANOTHER note-requiring one without a new note is now REJECTED with
+// `RsvpMessageRequired`, not silently blanked — the note can only ever be
+// silently cleared when the target does NOT itself require a note (yes/no).
+// An idempotent `coming_later -> coming_later` re-click must NOT regress and
 // wipe an already-saved note.
 // ============================================================
 
-describe('Event/SubmitRsvp RPC — note-retention guard on leaving coming_later', () => {
+describe('Event/SubmitRsvp RPC — note-retention guard on leaving coming_later/maybe', () => {
   beforeEach(() => {
     resetRpcStores();
   });
 
-  const seedPriorComingLaterWithNote = (note: string) => {
+  const seedPriorRsvpWithNote = (response: EventRsvp.RsvpResponse, note: string) => {
     const priorKey = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
     rpcRsvpsStore.set(priorKey, {
       id: crypto.randomUUID() as EventRsvp.EventRsvpId,
       event_id: RPC_TEST_EVENT_ID,
       team_member_id: RPC_TEST_MEMBER_ID,
-      response: 'coming_later',
+      response,
       message: Option.some(note),
       member_name: Option.none(),
       username: Option.none(),
@@ -2754,18 +2893,46 @@ describe('Event/SubmitRsvp RPC — note-retention guard on leaving coming_later'
       display_name: Option.none(),
     });
   };
+  const seedPriorComingLaterWithNote = (note: string) =>
+    seedPriorRsvpWithNote('coming_later', note);
 
   itEffect.effect(
-    'prior coming_later WITH a note, new response maybe, message: none → the stored message is CLEARED',
+    'prior coming_later WITH a note, new response maybe, message: none → Failure(RsvpMessageRequired) (maybe requires a note of its own now, so this no longer silently clears)',
     () => {
       seedPriorComingLaterWithNote('dorazím v 19:00');
 
       return makeSubmitRsvp({ response: 'maybe', message: Option.none() }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Failure');
+            if (result._tag === 'Failure') {
+              expect(JSON.stringify(result.failure)).toContain('RsvpMessageRequired');
+            }
+            // The prior row is untouched — a rejected submission must not mutate state.
+            const key = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
+            const stored = rpcRsvpsStore.get(key);
+            expect(stored?.response).toBe('coming_later');
+            expect(Option.getOrNull(stored?.message ?? Option.none())).toBe('dorazím v 19:00');
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'prior coming_later WITH a note, new response yes (a response that does NOT require a note), message: none → Success and the stored message is CLEARED',
+    () => {
+      seedPriorComingLaterWithNote('dorazím v 19:00');
+
+      return makeSubmitRsvp({ response: 'yes', message: Option.none() }).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             const key = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
             const stored = rpcRsvpsStore.get(key);
-            expect(stored?.response).toBe('maybe');
+            expect(stored?.response).toBe('yes');
             expect(Option.isNone(stored?.message ?? Option.none())).toBe(true);
           }),
         ),

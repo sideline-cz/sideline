@@ -84,9 +84,9 @@ const buildMessageActionRow = (
             label: m.bot_rsvp_edit_message({}, { locale }),
             custom_id: `rsvp-add-msg:${teamId}:${eventId}:${response}`,
           }),
-          // coming_later requires a message, so clearing it is illegal — never
-          // render the "clear message" button for that response.
-          ...(response === 'coming_later'
+          // coming_later and maybe both require a message, so clearing it is
+          // illegal — never render the "clear message" button for those.
+          ...(EventRsvp.rsvpResponseRequiresMessage(response)
             ? []
             : [
                 UI.button({
@@ -370,7 +370,7 @@ export const rsvpAddMessageButtonEffect = (modalPrefix: string, spanName: string
       const eventId = parts[2];
       const response = decodeRsvpResponse(parts[3]);
       const locale = userLocale(interaction);
-      const required = response === 'coming_later';
+      const required = EventRsvp.rsvpResponseRequiresMessage(response);
       const discordUserIdOption = interactionUserId(interaction);
 
       const currentMessage = Option.isNone(discordUserIdOption)

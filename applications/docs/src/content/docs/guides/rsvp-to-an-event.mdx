@@ -5,13 +5,13 @@ description: How to respond to your team's events and what Yes / Coming later / 
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-Every event you're invited to gets an RSVP prompt — in Discord, on the web, or both. Responding is a single click (or two, for "Coming later" — see below).
+Every event you're invited to gets an RSVP prompt — in Discord, on the web, or both. Responding is a single click for **Yes** or **No**, and two steps — click, then add a required note — for **Coming later** or **Not sure**.
 
 ## What the responses mean
 
 - **Yes** — I'll be there, on time. Counts as present for attendance stats.
 - **Coming later** — I'll be there, but arriving late. Counts as present for attendance stats, roster headcounts, and team generation, exactly like **Yes** — the only difference is you're letting your team know to expect you after the start time. Choosing this response requires a short note explaining when you expect to arrive (e.g. "~7pm after work") — you can't submit it blank.
-- **Not sure** — you don't know yet whether you'll make it. Unlike **Coming later**, this does **not** count as attending: you're not included in confirmed headcounts, you don't get a roster slot (or its Discord role) on events linked to a roster, you're not put into generated teams, and training attendance isn't auto-logged for you. No note is needed — it saves the moment you click it.
+- **Not sure** — you don't know yet whether you'll make it. Unlike **Coming later**, this does **not** count as attending: you're not included in confirmed headcounts, you don't get a roster slot (or its Discord role) on events linked to a roster, you're not put into generated teams, and training attendance isn't auto-logged for you. It still requires a short note — say what your answer depends on (e.g. "depends on work") — you can't submit it blank either.
 - **No** — I won't be there. Counts as an explicit decline, not a no-show.
 
 The key difference between **No** and silence: **No** tells your captain you got the message. Silence doesn't. That's why reminders keep nudging people who haven't answered.
@@ -20,8 +20,8 @@ The key difference between **No** and silence: **No** tells your captain you got
   If you have a **Player** role and miss a configurable number of events in a row without responding, the bot stops sending you RSVP reminder DMs. Respond to any event — yes, coming later, not sure, or no — to reset your streak and start receiving reminders again. Your captain can adjust the threshold in **Team settings → RSVP reminders → Stop reminding after N missed RSVPs**.
 </Aside>
 
-<Aside type="caution" title="Switching away from Coming later clears your arrival note">
-  Your **Coming later** note only makes sense for that response — it answers "when will you arrive?" So switching to **Yes**, **Not sure**, or **No** clears it. If the event is linked to a roster with approval required, switching from **Coming later** straight to **Not sure** also withdraws you from the roster; answering **Coming later** again puts you back in the pending queue rather than straight back onto the roster.
+<Aside type="caution" title="Switching away from Coming later or Not sure clears your note">
+  Your **Coming later** or **Not sure** note only makes sense for the response it was written for — one answers "when will you arrive?", the other "what does it depend on?" So switching to a different response clears it. Switching straight between **Coming later** and **Not sure** without typing a new note is rejected — you'll need to add one first. If the event is linked to a roster with approval required, switching from **Coming later** straight to **Not sure** also withdraws you from the roster; answering **Coming later** again puts you back in the pending queue rather than straight back onto the roster.
 </Aside>
 
 ## Responding in Discord
@@ -30,7 +30,7 @@ The key difference between **No** and silence: **No** tells your captain you got
 
 1. Find the event post in your private personal events channel (or via `/event list`). It shows the date, time, location, and current counts.
 2. Click **Yes**, **Coming later**, **Not sure**, or **No**. The buttons are under the event details.
-3. **Yes**, **Not sure**, and **No** save immediately — the bot confirms your response right away, and the post itself refreshes with your name in the right bucket within a few seconds. **Coming later** instead opens a pop-up asking for your reason/ETA; fill it in and submit to record your response.
+3. **Yes** and **No** save immediately — the bot confirms your response right away, and the post itself refreshes with your name in the right bucket within a few seconds. **Coming later** and **Not sure** instead open a pop-up asking for a required note (your ETA for one, what it depends on for the other); fill it in and submit to record your response.
 
 </Steps>
 
@@ -40,7 +40,7 @@ The key difference between **No** and silence: **No** tells your captain you got
 
 1. Open the Sideline web app and go to your team's Events tab.
 2. Click an event to see details.
-3. Click the RSVP button you want. **Yes**, **Not sure**, and **No** update the count live. Clicking **Coming later** reveals a required note field below the buttons — type your reason/ETA and click **Save note**; the button stays disabled until the note is filled in.
+3. Click the RSVP button you want. **Yes** and **No** update the count live. Clicking **Coming later** or **Not sure** reveals a required note field below the buttons — type your note and click **Save note**; the button stays disabled until the note is filled in.
 
 </Steps>
 
@@ -58,7 +58,7 @@ Use the **Coming later** response instead of **Yes** — add a short note with y
 
 ## What if I don't know yet?
 
-Use **Not sure** rather than leaving the event unanswered — it resets your reminder streak the same as any other response, and your captain can see at a glance that you've seen the invite, just haven't decided. Keep in mind it doesn't count toward the confirmed headcount, so switch to **Yes** or **Coming later** as soon as you know you're in.
+Use **Not sure** rather than leaving the event unanswered — it resets your reminder streak the same as any other response, and your captain can see at a glance that you've seen the invite, just haven't decided (add a short note saying what it depends on). Keep in mind it doesn't count toward the confirmed headcount, so switch to **Yes** or **Coming later** as soon as you know you're in.
 
 ## See also
 

@@ -1,4 +1,5 @@
-import type { EventApi, EventRsvp, EventRsvpApi } from '@sideline/domain';
+import type { EventApi, EventRsvpApi } from '@sideline/domain';
+import { EventRsvp } from '@sideline/domain';
 import { type Effect, Option } from 'effect';
 import { Check, CircleHelp, Clock, Loader2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -63,8 +64,9 @@ export function EventRsvpPanel({
   const [submittingResponse, setSubmittingResponse] = useState<RsvpResponse | null>(null);
   const [draftMessage, setDraftMessage] = useState(savedMessage);
   const [savingMessage, setSavingMessage] = useState(false);
-  // Set while the user has clicked "Coming later" but not yet saved a required note.
-  const [pendingResponse, setPendingResponse] = useState<'coming_later' | null>(null);
+  // Set while the user has clicked a note-requiring response ("Coming later" / "Nevím") but has
+  // not yet saved its required note.
+  const [pendingResponse, setPendingResponse] = useState<RsvpResponse | null>(null);
   const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -72,7 +74,7 @@ export function EventRsvpPanel({
   }, [savedMessage]);
 
   useEffect(() => {
-    if (pendingResponse === 'coming_later') {
+    if (pendingResponse !== null) {
       messageInputRef.current?.focus();
     }
   }, [pendingResponse]);
@@ -81,20 +83,22 @@ export function EventRsvpPanel({
 
   const isBusy = submittingResponse !== null || savingMessage;
 
-  // The response that a note-save would currently target: the pending "coming later" choice
+  // The response that a note-save would currently target: a pending note-requiring choice
   // takes priority over the already-saved response.
   const targetResponse = pendingResponse ?? currentResponse;
   const displayedResponse = submittingResponse ?? targetResponse;
-  const messageRequired = targetResponse === 'coming_later';
+  const messageRequired =
+    targetResponse !== null && EventRsvp.rsvpResponseRequiresMessage(targetResponse);
   const messageMissing = messageRequired && draftMessage.trim().length === 0;
 
   const handleResponseClick = async (response: RsvpResponse) => {
     if (isBusy) return;
-    if (response === 'coming_later') {
-      // Mandatory comment: "Coming later" never instant-submits — it only reveals + focuses the
-      // note field (focus happens in a `useEffect` on `pendingResponse`, after the textarea has
-      // been committed to the DOM) and requires a non-empty note before Save will submit it.
-      setPendingResponse('coming_later');
+    if (EventRsvp.rsvpResponseRequiresMessage(response)) {
+      // Mandatory comment: "Coming later" and "Nevím" never instant-submit — they only reveal +
+      // focus the note field (focus happens in a `useEffect` on `pendingResponse`, after the
+      // textarea has been committed to the DOM) and require a non-empty note before Save will
+      // submit them.
+      setPendingResponse(response);
       return;
     }
     if (response === currentResponse) {
@@ -103,13 +107,17 @@ export function EventRsvpPanel({
     }
     setPendingResponse(null);
     setSubmittingResponse(response);
-    // Leaving "coming_later" clears its mandatory note (the server's clear signal is an empty
-    // string) instead of re-sending it — that note answers "when will you arrive", so carrying it
-    // onto any other response renders nonsense like "Nevím 💬 dorazím v 19:00". Mirrors the
-    // server-side `effectiveClear` guard in `Event/SubmitRsvp`, which fires on the same condition
-    // when a client sends no message at all (the bot's path). Without this the web would never
-    // trigger that guard: a `coming_later` note is never empty, so `savedMessage` is always `Some`.
-    const messageToSend = currentResponse === 'coming_later' ? '' : savedMessage;
+    // Leaving a note-requiring response clears its mandatory note (the server's clear signal is
+    // an empty string) instead of re-sending it — that note answers a question specific to the
+    // response it was written for, so carrying it over renders nonsense. Mirrors the server-side
+    // `effectiveClear` guard in `Event/SubmitRsvp`, which fires on the same condition when a
+    // client sends no message at all (the bot's path). Without this the web would never trigger
+    // that guard: a mandatory note is never empty, so `savedMessage` is always `Some`.
+    // Only reachable for yes/no now — the note-requiring responses return above.
+    const messageToSend =
+      currentResponse !== null && EventRsvp.rsvpResponseRequiresMessage(currentResponse)
+        ? ''
+        : savedMessage;
     await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(response, messageToSend));
     setSubmittingResponse(null);
   };
@@ -117,9 +125,10 @@ export function EventRsvpPanel({
   const handleSaveNote = async () => {
     if (!targetResponse) return;
     if (isBusy) return;
-    // Mandatory comment: block saving when the pending/current response is "coming later" and the
-    // note is blank — the note is what carries the "coming later" reason and is required.
-    if (targetResponse === 'coming_later' && draftMessage.trim().length === 0) return;
+    // Mandatory comment: block saving when the pending/current response requires a note and the
+    // note is blank — that note is what carries the reason and is required.
+    if (EventRsvp.rsvpResponseRequiresMessage(targetResponse) && draftMessage.trim().length === 0)
+      return;
     setSavingMessage(true);
     await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(targetResponse, draftMessage));
     setSavingMessage(false);

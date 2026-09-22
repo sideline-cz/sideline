@@ -21,7 +21,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
 import {
-  isLeavingComingLaterWithoutNewMessage,
+  isLeavingRequiredNoteResponse,
   isRsvpMessageRequiredAndMissing,
 } from '~/utils/rsvpMessageRequired.js';
 
@@ -212,31 +212,33 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             Effect.bind('priorRsvp', ({ membership }) =>
               rsvps.findRsvpByEventAndMember(eventId, membership.id),
             ),
-            Effect.tap(({ priorRsvp }) =>
+            // Leaving a note-requiring response (`coming_later` / `maybe`) for a different one
+            // must not carry its mandatory note onto the new response. Derived here rather than
+            // alongside `clearMessage` above because it needs `priorRsvp`, which is only bound
+            // once membership is known. Mirrors the RPC `Event/SubmitRsvp` handler so both write
+            // surfaces agree on the same transition — the web client sends a blank string, but
+            // any other caller sending `message: null` would otherwise keep a stale
+            // "dorazím v 19:00" attached to its "Nevím".
+            Effect.let(
+              'effectiveClear',
+              ({ priorRsvp }) =>
+                clearMessage ||
+                isLeavingRequiredNoteResponse(
+                  payload.response,
+                  note,
+                  Option.map(priorRsvp, (r) => r.response),
+                ),
+            ),
+            // Consumes `effectiveClear`, not the raw flag — see `rsvpMessageRequired.ts`.
+            Effect.tap(({ priorRsvp, effectiveClear }) =>
               isRsvpMessageRequiredAndMissing(
                 payload.response,
-                clearMessage,
+                effectiveClear,
                 note,
                 Option.flatMap(priorRsvp, (r) => r.message),
               )
                 ? Effect.fail(messageRequired)
                 : Effect.void,
-            ),
-            // Leaving `coming_later` (whose note is mandatory) must not carry that note onto the
-            // new response. Derived here rather than alongside `clearMessage` above because it
-            // needs `priorRsvp`, which is only bound once membership is known. Mirrors the RPC
-            // `Event/SubmitRsvp` handler so both write surfaces agree on the same transition —
-            // the web client sends a blank string, but any other caller sending `message: null`
-            // would otherwise keep a stale "dorazím v 19:00" attached to its "Nevím".
-            Effect.let(
-              'effectiveClear',
-              ({ priorRsvp }) =>
-                clearMessage ||
-                isLeavingComingLaterWithoutNewMessage(
-                  payload.response,
-                  note,
-                  Option.map(priorRsvp, (r) => r.response),
-                ),
             ),
             Effect.bind('upsertResult', ({ membership, effectiveClear }) =>
               rsvps.upsertRsvp(eventId, membership.id, payload.response, note, effectiveClear).pipe(
