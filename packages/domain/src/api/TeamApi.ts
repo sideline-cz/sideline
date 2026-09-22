@@ -65,13 +65,18 @@ export class MemberEventPreferences extends Schema.Class<MemberEventPreferences>
   personalChannelsAvailable: Schema.Boolean,
 }) {}
 
-export class UpdateMemberEventPreferences extends Schema.Class<UpdateMemberEventPreferences>(
-  'UpdateMemberEventPreferences',
-)({
+// A `Schema.Struct`, NOT a `Schema.Class`, like every other request payload in this API
+// (81 of them). The HTTP client encodes the payload before it issues the request, and a
+// Class schema does not accept the plain object every call site passes — encoding fails,
+// the effect errors out, and NO network request is ever sent. The symptom is a generic
+// save-failed toast with nothing in the Network tab, which looks like a server problem
+// and is not one. Response schemas may stay classes; only payloads are affected.
+export const UpdateMemberEventPreferences = Schema.Struct({
   showAttendeeList: Schema.Boolean,
   rsvpReminderDms: Schema.Boolean,
   personalChannelsSplit: Schema.Boolean,
-}) {}
+});
+export type UpdateMemberEventPreferences = Schema.Schema.Type<typeof UpdateMemberEventPreferences>;
 
 export class TeamApiGroup extends HttpApiGroup.make('team')
   .add(
