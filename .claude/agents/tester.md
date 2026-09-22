@@ -37,15 +37,18 @@ Report what was written and confirm tests are ready for the developer.
 pnpm test
 ```
 
-If domain package was changed, rebuild first:
+If `packages/domain/` **or** `packages/migrations/` was changed, rebuild first:
 ```bash
 pnpm build && pnpm test
 ```
+
+**Always `pnpm build` before running integration tests after ANY edit to `packages/migrations/src/`.** Integration tests load the compiled `packages/migrations/dist/dist/esm/`, never `src/` — without a rebuild you are asserting against the previous compile. See the "Integration Tests" section of the root `AGENTS.md`.
 
 ### 2. Analyze results
 
 - If all tests pass, check if the changed code has test coverage
 - If tests fail, determine if failures are caused by the new changes or are pre-existing
+- **If a statement you can read in the source never appears in the database's own `log_statement=all` output, the stale build artifact is the first suspect, not the framework.** Run `pnpm build` and re-run before investigating module resolution, Effect, or the migrator.
 
 ### 3. Write missing tests
 
