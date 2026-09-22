@@ -1,12 +1,24 @@
 import { Team } from '@sideline/domain';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router';
 import { Array, Effect, Option, pipe, Schema } from 'effect';
 import { TeamSettingsPage } from '~/components/pages/TeamSettingsPage';
 import { ApiClient, NotFound, warnAndCatchAll } from '~/lib/runtime';
 
+type SettingsTab = 'general' | 'discord' | 'onboarding' | 'email' | 'finance' | 'automation';
+
+const isSettingsTab = (value: unknown): value is SettingsTab =>
+  value === 'general' ||
+  value === 'discord' ||
+  value === 'onboarding' ||
+  value === 'email' ||
+  value === 'finance' ||
+  value === 'automation';
+
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/settings')({
   component: TeamSettingsRoute,
   ssr: false,
+  validateSearch: (search: Record<string, unknown>): { tab?: SettingsTab } =>
+    isSettingsTab(search.tab) ? { tab: search.tab } : {},
   loader: async ({ params, context }) => {
     const teamId = await pipe(
       params.teamId,
@@ -62,6 +74,27 @@ function TeamSettingsRoute() {
     bankSyncConfig,
     canManageBankSync,
   } = Route.useLoaderData();
+  const { tab: searchTab } = useSearch({ from: Route.id });
+  const navigate = useNavigate({ from: Route.fullPath });
+
+  // `?tab=finance` for a caller without bank-sync access, or `?tab=automation`
+  // for a team without a manageable generation config, both fall back to
+  // `general` — this depends on loader-fetched permissions, so it can't live
+  // in `validateSearch`.
+  const defaultTab: SettingsTab = 'general';
+  const activeTab: SettingsTab =
+    (searchTab === 'finance' && !canManageBankSync) ||
+    (searchTab === 'automation' && !generationConfig?.canManage)
+      ? defaultTab
+      : (searchTab ?? defaultTab);
+
+  const handleTabChange = (tab: SettingsTab) => {
+    // `replace: true` matters: Radix's TabsList defaults to
+    // `activationMode='automatic'`, so arrow-key navigation across the tab
+    // strip changes tabs immediately — without `replace` that pushes one
+    // history entry per arrow press and the back button stops working.
+    navigate({ search: { tab }, replace: true });
+  };
 
   return (
     <TeamSettingsPage
@@ -75,6 +108,8 @@ function TeamSettingsRoute() {
       initialGenerationConfig={generationConfig}
       bankSyncConfig={bankSyncConfig}
       canManageBankSync={canManageBankSync}
+      activeTab={activeTab}
+      onTabChange={handleTabChange}
     />
   );
 }

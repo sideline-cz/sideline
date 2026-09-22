@@ -43,7 +43,7 @@ Channels whose Discord parent category matches the team's configured **archive c
 </Aside>
 
 <Aside type="note" title="Channel name format">
-  The team's channel name format is shown at the top of the **Team → Channels** page (the `channelFormat` field from the API). A format like `{emoji}│{name}` will produce a Discord channel named `🏐│main-announcements` for a channel with emoji `🏐` and name `main-announcements`. Change the format in **Team settings → Discord integration → Channel format**.
+  The team's channel name format is shown at the top of the **Team → Channels** page (the `channelFormat` field from the API). A format like `{emoji}│{name}` will produce a Discord channel named `🏐│main-announcements` for a channel with emoji `🏐` and name `main-announcements`. Change the format in **Team settings → Discord → Channel format**.
 </Aside>
 
 ## Setting access for a channel
@@ -118,7 +118,7 @@ You can archive any channel shown in the list — whether Sideline created it or
 
 </Steps>
 
-The bot moves the Discord channel to the **archive category** configured in **Team settings → Discord integration → Archive category**. The channel is not deleted — it simply moves into that category in your Discord server.
+The bot moves the Discord channel to the **archive category** configured in **Team settings → Discord → Archive category**. The channel is not deleted — it simply moves into that category in your Discord server.
 
 <Aside type="caution" title="Archive category required for Discord-native channels">
   Archiving a channel that Sideline did not create requires an archive category to be configured. If no archive category is set, the action is blocked with an error. For Sideline-created (managed) channels, archiving also works without an archive category by falling back to deletion of the Discord channel.
@@ -140,7 +140,7 @@ You can select multiple channels and archive them all in one action.
 
 </Steps>
 
-The archive category must be configured in **Team settings → Discord integration** before bulk-archiving. Each channel is processed independently — channels that are already archived, are categories, or cannot be found are listed as skipped in the result summary, and any unexpected error for a single channel is reported without blocking the rest.
+The archive category must be configured in **Team settings → Discord** before bulk-archiving. Each channel is processed independently — channels that are already archived, are categories, or cannot be found are listed as skipped in the result summary, and any unexpected error for a single channel is reported without blocking the rest.
 
 ## Restoring an archived channel
 
@@ -185,4 +185,4 @@ The **Team → Channels** page shows two types of channels:
 - **Managed** (`managed = true`) — channels Sideline created. Sideline owns their full lifecycle: name, access, and archive state can all be controlled from the web app.
 - **Discord-native** (`managed = false`) — channels that already exist in your Discord server and are shown for visibility. You can archive them (move to the archive category), but you cannot rename them or set access grants from Sideline.
 
-The Discord channels that Sideline auto-creates when a group is provisioned (controlled by **Team settings → Create Discord channel on group**) are separate from managed channels and do not appear in this list — they are tracked under each group's settings.
+The Discord channels that Sideline auto-creates when a group is provisioned (controlled by **Team settings → Discord → Create Discord channel on group**) are separate from managed channels and do not appear in this list — they are tracked under each group's settings.

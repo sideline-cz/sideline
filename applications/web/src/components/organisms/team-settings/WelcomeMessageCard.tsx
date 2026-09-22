@@ -9,7 +9,7 @@ import { Label } from '~/components/ui/label';
 import { Textarea } from '~/components/ui/textarea';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
-import { SaveRow } from './SaveRow';
+import { useSaveBarEntry } from './SaveBar';
 import { NONE_VALUE, textChannelOptions } from './shared';
 import { welcomeFormFrom, welcomeRequestFrom } from './teamInfoForm';
 import { useCardForm } from './useCardForm';
@@ -68,8 +68,20 @@ export function WelcomeMessageCard({
     setSaving(false);
     if (Option.isSome(result)) {
       onRefresh();
+      return true;
     }
+    return false;
   }, [teamInfo.teamId, values, run, onRefresh]);
+
+  useSaveBarEntry({
+    id: 'welcome',
+    label: tr('teamSettings_welcomeTitle'),
+    tab: 'onboarding',
+    dirty: form.isDirty,
+    saving,
+    onSave: handleSave,
+    onDiscard: () => form.reset(welcomeFormFrom(teamInfo)),
+  });
 
   return (
     <Card>
@@ -157,7 +169,6 @@ export function WelcomeMessageCard({
               </div>
             </div>
           )}
-          <SaveRow onSave={handleSave} saving={saving} dirty={form.isDirty} />
         </div>
       </CardContent>
     </Card>

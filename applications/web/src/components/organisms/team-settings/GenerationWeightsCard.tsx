@@ -15,6 +15,7 @@ import {
   hasGenerationWeightsErrors,
   validateGenerationWeights,
 } from './generationWeightsForm';
+import { useSaveBarEntry } from './SaveBar';
 import { useCardForm } from './useCardForm';
 
 // Defaults imported from domain so "Reset to defaults" always matches server defaults
@@ -50,10 +51,10 @@ export function GenerationWeightsCard({
   const errors = validateGenerationWeights(form.values);
   const isValid = !hasGenerationWeightsErrors(errors);
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<boolean> => {
     // Unreachable from the UI — Save is disabled while invalid — but the
     // payload builder assumes the numbers parse, so keep the guard.
-    if (!isValid) return;
+    if (!isValid) return false;
     setSaving(true);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
@@ -71,8 +72,21 @@ export function GenerationWeightsCard({
     setSaving(false);
     if (Option.isSome(result)) {
       onRefresh();
+      return true;
     }
+    return false;
   };
+
+  useSaveBarEntry({
+    id: 'weights',
+    label: tr('teamGenSettings_title'),
+    tab: 'automation',
+    dirty: form.isDirty,
+    saving,
+    disabled: !isValid,
+    onSave: handleSave,
+    onDiscard: () => form.reset(generationWeightsFormFrom(initialConfig)),
+  });
 
   const handleResetToDefaults = React.useCallback(() => {
     setField('weightElo', DEFAULT_WEIGHT_ELO);
@@ -181,15 +195,9 @@ export function GenerationWeightsCard({
           </div>
 
           <div className='flex items-center gap-3'>
-            <Button onClick={handleSave} disabled={saving || !form.isDirty || !isValid}>
-              {saving ? tr('teamGenSettings_saving') : tr('teamGenSettings_save')}
-            </Button>
             <Button variant='ghost' size='sm' onClick={handleResetToDefaults} disabled={saving}>
               {tr('teamGenSettings_resetToDefaults')}
             </Button>
-            {form.isDirty && (
-              <p className='text-sm text-muted-foreground'>{tr('teamSettings_unsavedChanges')}</p>
-            )}
           </div>
         </div>
       </CardContent>

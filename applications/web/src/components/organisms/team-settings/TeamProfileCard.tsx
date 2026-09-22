@@ -9,7 +9,7 @@ import { Input } from '~/components/ui/input';
 import { Textarea } from '~/components/ui/textarea';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
-import { SaveRow } from './SaveRow';
+import { useSaveBarEntry } from './SaveBar';
 import { findInvalidProfileField, profileFormFrom, profileRequestFrom } from './teamInfoForm';
 import { useCardForm } from './useCardForm';
 
@@ -28,7 +28,7 @@ export function TeamProfileCard({ teamInfo, onRefresh }: TeamProfileCardProps) {
     const invalidField = findInvalidProfileField(values);
     if (invalidField !== undefined) {
       toast.error(tr('teamSettings_fieldInvalid', { field: tr(invalidField) }));
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -45,8 +45,20 @@ export function TeamProfileCard({ teamInfo, onRefresh }: TeamProfileCardProps) {
     setSaving(false);
     if (Option.isSome(result)) {
       onRefresh();
+      return true;
     }
+    return false;
   }, [teamInfo.teamId, values, run, onRefresh]);
+
+  useSaveBarEntry({
+    id: 'profile',
+    label: tr('teamSettings_teamProfile'),
+    tab: 'general',
+    dirty: form.isDirty,
+    saving,
+    onSave: handleSave,
+    onDiscard: () => form.reset(profileFormFrom(teamInfo)),
+  });
 
   return (
     <Card>
@@ -121,7 +133,6 @@ export function TeamProfileCard({ teamInfo, onRefresh }: TeamProfileCardProps) {
               placeholder='https://...'
             />
           </div>
-          <SaveRow onSave={handleSave} saving={saving} dirty={form.isDirty} />
         </div>
       </CardContent>
     </Card>

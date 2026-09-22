@@ -26,6 +26,7 @@ import {
   hasFioBankErrors,
   validateFioBankForm,
 } from './fioBankForm';
+import { useSaveBarEntry } from './SaveBar';
 import { useCardForm } from './useCardForm';
 
 interface FioBankCardProps {
@@ -107,8 +108,24 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
     requestAnimationFrame(() => tokenInputRef.current?.focus());
   };
 
-  const handleSave = async () => {
-    if (!runValidation()) return;
+  // Single source for "reset the token/date/error fields against a saved
+  // config" — called from both the post-save path and discard, so the two
+  // can never drift apart the way a hand-mirrored reset list did twice in
+  // this directory. `testResult` is deliberately NOT touched here: it
+  // describes the saved config and stays valid after a discard.
+  const resetFormFields = React.useCallback(
+    (cfg: BankSyncApi.BankSyncConfigView | null) => {
+      form.reset(fioBankFormFrom(cfg));
+      setFioToken('');
+      setReplacingToken(false);
+      setTokenCreatedAt(todayIsoDate());
+      setErrors({});
+    },
+    [form],
+  );
+
+  const handleSave = async (): Promise<boolean> => {
+    if (!runValidation()) return false;
     setSaving(true);
 
     const fioTokenOption = fioTokenPayload(tokenOptions);
@@ -135,15 +152,24 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
     if (Option.isSome(result)) {
       const cfg = result.value;
       setConfig(cfg);
-      form.reset(fioBankFormFrom(cfg));
-      setFioToken('');
-      setReplacingToken(false);
-      setTokenCreatedAt(todayIsoDate());
-      setErrors({});
+      resetFormFields(cfg);
       setTestResult(null);
       onRefresh();
+      return true;
     }
+    return false;
   };
+
+  useSaveBarEntry({
+    id: 'fio',
+    label: tr('fio_card_title'),
+    tab: 'finance',
+    dirty: hasChanges,
+    saving,
+    disabled: retrying,
+    onSave: handleSave,
+    onDiscard: () => resetFormFields(config),
+  });
 
   const handleRetryNow = React.useCallback(async () => {
     setTestResult(null); // a stale verdict must never be mistaken for the new one
@@ -262,9 +288,12 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
               `aria-live` + `aria-atomic` deliberately, NOT `role='status'` — the two announce
               identically (a `status` role IS a polite atomic live region), but the role also
               registers this div in the accessibility tree as a `status` element. The team
-              settings page already has one (`molecules/SyncRolesButton.tsx`), and a second makes
-              `page.getByRole('status')` ambiguous — which broke two E2E specs in
-              `e2e/tests/onboarding-settings.spec.ts` with a strict-mode violation.
+              settings page already has one — `OnboardingCard`'s `<output aria-live>`, which
+              carries an implicit `role='status'` — and a second makes `page.getByRole('status')`
+              ambiguous, which broke two E2E specs in `e2e/tests/onboarding-settings.spec.ts`
+              with a strict-mode violation. Since the tab panels are `forceMount`ed, that
+              `<output>` is in the DOM on every tab, not just Onboarding. The save bar
+              (`SaveBar.tsx`) is bound by the same rule and uses `role='region'`.
             */}
             <div aria-live='polite' aria-atomic='true'>
               {testResult && config && Option.isSome(config.computedIban) && (
@@ -564,15 +593,6 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
                 </div>
               </div>
             </fieldset>
-
-            <div className='flex items-center gap-3'>
-              <Button onClick={handleSave} disabled={saving || retrying || !hasChanges}>
-                {saving ? tr('profile_saving') : tr('profile_saveChanges')}
-              </Button>
-              {hasChanges && (
-                <p className='text-sm text-muted-foreground'>{tr('teamSettings_unsavedChanges')}</p>
-              )}
-            </div>
           </div>
         </CardContent>
       </Card>

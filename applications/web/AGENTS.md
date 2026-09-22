@@ -60,7 +60,7 @@ Several `components/ui/*` primitives hardcode an ARIA attribute **before** their
 <Alert variant='warning' role='presentation'>
 ```
 
-Reference: `components/organisms/bank/FioTestResultAlert.tsx`. Its `role='presentation'` is load-bearing — the alert renders **inside** the permanently-mounted `role='status' aria-live='polite'` region owned by `FioBankCard.tsx`, and leaving the default `role='alert'` nests an implicitly assertive live region inside a polite one, double-announcing a result the user explicitly asked for. When a component must be announced, put the `aria-live` region on the always-mounted parent and strip the child's role — most screen readers only announce mutations made inside a region that already existed.
+Reference: `components/organisms/bank/FioTestResultAlert.tsx`. Its `role='presentation'` is load-bearing — the alert renders **inside** the permanently-mounted `aria-live='polite' aria-atomic='true'` region owned by `FioBankCard.tsx` (deliberately a bare `<div>` with no `role='status'` — see `SaveBar` rule 3 for why a second `status` element on this page is a test hazard), and leaving the default `role='alert'` nests an implicitly assertive live region inside a polite one, double-announcing a result the user explicitly asked for. When a component must be announced, put the `aria-live` region on the always-mounted parent and strip the child's role — most screen readers only announce mutations made inside a region that already existed.
 
 ### Interactive Triggers: `Badge` Is a `<span>`, Tooltips Do Not Open On Touch
 
@@ -256,6 +256,8 @@ When a page renders a tab bar and the active tab must be deep-linkable (sharable
 
 Reference implementation: `applications/web/src/routes/(authenticated)/teams/$teamId/finances.tsx` (route) + `applications/web/src/components/pages/FinancesOverviewPage.tsx` (page). URL form: `/teams/:teamId/finances?tab=overview` | `?tab=by-member` | `?tab=by-assignment`.
 
+Two tab-strip implementations exist and both obey the rules below. For a **new** page use the Radix primitive `components/ui/tabs.tsx` (`Tabs` / `TabsList` / `TabsTrigger` / `TabsContent`, reference `components/pages/TeamSettingsPage.tsx`) — never hand-roll a third. `FinancesOverviewPage.tsx` predates that primitive and builds its strip from `Button`s with `role='tab'`; leave it alone unless you are already editing it.
+
 ### Route File Shape
 
 ```typescript
@@ -287,6 +289,8 @@ function FinancesRoute() {
 3. **The page component takes `activeTab?: ActiveTab` and `onTabChange?: (tab: ActiveTab) => void` as OPTIONAL props.** When both are provided the page is controlled (URL-driven); when omitted, it falls back to internal `React.useState`. The controlled-vs-uncontrolled branch lives in exactly one place: `const isControlled = controlledActiveTab !== undefined && onTabChange !== undefined;`. This keeps the page testable without mounting a router.
 4. **Define the tab literal union ONCE in the page component file** (`type ActiveTab = ...`) and re-declare an identical alias in the route file. Do not import the type across the page/route boundary — the route owns URL serialization, the page owns rendering; both keep their copy of the literal union so a rename touches both files and is visible in PR diffs.
 5. **The default tab is computed in the route, not in `validateSearch`.** `validateSearch` only narrows the parsed value; defaulting (`activeTab = searchTab ?? defaultTab`) happens in the component where `defaultTab` may depend on loader data (e.g. "show Overview tab only if `balanceSummaries` was fetched").
+6. **When a panel holds unsaved form state, mount every panel with `forceMount` and hide inactive ones with an explicit `data-[state=inactive]:hidden` class — never let Radix unmount them.** `TabsContent`'s default behaviour (unmount when inactive) destroys any local `useState` the panel's cards own and re-seeds `useCardForm`'s baseline on remount, silently discarding whatever the user typed on a tab they merely clicked away from. `forceMount` makes Radix render `hidden={false}` on every panel regardless of selection, so the explicit class is what actually hides the inactive ones — hide with `display:none` (the `hidden` class), never `opacity-0` or `absolute`, or the invisible inputs stay in the tab order. Reference: `TeamSettingsPage.tsx`, all six `TabsContent` panels.
+7. **A Radix tab strip's `handleTabChange` MUST navigate with `replace: true`.** `TabsList` defaults to `activationMode='automatic'`, so arrow-key travel across the strip selects each tab it passes; without `replace` that pushes one history entry per keypress and the browser Back button no longer leaves the page. This does not apply to the hand-rolled `role='tab'` Buttons in `FinancesOverviewPage.tsx`, which only change tabs on click. Reference: `routes/(authenticated)/teams/$teamId/settings.tsx`.
 
 ## Loader-Refetching Search Param Via `validateSearch` + `loaderDeps`
 
@@ -319,7 +323,7 @@ Rules:
 
 ## Forms — React Hook Form + Effect Schema
 
-**Always use Shadcn Form (`components/ui/form`) with React Hook Form and Effect Schema** for any form that collects user input. The single exception is a page whose cards each carry their own Save button — see "Pages With Several Independent Save Buttons — `useCardForm`" below; nothing else may opt out.
+**Always use Shadcn Form (`components/ui/form`) with React Hook Form and Effect Schema** for any form that collects user input. The single exception is a page whose cards each own an independent save state — see "Pages With Several Independent Save Buttons — `useCardForm`" below; nothing else may opt out. (Those save states need not each render their own inline Save button: on `TeamSettingsPage` they are collected into one shared `SaveBar`.)
 
 ```typescript
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
@@ -471,13 +475,15 @@ Rules:
 
 ### Pages With Several Independent Save Buttons — `useCardForm`
 
-A settings page is not one form. `TeamSettingsPage` renders **nine cards
-behind six Save buttons**, each button posting its own payload — and three of
-those six PATCH the *same* endpoint (`updateTeamInfo`) over disjoint field
-slices. React Hook Form assumes one form per submit, so these cards use
-`components/organisms/team-settings/useCardForm.ts` instead — the **only**
-sanctioned exception to the React Hook Form rule above, and it applies solely
-to a page whose cards each have their own Save button.
+A settings page is not one form. `TeamSettingsPage` renders **ten cards
+behind seven independent save states**, each posting its own payload — and
+three of those seven PATCH the *same* endpoint (`updateTeamInfo`) over
+disjoint field slices. React Hook Form assumes one form per submit, so these
+cards use `components/organisms/team-settings/useCardForm.ts` instead — the
+**only** sanctioned exception to the React Hook Form rule above, and it
+applies solely to a page whose cards each have their own save state. (The
+seven save states no longer render seven inline Save buttons — see
+"`SaveBar` / `useSaveBarEntry`" below for how they surface today.)
 
 The invariant it exists to enforce: **the dirty flag and the request payload
 must be derived from the same object.** They used to be hand-written lists
@@ -495,7 +501,7 @@ that agreed only by discipline, and the page shipped two bugs because of it:
 
 Rules:
 
-1. **One `SomethingFormValues` type per Save button**, holding
+1. **One `SomethingFormValues` type per save state (one payload)**, holding
    primitive-typed fields only — `string | number | boolean`, string literal
    unions included (`ChannelSyncEvent.ChannelCleanupMode`,
    `Onboarding.OnboardingLocale`) — never an object, array or `Option`, because
@@ -524,12 +530,12 @@ Rules:
 4. **Cards that only render fields take `CardForm` and own no dirty flag or
    handler.** `GeneralLimitsCard`, `RemindersCard`, `CoachAssignmentCard` and
    `DiscordDefaultsCard` take `form: CardForm<SettingsFormValues>` and read and
-   write it; their one Save button lives in the parent that holds the form
-   (`TeamSettingsSection`), rendered via `SaveRow` with `dirty={form.isDirty}`.
-   A presentational card physically cannot wire a field to a button that does
-   not send it. `SaveRow`'s `disabled` prop is for an extra reason the card
-   cannot be saved at all (`OnboardingCard` passes `!isCommunityEnabled`) and
-   never for dirty state.
+   write it; the one shared save state lives in `useTeamSettingsForm.ts` and is
+   registered by `TeamSettingsPage` itself (via `useSaveBarEntry`) — not by any
+   of the four cards. A presentational card physically cannot wire a field to
+   a save action that does not send it. `useSaveBarEntry`'s `disabled` prop is
+   for an extra reason the card cannot be saved at all (`OnboardingCard`
+   passes `!isCommunityEnabled`) and never for dirty state.
 5. **When several cards PATCH the same endpoint, spread a shared
    all-`Option.none()` constant** (`untouchedTeamInfo`) and name only the keys
    that card owns. A field added to the DTO then defaults to untouched
@@ -551,14 +557,80 @@ Rules:
    call.
 
 8. **`useCardForm` seeds its state ONCE, so a card must never mount against placeholder data.** The hook calls `useState(baseline)` and does not re-seed when the prop changes — that is deliberate (rule 7 relies on fresh props recomputing the baseline only because the component remounts or the values are already equal). It means a card rendered with fabricated defaults while its real data is missing keeps those defaults after a successful retry: the form reads dirty against a baseline that was never the member's, and Save is armed to overwrite their real settings. When a card's data can fail to load independently of the page, render a **separate component** for the failure state — never a branch inside the card, and never a `?? defaultValues` fallback on the prop. Reference: `components/organisms/EventPreferencesCard.tsx` exports `EventPreferencesCard` (prop `prefs: MemberEventPreferences`, non-nullable) and `EventPreferencesLoadFailed` (holds no form state, renders an alert plus a Retry button calling the same `onRefresh`); `MyProfilePage`'s `EventPreferencesSection` picks between them per team, so React remounts the card on the transition and it is always seeded from real data.
-9. **`useCardForm` and `SaveRow` are generic despite living in `components/organisms/team-settings/`.** Import them in place — `import { useCardForm } from './team-settings/useCardForm'` — from any card on any page that needs the several-independent-Save-buttons pattern. Do NOT copy them, do NOT re-home them, and do NOT fork a second implementation because the consumer is not a team-settings card. First consumer outside that folder: `components/organisms/EventPreferencesCard.tsx`. Rules 1-8 apply in full to such a card; rule 2's separate `*Form.ts` module is required only when several cards share one endpoint or a field can be invalid — a card with one endpoint and only boolean/literal fields may keep its `valuesFrom<Dto>` converter inline.
+9. **`useCardForm` is generic despite living in `components/organisms/team-settings/`.** Import it in place — `import { useCardForm } from './team-settings/useCardForm'` — from any card on any page that needs the several-independent-Save-states pattern. Do NOT copy it, do NOT re-home it, and do NOT fork a second implementation because the consumer is not a team-settings card. First consumer outside that folder: `components/organisms/EventPreferencesCard.tsx`. Rules 1-8 apply in full to such a card; rule 2's separate `*Form.ts` module is required only when several cards share one endpoint or a field can be invalid — a card with one endpoint and only boolean/literal fields may keep its `valuesFrom<Dto>` converter inline. `EventPreferencesCard` keeps `SaveRow` (`components/organisms/team-settings/SaveRow.tsx`) for its own inline Save button — that component is unrelated to `SaveBar`/`useSaveBarEntry` below and is not used by any card in `team-settings/` anymore.
 
-All six cards in that directory now follow this pattern. Two carry documented exceptions rather than deviations:
+Six cards in that directory own a `useCardForm` plus one save-bar entry each
+(`TeamProfileCard`, `WelcomeMessageCard`, `OnboardingCard`,
+`EmailForwardingCard`, `FioBankCard`, `GenerationWeightsCard`); the seventh
+save state is `useTeamSettingsForm.ts`, which is a hook, not a card, and the
+remaining four cards are the rule-4 presentational ones. All seven follow
+this pattern. One carries a documented exception rather than a deviation:
+**`EmailForwardingCard`** keeps `monitoredAddresses` and `imapSecret` outside the form type, because neither survives a shallow compare: the first is an array (a new reference every render), and the second is write-only and three-state — whether a typed value counts as a change depends on `imapSecretSet` and `replacingSecret`, not on inequality, since the stored secret is never sent to the browser. The card ORs both into `hasChanges` explicitly, and that (not `form.isDirty`) is what it passes as `useSaveBarEntry`'s `dirty`. It and `FioBankCard` both extract their post-save local-state reset into one function and call it from both the save-success path and `onDiscard`, so the two can never drift apart the way a hand-mirrored reset list did twice in this directory.
 
-- **`EmailForwardingCard`** keeps `monitoredAddresses` and `imapSecret` outside the form type, because neither survives a shallow compare: the first is an array (a new reference every render), and the second is write-only and three-state — whether a typed value counts as a change depends on `imapSecretSet` and `replacingSecret`, not on inequality, since the stored secret is never sent to the browser. The card ORs both into `hasChanges` explicitly. It is also the one card that calls `form.reset(...)` after saving, because the server normalises an empty IMAP folder to `INBOX` and the form would otherwise read as dirty for ever.
-- **Both `EmailForwardingCard` and `GenerationWeightsCard` keep a hand-rolled Save row** instead of `SaveRow`, because each has a second button beside Save (Regenerate token, Reset to defaults). They still gate on `form.isDirty` from the same object their payload is built from, which is the part that matters.
+Prefer **per-field errors over a single toast** where a card has more than one rejectable input. `settingsForm.ts` returns the first bad field's key because its four cards share one save state and one toast; `emailForwardingForm.ts` and `generationWeightsForm.ts` return a key *per field* so each renders under its own input with `aria-invalid` and `aria-describedby`. A disabled Save button with no message is the same defect as a dead click — `GenerationWeightsCard` greyed out its button on an out-of-range number and displayed nothing until this was fixed. Those per-field messages stay the card's job — `useSaveBarEntry`'s `disabledReason` is for a **card-level** block whose explanation is not visible from the bar (`OnboardingCard`'s "community features are off" is the only one today); `GenerationWeightsCard`, `EmailForwardingCard` and `FioBankCard` pass `disabled` without a reason because theirs is either a per-field error inside the card or a transient in-flight retry.
 
-Prefer **per-field errors over a single toast** where a card has more than one rejectable input. `settingsForm.ts` returns the first bad field's key because its four cards share one Save button and one toast; `emailForwardingForm.ts` and `generationWeightsForm.ts` return a key *per field* so each renders under its own input with `aria-invalid` and `aria-describedby`. A disabled Save button with no message is the same defect as a dead click — `GenerationWeightsCard` greyed out its button on an out-of-range number and displayed nothing until this was fixed.
+### `SaveBar` / `useSaveBarEntry` — One Shared Save Bar For Several `useCardForm`s
+
+`components/organisms/team-settings/SaveBar.tsx` replaces per-card inline Save
+buttons with one sticky bar at the bottom of the page, rendering one row per
+currently-dirty card. A card registers itself with `useSaveBarEntry({ id,
+label, tab, dirty, saving, disabled?, disabledReason?, onSave, onDiscard })`;
+`onSave` returns `Promise<boolean>` (`false` = the card's own validation
+rejected the save), and `SaveBar` calls the page's `onInvalid(tab)` prop on
+`false` so a validation failure on a hidden tab still becomes visible.
+
+Rules:
+
+1. **The registering `useEffect`'s dependency array holds ONLY primitives
+   plus the two stable wrapper callbacks** (`register, id, label, tab, dirty,
+   saving, disabled, disabledReason, stableOnSave, stableOnDiscard`). Putting
+   the entry object — or the raw `onSave`/`onDiscard` props — in that array
+   causes a setState-per-render loop, because a fresh object/closure is a new
+   reference every render. The hook works around needing fresh closures by
+   holding `{ onSave, onDiscard }` in a `ref` reassigned on every render, and
+   registering a pair of wrapper callbacks built once with `useCallback(...,
+   [])` — a stable identity Biome's `useExhaustiveDependencies` is happy to
+   see in the deps array, unlike the raw props.
+2. **A card registers `null` when `!dirty`, and every `id` MUST appear in
+   `ENTRY_ORDER`.** `SaveBarProvider` stores entries in a `Map` keyed by `id`
+   and renders them in that fixed module-level order, never insertion order —
+   effects run child-first, so a page-level shared entry would otherwise
+   always register last, and any dirty/saving flip would reorder rows under
+   the user's cursor. An `id` missing from `ENTRY_ORDER` gets `indexOf === -1`
+   and silently sorts above every other row; adding a card means adding its
+   `id` to that array in the same edit.
+3. **The bar's `<section>` is `role=region` (via `aria-label`), never
+   `role='status'`, and it is always mounted** (empty when nothing is dirty).
+   A live region inserted at the same moment its content appears announces
+   unreliably, so it must exist before it has anything to say. `OnboardingCard`
+   already renders `<output aria-live='polite'>` on this page — `<output>`'s
+   implicit ARIA role IS `status`, so a second `status` region makes
+   `getByRole('status')` ambiguous, which is exactly what broke two specs in
+   `e2e/tests/onboarding-settings.spec.ts` during development. (`FioBankCard`
+   carries the same warning in a code comment for the same reason.)
+4. **The bar is `sticky bottom-0`, never `fixed`, and is the last in-flow
+   child of the page root** (it follows `</Tabs>`; the `UnsavedChangesGuard`
+   rendered after it is a portal and does not count).
+   `SidebarInset` is a flow sibling of the fixed sidebar, so
+   a `sticky` child is automatically inset by the sidebar's width in both the
+   expanded and collapsed states with zero extra classes — a `fixed
+   bottom-0 left-0 right-0` bar (the pattern in `ChannelManagementPage.tsx`)
+   overlaps the desktop sidebar instead.
+5. **A component that renders `SaveBarProvider` must not itself call
+   `useSaveBarEntry`.** The default context is a no-op registry, so a
+   `useSaveBarEntry` call with no provider above it — including one in the
+   same component that renders the provider — registers nothing, throws
+   nothing and logs nothing: the row simply never appears. Split the page in
+   two like `TeamSettingsPage` (provider shell) / `TeamSettingsPageBody`
+   (everything that consumes the registry, including `useSaveBarEntries`).
+6. **`onDiscard` MUST restore the `useCardForm` baseline AND every
+   card-local `useState` the payload reads, through the same function the
+   save-success path calls.** A discard that resets only `form` leaves the
+   card clean-looking while an out-of-form value (`monitoredAddresses`,
+   `imapSecret`, `fioToken`, `tokenCreatedAt`) still holds the abandoned
+   edit, and the next save sends it. Reference: `EmailForwardingCard`'s
+   `resetLocalState` and `FioBankCard`'s `resetFormFields`, each called from
+   both places.
 
 ## Submitting Branded Values to API Endpoints
 
