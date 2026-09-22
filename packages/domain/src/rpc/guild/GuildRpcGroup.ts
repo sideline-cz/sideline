@@ -139,6 +139,16 @@ export const GuildRpcGroup = RpcGroup.make(
           }),
         ),
         invite_code: Schema.OptionFromNullOr(Schema.String),
+        // Top level, outside `welcome` — the profile-gate cohort (a plain Discord invite, no
+        // Sideline invite context) gets `welcome: None` today, so the bot needs these fields to
+        // act on a join with no welcome embed at all. Absent key = an old server. Safe direction
+        // is "never nag", so default true.
+        profile_complete: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => true)),
+        // `team_settings.require_complete_profile`. Absent = off = the bot does nothing.
+        profile_gate_enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+        // `teams.onboarding_locale`. `GuildMemberAdd` has no `guild_locale` to read, so the locale
+        // for every string the bot posts at join time rides on the DTO.
+        verify_locale: OnboardingLocale.pipe(Schema.withDecodingDefaultKey(() => 'en')),
       }),
     ),
   }),

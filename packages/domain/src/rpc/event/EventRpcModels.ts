@@ -92,6 +92,12 @@ export class RsvpNotGroupMember extends Schema.TaggedErrorClass<RsvpNotGroupMemb
   {},
 ) {}
 
+// The request is well-formed; the actor just hasn't finished onboarding yet.
+export class RsvpProfileIncomplete extends Schema.TaggedErrorClass<RsvpProfileIncomplete>()(
+  'RsvpProfileIncomplete',
+  {},
+) {}
+
 export class CreateEventNotMember extends Schema.TaggedErrorClass<CreateEventNotMember>()(
   'CreateEventNotMember',
   {},
@@ -279,6 +285,12 @@ export class ClaimAlreadyClaimed extends Schema.TaggedErrorClass<ClaimAlreadyCla
 
 export class ClaimNotClaimer extends Schema.TaggedErrorClass<ClaimNotClaimer>()(
   'ClaimNotClaimer',
+  {},
+) {}
+
+// The request is well-formed; the actor just hasn't finished onboarding yet.
+export class ClaimProfileIncomplete extends Schema.TaggedErrorClass<ClaimProfileIncomplete>()(
+  'ClaimProfileIncomplete',
   {},
 ) {}
 

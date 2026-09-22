@@ -38,6 +38,7 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
   eventHorizonDays: Schema.Int,
   minPlayersThreshold: Schema.Int,
   rsvpRemindersEnabled: Schema.Boolean,
+  requireCompleteProfile: Schema.Boolean,
   rsvpReminderDaysBefore: Schema.Int,
   maxMissedRsvps: Schema.Int,
   claimRequestDaysBefore: Schema.Int,
@@ -89,6 +90,7 @@ export const UpdateTeamSettingsRequest = Schema.Struct({
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 100 }))),
   ),
   rsvpRemindersEnabled: Schema.OptionFromOptional(Schema.Boolean),
+  requireCompleteProfile: Schema.OptionFromOptional(Schema.Boolean),
   rsvpReminderDaysBefore: Schema.OptionFromOptional(
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 14 }))),
   ),

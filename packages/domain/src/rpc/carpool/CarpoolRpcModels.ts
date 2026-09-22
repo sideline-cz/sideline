@@ -129,3 +129,9 @@ export class CarpoolTargetNotInCar extends Schema.TaggedErrorClass<CarpoolTarget
   'CarpoolTargetNotInCar',
   {},
 ) {}
+
+// The request is well-formed; the actor just hasn't finished onboarding yet.
+export class CarpoolProfileIncomplete extends Schema.TaggedErrorClass<CarpoolProfileIncomplete>()(
+  'CarpoolProfileIncomplete',
+  {},
+) {}
