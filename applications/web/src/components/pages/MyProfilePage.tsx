@@ -2,6 +2,7 @@ import type { Auth, TeamApi } from '@sideline/domain';
 import { useRouter } from '@tanstack/react-router';
 import { Option } from 'effect';
 import { ArrowLeft } from 'lucide-react';
+import React from 'react';
 
 import { DataExportCard } from '~/components/organisms/DataExportCard.js';
 import { DiscordConnectCard } from '~/components/organisms/DiscordConnectCard.js';
@@ -15,6 +16,7 @@ import { TelemetryPreferenceCard } from '~/components/organisms/TelemetryPrefere
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
+import { ToggleGroup, ToggleGroupItem } from '~/components/ui/toggle-group';
 import { tr } from '~/lib/translations.js';
 
 function discordAvatarUrl(discordId: string, avatar: string): string {
@@ -52,8 +54,11 @@ function DiscordConnectSection({ teams }: { readonly teams: ReadonlyArray<Auth.U
 }
 
 /**
- * Nastavitelná docházka (design.md §A.1) — one `EventPreferencesCard` per team the member is
- * actually connected to on Discord. DIFFERENT predicate than `DiscordConnectSection` above:
+ * Nastavitelná docházka (design.md §A.1) — event preferences for the teams the member is
+ * actually connected to on Discord. ONE card at a time, with a team switcher above it when
+ * there is more than one: the card names the feature and never the team, so rendering one
+ * card per team gave a multi-team member several identical-looking cards and no way to tell
+ * them apart. DIFFERENT predicate than `DiscordConnectSection` above:
  * `discordJoined === 'connected'`, not `!== 'unknown'`. A member who is `'not_connected'` or
  * `'unknown'` has no personal channel and receives no DM, so every control on the card would
  * be inert — `DiscordConnectSection`'s job is inviting those members to connect, not this
@@ -69,27 +74,57 @@ function EventPreferencesSection({
   readonly onRefresh: () => void;
 }) {
   const connectedTeams = teams.filter((team) => team.discordJoined === 'connected');
+  const [selectedTeamId, setSelectedTeamId] = React.useState<string | undefined>(undefined);
+
   if (connectedTeams.length === 0) return null;
+
+  // One card at a time, with a team switcher above it — rendering N identical-looking cards
+  // gave a member of several teams no way to tell which card belonged to which team, since
+  // the card names the feature and never the team.
+  const selected =
+    connectedTeams.find((team) => team.teamId === selectedTeamId) ?? connectedTeams[0];
+  const selectedPrefs = prefs[selected.teamId] ?? null;
 
   return (
     <>
-      {connectedTeams.map((team) => {
-        const teamPrefs = prefs[team.teamId] ?? null;
-        // Render a DIFFERENT component on load failure, never the card with null prefs:
-        // `useCardForm` seeds its state once, so a card that mounted against a failed load
-        // would survive the retry holding defaults over the real baseline — dirty, with
-        // Save armed to overwrite the member's settings and delete their channels.
-        return teamPrefs ? (
-          <EventPreferencesCard
-            key={team.teamId}
-            teamId={team.teamId}
-            prefs={teamPrefs}
-            onRefresh={onRefresh}
-          />
-        ) : (
-          <EventPreferencesLoadFailed key={team.teamId} onRefresh={onRefresh} />
-        );
-      })}
+      {connectedTeams.length > 1 && (
+        <div className='w-full max-w-md mt-4'>
+          <span id='event-prefs-team-switcher-label' className='text-sm font-medium block mb-2'>
+            {tr('eventPrefs_teamSwitcher')}
+          </span>
+          <ToggleGroup
+            type='single'
+            variant='outline'
+            aria-labelledby='event-prefs-team-switcher-label'
+            value={selected.teamId}
+            // Radix fires '' when the active item is re-clicked; keep the current team
+            // rather than letting the section fall back to the first one.
+            onValueChange={(next) => next && setSelectedTeamId(next)}
+            className='flex-wrap justify-start'
+          >
+            {connectedTeams.map((team) => (
+              <ToggleGroupItem key={team.teamId} value={team.teamId}>
+                {team.teamName}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
+      )}
+
+      {/* `key` is load-bearing: `useCardForm` seeds its state ONCE, so without a remount the
+          card would carry the previous team's edits over onto the newly selected team's
+          baseline — dirty, with Save armed to write one team's settings onto another. The
+          same reason the load-failure state is a separate component below. */}
+      {selectedPrefs ? (
+        <EventPreferencesCard
+          key={selected.teamId}
+          teamId={selected.teamId}
+          prefs={selectedPrefs}
+          onRefresh={onRefresh}
+        />
+      ) : (
+        <EventPreferencesLoadFailed key={selected.teamId} onRefresh={onRefresh} />
+      )}
     </>
   );
 }

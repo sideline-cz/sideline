@@ -5,7 +5,7 @@
 // DiscordConnectSection's `!== 'unknown'` (design.md §A.1's correction: a member who is not in
 // the guild has no personal channel and receives no DM, so every control would be inert).
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Option } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -231,7 +231,7 @@ describe('MyProfilePage — EventPreferencesSection filtering (design.md §A.1)'
     expect(EventPreferencesCardSpy).not.toHaveBeenCalled();
   });
 
-  it('multiple connected teams → one EventPreferencesCard per team, each with its own teamId', () => {
+  it('multiple connected teams → ONE card plus a named switcher, not N identical cards', () => {
     const secondConnectedTeam = { ...connectedTeam, teamId: 'team-4', teamName: 'Seniors' };
     render(
       <MyProfilePage
@@ -243,8 +243,52 @@ describe('MyProfilePage — EventPreferencesSection filtering (design.md §A.1)'
       />,
     );
 
+    // Exactly one card — N identical cards left a multi-team member unable to tell which
+    // card belonged to which team, since the card names the feature and never the team.
+    expect(EventPreferencesCardSpy).toHaveBeenCalledTimes(1);
+    expect(
+      (EventPreferencesCardSpy.mock.calls[0]?.[0] as { teamId: string } | undefined)?.teamId,
+    ).toBe('team-1');
+
+    // The switcher names every team, so the choice is visible rather than implied.
+    const radios = screen.getAllByRole('radio');
+    expect(radios.map((r) => r.textContent).sort()).toEqual(['Seniors', 'Ultimate Praha']);
+  });
+
+  it('switching team swaps the card and remounts it (fresh form state per team)', () => {
+    const secondConnectedTeam = { ...connectedTeam, teamId: 'team-4', teamName: 'Seniors' };
+    render(
+      <MyProfilePage
+        user={user as never}
+        teams={[connectedTeam as never, secondConnectedTeam as never]}
+        onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Seniors' }));
+
+    const last = EventPreferencesCardSpy.mock.calls.at(-1)?.[0] as any;
+    expect(last.teamId).toBe('team-4');
+    // Regression guard: the card is keyed by teamId, so React remounts it and `useCardForm`
+    // reseeds. Without that, one team's unsaved edits ride onto another team's baseline and
+    // Save would write them to the wrong team.
     expect(EventPreferencesCardSpy).toHaveBeenCalledTimes(2);
-    const teamIds = EventPreferencesCardSpy.mock.calls.map((c) => (c[0] as any).teamId).sort();
-    expect(teamIds).toEqual(['team-1', 'team-4']);
+  });
+
+  it('a single connected team renders no switcher', () => {
+    render(
+      <MyProfilePage
+        user={user as never}
+        teams={[connectedTeam as never]}
+        onUpdated={() => undefined}
+        prefs={noPrefs as never}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    expect(EventPreferencesCardSpy).toHaveBeenCalledTimes(1);
   });
 });
