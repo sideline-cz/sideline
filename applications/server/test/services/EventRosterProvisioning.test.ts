@@ -1024,6 +1024,274 @@ describe('EventRosterProvisioningService — onRsvp', () => {
     },
   );
 
+  // ---------------------------------------------------------------------------
+  // maybe ("Nevím") — NOT full attendance. Narrowed per
+  // docs/plans/rsvp-maybe-restore.md: `isAttendingRsvpResponse` drops the
+  // `'maybe'` arm, so this service must treat `newResponse: 'maybe'` exactly
+  // like `'no'` for provisioning purposes, and `coming_later -> maybe` must
+  // run the withdrawal branch (`isWithdraw = wasAttending && !isAttending`).
+  // ---------------------------------------------------------------------------
+
+  it.effect(
+    'T-maybe-1: maybe + autoON + not member → no roster seat: no upsertApproved/addMember, no approval request',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.none(),
+            newResponse: 'maybe',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.rosterMemberAdded).toHaveLength(0);
+            expect(calls.approvalRequestEmitted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: true }),
+            makeRequestsRepository(),
+            makeRostersRepository({ isMember: false }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository(),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-maybe-2: maybe + autoOFF + ownerGroup → still no roster seat, no approval request (maybe is non-attending like no)',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.none(),
+            newResponse: 'maybe',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.rosterMemberAdded).toHaveLength(0);
+            expect(calls.approvalRequestEmitted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: false }),
+            makeRequestsRepository(),
+            makeRostersRepository({ isMember: false }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository({ isInOwnerGroup: true }),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-maybe-3: coming_later -> maybe (approved, was_member_before=false) runs the WITHDRAWAL branch → removeMember + emitRosterMemberRemoved',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.some('coming_later'),
+            newResponse: 'maybe',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.rosterMemberRemoved).toHaveLength(1);
+            expect(calls.rosterMemberRemoved[0].rosterId).toBe(ROSTER_ID);
+            expect(calls.rosterMemberAdded).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: true }),
+            makeRequestsRepository({
+              existingRequest: Option.some({
+                id: REQUEST_ID,
+                status: 'approved',
+                was_member_before: false,
+                discord_message_id: Option.none(),
+              }),
+              cancelResult: Option.some({ status: 'approved', was_member_before: false }),
+            }),
+            makeRostersRepository({ isMember: true }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository(),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-maybe-4: coming_later -> maybe, pending (not yet approved) → cancel → emitApprovalCancel, NO removeMember',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.some('coming_later'),
+            newResponse: 'maybe',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.approvalCancelEmitted).toHaveLength(1);
+            expect(calls.rosterMemberRemoved).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: false }),
+            makeRequestsRepository({
+              existingRequest: Option.some({
+                id: REQUEST_ID,
+                status: 'pending',
+                was_member_before: false,
+                discord_message_id: Option.some('msg-001' as Discord.Snowflake),
+              }),
+              cancelResult: Option.some({ status: 'pending', was_member_before: false }),
+            }),
+            makeRostersRepository({ isMember: false }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository(),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-maybe-5: maybe -> coming_later provisions (autoON, not member) → addMember + emitRosterMemberAdded once',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.some('maybe'),
+            newResponse: 'coming_later',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.rosterMemberAdded).toHaveLength(1);
+            expect(calls.rosterMemberAdded[0].rosterId).toBe(ROSTER_ID);
+            expect(calls.approvalRequestEmitted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: true }),
+            makeRequestsRepository(),
+            makeRostersRepository({ isMember: false }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository(),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-maybe-6: yes -> coming_later stays attending — no withdraw (no removeMember, no approvalCancel)',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.some('yes'),
+            newResponse: 'coming_later',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.rosterMemberRemoved).toHaveLength(0);
+            expect(calls.approvalCancelEmitted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: true }),
+            makeRequestsRepository({
+              existingRequest: Option.some({
+                id: REQUEST_ID,
+                status: 'approved',
+                was_member_before: false,
+                discord_message_id: Option.none(),
+              }),
+              cancelResult: Option.some({ status: 'approved', was_member_before: false }),
+            }),
+            makeRostersRepository({ isMember: true }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository(),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
   it.effect('no linked roster → onRsvp is a no-op', () => {
     const calls = makeCalls();
 

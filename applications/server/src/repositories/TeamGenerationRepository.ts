@@ -108,7 +108,7 @@ const make = Effect.gen(function* () {
       LEFT JOIN users u ON u.id = tm.user_id
       LEFT JOIN player_ratings pr ON pr.team_member_id = tm.id
       WHERE er.event_id = ${input.event_id}
-        AND er.response IN ('yes', 'coming_later', 'maybe')
+        AND er.response IN ('yes', 'coming_later')
       ORDER BY COALESCE(pr.rating, ${Elo.DEFAULT_RATING}) DESC, tm.id ASC
     `,
   });

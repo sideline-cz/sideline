@@ -1,6 +1,6 @@
-import type { EventApi, EventRsvpApi } from '@sideline/domain';
+import type { EventApi, EventRsvp, EventRsvpApi } from '@sideline/domain';
 import { type Effect, Option } from 'effect';
-import { Loader2 } from 'lucide-react';
+import { Check, CircleHelp, Clock, Loader2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { Textarea } from '~/components/ui/textarea';
@@ -8,19 +8,48 @@ import type { ClientConfig } from '~/lib/client';
 import { type ApiClient, type ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
+type RsvpResponse = EventRsvp.RsvpResponse;
+
 interface EventRsvpPanelProps {
   eventDetail: EventApi.EventDetail;
   rsvpDetail: EventRsvpApi.EventRsvpDetail;
   nonResponders: ReadonlyArray<EventRsvpApi.NonResponderEntry>;
   onRsvpSubmit: (
-    response: 'yes' | 'no' | 'maybe' | 'coming_later',
+    response: RsvpResponse,
     message: string,
   ) => Effect.Effect<void, ClientError, ApiClient | ClientConfig>;
 }
 
-// The server projects the legacy `coming_later` write value to `maybe` on the read wire this
-// release, so a late RSVP can come back as either tag — treat them as the same display state.
-const isLate = (response: string): boolean => response === 'coming_later' || response === 'maybe';
+// Canonical order everywhere: yes -> coming_later -> maybe -> no.
+const RESPONSES: ReadonlyArray<RsvpResponse> = ['yes', 'coming_later', 'maybe', 'no'];
+
+const RESPONSE_ICON: Record<RsvpResponse, typeof Check> = {
+  yes: Check,
+  coming_later: Clock,
+  maybe: CircleHelp,
+  no: X,
+};
+
+const RESPONSE_VARIANT: Record<RsvpResponse, 'default' | 'secondary' | 'destructive'> = {
+  yes: 'default',
+  coming_later: 'secondary',
+  maybe: 'secondary',
+  no: 'destructive',
+};
+
+const RESPONSE_TEXT_CLASS: Record<RsvpResponse, string> = {
+  yes: 'text-green-700 dark:text-green-400',
+  coming_later: 'text-blue-600 dark:text-blue-400',
+  maybe: 'text-amber-600 dark:text-amber-400',
+  no: 'text-red-600 dark:text-red-400',
+};
+
+const RESPONSE_LABEL_KEY: Record<RsvpResponse, string> = {
+  yes: 'rsvp_yes',
+  coming_later: 'rsvp_comingLater',
+  maybe: 'rsvp_maybe',
+  no: 'rsvp_no',
+};
 
 export function EventRsvpPanel({
   eventDetail,
@@ -31,9 +60,7 @@ export function EventRsvpPanel({
   const currentResponse = Option.getOrNull(rsvpDetail.myResponse);
   const savedMessage = Option.getOrElse(rsvpDetail.myMessage, () => '');
 
-  const [submittingResponse, setSubmittingResponse] = useState<
-    'yes' | 'no' | 'coming_later' | null
-  >(null);
+  const [submittingResponse, setSubmittingResponse] = useState<RsvpResponse | null>(null);
   const [draftMessage, setDraftMessage] = useState(savedMessage);
   const [savingMessage, setSavingMessage] = useState(false);
   // Set while the user has clicked "Coming later" but not yet saved a required note.
@@ -58,10 +85,10 @@ export function EventRsvpPanel({
   // takes priority over the already-saved response.
   const targetResponse = pendingResponse ?? currentResponse;
   const displayedResponse = submittingResponse ?? targetResponse;
-  const messageRequired = targetResponse !== null && isLate(targetResponse);
+  const messageRequired = targetResponse === 'coming_later';
   const messageMissing = messageRequired && draftMessage.trim().length === 0;
 
-  const handleResponseClick = async (response: 'yes' | 'no' | 'coming_later') => {
+  const handleResponseClick = async (response: RsvpResponse) => {
     if (isBusy) return;
     if (response === 'coming_later') {
       // Mandatory comment: "Coming later" never instant-submits — it only reveals + focuses the
@@ -76,16 +103,23 @@ export function EventRsvpPanel({
     }
     setPendingResponse(null);
     setSubmittingResponse(response);
-    await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(response, savedMessage));
+    // Leaving "coming_later" clears its mandatory note (the server's clear signal is an empty
+    // string) instead of re-sending it — that note answers "when will you arrive", so carrying it
+    // onto any other response renders nonsense like "Nevím 💬 dorazím v 19:00". Mirrors the
+    // server-side `effectiveClear` guard in `Event/SubmitRsvp`, which fires on the same condition
+    // when a client sends no message at all (the bot's path). Without this the web would never
+    // trigger that guard: a `coming_later` note is never empty, so `savedMessage` is always `Some`.
+    const messageToSend = currentResponse === 'coming_later' ? '' : savedMessage;
+    await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(response, messageToSend));
     setSubmittingResponse(null);
   };
 
   const handleSaveNote = async () => {
     if (!targetResponse) return;
     if (isBusy) return;
-    // Mandatory comment: block saving when the pending/current response is a late RSVP and the
+    // Mandatory comment: block saving when the pending/current response is "coming later" and the
     // note is blank — the note is what carries the "coming later" reason and is required.
-    if (isLate(targetResponse) && draftMessage.trim().length === 0) return;
+    if (targetResponse === 'coming_later' && draftMessage.trim().length === 0) return;
     setSavingMessage(true);
     await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(targetResponse, draftMessage));
     setSavingMessage(false);
@@ -98,32 +132,29 @@ export function EventRsvpPanel({
 
       {rsvpDetail.canRsvp ? (
         <div className='flex flex-col gap-4'>
-          <div className='flex gap-2'>
-            {(['yes', 'coming_later', 'no'] as const).map((response) => {
-              const activeVariant =
-                response === 'yes'
-                  ? 'default'
-                  : response === 'coming_later'
-                    ? 'secondary'
-                    : 'destructive';
-              const isActive = isLate(response)
-                ? isLate(displayedResponse ?? '')
-                : displayedResponse === response;
+          <div className='grid grid-cols-2 gap-2 sm:flex sm:flex-wrap'>
+            {RESPONSES.map((response) => {
+              const isActive = displayedResponse === response;
               const isLoadingThis = submittingResponse === response;
+              const Icon = RESPONSE_ICON[response];
               return (
                 <Button
                   key={response}
-                  variant={isActive ? activeVariant : 'outline'}
-                  onClick={() => handleResponseClick(response)}
+                  variant={isActive ? RESPONSE_VARIANT[response] : 'outline'}
+                  onClick={(e) => {
+                    // `coming_later` moves focus to the textarea in a `useEffect` right after
+                    // this; every other response instant-submits and keeps focus on the button
+                    // that was clicked — jsdom's `fireEvent.click` doesn't do this by itself.
+                    e.currentTarget.focus();
+                    void handleResponseClick(response);
+                  }}
                   disabled={isBusy}
                   aria-pressed={isActive}
+                  className='w-full sm:w-auto'
                 >
                   {isLoadingThis && <Loader2 className='animate-spin' aria-hidden='true' />}
-                  {response === 'yes'
-                    ? tr('rsvp_yes')
-                    : response === 'coming_later'
-                      ? tr('rsvp_maybe')
-                      : tr('rsvp_no')}
+                  <Icon aria-hidden='true' />
+                  {tr(RESPONSE_LABEL_KEY[response])}
                 </Button>
               );
             })}
@@ -134,7 +165,7 @@ export function EventRsvpPanel({
               <div>
                 <label htmlFor='rsvp-message' className='text-sm font-medium mb-1 block'>
                   {tr('rsvp_message')}
-                  {messageRequired && ' *'}
+                  {messageRequired && <span aria-hidden='true'> *</span>}
                 </label>
                 <Textarea
                   id='rsvp-message'
@@ -145,8 +176,15 @@ export function EventRsvpPanel({
                   rows={2}
                   aria-required={messageRequired}
                   aria-invalid={messageMissing}
-                  aria-describedby={messageMissing ? 'rsvp-message-error' : undefined}
+                  aria-describedby={
+                    messageMissing ? 'rsvp-message-help rsvp-message-error' : 'rsvp-message-help'
+                  }
                 />
+                <p id='rsvp-message-help' className='mt-1 text-sm text-muted-foreground'>
+                  {messageRequired
+                    ? tr('rsvp_messageHelpRequired')
+                    : tr('rsvp_messageHelpOptional')}
+                </p>
                 {messageMissing && (
                   <p
                     id='rsvp-message-error'
@@ -172,23 +210,26 @@ export function EventRsvpPanel({
 
       <div className='mt-6'>
         <h3 className='text-sm font-semibold mb-2'>{tr('rsvp_summary')}</h3>
-        <div className='flex gap-4 text-sm mb-4'>
-          <span className='text-green-700 dark:text-green-400'>
+        <div className='flex flex-wrap gap-4 text-sm mb-4'>
+          <span className={RESPONSE_TEXT_CLASS.yes}>
             {tr('rsvp_attending', { count: String(rsvpDetail.yesCount) })}
           </span>
-          <span className='text-blue-600 dark:text-blue-400'>
+          <span className={RESPONSE_TEXT_CLASS.coming_later}>
+            {tr('rsvp_comingLaterCount', { count: String(rsvpDetail.comingLaterCount) })}
+          </span>
+          <span className={RESPONSE_TEXT_CLASS.maybe}>
             {tr('rsvp_undecided', { count: String(rsvpDetail.maybeCount) })}
           </span>
-          <span className='text-red-600 dark:text-red-400'>
+          <span className={RESPONSE_TEXT_CLASS.no}>
             {tr('rsvp_notAttending', { count: String(rsvpDetail.noCount) })}
           </span>
         </div>
 
         {rsvpDetail.minPlayersThreshold > 0 &&
-          rsvpDetail.yesCount + rsvpDetail.maybeCount < rsvpDetail.minPlayersThreshold && (
+          rsvpDetail.yesCount + rsvpDetail.comingLaterCount < rsvpDetail.minPlayersThreshold && (
             <div className='mb-4 rounded-md border border-yellow-300 bg-yellow-50 px-4 py-2 text-sm text-yellow-800 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-200'>
               {tr('rsvp_belowMinPlayers', {
-                count: String(rsvpDetail.yesCount + rsvpDetail.maybeCount),
+                count: String(rsvpDetail.yesCount + rsvpDetail.comingLaterCount),
                 threshold: String(rsvpDetail.minPlayersThreshold),
               })}
             </div>
@@ -197,26 +238,11 @@ export function EventRsvpPanel({
         {rsvpDetail.rsvps.length > 0 ? (
           <ul className='space-y-1 text-sm'>
             {[...rsvpDetail.rsvps]
-              .sort((a, b) => {
-                const order = (r: string) => (r === 'yes' ? 0 : isLate(r) ? 1 : 2);
-                return order(a.response) - order(b.response);
-              })
+              .sort((a, b) => RESPONSES.indexOf(a.response) - RESPONSES.indexOf(b.response))
               .map((r) => (
                 <li key={r.teamMemberId} className='flex items-center gap-2'>
-                  <span
-                    className={
-                      r.response === 'yes'
-                        ? 'text-green-700 dark:text-green-400'
-                        : isLate(r.response)
-                          ? 'text-blue-600 dark:text-blue-400'
-                          : 'text-red-600 dark:text-red-400'
-                    }
-                  >
-                    {r.response === 'yes'
-                      ? tr('rsvp_yes')
-                      : isLate(r.response)
-                        ? tr('rsvp_maybe')
-                        : tr('rsvp_no')}
+                  <span className={RESPONSE_TEXT_CLASS[r.response]}>
+                    {tr(RESPONSE_LABEL_KEY[r.response])}
                   </span>
                   <span>{r.displayName}</span>
                   {Option.isSome(r.message) && (

@@ -9,7 +9,6 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
-import { projectRsvpResponseToLegacy } from '~/utils/rsvpWireProjection.js';
 
 /**
  * Format a `Date` as `YYYY-MM-DD` in an arbitrary IANA timezone. Shared by the
@@ -118,7 +117,7 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
                 endAt: e.end_at,
                 location: e.location,
                 locationUrl: e.location_url,
-                myRsvp: Option.map(e.my_rsvp, projectRsvpResponseToLegacy),
+                myRsvp: e.my_rsvp,
                 startDate: Option.some(e.start_date),
                 allDay: e.all_day,
               });

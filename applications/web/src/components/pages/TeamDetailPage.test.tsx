@@ -33,7 +33,8 @@ vi.mock('~/lib/translations.js', () => ({
       dashboard_noResponse: 'No response',
       dashboard_rsvpYes: 'Yes',
       dashboard_rsvpNo: 'No',
-      dashboard_rsvpMaybe: 'Maybe',
+      dashboard_rsvpMaybe: 'Not sure',
+      dashboard_rsvpComingLater: 'Coming later',
       dashboard_rsvpNow: 'RSVP now',
       dashboard_upcomingEvents: 'Upcoming events',
       dashboard_viewEvents: 'View events',
@@ -380,6 +381,46 @@ describe('TeamDetailPage — all-day upcoming-events card (PR 5)', () => {
 
     expect(screen.getByText(/10:00/)).not.toBeNull();
     expect(screen.queryByText('All day')).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // docs/plans/rsvp-maybe-restore.md — `maybe` and `coming_later` are now
+  // distinct RSVP badges (the dashboard used to group them under one "late"
+  // style/label key). They must render DIFFERENT text AND different colour
+  // classes.
+  // ---------------------------------------------------------------------------
+
+  it('myRsvp Some("maybe") and Some("coming_later") render different badge text and different colour classes', () => {
+    const { unmount } = render(
+      <TeamDetailPage
+        teamId={TEAM_ID}
+        dashboard={
+          {
+            ...makeDashboard(),
+            upcomingEvents: [makeTimedEvent({ myRsvp: Option.some('maybe') })],
+          } as any
+        }
+      />,
+    );
+    const maybeBadge = screen.getByText('Not sure');
+    const maybeClassName = maybeBadge.className;
+    unmount();
+
+    render(
+      <TeamDetailPage
+        teamId={TEAM_ID}
+        dashboard={
+          {
+            ...makeDashboard(),
+            upcomingEvents: [makeTimedEvent({ myRsvp: Option.some('coming_later') })],
+          } as any
+        }
+      />,
+    );
+    const comingLaterBadge = screen.getByText('Coming later');
+
+    expect(maybeBadge.textContent).not.toBe(comingLaterBadge.textContent);
+    expect(maybeClassName).not.toBe(comingLaterBadge.className);
   });
 
   it('an all-day event with startDate: Option.none() (older server) falls back instead of breaking', () => {

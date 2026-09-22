@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import { Option, Schema } from 'effect';
-import { UpcomingEventForUserEntry } from '~/rpc/event/EventRpcModels.js';
+import { RsvpAttendeeEntry, UpcomingEventForUserEntry } from '~/rpc/event/EventRpcModels.js';
 
 const baseWire = {
   event_id: 'evt-1',
@@ -76,5 +76,79 @@ describe('UpcomingEventForUserEntry — start_date/end_date (PR 3b)', () => {
     // §11.4: `discordDateInstant('', fallback)` would quietly return the fallback too,
     // masking the mistake on the bot side as well as the web side (§11.2's box).
     expect(result.start_date).not.toStrictEqual(Option.some(''));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `docs/plans/rsvp-maybe-restore.md` — `maybe` becomes a first-class,
+// non-attending response, distinct from `coming_later`. The server-side
+// coming_later -> maybe wire projection is removed, so both DTOs must widen
+// to decode `coming_later` on their response-carrying fields, and
+// `coming_later_count`/`my_response_actual` must default sanely when absent
+// (rolling-deploy skew).
+// ---------------------------------------------------------------------------
+
+describe('UpcomingEventForUserEntry — coming_later widening (rsvp-maybe-restore)', () => {
+  it('decodes my_response: "coming_later" (previously a decode failure against the 3-literal union)', () => {
+    const result = Schema.decodeUnknownSync(UpcomingEventForUserEntry)({
+      ...baseWire,
+      my_response: 'coming_later',
+    });
+    expect(result.my_response).toStrictEqual(Option.some('coming_later'));
+  });
+
+  it('coming_later_count defaults to 0 when the key is absent (rolling-deploy skew)', () => {
+    const result = Schema.decodeUnknownSync(UpcomingEventForUserEntry)(baseWire);
+    expect(result.coming_later_count).toBe(0);
+  });
+
+  it('coming_later_count decodes the present value independently of maybe_count', () => {
+    const result = Schema.decodeUnknownSync(UpcomingEventForUserEntry)({
+      ...baseWire,
+      maybe_count: 2,
+      coming_later_count: 4,
+    });
+    expect(result.maybe_count).toBe(2);
+    expect(result.coming_later_count).toBe(4);
+  });
+
+  it('my_response_actual decodes to Option.none() when the key is absent', () => {
+    const result = Schema.decodeUnknownSync(UpcomingEventForUserEntry)(baseWire);
+    expect(result.my_response_actual).toStrictEqual(Option.none());
+  });
+
+  it('my_response_actual decodes "coming_later" when present', () => {
+    const result = Schema.decodeUnknownSync(UpcomingEventForUserEntry)({
+      ...baseWire,
+      my_response_actual: 'coming_later',
+    });
+    expect(result.my_response_actual).toStrictEqual(Option.some('coming_later'));
+  });
+});
+
+describe('RsvpAttendeeEntry — decodes response: "coming_later"', () => {
+  const baseAttendeeWire = {
+    discord_id: null,
+    name: null,
+    nickname: null,
+    username: null,
+    display_name: null,
+    message: null,
+  };
+
+  it('decodes response: "coming_later" (previously restricted to yes|no|maybe)', () => {
+    const result = Schema.decodeUnknownSync(RsvpAttendeeEntry)({
+      ...baseAttendeeWire,
+      response: 'coming_later',
+    });
+    expect(result.response).toBe('coming_later');
+  });
+
+  it('still decodes response: "maybe" as its own distinct literal', () => {
+    const result = Schema.decodeUnknownSync(RsvpAttendeeEntry)({
+      ...baseAttendeeWire,
+      response: 'maybe',
+    });
+    expect(result.response).toBe('maybe');
   });
 });

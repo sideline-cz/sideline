@@ -6,20 +6,30 @@ import { describe, expect, it, vi } from 'vitest';
 // Module mocks — before any imports using them
 // ---------------------------------------------------------------------------
 
+// FIX (docs/plans/rsvp-maybe-restore.md): `rsvp_maybe` used to render "Coming
+// later" here, which — combined with this stub's `map[key] ?? key` fallback —
+// made every `getByRole('button', { name: 'Coming later' })` query in this
+// file silently resolve to whichever button rendered `tr('rsvp_maybe')`. After
+// the retarget, `rsvp_maybe` means "Not sure" (Nevím), so this MUST be fixed
+// first, before any query below can be trusted to hit the button it names.
 vi.mock('~/lib/translations.js', () => ({
   tr: (key: string, params?: Record<string, unknown>) => {
     const map: Record<string, string> = {
       rsvp_title: 'RSVP',
       rsvp_yes: 'Yes',
       rsvp_no: 'No',
-      rsvp_maybe: 'Coming later',
+      rsvp_maybe: 'Not sure',
+      rsvp_comingLater: 'Coming later',
+      rsvp_comingLaterCount: '{count} coming later',
       rsvp_message: 'Message',
       rsvp_messagePlaceholder: 'Optional message for the team',
       rsvp_messageRequired: 'Please add a reason for coming later.',
+      rsvp_messageHelpRequired: 'Tell the team when you will arrive — required for "Coming later".',
+      rsvp_messageHelpOptional: 'Optional note for the team.',
       rsvp_deadlinePassed: 'RSVP deadline has passed.',
       rsvp_attending: '{count} going',
       rsvp_notAttending: '{count} not going',
-      rsvp_undecided: '{count} coming later',
+      rsvp_undecided: '{count} not sure',
       rsvp_summary: 'Responses',
       rsvp_noResponses: 'No responses yet.',
       rsvp_belowMinPlayers: 'Only {count} confirmed, need {threshold}.',
@@ -72,6 +82,7 @@ type RsvpDetailView = {
   yesCount: number;
   noCount: number;
   maybeCount: number;
+  comingLaterCount: number;
   canRsvp: boolean;
   minPlayersThreshold: number;
 };
@@ -96,6 +107,7 @@ function makeRsvpDetail(overrides: Partial<RsvpDetailView> = {}): RsvpDetailView
     yesCount: 0,
     noCount: 0,
     maybeCount: 0,
+    comingLaterCount: 0,
     canRsvp: true,
     minPlayersThreshold: 0,
     ...overrides,
@@ -139,6 +151,15 @@ function renderPanel({
 // ---------------------------------------------------------------------------
 
 describe('EventRsvpPanel', () => {
+  it('renders four buttons in gradient order: Yes, Coming later, Not sure, No', () => {
+    renderPanel();
+    const buttons = screen.getAllByRole('button').map((b) => b.textContent?.trim());
+    const rsvpButtonNames = ['Yes', 'Coming later', 'Not sure', 'No'];
+    const indices = rsvpButtonNames.map((name) => buttons.indexOf(name));
+    expect(indices.every((i) => i >= 0)).toBe(true);
+    expect(indices).toEqual([...indices].sort((a, b) => a - b));
+  });
+
   it('clicking "Yes" submits immediately, regardless of note content', async () => {
     const { onRsvpSubmit } = renderPanel({
       rsvpDetail: makeRsvpDetail({ myResponse: Option.some('no'), myMessage: Option.some('') }),
@@ -164,10 +185,11 @@ describe('EventRsvpPanel', () => {
   });
 
   it('Yes/No submit uses the already-saved note, ignoring an unsaved draft typed into the textarea', async () => {
-    // Starting response is "coming_later" so the note textarea is already visible/editable.
+    // Starting response is "yes" — any selected response renders the textarea, and starting from
+    // "coming_later" would confound this with the note-clearing rule covered by the test below.
     const { onRsvpSubmit } = renderPanel({
       rsvpDetail: makeRsvpDetail({
-        myResponse: Option.some('coming_later'),
+        myResponse: Option.some('yes'),
         myMessage: Option.some('saved reason'),
       }),
     });
@@ -180,6 +202,30 @@ describe('EventRsvpPanel', () => {
     await waitFor(() => {
       // Called with the saved message, NOT the unsaved draft just typed.
       expect(onRsvpSubmit).toHaveBeenCalledWith('no', 'saved reason');
+    });
+  });
+
+  // A "coming later" note is mandatory and answers "when will you arrive", so it must not survive
+  // leaving that response — on ANY target, not just "maybe". The server enforces the same rule via
+  // `effectiveClear` in `Event/SubmitRsvp` for clients that send no message; the web must send the
+  // empty-string clear signal explicitly, because a `coming_later` note is never blank and would
+  // otherwise always be re-sent.
+  it.each([
+    ['Not sure', 'maybe'],
+    ['No', 'no'],
+    ['Yes', 'yes'],
+  ])('leaving "Coming later" for "%s" clears its mandatory note', async (label, response) => {
+    const { onRsvpSubmit } = renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        myResponse: Option.some('coming_later'),
+        myMessage: Option.some('dorazím v 19:00'),
+      }),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: label }));
+
+    await waitFor(() => {
+      expect(onRsvpSubmit).toHaveBeenCalledWith(response, '');
     });
   });
 
@@ -280,60 +326,218 @@ describe('EventRsvpPanel', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('below-min-players warning sums yesCount + maybeCount against the threshold (hidden at the boundary)', () => {
-    renderPanel({
-      rsvpDetail: makeRsvpDetail({ yesCount: 3, maybeCount: 2, minPlayersThreshold: 5 }),
+  // ---------------------------------------------------------------------------
+  // maybe ("Not sure") — instant-submits like yes/no, and does NOT steal focus
+  // the way "Coming later" does (no mandatory comment, so no textarea reveal).
+  // ---------------------------------------------------------------------------
+
+  it('clicking "Not sure" instant-submits with response "maybe", does not force-reveal the textarea, and keeps focus on the button', async () => {
+    const { onRsvpSubmit } = renderPanel({
+      rsvpDetail: makeRsvpDetail({ myResponse: Option.none(), myMessage: Option.none() }),
     });
 
-    // 3 + 2 = 5, which is NOT below the threshold of 5 — warning should be hidden.
+    const notSureButton = screen.getByRole('button', { name: 'Not sure' });
+    fireEvent.click(notSureButton);
+
+    await waitFor(() => {
+      expect(onRsvpSubmit).toHaveBeenCalledWith('maybe', '');
+    });
+
+    // No textarea was force-revealed by this click (targetResponse stays null —
+    // "maybe" doesn't set a pending response the way "Coming later" does).
+    expect(screen.queryByLabelText(/Message/)).toBeNull();
+    // Focus stays on the clicked button — INVERTS the "Coming later" focus
+    // expectation, which moves focus into the (mandatory-comment) textarea.
+    expect(document.activeElement).toBe(notSureButton);
+  });
+
+  it('Save is enabled with a blank note when the current response is "maybe"', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({ myResponse: Option.some('maybe'), myMessage: Option.none() }),
+    });
+
+    const textarea = screen.getByLabelText(/Message/) as HTMLTextAreaElement;
+    expect(textarea.value).toBe('');
+    expect(textarea.getAttribute('aria-required')).toBe('false');
+
+    const saveButton = screen.getByRole('button', { name: 'Save note' }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(false);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Below-min-players — REWRITTEN (docs/plans/rsvp-maybe-restore.md): the
+  // formula is now `yesCount + comingLaterCount` against the threshold.
+  // `maybe` is deliberately excluded — the copy says "Pouze {count}
+  // potvrzeno" ("Only {count} confirmed") and "Not sure" is not a
+  // confirmation. These two cases prove that: the old (pre-split) formula
+  // `yesCount + maybeCount` would read 8 and hide the warning at case 1, and
+  // 4 and show it at case 2 — this rewrite locks the opposite outcomes.
+  // ---------------------------------------------------------------------------
+
+  it('below-min-players: { yes: 2, comingLater: 1, maybe: 5, threshold: 4 } shows the warning reading 3 (proves maybe is excluded)', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        yesCount: 2,
+        comingLaterCount: 1,
+        maybeCount: 5,
+        minPlayersThreshold: 4,
+      }),
+    });
+
+    // 2 + 1 = 3 < 4 — warning shown, reading 3 (NOT 8, which is what
+    // yesCount + maybeCount would have produced under the old formula).
+    expect(screen.getByText('Only 3 confirmed, need 4.')).not.toBeNull();
+  });
+
+  it('below-min-players: { yes: 2, comingLater: 2, maybe: 0, threshold: 4 } hides the warning at the boundary', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        yesCount: 2,
+        comingLaterCount: 2,
+        maybeCount: 0,
+        minPlayersThreshold: 4,
+      }),
+    });
+
+    // 2 + 2 = 4, which is NOT below the threshold of 4 — warning hidden.
     expect(screen.queryByText(/Only \d+ confirmed/)).toBeNull();
   });
 
-  it('below-min-players warning shows using the yesCount + maybeCount sum, not yesCount alone', () => {
-    renderPanel({
-      rsvpDetail: makeRsvpDetail({ yesCount: 3, maybeCount: 1, minPlayersThreshold: 5 }),
-    });
+  // ---------------------------------------------------------------------------
+  // INVERTED (docs/plans/rsvp-maybe-restore.md): the wire projection that
+  // made a legacy `maybe` row and a `coming_later` row render identically is
+  // removed. They must now render DIFFERENT labels and DIFFERENT colour
+  // classes in the per-responder list.
+  // ---------------------------------------------------------------------------
 
-    // 3 + 1 = 4 < 5 — warning shown, using the summed count (4), not yesCount alone (3).
-    expect(screen.getByText('Only 4 confirmed, need 5.')).not.toBeNull();
-  });
-
-  it('a legacy "maybe" response and a "coming_later" response both render as "Coming later" in blue', () => {
+  it('a "maybe" response and a "coming_later" response render DIFFERENT labels and DIFFERENT colour classes', () => {
     renderPanel({
       rsvpDetail: makeRsvpDetail({
         rsvps: [
           makeRsvpEntry({
-            teamMemberId: 'm-legacy',
-            displayName: 'Legacy Maybe',
+            teamMemberId: 'm-maybe',
+            displayName: 'Nevím Nora',
             response: 'maybe',
           }),
           makeRsvpEntry({
-            teamMemberId: 'm-new',
-            displayName: 'New ComingLater',
+            teamMemberId: 'm-coming-later',
+            displayName: 'Later Larry',
             response: 'coming_later',
           }),
         ],
       }),
     });
 
-    const legacyRow = screen.getByText('Legacy Maybe').closest('li');
-    const newRow = screen.getByText('New ComingLater').closest('li');
-    expect(legacyRow).not.toBeNull();
-    expect(newRow).not.toBeNull();
+    const maybeRow = screen.getByText('Nevím Nora').closest('li');
+    const comingLaterRow = screen.getByText('Later Larry').closest('li');
+    expect(maybeRow).not.toBeNull();
+    expect(comingLaterRow).not.toBeNull();
 
-    for (const row of [legacyRow, newRow]) {
-      const label = row?.querySelector('span');
-      expect(label?.textContent).toBe('Coming later');
-      expect(label?.className).toContain('text-blue-600');
-    }
+    const maybeLabel = maybeRow?.querySelector('span');
+    const comingLaterLabel = comingLaterRow?.querySelector('span');
+
+    expect(maybeLabel?.textContent).not.toBe(comingLaterLabel?.textContent);
+    expect(maybeLabel?.className).not.toBe(comingLaterLabel?.className);
   });
 
-  it('the "Coming later" button is shown as active (aria-pressed) when the saved response is the legacy "maybe" value', () => {
+  // ---------------------------------------------------------------------------
+  // INVERTED (docs/plans/rsvp-maybe-restore.md): aria-pressed on the row-1
+  // buttons must track each response independently now — a saved "maybe" no
+  // longer activates the "Coming later" button (they used to be
+  // indistinguishable under the legacy projection).
+  // ---------------------------------------------------------------------------
+
+  it('myResponse Some("maybe") activates ONLY the "Not sure" button — "Coming later" is not pressed', () => {
     renderPanel({
       rsvpDetail: makeRsvpDetail({ myResponse: Option.some('maybe') }),
     });
 
-    const comingLaterButton = screen.getByRole('button', { name: 'Coming later' });
-    expect(comingLaterButton.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Not sure' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Coming later' }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+  });
+
+  it('myResponse Some("coming_later") activates ONLY the "Coming later" button — "Not sure" is not pressed (the mirror case)', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({ myResponse: Option.some('coming_later') }),
+    });
+
+    expect(screen.getByRole('button', { name: 'Coming later' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Not sure' }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // aria-pressed is true on exactly one of the four buttons, for each state.
+  // ---------------------------------------------------------------------------
+
+  (['yes', 'coming_later', 'maybe', 'no'] as const).forEach((response) => {
+    it(`aria-pressed is true on exactly one of the four buttons when myResponse is "${response}"`, () => {
+      renderPanel({
+        rsvpDetail: makeRsvpDetail({ myResponse: Option.some(response) }),
+      });
+
+      const rsvpButtonNames = ['Yes', 'Coming later', 'Not sure', 'No'];
+      const pressed = rsvpButtonNames.filter(
+        (name) => screen.getByRole('button', { name }).getAttribute('aria-pressed') === 'true',
+      );
+      expect(pressed).toHaveLength(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Accessibility — required marker is aria-hidden (not announced as a bare
+  // "asterisk"); the textarea always carries aria-required.
+  // ---------------------------------------------------------------------------
+
+  it('the required marker is aria-hidden and the textarea carries aria-required', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Coming later' }));
+
+    const textarea = screen.getByLabelText(/Message/);
+    expect(textarea.hasAttribute('aria-required')).toBe(true);
+
+    const marker = document.querySelector('[aria-hidden="true"]');
+    expect(marker).not.toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // aria-describedby lists both the permanent help text and the error text
+  // when the note is missing on a mandatory-comment response; help alone
+  // otherwise. The help text is rendered permanently (not only on error).
+  // ---------------------------------------------------------------------------
+
+  it('aria-describedby lists both help and error ids when the note is required and missing', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Coming later' }));
+
+    const textarea = screen.getByLabelText(/Message/);
+    const describedBy = textarea.getAttribute('aria-describedby') ?? '';
+    const ids = describedBy.split(/\s+/).filter(Boolean);
+
+    expect(ids.length).toBe(2);
+    for (const id of ids) {
+      expect(document.getElementById(id)).not.toBeNull();
+    }
+  });
+
+  it('aria-describedby lists only the help id when the note is not missing (e.g. a non-mandatory response)', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({ myResponse: Option.some('yes'), myMessage: Option.some('hi') }),
+    });
+
+    const textarea = screen.getByLabelText(/Message/);
+    const describedBy = textarea.getAttribute('aria-describedby') ?? '';
+    const ids = describedBy.split(/\s+/).filter(Boolean);
+
+    expect(ids.length).toBe(1);
+    expect(document.getElementById(ids[0])).not.toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

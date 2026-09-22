@@ -52,6 +52,7 @@ import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementC
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
+import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 import { MockChatAgentLayer, MockChatRateLimiterLayer } from '../mocks/aiChatMocks.js';
 import { MockBankSyncLayers, MockGenericSqlClientLayer } from '../mocks/bankSyncMocks.js';
 import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
@@ -2357,6 +2358,69 @@ describe('logTrainingGame + getTrainingGames (Epic 6.2)', () => {
       expect(response.status).toBe(422);
       const body = await response.json();
       expect(body.reason).toBe('notRsvpYes');
+    });
+
+    // -----------------------------------------------------------------------
+    // Attendance narrowing (docs/plans/rsvp-maybe-restore.md) — this handler
+    // only trusts whatever `findYesRsvpMemberIdsByEventId` returns, and that
+    // set is computed by the REAL `isAttendingRsvpResponse` predicate here
+    // (not a hand-picked id list), so these two cases exercise the actual
+    // narrowing the migration plan describes: a `maybe` ("Nevím") responder
+    // must fail `notRsvpYes`, a `coming_later` responder must be accepted.
+    // -----------------------------------------------------------------------
+
+    it('a game result naming a maybe responder fails with 422 notRsvpYes', async () => {
+      const responses: Record<string, string> = {
+        [TEST_MEMBER_A]: 'coming_later',
+        [TEST_MEMBER_B]: 'maybe',
+      };
+      tgYesRsvpMembers = Object.entries(responses)
+        .filter(([, response]) => isAttendingRsvpResponse(response))
+        .map(([id]) => id as TeamMember.TeamMemberId);
+
+      const response = await tgHandler(
+        new Request(trainingGamesUrl(TEST_TEAM_ID, TEST_EVENT_ID), {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer captain-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            teamA: [TEST_MEMBER_A],
+            teamB: [TEST_MEMBER_B],
+            outcome: 'teamA',
+          }),
+        }),
+      );
+      expect(response.status).toBe(422);
+      const body = await response.json();
+      expect(body.reason).toBe('notRsvpYes');
+    });
+
+    it('a game result naming only yes/coming_later responders is accepted (200)', async () => {
+      const responses: Record<string, string> = {
+        [TEST_MEMBER_A]: 'yes',
+        [TEST_MEMBER_B]: 'coming_later',
+      };
+      tgYesRsvpMembers = Object.entries(responses)
+        .filter(([, response]) => isAttendingRsvpResponse(response))
+        .map(([id]) => id as TeamMember.TeamMemberId);
+
+      const response = await tgHandler(
+        new Request(trainingGamesUrl(TEST_TEAM_ID, TEST_EVENT_ID), {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer captain-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            teamA: [TEST_MEMBER_A],
+            teamB: [TEST_MEMBER_B],
+            outcome: 'teamA',
+          }),
+        }),
+      );
+      expect(response.status).toBe(200);
     });
   });
 

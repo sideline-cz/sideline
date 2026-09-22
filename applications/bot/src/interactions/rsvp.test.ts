@@ -175,6 +175,23 @@ describe('RsvpAddMessageButton modal shape', () => {
     const typed = response as { data: { custom_id: string } };
     expect(typed.data.custom_id).toBe(`rsvp-modal:${TEAM_ID}:${EVENT_ID}:coming_later`);
   });
+
+  // ---------------------------------------------------------------------------
+  // maybe ("Nevím") — docs/plans/rsvp-maybe-restore.md: `maybe` stays a
+  // non-mandatory-comment response (mirrors yes/no), unlike coming_later.
+  // ---------------------------------------------------------------------------
+
+  it('builds the text input with required: false and no min_length for maybe', async () => {
+    const response = await runHandler(`rsvp-add-msg:${TEAM_ID}:${EVENT_ID}:maybe`);
+    const typed = response as {
+      data: {
+        components: ReadonlyArray<{ type: number; components: ReadonlyArray<TextInputComponent> }>;
+      };
+    };
+    const input = typed.data.components[0]?.components[0];
+    expect(input?.required).toBe(false);
+    expect(input).not.toHaveProperty('min_length');
+  });
   // ---------------------------------------------------------------------------
   // Prefill — the modal must show the member's existing note so "Edit message"
   // doesn't read as though the note was lost.

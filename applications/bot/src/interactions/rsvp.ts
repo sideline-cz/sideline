@@ -60,7 +60,7 @@ const localizeRsvpResponse = (response: EventRsvp.RsvpResponse, locale: Locale):
     case 'maybe':
       return m.rsvp_maybe({}, { locale });
     case 'coming_later':
-      return m.rsvp_maybe({}, { locale });
+      return m.rsvp_comingLater({}, { locale });
   }
 };
 

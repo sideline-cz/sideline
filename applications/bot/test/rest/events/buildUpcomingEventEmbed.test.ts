@@ -26,6 +26,7 @@ const makeEntry = (
     yes_count: 0,
     no_count: 0,
     maybe_count: 0,
+    coming_later_count: 0,
     my_response: Option.none(),
     my_response_actual: Option.none(),
     my_message: Option.none(),
@@ -318,15 +319,25 @@ describe('buildUpcomingEventEmbed', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // docs/plans/rsvp-maybe-restore.md — row 1 becomes FOUR buttons in the
+  // canonical gradient order: yes -> coming_later -> maybe -> no. `maybe`
+  // ("Nevím") now instant-submits (like yes/no); `coming_later` keeps its
+  // `:v`-marked modal-trigger custom_id, now at index 1. Highlight styling is
+  // driven by `myActualResponse` (falls back to `my_response` when
+  // `my_response_actual` is absent — rolling-deploy safety), per the plan's
+  // "row 1's style highlight" note.
+  // ---------------------------------------------------------------------------
+
   describe('RSVP buttons', () => {
     it('returns two component rows (rsvp + attendees) when user has no response', () => {
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry: makeEntry() });
       expect(components).toHaveLength(2);
     });
 
-    it('rsvp row has three buttons (yes/no/maybe)', () => {
+    it('rsvp row has FOUR buttons (yes/coming_later/maybe/no)', () => {
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry: makeEntry() });
-      expect(components[0].components).toHaveLength(3);
+      expect(components[0].components).toHaveLength(4);
     });
 
     it('includes an attendees button targeting this event on the second row', () => {
@@ -344,46 +355,108 @@ describe('buildUpcomingEventEmbed', () => {
       expect(rsvpButtons.every((b) => !b.disabled)).toBe(true);
     });
 
-    it('yes button uses success style when my_response is yes', () => {
-      const entry = makeEntry({ my_response: Option.some('yes') });
+    it('yes button uses success style when my_response_actual is yes', () => {
+      const entry = makeEntry({
+        my_response: Option.some('yes'),
+        my_response_actual: Option.some('yes'),
+      });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const yesButton = components[0].components[0] as { style: number };
       expect(yesButton.style).toBe(3); // success/green
     });
 
-    it('no button uses danger style when my_response is no', () => {
-      const entry = makeEntry({ my_response: Option.some('no') });
+    it('no button uses danger style when my_response_actual is no', () => {
+      const entry = makeEntry({
+        my_response: Option.some('no'),
+        my_response_actual: Option.some('no'),
+      });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const noButton = components[0].components[1] as { style: number };
+      const noButton = components[0].components[3] as { style: number };
       expect(noButton.style).toBe(4); // danger/red
     });
 
-    it('maybe button uses primary style when my_response is maybe', () => {
-      const entry = makeEntry({ my_response: Option.some('maybe') });
-      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const maybeButton = components[0].components[2] as { style: number };
-      expect(maybeButton.style).toBe(1); // primary/blurple
-    });
-
     it('all rsvp buttons use secondary style when my_response is none', () => {
-      const entry = makeEntry({ my_response: Option.none() });
+      const entry = makeEntry({ my_response: Option.none(), my_response_actual: Option.none() });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const rsvpButtons = components[0].components as ReadonlyArray<{ style: number }>;
       expect(rsvpButtons.every((b) => b.style === 2)).toBe(true);
     });
 
-    it('rsvp button custom_ids encode event_id, team_id, and response (no offset)', () => {
+    // Table: exactly one of the four row-1 buttons is highlighted (non-secondary
+    // style), for each of the four possible responses — deliberately NOT pinning
+    // an exact style CODE for coming_later/maybe (undocumented in the plan);
+    // only that highlighting is mutually exclusive and present.
+    (
+      [
+        ['yes', 0],
+        ['coming_later', 1],
+        ['maybe', 2],
+        ['no', 3],
+      ] as const
+    ).forEach(([response, expectedIndex]) => {
+      it(`exactly one row-1 button is highlighted for my_response_actual = ${response} (index ${expectedIndex})`, () => {
+        const entry = makeEntry({
+          my_response: Option.some(response),
+          my_response_actual: Option.some(response),
+        });
+        const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+        const rsvpButtons = components[0].components as ReadonlyArray<{ style: number }>;
+        const highlightedIndices = rsvpButtons
+          .map((b, i) => (b.style !== 2 ? i : -1))
+          .filter((i) => i !== -1);
+        expect(highlightedIndices).toHaveLength(1);
+        expect(highlightedIndices[0]).toBe(expectedIndex);
+      });
+    });
+
+    // The cases above set `my_response` and `my_response_actual` to the SAME value, so they
+    // would all still pass if row 1 were highlighted from the projected `my_response`. This is
+    // the only case that pins the distinction: it is the new-bot/old-server skew, where the
+    // server still projects `coming_later` down to `maybe` on `my_response`. Highlighting from
+    // the projected value would light up "Nevím" for a member who actually answered
+    // "Přijdu později".
+    it('highlights from my_response_actual, not the projected my_response, when they disagree', () => {
+      const entry = makeEntry({
+        my_response: Option.some('maybe'),
+        my_response_actual: Option.some('coming_later'),
+      });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const rsvpButtons = components[0].components as ReadonlyArray<{ style: number }>;
+      const highlightedIndices = rsvpButtons
+        .map((b, i) => (b.style !== 2 ? i : -1))
+        .filter((i) => i !== -1);
+      expect(highlightedIndices).toEqual([1]);
+    });
+
+    it('rsvp button custom_ids encode event_id, team_id in gradient order yes/coming_later/maybe/no', () => {
       const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const [yesBtn, noBtn, maybeBtn] = components[0].components as ReadonlyArray<{
+      const [yesBtn, comingLaterBtn, maybeBtn, noBtn] = components[0].components as ReadonlyArray<{
         custom_id: string;
       }>;
       expect(yesBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:yes');
-      expect(noBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:no');
       // coming_later always opens the required-comment modal instead of an
-      // instant upcoming-rsvp:...:maybe submit — see the dedicated
-      // "message action row" describe block below for full coverage.
-      expect(maybeBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
+      // instant submit — see the dedicated "message action row" describe
+      // block below for full coverage.
+      expect(comingLaterBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
+      // maybe ("Nevím") INSTANT-SUBMITS, unlike coming_later.
+      expect(maybeBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:maybe');
+      expect(noBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:no');
+    });
+
+    it('the maybe button instant-submits: custom_id starts with upcoming-rsvp:, NOT u-add-msg:', () => {
+      const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const maybeBtn = components[0].components[2] as { custom_id: string };
+      expect(maybeBtn.custom_id.startsWith('upcoming-rsvp:')).toBe(true);
+      expect(maybeBtn.custom_id.startsWith('u-add-msg:')).toBe(false);
+    });
+
+    it('the coming_later button keeps the :v marker (ends with :coming_later:v)', () => {
+      const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const comingLaterBtn = components[0].components[1] as { custom_id: string };
+      expect(comingLaterBtn.custom_id.endsWith(':coming_later:v')).toBe(true);
     });
   });
 
@@ -405,6 +478,46 @@ describe('buildUpcomingEventEmbed', () => {
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const allText = (embeds[0].fields ?? []).map((f) => f.value).join(' ');
       expect(allText).toContain('Cannot wait!');
+    });
+
+    // docs/plans/rsvp-maybe-restore.md — the coming_later -> maybe wire
+    // projection is removed, so `my_response: 'maybe'` and
+    // `my_response: 'coming_later'` must render DIFFERENT "your RSVP" labels
+    // (previously both collapsed to the same "Coming later" text).
+    it('maybe and coming_later produce DIFFERENT "your RSVP" label strings', () => {
+      const maybeEntry = makeEntry({ my_response: Option.some('maybe') });
+      const comingLaterEntry = makeEntry({ my_response: Option.some('coming_later') });
+
+      // Match the exact "Your RSVP" field name, not a loose `includes('rsvp')`:
+      // the "RSVPs" summary field (name "📊 RSVPs") ALSO matches that, and is
+      // pushed before "Your RSVP" — a loose `.find` would grab the summary
+      // every time, identical for both entries regardless of `my_response`,
+      // and this assertion would false-fail.
+      const yourRsvpName = m.bot_embed_your_rsvp({}, { locale: baseParams.locale });
+      const maybeField = (
+        buildUpcomingEventEmbed({ ...baseParams, entry: maybeEntry }).embeds[0].fields ?? []
+      ).find((f) => f.name === yourRsvpName);
+      const comingLaterField = (
+        buildUpcomingEventEmbed({ ...baseParams, entry: comingLaterEntry }).embeds[0].fields ?? []
+      ).find((f) => f.name === yourRsvpName);
+
+      expect(maybeField?.value).toBeDefined();
+      expect(comingLaterField?.value).toBeDefined();
+      expect(maybeField?.value).not.toBe(comingLaterField?.value);
+    });
+  });
+
+  // docs/plans/rsvp-maybe-restore.md — the summary field renders four counts
+  // in the canonical gradient order (yes, coming_later, maybe, no).
+  describe('rsvp summary — four counts', () => {
+    it('renders all four counts (yes, coming_later, maybe, no)', () => {
+      const entry = makeEntry({ yes_count: 5, no_count: 2, maybe_count: 1, coming_later_count: 3 });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const allValues = (embeds[0].fields ?? []).map((f) => f.value).join(' ');
+      expect(allValues).toContain('5');
+      expect(allValues).toContain('3');
+      expect(allValues).toContain('1');
+      expect(allValues).toContain('2');
     });
   });
 
@@ -447,35 +560,43 @@ describe('buildUpcomingEventEmbed', () => {
     });
 
     // -----------------------------------------------------------------------
-    // coming_later — row 1's third RSVP button ("Maybe") now routes to the
-    // add-message modal for the new coming_later response (coming_later
-    // always requires a non-empty comment, so it can no longer be an
-    // instant-submit `upcoming-rsvp:...:maybe` button). Unlike row 2's
-    // edit/clear pairing (buildMessageActionRow-equivalent), this row-1 slot
-    // never has a "clear message" variant — it is always the single
-    // modal-trigger button, regardless of the user's current my_response /
-    // my_message state.
+    // Row 1 layout, updated for rsvp-maybe-restore: row 1's SECOND button
+    // (coming_later, index 1) routes to the add-message modal — coming_later
+    // always requires a non-empty comment, so it can never be an
+    // instant-submit button. Row 1's THIRD button (maybe, index 2) DOES
+    // instant-submit, since "Nevím" carries no mandatory comment. Neither
+    // slot ever gains a "clear message" variant — row 1 is always exactly
+    // four buttons, regardless of the user's current my_response/my_message
+    // state (that pairing only exists on row 2, below).
     // -----------------------------------------------------------------------
 
-    it('third rsvp button routes to u-add-msg:...:coming_later, not an instant upcoming-rsvp:...:maybe submit', () => {
+    it('row 1 second button (coming_later) routes to u-add-msg:...:coming_later:v, not an instant submit', () => {
+      const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const [, secondBtn] = components[0].components as ReadonlyArray<{ custom_id: string }>;
+      expect(secondBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
+      expect(secondBtn.custom_id).not.toBe('upcoming-rsvp:ev-42:tm-7:coming_later');
+    });
+
+    it('row 1 third button (maybe) instant-submits via upcoming-rsvp:...:maybe', () => {
       const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const [, , thirdBtn] = components[0].components as ReadonlyArray<{ custom_id: string }>;
-      expect(thirdBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
-      expect(thirdBtn.custom_id).not.toBe('upcoming-rsvp:ev-42:tm-7:maybe');
+      expect(thirdBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:maybe');
     });
 
-    it('row 1 still has exactly 3 buttons regardless of my_response/my_message state (no clear-message variant for coming_later)', () => {
+    it('row 1 still has exactly FOUR buttons regardless of my_response/my_message state', () => {
       const entry = makeEntry({
         event_id: 'ev-42',
         team_id: 'tm-7',
         my_response: Option.some('maybe'),
+        my_response_actual: Option.some('maybe'),
         my_message: Option.some('Already responded with a note'),
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      expect(components[0].components).toHaveLength(3);
-      const [, , thirdBtn] = components[0].components as ReadonlyArray<{ custom_id: string }>;
-      expect(thirdBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
+      expect(components[0].components).toHaveLength(4);
+      const [, secondBtn] = components[0].components as ReadonlyArray<{ custom_id: string }>;
+      expect(secondBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
     });
 
     it('encodes team_id and event_id in message-button custom_ids', () => {
@@ -581,28 +702,45 @@ describe('buildUpcomingEventEmbed', () => {
     // voted "Coming later". Guarded by a `:v` marker on row 1's id only.
     // -----------------------------------------------------------------------
 
-    it("every custom_id across both action rows is unique, and stays within Discord's 100-char limit, when the true response is coming_later", () => {
-      // Realistic 36-char UUIDs: with two of them the id is already 96 of
-      // Discord's 100-character budget, so a longer marker would silently
-      // break the limit — the length assertion is meaningless with short ids.
-      const teamId = '11111111-2222-4333-8444-555555555555';
-      const eventId = '66666666-7777-4888-8999-aaaaaaaaaaaa';
-      const entry = makeEntry({
-        event_id: eventId,
-        team_id: teamId,
-        my_response: Option.some('maybe'),
-        my_response_actual: Option.some('coming_later'),
-        my_message: Option.some('Running late'),
-      });
-      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const customIds = components.flatMap((row) =>
-        (row.components as ReadonlyArray<{ custom_id: string }>).map((b) => b.custom_id),
-      );
+    // Table: all FOUR my_response_actual values x my_message present/absent —
+    // 8 cases, each built with two REAL 36-character UUIDs (the longest id,
+    // row 1's coming_later `:v`-marked button, is 98 of Discord's 100-char
+    // budget — 2 characters of headroom). Discord error 50035 rejects the
+    // WHOLE message on a single duplicate custom_id, so every case must be
+    // both internally unique and within budget.
+    const teamId = '11111111-2222-4333-8444-555555555555';
+    const eventId = '66666666-7777-4888-8999-aaaaaaaaaaaa';
 
-      expect(new Set(customIds).size).toBe(customIds.length);
-      for (const id of customIds) {
-        expect(id.length).toBeLessThanOrEqual(100);
-      }
+    (
+      [
+        ['yes', true],
+        ['yes', false],
+        ['coming_later', true],
+        ['coming_later', false],
+        ['maybe', true],
+        ['maybe', false],
+        ['no', true],
+        ['no', false],
+      ] as const
+    ).forEach(([response, hasMessage]) => {
+      it(`every custom_id across both action rows is unique and <=100 chars — my_response_actual=${response}, my_message ${hasMessage ? 'present' : 'absent'}`, () => {
+        const entry = makeEntry({
+          event_id: eventId,
+          team_id: teamId,
+          my_response: Option.some(response),
+          my_response_actual: Option.some(response),
+          my_message: hasMessage ? Option.some('Running late') : Option.none(),
+        });
+        const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+        const customIds = components.flatMap((row) =>
+          (row.components as ReadonlyArray<{ custom_id: string }>).map((b) => b.custom_id),
+        );
+
+        expect(new Set(customIds).size).toBe(customIds.length);
+        for (const id of customIds) {
+          expect(id.length).toBeLessThanOrEqual(100);
+        }
+      });
     });
   });
 

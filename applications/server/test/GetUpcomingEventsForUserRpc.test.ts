@@ -245,6 +245,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             yes_count: 3,
             no_count: 1,
             maybe_count: 2,
+            coming_later_count: 0,
             my_response: Option.some('yes'),
             my_response_actual: Option.some('yes'),
             my_message: Option.some('See you there'),
@@ -329,6 +330,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             yes_count: 0,
             no_count: 0,
             maybe_count: 0,
+            coming_later_count: 0,
             my_response: Option.none(),
             my_response_actual: Option.none(),
             my_message: Option.none(),
@@ -350,5 +352,62 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
       Effect.provide(MockProvideLayer),
       Effect.asVoid,
     ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // docs/plans/rsvp-maybe-restore.md — the projection that folded a stored
+  // `coming_later` row down to `my_response: 'maybe'` is removed. `my_response`
+  // now carries the true stored value, and `coming_later_count` is its own
+  // bucket, split from `maybe_count`. `my_response_actual` is DELIBERATELY
+  // RETAINED (one more release, rolling-deploy safety) — both fields are
+  // asserted here.
+  // ---------------------------------------------------------------------------
+
+  it.effect(
+    'my_response is Some("coming_later") where a legacy-projected Some("maybe") used to be expected; coming_later_count splits from maybe_count',
+    () =>
+      Effect.Do.pipe(
+        Effect.let(
+          'entry',
+          () =>
+            new EventRpcModels.UpcomingEventForUserEntry({
+              event_id: TEST_EVENT_ID,
+              team_id: TEST_TEAM_ID,
+              title: 'Late Arrival Event',
+              description: Option.none(),
+              image_url: Option.none(),
+              start_at: FUTURE_DATE,
+              end_at: Option.none(),
+              location: Option.none(),
+              location_url: Option.none(),
+              event_type: 'training',
+              yes_count: 3,
+              no_count: 1,
+              maybe_count: 2,
+              coming_later_count: 4,
+              my_response: Option.some('coming_later'),
+              my_response_actual: Option.some('coming_later'),
+              my_message: Option.some('Running late'),
+              all_day: false,
+              status: 'active',
+              start_date: Option.none(),
+              end_date: Option.none(),
+            }),
+        ),
+        Effect.tap(({ entry }) =>
+          Effect.sync(() => {
+            expect(Option.isSome(entry.my_response) && entry.my_response.value).toBe(
+              'coming_later',
+            );
+            expect(Option.isSome(entry.my_response_actual) && entry.my_response_actual.value).toBe(
+              'coming_later',
+            );
+            expect(entry.maybe_count).toBe(2);
+            expect(entry.coming_later_count).toBe(4);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
   );
 });

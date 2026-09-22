@@ -25,3 +25,25 @@ export const isRsvpMessageRequiredAndMissing = (
   const effective = Option.isSome(submitted) ? submitted : priorMessage;
   return Option.isNone(effective);
 };
+
+/**
+ * The mirror of the guard above, for the opposite transition. A `coming_later` note is
+ * MANDATORY and answers "when will you arrive", so it must not survive the member leaving
+ * that response — carrying it over renders nonsense like `Nevím 💬 dorazím v 19:00`.
+ *
+ * The upsert's `COALESCE(${message}, event_rsvps.message)` preserves the old note whenever a
+ * caller submits no message, which is exactly what the bot does on an instant-submit button.
+ * So the clearing has to be derived server-side rather than left to each client: returns true
+ * iff the member is leaving `coming_later` and supplied no replacement note.
+ *
+ * Both write surfaces MUST route through this — `Event/SubmitRsvp` (RPC) and `submitRsvp`
+ * (HTTP) — or the two disagree for the same transition depending on which client made it.
+ */
+export const isLeavingComingLaterWithoutNewMessage = (
+  response: EventRsvp.RsvpResponse,
+  submittedMessage: Option.Option<string>,
+  priorResponse: Option.Option<EventRsvp.RsvpResponse>,
+): boolean =>
+  response !== 'coming_later' &&
+  Option.isNone(Option.filter(submittedMessage, (message) => message.trim().length > 0)) &&
+  Option.contains(priorResponse, 'coming_later');

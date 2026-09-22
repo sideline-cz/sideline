@@ -1,4 +1,4 @@
-import type { Auth, DashboardApi, DashboardLayoutApi } from '@sideline/domain';
+import type { Auth, DashboardApi, DashboardLayoutApi, EventRsvp } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { DateTime, Option } from 'effect';
 import {
@@ -131,27 +131,27 @@ const eventBadgeDate = (
   return { day: date.getDate(), month: date.toLocaleDateString(undefined, { month: 'short' }) };
 };
 
-const RsvpBadge = ({ rsvp }: { rsvp: Option.Option<'yes' | 'no' | 'maybe' | 'coming_later'> }) => {
+const RsvpBadge = ({ rsvp }: { rsvp: Option.Option<EventRsvp.RsvpResponse> }) => {
   if (Option.isNone(rsvp)) {
     return <Badge variant='secondary'>{tr('dashboard_noResponse')}</Badge>;
   }
-  // "Coming later" is written as `coming_later` and read back as `maybe` this release — both
-  // render as the same "coming later" badge, grouped under the `late` style/label key.
-  const key: 'yes' | 'no' | 'late' =
-    rsvp.value === 'yes' ? 'yes' : rsvp.value === 'no' ? 'no' : 'late';
   const styles = {
     yes: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/50 dark:text-green-200 dark:border-green-800',
+    coming_later:
+      'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/50 dark:text-blue-200 dark:border-blue-800',
+    maybe:
+      'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-200 dark:border-amber-800',
     no: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/50 dark:text-red-200 dark:border-red-800',
-    late: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/50 dark:text-blue-200 dark:border-blue-800',
   };
   const labels = {
     yes: tr('dashboard_rsvpYes'),
+    coming_later: tr('dashboard_rsvpComingLater'),
+    maybe: tr('dashboard_rsvpMaybe'),
     no: tr('dashboard_rsvpNo'),
-    late: tr('dashboard_rsvpMaybe'),
   };
   return (
-    <Badge variant='outline' className={styles[key]}>
-      {labels[key]}
+    <Badge variant='outline' className={styles[rsvp.value]}>
+      {labels[rsvp.value]}
     </Badge>
   );
 };

@@ -627,7 +627,7 @@ Returns a summary view for the authenticated user within a team: upcoming events
 | `endAt` | `string \| null` | Yes | End date/time |
 | `location` | `string \| null` | Yes | Location |
 | `locationUrl` | `string \| null` | Yes | Optional location URL (public `https://`, max 2048 chars) |
-| `myRsvp` | `"yes" \| "no" \| "maybe" \| null` | Yes | User's current RSVP response. A `"coming_later"` response is projected to `"maybe"` on this read surface this release (see the Event RSVP section's Enums) |
+| `myRsvp` | `"yes" \| "no" \| "maybe" \| "coming_later" \| null` | Yes | User's current RSVP response |
 
 `DashboardActivitySummary`:
 
@@ -2154,9 +2154,7 @@ Cancels an event. This action is irreversible.
 
 #### Enums
 
-**RsvpResponse (submit):** `"yes"`, `"no"`, `"maybe"`, `"coming_later"` — `"coming_later"` ("Coming later") means the member will attend but arrive late; it counts as full attendance (roster auto-provisioning, team generation, training auto-log, player ratings, and the min-players headcount all treat it like `"yes"`) and requires a non-empty `message` (see `RsvpMessageRequired` below).
-
-**RsvpResponse (read):** `"yes"`, `"no"`, `"maybe"` — read endpoints (`GET .../rsvps`) are intentionally still restricted to this legacy 3-value vocabulary this release: a stored `"coming_later"` response is projected down to `"maybe"` before it reaches these responses, so already-deployed clients never decode an unrecognized value. `maybeCount` (below) counts both legacy `"maybe"` and `"coming_later"` responses together.
+**RsvpResponse:** `"yes"`, `"no"`, `"maybe"`, `"coming_later"` — used identically on submit and read (no wire projection). `"maybe"` ("Not sure") is a non-attending response, distinct from `"coming_later"` ("Coming later"), which means the member will attend but arrive late; it counts as full attendance (roster auto-provisioning, team generation, training auto-log, player ratings, and the min-players headcount all treat it like `"yes"`) and requires a non-empty `message` (see `RsvpMessageRequired` below).
 
 ---
 
@@ -2182,7 +2180,8 @@ Returns RSVP details for an event including all responses and counts.
 | `rsvps` | `RsvpEntry[]` | No | All RSVP entries |
 | `yesCount` | `number` | No | Number of "yes" responses |
 | `noCount` | `number` | No | Number of "no" responses |
-| `maybeCount` | `number` | No | Number of "maybe" responses, including "coming later" (projected to `"maybe"` on this read surface — see the Enums section above) |
+| `maybeCount` | `number` | No | Number of "maybe" ("Not sure") responses |
+| `comingLaterCount` | `number` | No | Number of "coming later" responses. Absent from older server responses decodes as `0` |
 | `canRsvp` | `boolean` | No | Whether the user can submit/update their RSVP |
 | `minPlayersThreshold` | `number` | No | Team's minimum players threshold |
 
@@ -2224,7 +2223,7 @@ Submits or updates the authenticated user's RSVP for an event.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `response` | `RsvpResponse` | Yes | `"yes"`, `"no"`, `"maybe"`, or `"coming_later"` |
-| `message` | `string \| null` | Yes | Message to accompany the RSVP. `null` leaves any already-stored message untouched (an idempotent resubmit keeps it); a blank/whitespace-only string clears it. Optional for `"yes"`/`"no"`/`"maybe"`; required (non-blank, after falling back to any existing stored message) for `"coming_later"` — so a blank/whitespace clear is rejected with `EventRsvpMessageRequired` on that response |
+| `message` | `string \| null` | Yes | Message to accompany the RSVP. `null` leaves any already-stored message untouched (an idempotent resubmit keeps it); a blank/whitespace-only string clears it. Optional for `"yes"`/`"no"`/`"maybe"`; required (non-blank, after falling back to any existing stored message) for `"coming_later"` — so a blank/whitespace clear is rejected with `EventRsvpMessageRequired` on that response. Exception: if the member's prior response was `"coming_later"` and the new `response` is not, the stored note is always cleared (even on `null`) — a mandatory "when will you arrive" note must not survive onto another response |
 
 **Response:** `204 No Content`
 
@@ -7399,7 +7398,7 @@ Handles Discord guild lifecycle events.
 | `Guild/AllocatePersonalOverflowCategory` | `team_id` → `{ sequence: number, exists: boolean }` | Inserts a new `personal_event_overflow_categories` row (next sequence number) with `ON CONFLICT DO NOTHING`; returns whether a new row was inserted |
 | `Guild/SavePersonalOverflowCategoryId` | `team_id`, `sequence`, `discord_category_id` | Writes the Discord category snowflake back to the overflow row |
 | `Guild/ListPersonalOverflowCategories` | `team_id` → `{ sequence: number, discord_category_id: Snowflake }[]` | Lists all provisioned overflow categories for a team in sequence order |
-| `Guild/GetAllUpcomingEventsForUser` | `guild_id`, `discord_user_id` → `UpcomingEventsForUserResult` | Returns all upcoming active events for the requesting Discord user with their RSVP status; used by the personal-channel reconcile worker to build the member's personal-channel embed list. Same `my_response` / `my_response_actual` projection split as `Event/GetUpcomingEventsForUser` (see the Event RPC group below). Result also carries the caller's `show_attendee_list` preference (decoding default `true` for rollout compatibility) so the reconcile worker knows whether to render the attendee list in the personal-channel embed. |
+| `Guild/GetAllUpcomingEventsForUser` | `guild_id`, `discord_user_id` → `UpcomingEventsForUserResult` | Returns all upcoming active events for the requesting Discord user with their RSVP status; used by the personal-channel reconcile worker to build the member's personal-channel embed list. Same `my_response` / `my_response_actual` fields as `Event/GetUpcomingEventsForUser` (see the Event RPC group below). Result also carries the caller's `show_attendee_list` preference (decoding default `true` for rollout compatibility) so the reconcile worker knows whether to render the attendee list in the personal-channel embed. |
 
 #### Event
 
@@ -7414,19 +7413,19 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/GetDiscordMessageId` | `event_id` → `EventDiscordMessage \| null` | Retrieves the stored Discord message for an event |
 | `Event/SubmitRsvp` | `event_id`, `team_id`, `discord_user_id`, `response`, `message` → `SubmitRsvpResult` | Submits an RSVP from the bot; `response` accepts `"coming_later"` (requires a non-blank `message`, or `RsvpMessageRequired` is returned); result includes late-RSVP flag and optional notification channel |
 | `Event/GetRsvpMessage` | `event_id`, `team_id`, `discord_user_id` → `string \| null` | Lean read for the "Add/Edit message" modal prefill: returns the member's stored RSVP note, or `null` if none. Called synchronously before opening the modal (a `MODAL` response cannot be deferred), so the bot falls back to an empty modal on `RpcClientError` |
-| `Event/GetRsvpCounts` | `event_id` → `RsvpCountsResult` | Returns yes/no/maybe counts for an event; `maybeCount` includes both legacy `maybe` and `coming_later` responses |
+| `Event/GetRsvpCounts` | `event_id` → `RsvpCountsResult` | Returns yes/no/maybe counts for an event; `maybeCount` counts only `"maybe"` responses (`coming_later` is not included and has no count field on this result) |
 | `Event/GetEventEmbedInfo` | `event_id` → `EventEmbedInfo \| null` | Retrieves info needed to render the Discord embed |
 | `Event/GetChannelEvents` | `discord_channel_id` → `ChannelEventEntry[]` | Lists events posted in a Discord channel |
-| `Event/GetRsvpAttendees` | `event_id`, `offset`, `limit` → `RsvpAttendeesResult` | Returns paginated RSVP attendee list; each entry's `response` is projected to the legacy `"yes" \| "no" \| "maybe"` vocabulary (`coming_later` → `maybe`) |
-| `Event/GetRsvpReminderSummary` | `event_id` → `RsvpReminderSummary` | Returns RSVP reminder data including non-responders and yes-attendee list; the yes-attendee list also includes `coming_later` responders (both count as attending). `nonResponders` excludes members with `rsvp_reminder_dms = false` — this RPC's only consumer is the reminder DM send, so an opted-out member simply never appears here; the organiser-facing non-responders view and `missed_rsvps` accounting query the table unfiltered. |
+| `Event/GetRsvpAttendees` | `event_id`, `offset`, `limit` → `RsvpAttendeesResult` | Returns paginated RSVP attendee list; each entry's `response` is the true stored value (`"yes" \| "no" \| "maybe" \| "coming_later"`), ordered yes, coming later, maybe, no |
+| `Event/GetRsvpReminderSummary` | `event_id` → `RsvpReminderSummary` | Returns RSVP reminder data including non-responders and yes-attendee list; the yes-attendee list also includes `coming_later` responders (both count as attending) |
 | `Event/GetUpcomingGuildEvents` | `guild_id`, `offset`, `limit` → `GuildEventListResult` | Lists upcoming events for a guild (guild-scoped, no per-user RSVP data) |
-| `Event/GetUpcomingEventsForUser` | `guild_id`, `discord_user_id`, `offset`, `limit` → `UpcomingEventsForUserResult` | Lists upcoming events with the invoking user's RSVP status; used by `/event list`, the overview show button, and per-user embed pagination. Each entry's `my_response` stays projected to the legacy 3-value vocabulary; `my_response_actual` additionally carries the true unprojected response (including `coming_later`) so the bot can build the correct message-management buttons. Result also carries the caller's `show_attendee_list` preference, same as `Guild/GetAllUpcomingEventsForUser` above. |
+| `Event/GetUpcomingEventsForUser` | `guild_id`, `discord_user_id`, `offset`, `limit` → `UpcomingEventsForUserResult` | Lists upcoming events with the invoking user's RSVP status; used by `/event list`, the overview show button, and per-user embed pagination. Each entry's `my_response` carries the true stored response (`"yes" \| "no" \| "maybe" \| "coming_later"`); `maybe_count` counts only `"maybe"` and `coming_later_count` (defaults to `0` if absent) counts `"coming_later"` separately. `my_response_actual` is now an exact duplicate of `my_response` against a server running this release — it is kept one more release only for rolling-deploy safety against an older server that still projects `my_response` down to `"maybe"`. Result also carries the caller's `show_attendee_list` preference, same as `Guild/GetAllUpcomingEventsForUser` above. |
 | `Event/GetTrainingTypesByGuild` | `guild_id` → `TrainingTypeChoice[]` | Lists training types for a guild (for autocomplete) |
 | `Event/CreateEvent` | `guild_id`, `discord_user_id`, `event_type`, `title`, `start_at`, ... → `CreateEventResult` | Creates an event from the bot slash command |
 | `Event/GetChannelDivider` | `discord_channel_id` → `Snowflake \| null` | Returns the stored divider message ID for a channel |
 | `Event/SaveChannelDivider` | `discord_channel_id`, `discord_message_id` | Persists or updates the divider message ID |
 | `Event/DeleteChannelDivider` | `discord_channel_id` | Removes the stored divider message ID |
-| `Event/GetYesAttendeesForEmbed` | `event_id`, `limit`, `member_group_id` → `RsvpAttendeeEntry[]` | Returns up to `limit` attending (`"yes"` or `"coming_later"`/legacy `"maybe"`) RSVPs filtered to a member group (including descendants) |
+| `Event/GetYesAttendeesForEmbed` | `event_id`, `limit`, `member_group_id` → `RsvpAttendeeEntry[]` | Returns up to `limit` attending (`"yes"` or `"coming_later"`) RSVPs filtered to a member group (including descendants); `"maybe"` is not attendance and is excluded |
 | `Event/ClaimTraining` | `event_id`, `team_id`, `discord_user_id` → `EventClaimInfo` | Claims an unclaimed training for the invoking user; errors: `ClaimEventNotFound`, `ClaimNotTraining`, `ClaimEventInactive`, `ClaimNotOwnerGroupMember`, `ClaimAlreadyClaimed` |
 | `Event/UnclaimTraining` | `event_id`, `team_id`, `discord_user_id` → `EventClaimInfo` | Unclaims a previously claimed training; errors: `ClaimEventNotFound`, `ClaimEventInactive`, `ClaimNotClaimer` |
 | `Event/SaveClaimDiscordMessageId` | `event_id`, `channel_id`, `message_id` | Stores the claim-board message ID after posting |

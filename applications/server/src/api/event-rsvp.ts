@@ -2,6 +2,7 @@ import {
   Auth,
   DisplayName,
   type Event,
+  type EventRsvp,
   EventRsvpApi,
   type GroupModel,
   type TeamMember,
@@ -19,8 +20,23 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
-import { isRsvpMessageRequiredAndMissing } from '~/utils/rsvpMessageRequired.js';
-import { projectRsvpResponseToLegacy } from '~/utils/rsvpWireProjection.js';
+import {
+  isLeavingComingLaterWithoutNewMessage,
+  isRsvpMessageRequiredAndMissing,
+} from '~/utils/rsvpMessageRequired.js';
+
+type RsvpCounts = Effect.Success<
+  ReturnType<ServiceMap.Service.Shape<typeof EventRsvpsRepository>['countRsvpsByEventId']>
+>;
+
+/** `countRsvpsByEventId` only returns rows for responses that someone actually picked. */
+const countFor = (counts: RsvpCounts, response: EventRsvp.RsvpResponse): number =>
+  pipe(
+    counts,
+    Array.findFirst((c) => c.response === response),
+    Option.map((c) => c.count),
+    Option.getOrElse(() => 0),
+  );
 
 const forbidden = new EventRsvpApi.Forbidden();
 const notFound = new EventRsvpApi.EventNotFound();
@@ -68,7 +84,7 @@ const buildRsvpDetail = (
     Effect.map(
       ({ allRsvps, myRsvp, counts }) =>
         new EventRsvpApi.EventRsvpDetail({
-          myResponse: Option.map(myRsvp, (my) => projectRsvpResponseToLegacy(my.response)),
+          myResponse: Option.map(myRsvp, (my) => my.response),
           myMessage: Option.flatMap(myRsvp, (my) => my.message),
           rsvps: Array.map(
             allRsvps,
@@ -77,7 +93,7 @@ const buildRsvpDetail = (
                 teamMemberId: r.team_member_id,
                 memberName: r.member_name,
                 username: r.username,
-                response: projectRsvpResponseToLegacy(r.response),
+                response: r.response,
                 message: r.message,
                 displayName: Option.getOrElse(
                   DisplayName.pickDisplayName({
@@ -90,23 +106,10 @@ const buildRsvpDetail = (
                 ),
               }),
           ),
-          yesCount: pipe(
-            counts,
-            Array.findFirst((c) => c.response === 'yes'),
-            Option.map((c) => c.count),
-            Option.getOrElse(() => 0),
-          ),
-          noCount: pipe(
-            counts,
-            Array.findFirst((c) => c.response === 'no'),
-            Option.map((c) => c.count),
-            Option.getOrElse(() => 0),
-          ),
-          maybeCount: pipe(
-            counts,
-            Array.filter((c) => c.response === 'maybe' || c.response === 'coming_later'),
-            Array.reduce(0, (acc, c) => acc + c.count),
-          ),
+          yesCount: countFor(counts, 'yes'),
+          noCount: countFor(counts, 'no'),
+          maybeCount: countFor(counts, 'maybe'),
+          comingLaterCount: countFor(counts, 'coming_later'),
           canRsvp,
           minPlayersThreshold,
         }),
@@ -219,8 +222,24 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                 ? Effect.fail(messageRequired)
                 : Effect.void,
             ),
-            Effect.bind('upsertResult', ({ membership }) =>
-              rsvps.upsertRsvp(eventId, membership.id, payload.response, note, clearMessage).pipe(
+            // Leaving `coming_later` (whose note is mandatory) must not carry that note onto the
+            // new response. Derived here rather than alongside `clearMessage` above because it
+            // needs `priorRsvp`, which is only bound once membership is known. Mirrors the RPC
+            // `Event/SubmitRsvp` handler so both write surfaces agree on the same transition —
+            // the web client sends a blank string, but any other caller sending `message: null`
+            // would otherwise keep a stale "dorazím v 19:00" attached to its "Nevím".
+            Effect.let(
+              'effectiveClear',
+              ({ priorRsvp }) =>
+                clearMessage ||
+                isLeavingComingLaterWithoutNewMessage(
+                  payload.response,
+                  note,
+                  Option.map(priorRsvp, (r) => r.response),
+                ),
+            ),
+            Effect.bind('upsertResult', ({ membership, effectiveClear }) =>
+              rsvps.upsertRsvp(eventId, membership.id, payload.response, note, effectiveClear).pipe(
                 Effect.catchTag(
                   'NoSuchElementError',
                   LogicError.withMessage(() => 'Failed upserting RSVP — no row returned'),

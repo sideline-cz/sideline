@@ -6,6 +6,7 @@ import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { trainingAutoLogCronEffect } from '~/services/TrainingAutoLogCron.js';
+import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 
 // --- Test IDs ---
 const EVENT_ID_1 = '00000000-0000-0000-0000-000000000001' as Event.EventId;
@@ -278,6 +279,72 @@ describe('trainingAutoLogCronEffect', () => {
         }),
       ),
       Effect.provide(FailingFirstEventLayer),
+      Effect.asVoid,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Attendance narrowing (docs/plans/rsvp-maybe-restore.md) — a `maybe`
+// ("Nevím") responder must NOT be auto-logged; `yes` and `coming_later`
+// responders must. The cron itself only reads whatever
+// `findYesRsvpMemberIdsByEventId` hands back, so this mock routes a
+// per-member response map through the REAL `isAttendingRsvpResponse`
+// predicate (the single chokepoint the plan narrows) rather than hand-picking
+// which ids to return — that ties this test to the production narrowing
+// logic instead of merely re-asserting whatever the mock is told to return.
+// ---------------------------------------------------------------------------
+
+describe('trainingAutoLogCronEffect — attendance narrowing', () => {
+  const RESPONDER_YES = '00000000-0000-0000-0000-000000000020' as TeamMember.TeamMemberId;
+  const RESPONDER_COMING_LATER = '00000000-0000-0000-0000-000000000021' as TeamMember.TeamMemberId;
+  const RESPONDER_MAYBE = '00000000-0000-0000-0000-000000000022' as TeamMember.TeamMemberId;
+
+  it.effect('a maybe responder is NOT auto-logged; yes and coming_later responders are', () => {
+    endedTrainings = [{ id: EVENT_ID_1, start_at: START_AT, end_at: Option.some(END_AT) }];
+
+    const responsesByMember = new Map<TeamMember.TeamMemberId, string>([
+      [RESPONDER_YES, 'yes'],
+      [RESPONDER_COMING_LATER, 'coming_later'],
+      [RESPONDER_MAYBE, 'maybe'],
+    ]);
+
+    const NarrowedEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
+      findYesRsvpMemberIdsByEventId: (eventId: Event.EventId) =>
+        eventId === EVENT_ID_1
+          ? Effect.succeed(
+              [...responsesByMember.entries()]
+                .filter(([, response]) => isAttendingRsvpResponse(response))
+                .map(([team_member_id]) => ({ team_member_id })),
+            )
+          : Effect.succeed([]),
+      findRsvpsByEventId: () => Effect.die(new Error('Not implemented')),
+      findRsvpByEventAndMember: () => Effect.die(new Error('Not implemented')),
+      upsertRsvp: () => Effect.die(new Error('Not implemented')),
+      countRsvpsByEventId: () => Effect.die(new Error('Not implemented')),
+      findRsvpAttendeesPage: () => Effect.die(new Error('Not implemented')),
+      findNonRespondersByEventId: () => Effect.die(new Error('Not implemented')),
+      countRsvpTotal: () => Effect.die(new Error('Not implemented')),
+    } as any);
+
+    const NarrowedLayer = Layer.mergeAll(
+      MockEventsRepositoryLayer,
+      NarrowedEventRsvpsRepositoryLayer,
+      MockActivityLogsRepositoryLayer,
+      MockActivityTypesRepositoryLayer,
+    );
+
+    return trainingAutoLogCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          const loggedMemberIds = insertedLogs.map((l) => l.team_member_id);
+          expect(loggedMemberIds).toContain(RESPONDER_YES);
+          expect(loggedMemberIds).toContain(RESPONDER_COMING_LATER);
+          expect(loggedMemberIds).not.toContain(RESPONDER_MAYBE);
+          expect(insertedLogs).toHaveLength(2);
+        }),
+      ),
+      Effect.provide(NarrowedLayer),
       Effect.asVoid,
     );
   });
