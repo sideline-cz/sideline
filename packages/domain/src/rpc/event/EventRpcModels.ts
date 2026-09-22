@@ -142,7 +142,7 @@ export class RsvpAttendeeEntry extends Schema.Class<RsvpAttendeeEntry>('RsvpAtte
   nickname: Schema.OptionFromNullOr(Schema.String),
   username: Schema.OptionFromNullOr(Schema.String),
   display_name: Schema.OptionFromNullOr(Schema.String),
-  response: Schema.Literals(['yes', 'no', 'maybe']),
+  response: RsvpResponse,
   message: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
@@ -189,7 +189,10 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
   event_type: Schema.String,
   yes_count: Schema.Number,
   no_count: Schema.Number,
+  // `maybe_count` now means only `response = 'maybe'` ("Nevím"); `coming_later_count` below
+  // carries the other non-`yes`-attending bucket that used to be folded in here.
   maybe_count: Schema.Number,
+  coming_later_count: Schema.Number.pipe(Schema.withDecodingDefaultKey(() => 0)),
   all_day: Schema.Boolean,
   /**
    * Drives the personal-message "Dnes"/"Today" marker (plan §4.6): an all-day event whose
@@ -200,19 +203,16 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
    * failure — see `TeamSettingsApi.ts:79` for the same `withDecodingDefaultKey` precedent.
    */
   status: Schema.String.pipe(Schema.withDecodingDefaultKey(() => 'active')),
-  my_response: Schema.OptionFromNullOr(Schema.Literals(['yes', 'no', 'maybe'])),
-  /**
-   * The TRUE (unprojected) stored response, additive alongside the legacy
-   * `my_response` above. `my_response` intentionally stays pinned to the
-   * legacy 3-value vocabulary for wire safety (see `rsvpWireProjection.ts`),
-   * but bot-side logic that must distinguish a real `coming_later` RSVP from a
-   * legacy `maybe` (e.g. which message-management buttons to render) needs
-   * the unprojected value. Uses `OptionFromOptionalKey` (not `OptionFromNullOr`)
-   * so a rolling deploy where the bot updates before the server — and briefly
-   * decodes a response from an older producer that omits this key entirely —
-   * tolerates the missing key as `Option.none()` instead of a hard decode
-   * failure.
-   */
+  my_response: Schema.OptionFromNullOr(RsvpResponse),
+  // `my_response` now carries the true stored value, so this field is its exact duplicate
+  // against a server that has shipped this release. It stays only for the rolling-deploy
+  // window in the OTHER direction: a new bot talking to an OLD server still reads
+  // `my_response: 'maybe'` for a member who actually stored `coming_later`, and row 2 of the
+  // embed would then mint `u-add-msg:{team}:{event}:maybe`; submitting that rewrites the
+  // stored response to `maybe` and slips past the mandatory-comment guard in
+  // `applications/server/src/utils/rsvpMessageRequired.ts`. `OptionFromOptionalKey` tolerates
+  // a producer on either side of the deploy that hasn't shipped/dropped this key yet. Delete
+  // in the release AFTER the old projection is gone from every deployed instance.
   my_response_actual: Schema.OptionFromOptionalKey(RsvpResponse),
   my_message: Schema.OptionFromNullOr(Schema.String),
   /**
