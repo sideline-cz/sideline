@@ -41,10 +41,11 @@ For each task in the plan:
 1. Read the files that need to be modified
 2. Make the changes described in the plan
 3. Follow existing patterns in the codebase (the plan references them)
-4. If domain package (`packages/domain/`) was changed, rebuild:
+4. If `packages/domain/` or `packages/migrations/` was changed, rebuild:
    ```bash
    pnpm build
    ```
+   Integration tests load `packages/migrations/dist/`, never `src/` — skipping this rebuild makes every migration assertion test the previous compile.
 
 ### 2. Handle errors
 

@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — Fix: recurring event series could not be edited at all
+
+Recurring event series created before Sideline started storing series times in each team's own timezone kept their times in the older format. Any attempt to edit one of those series failed with an error instead of saving — not just changing its start or end time, but renaming it, changing its location, or changing which days it runs, because the schedule form always submits the series' start time along with whatever else you changed. Retrying never helped, since a rejected save left the series exactly as it was. Series created after that change were unaffected. Every existing series has now been converted to the current format, so editing any series works regardless of when it was created. Times on those series are unchanged — they keep the same wall-clock time they have always shown. No action is needed.
+
 ## 2026-09-22 — New: file a bug report or feature request from Discord
 
 The new `/report type:<bug|feature>` command (Czech: `/nahlasit`) lets anyone file a bug report or feature request without leaving Discord — it works in a server channel or in a DM with the bot. Fill in a short title and description in the modal that pops up, and Sideline opens a GitHub issue for it, labelled so the team can triage it. You get a reply with a link to the created issue once it's filed.
