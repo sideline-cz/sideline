@@ -1,12 +1,4 @@
-import {
-  ApiGroup,
-  Auth,
-  Discord,
-  OAuthConnection,
-  Role,
-  type Team,
-  type User,
-} from '@sideline/domain';
+import { ApiGroup, Auth, Discord, OAuthConnection, type Team, type User } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import type { OAuth2Tokens } from 'arctic';
 import { DiscordConfig, DiscordREST, DiscordRESTLive, MemoryRateLimitStoreLive } from 'dfx';
@@ -615,14 +607,29 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                                     teamName: team.name,
                                   }),
                                 ),
-                                Effect.map(() =>
+                                // AC 5: echo the roles/permissions the member ACTUALLY got, not a
+                                // hardcoded Player. Re-reads through `findMembershipByIds`, which
+                                // already aggregates effective role names and permissions
+                                // (`effectiveRoleNamesAgg` / `effectivePermissionsAgg`) — cheaper
+                                // than teaching this handler about `role_permissions`, and it
+                                // picks up group-inherited grants a hand-rolled version would miss.
+                                Effect.bind('joined', () =>
+                                  members.findMembershipByIds(team.id, userId),
+                                ),
+                                Effect.map(({ joined }) =>
                                   Option.some(
                                     new Auth.UserTeam({
                                       teamId: team.id,
                                       teamName: team.name,
                                       logoUrl: team.logo_url,
-                                      roleNames: ['Player'],
-                                      permissions: [...Role.defaultPermissions.Player],
+                                      roleNames: Option.match(joined, {
+                                        onNone: () => [role.name],
+                                        onSome: (m) => m.role_names,
+                                      }),
+                                      permissions: Option.match(joined, {
+                                        onNone: () => [],
+                                        onSome: (m) => m.permissions,
+                                      }),
                                       // Ephemeral response to the auto-join click itself, not a
                                       // `myTeams` read — the caller's next load re-fetches the
                                       // real tri-state from `discord_joined_at` /

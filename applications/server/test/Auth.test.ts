@@ -203,7 +203,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   findRosterByTeam: () => Effect.succeed([]),
   findRosterMemberByIds: () => Effect.succeed(Option.none()),
   deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-  getDefaultRoleId: () => Effect.succeed(Option.some({ id: TEST_ROLE_ID })),
+  getDefaultRoleId: () => Effect.succeed(Option.some({ id: TEST_ROLE_ID, name: 'Player' })),
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
@@ -887,6 +887,8 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
   const AUTH_GUILD_A = '111111111111111111' as Discord.Snowflake;
   const AUTH_GUILD_B = '222222222222222222' as Discord.Snowflake;
   const AUTH_ROLE_ID = '00000000-0000-0000-0000-000000000050' as Role.RoleId;
+  // T-S4: a team-configured default role that is NOT the built-in Player.
+  const AUTH_GUEST_ROLE_ID = '00000000-0000-0000-0000-000000000054' as Role.RoleId;
 
   const teamA = {
     id: AUTH_TEAM_ID_A,
@@ -955,6 +957,9 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
   // Track addMember / reactivateMember calls in autoJoinTeams tests
   let autoJoinAddMemberCalled = false;
   let autoJoinReactivateCalled = false;
+  // T-S4 (`.work-plans/configurable-default-roles.md`): which role autoJoinTeams actually
+  // assigned — `roleId`, not just "was it called".
+  let autoJoinAssignRoleCalls: Array<{ memberId: string; roleId: string }> = [];
 
   // Helper to build a test layer with configurable findByUser and findMembershipByIds behaviour
   const buildAuthTestLayer = (opts: {
@@ -967,6 +972,10 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
     teamsToReturn?: ReadonlyArray<typeof teamA>;
     profileComplete?: boolean;
     guildIds?: ReadonlyArray<string>;
+    // T-S4: the team's resolved default role — defaults to the fixture's built-in Player.
+    // `{ id, name }` is the resolver's Result shape (T-R1/etc) — `name` is what lets the
+    // auto-join response echo the role actually assigned.
+    defaultRoleResult?: Option.Option<{ id: Role.RoleId; name: string }>;
     // Blocker D — defaults to `true` (enforcement ON) so the pre-existing `discordJoined`
     // derivation tests below keep exercising `deriveDiscordJoined` for real. The kill-switch
     // tests explicitly pass `false`.
@@ -1006,8 +1015,12 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
       findRosterByTeam: () => Effect.succeed([]),
       findRosterMemberByIds: () => Effect.succeed(Option.none()),
       deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-      getDefaultRoleId: () => Effect.succeed(Option.some({ id: AUTH_ROLE_ID })),
-      assignRole: () => Effect.void,
+      getDefaultRoleId: () =>
+        Effect.succeed(opts.defaultRoleResult ?? Option.some({ id: AUTH_ROLE_ID, name: 'Player' })),
+      assignRole: (memberId: TeamMember.TeamMemberId, roleId: Role.RoleId) => {
+        autoJoinAssignRoleCalls.push({ memberId, roleId });
+        return Effect.void;
+      },
       unassignRole: () => Effect.void,
       setJerseyNumber: () => Effect.void,
     } as any);
@@ -1459,6 +1472,154 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
     const hasTeamA = body.some((t: { teamId: string }) => t.teamId === AUTH_TEAM_ID_A);
     expect(hasTeamA).toBe(true);
   });
+
+  // ---------------------------------------------------------------------------
+  // T-S4 (`.work-plans/configurable-default-roles.md`) — autoJoinTeams honours the
+  // configured default role (AC 2), and echoes the roles/permissions actually granted (AC 5)
+  // instead of a hardcoded 'Player'.
+  // ---------------------------------------------------------------------------
+
+  it('T-S4/1: autoJoinTeams assigns the configured default (Guest), not the built-in Player', async () => {
+    autoJoinAddMemberCalled = false;
+    autoJoinReactivateCalled = false;
+    autoJoinAssignRoleCalls = [];
+
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [],
+      findMembershipByIdsResult: () => Option.none(),
+      teamsToReturn: [teamA],
+      profileComplete: true,
+      guildIds: [AUTH_GUILD_A],
+      defaultRoleResult: Option.some({ id: AUTH_GUEST_ROLE_ID, name: 'Guest' }),
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams/auto-join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    expect(autoJoinAssignRoleCalls).toContainEqual(
+      expect.objectContaining({ roleId: AUTH_GUEST_ROLE_ID }),
+    );
+  });
+
+  // FAILS on `main`, which returns `['Player']` + `Role.defaultPermissions.Player` — TWO
+  // permissions (`roster:view`, `member:view`), not the exact post-join membership read.
+  it('T-S4/2: roleNames/permissions on the response come from the post-join membership read, not a hardcoded Player', async () => {
+    autoJoinAddMemberCalled = false;
+    autoJoinReactivateCalled = false;
+    autoJoinAssignRoleCalls = [];
+
+    const joinedMembership = asMembershipWithRole({
+      ...activeMembershipA,
+      role_names: ['Guest'],
+      permissions: ['roster:view'] as readonly Role.Permission[],
+    });
+
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [],
+      // Pre-check (`{ includeInactive: true }`) → not yet a member → the join path runs.
+      // Post-join re-read (no options) → the membership as it exists AFTER assignRole ran.
+      findMembershipByIdsResult: (_teamId, _userId, options) =>
+        options?.includeInactive === true ? Option.none() : Option.some(joinedMembership),
+      teamsToReturn: [teamA],
+      profileComplete: true,
+      guildIds: [AUTH_GUILD_A],
+      defaultRoleResult: Option.some({ id: AUTH_GUEST_ROLE_ID, name: 'Guest' }),
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams/auto-join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as ReadonlyArray<{
+      teamId: string;
+      roleNames: ReadonlyArray<string>;
+      permissions: ReadonlyArray<string>;
+    }>;
+    const joined = body.find((t) => t.teamId === AUTH_TEAM_ID_A);
+    expect(joined?.roleNames).toEqual(['Guest']);
+    expect(joined?.permissions).toEqual(['roster:view']);
+  });
+
+  it('T-S4/3: getDefaultRoleId → None still skips the team (no addMember, no UserTeam entry)', async () => {
+    autoJoinAddMemberCalled = false;
+    autoJoinReactivateCalled = false;
+    autoJoinAssignRoleCalls = [];
+
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [],
+      findMembershipByIdsResult: () => Option.none(),
+      teamsToReturn: [teamA],
+      profileComplete: true,
+      guildIds: [AUTH_GUILD_A],
+      defaultRoleResult: Option.none(),
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams/auto-join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(autoJoinAddMemberCalled).toBe(false);
+    expect(autoJoinAssignRoleCalls).toHaveLength(0);
+    const hasTeamA = body.some((t: { teamId: string }) => t.teamId === AUTH_TEAM_ID_A);
+    expect(hasTeamA).toBe(false);
+  });
+
+  it("T-S4/4: discordJoined stays 'unknown' on the auto-join response (pins CC-15)", async () => {
+    autoJoinAddMemberCalled = false;
+    autoJoinReactivateCalled = false;
+    autoJoinAssignRoleCalls = [];
+
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [],
+      findMembershipByIdsResult: () => Option.none(),
+      teamsToReturn: [teamA],
+      profileComplete: true,
+      guildIds: [AUTH_GUILD_A],
+      defaultRoleResult: Option.some({ id: AUTH_GUEST_ROLE_ID, name: 'Guest' }),
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams/auto-join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const joined = body.find((t: { teamId: string }) => t.teamId === AUTH_TEAM_ID_A);
+    expect(joined?.discordJoined).toBe('unknown');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1496,7 +1657,7 @@ describe('Global admin read access', () => {
     findRosterByTeam: () => Effect.succeed([]),
     findRosterMemberByIds: () => Effect.succeed(Option.none()),
     deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-    getDefaultRoleId: () => Effect.succeed(Option.some({ id: TEST_ROLE_ID })),
+    getDefaultRoleId: () => Effect.succeed(Option.some({ id: TEST_ROLE_ID, name: 'Player' })),
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
     setJerseyNumber: () => Effect.void,

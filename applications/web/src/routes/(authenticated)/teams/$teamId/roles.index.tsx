@@ -20,5 +20,13 @@ function RolesRoute() {
   const { teamId: teamIdRaw } = Route.useParams();
   const data = Route.useLoaderData();
 
-  return <RolesListPage teamId={teamIdRaw} roles={data.roles} canManage={data.canManage} />;
+  return (
+    <RolesListPage
+      teamId={teamIdRaw}
+      roles={data.roles}
+      canManage={data.canManage}
+      defaultRoleId={data.defaultRoleId}
+      defaultRoleGrantsManage={data.defaultRoleGrantsManage}
+    />
+  );
 }

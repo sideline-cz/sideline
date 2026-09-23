@@ -277,3 +277,164 @@ describe('GET /teams/:teamId/events/:eventId/rsvps/non-responders — Setting 2 
     expect(ids).toHaveLength(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-R2 (`.work-plans/configurable-default-roles.md`) — the regression BLOCKER 1 describes.
+// `findNonRespondersByEventId` / `incrementMissedForEventNonRespondersByEventId` gate on
+// built-in Player today. Once a team configures a custom default (e.g. Poletime's Guest), a
+// member holding ONLY that default must still be treated as an eligible new-member population —
+// otherwise RSVP reminders and the missed-RSVP counter silently stop tracking them.
+//
+// Direct repository access (not the HTTP endpoint above): `incrementMissedForEventNonResponders`
+// has no HTTP surface in this SmallApi, so both queries are exercised the same way for symmetry.
+//
+// Cases 1 and 3 pin the shared predicate (`holdsDefaultRoleWhere` in `effectiveRoles.ts`) now
+// unioning `eff.is_default` in with the built-in Player fallback. Cases 2 and 4 are regression
+// pins: they held on `main` before this change (the query already excluded Captain-only and
+// already included Player-only) and must keep holding now that the predicate is a union.
+// ---------------------------------------------------------------------------
+
+const getCaptainRoleId = (teamId: Team.TeamId) =>
+  RolesRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.findRoleByTeamAndName(teamId, 'Captain')),
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.fail(new Error('Captain role not found')),
+        onSome: (r) => Effect.succeed(r.id),
+      }),
+    ),
+  );
+
+const insertGuestRole = (teamId: Team.TeamId) =>
+  RolesRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.insertRole(teamId, 'Guest')),
+    Effect.map((r) => r.id),
+  );
+
+const setTeamDefaultRole = (roleId: Role.RoleId) =>
+  RolesRepository.asEffect().pipe(Effect.andThen((repo) => repo.setDefaultRole(roleId)));
+
+const getMissedRsvps = (memberId: TeamMember.TeamMemberId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) =>
+        sql<{ missed_rsvps: number }>`SELECT missed_rsvps FROM team_members WHERE id = ${memberId}`,
+    ),
+    Effect.map((rows) => rows[0]?.missed_rsvps ?? -1),
+  );
+
+/**
+ * Team with a CUSTOM default (Guest, not built-in Player) plus three members:
+ *   - guestMember: holds ONLY the configured default (Guest)
+ *   - legacyMember: holds ONLY the built-in Player (never re-assigned after the switch)
+ *   - captainMember: holds ONLY Captain (neither the default nor Player)
+ */
+const seedDefaultRoleRsvpFixture = () =>
+  Effect.Do.pipe(
+    Effect.bind('ownerUserId', () => createUser('890000000000000101', 'owner-dr-rsvp')),
+    Effect.bind('team', ({ ownerUserId }) =>
+      createTeam('890000000000000110' as Discord.Snowflake, ownerUserId),
+    ),
+    Effect.tap(({ team }) => seedRoles(team.id)),
+    Effect.bind('playerRoleId', ({ team }) => getPlayerRoleId(team.id)),
+    Effect.bind('captainRoleId', ({ team }) => getCaptainRoleId(team.id)),
+    Effect.bind('guestRoleId', ({ team }) => insertGuestRole(team.id)),
+    Effect.tap(({ guestRoleId }) => setTeamDefaultRole(guestRoleId)),
+
+    Effect.bind('guestUserId', () => createUser('890000000000000102', 'guest-only-dr')),
+    Effect.bind('guestMember', ({ team, guestUserId }) => addTeamMember(team.id, guestUserId)),
+    Effect.tap(({ guestMember, guestRoleId }) => assignRole(guestMember.id, guestRoleId)),
+
+    Effect.bind('legacyUserId', () => createUser('890000000000000103', 'legacy-player-dr')),
+    Effect.bind('legacyMember', ({ team, legacyUserId }) => addTeamMember(team.id, legacyUserId)),
+    Effect.tap(({ legacyMember, playerRoleId }) => assignRole(legacyMember.id, playerRoleId)),
+
+    Effect.bind('captainUserId', () => createUser('890000000000000104', 'captain-only-dr')),
+    Effect.bind('captainMember', ({ team, captainUserId }) =>
+      addTeamMember(team.id, captainUserId),
+    ),
+    Effect.tap(({ captainMember, captainRoleId }) => assignRole(captainMember.id, captainRoleId)),
+
+    Effect.bind('event', ({ team, guestMember }) => createEvent(team.id, guestMember.id)),
+  );
+
+describe('EventRsvpsRepository — RSVP eligibility follows the configured default role (T-R2, BLOCKER 1)', () => {
+  it.effect(
+    '1. a member holding ONLY the configured default (Guest) appears as a non-responder',
+    () =>
+      seedDefaultRoleRsvpFixture().pipe(
+        Effect.bind('nonResponders', ({ event, team }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.findNonRespondersByEventId(event.id, team.id, Option.none(), 4),
+            ),
+          ),
+        ),
+        Effect.tap(({ nonResponders, guestMember }) =>
+          Effect.sync(() => {
+            expect(nonResponders.map((r) => r.team_member_id)).toContain(guestMember.id);
+          }),
+        ),
+        Effect.provide(SeedLayer),
+      ),
+  );
+
+  it.effect(
+    '2. a legacy member holding only built-in Player STILL appears after the default moves to Guest (union, not a priority pick)',
+    () =>
+      seedDefaultRoleRsvpFixture().pipe(
+        Effect.bind('nonResponders', ({ event, team }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.findNonRespondersByEventId(event.id, team.id, Option.none(), 4),
+            ),
+          ),
+        ),
+        Effect.tap(({ nonResponders, legacyMember }) =>
+          Effect.sync(() => {
+            expect(nonResponders.map((r) => r.team_member_id)).toContain(legacyMember.id);
+          }),
+        ),
+        Effect.provide(SeedLayer),
+      ),
+  );
+
+  it.effect('3. incrementMissedForEventNonResponders increments the Guest-only member', () =>
+    seedDefaultRoleRsvpFixture().pipe(
+      Effect.tap(({ event, team }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.incrementMissedForEventNonRespondersByEventId(event.id, team.id, Option.none()),
+          ),
+        ),
+      ),
+      Effect.bind('missed', ({ guestMember }) => getMissedRsvps(guestMember.id)),
+      Effect.tap(({ missed }) =>
+        Effect.sync(() => {
+          expect(missed).toBe(1);
+        }),
+      ),
+      Effect.provide(SeedLayer),
+    ),
+  );
+
+  it.effect(
+    '4. a member holding only Captain (neither default nor Player) still does NOT appear',
+    () =>
+      seedDefaultRoleRsvpFixture().pipe(
+        Effect.bind('nonResponders', ({ event, team }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.findNonRespondersByEventId(event.id, team.id, Option.none(), 4),
+            ),
+          ),
+        ),
+        Effect.tap(({ nonResponders, captainMember }) =>
+          Effect.sync(() => {
+            expect(nonResponders.map((r) => r.team_member_id)).not.toContain(captainMember.id);
+          }),
+        ),
+        Effect.provide(SeedLayer),
+      ),
+  );
+});

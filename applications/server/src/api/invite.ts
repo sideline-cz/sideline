@@ -78,10 +78,10 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
               Option.filter(existing, (member) => member.active),
             ),
             // Should-fix 5 (third review of PR-4): no longer fails the request when the team
-            // has no "Player" role. That value is only consumed by the `assignRole` tap below,
+            // has no default role. That value is only consumed by the `assignRole` tap below,
             // which itself is skipped for a returning active member — failing here unconditionally
-            // 404'd every idempotent re-join for a team that renamed or deleted its Player role.
-            Effect.bind('playerRole', ({ invite }) => members.getDefaultRoleId(invite.team_id)),
+            // 404'd every idempotent re-join for a team that renamed or deleted its default role.
+            Effect.bind('defaultRole', ({ invite }) => members.getDefaultRoleId(invite.team_id)),
             // CC-14: `Invite.AlreadyMember` is no longer raised. A returning active member does
             // not get re-inserted; everyone else (new member, or a previously-removed member
             // being reactivated) runs today's insert/reactivate path. Both cases fall through to
@@ -104,13 +104,13 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
             ),
             // Must-fix 7: skip for a returning ACTIVE member. The removed `AlreadyMember` tap
             // used to short-circuit above this line for that cohort; without an equivalent
-            // guard here, a captain or coach without the Player role who opens their own team's
+            // guard here, a captain or coach without the default role who opens their own team's
             // invite link would silently gain it on every re-join. Should-fix 5: only fail on a
-            // missing Player role when the assignment is actually about to run.
-            Effect.tap(({ activeMembership, membership, playerRole }) =>
+            // missing default role when the assignment is actually about to run.
+            Effect.tap(({ activeMembership, membership, defaultRole }) =>
               Option.isSome(activeMembership)
                 ? Effect.void
-                : Option.match(playerRole, {
+                : Option.match(defaultRole, {
                     onNone: () => Effect.fail(new Invite.InviteNotFound()),
                     onSome: (role) => members.assignRole(membership.id, role.id),
                   }),
@@ -134,7 +134,7 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
             // NOTHING`, so this one costs it nothing.
             //
             // Both calls are `E = never` after `catchSqlErrors`, i.e. a failure is a DEFECT that
-            // kills the join after the membership and Player role are committed but before the
+            // kills the join after the membership and default role are committed but before the
             // acceptance row exists — the same exposure the `assignRole` tap above already has.
             // Acceptable at two writes; do not grow this tap further without a transaction.
             Effect.tap(({ invite, membership }) =>
@@ -163,9 +163,11 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
             ),
             // Should-fix 7: derived from whether `assignRole` actually ran above, rather than
             // unconditionally `['Player']` — a returning active member whose assignment was
-            // skipped may not hold the role.
-            Effect.let('roleNames', ({ activeMembership }) =>
-              Option.isSome(activeMembership) ? [] : ['Player'],
+            // skipped may not hold the role. AC 5: echoes the role actually assigned, whatever
+            // this team's configured default is. No extra query: the assign tap above already
+            // failed the request if `defaultRole` was `None`.
+            Effect.let('roleNames', ({ activeMembership, defaultRole }) =>
+              Option.isSome(activeMembership) ? [] : Option.toArray(defaultRole).map((r) => r.name),
             ),
             // BLOCKER 1 (third review of PR-4): `resolveOrCreateAcceptance`'s rate limit is now
             // scoped to this (user, invite) pair, so it always returns a real acceptance — see

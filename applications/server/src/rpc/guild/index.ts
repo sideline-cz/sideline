@@ -156,8 +156,8 @@ export const GuildsRpcLive = Effect.Do.pipe(
           deps.members.getDefaultRoleId(team.id).pipe(
             Effect.flatMap(
               Option.match({
-                onNone: () => Effect.logInfo('No Player role found, skipping'),
-                onSome: (playerRole) => deps.members.assignRole(newMember.id, playerRole.id),
+                onNone: () => Effect.logInfo('No default role found, skipping'),
+                onSome: (defaultRole) => deps.members.assignRole(newMember.id, defaultRole.id),
               }),
             ),
           ),

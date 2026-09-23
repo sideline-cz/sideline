@@ -90,6 +90,12 @@ const TEST_MEMBER_NO_DISCORD_ID = '00000000-0000-0000-0000-000000000021' as Team
 // still effectively holds the role via the group.
 const TEST_MEMBER_GROUP_ROLE_ID = '00000000-0000-0000-0000-000000000022' as TeamMember.TeamMemberId;
 const TEST_ROLE_ID = '00000000-0000-0000-0000-000000000040' as Role.RoleId;
+// T-S2 (`.work-plans/configurable-default-roles.md`, BLOCKER 2): a role belonging to a
+// DIFFERENT team, and a built-in role of `TEST_TEAM_ID` — regression pins for the team-scope
+// guard on `getRole`/`updateRole`/`deleteRole` and for the built-in-name-only guard.
+const OTHER_TEAM_ID = '00000000-0000-0000-0000-000000000099' as Team.TeamId;
+const OTHER_TEAM_ROLE_ID = '00000000-0000-0000-0000-000000000098' as Role.RoleId;
+const BUILT_IN_ROLE_ID = '00000000-0000-0000-0000-000000000041' as Role.RoleId;
 const GUILD_ID = '999999999999999999' as Discord.Snowflake;
 const MEMBER_DISCORD_ID = '111111111111111111' as Discord.Snowflake;
 const GROUP_MEMBER_DISCORD_ID = '222222222222222222' as Discord.Snowflake;
@@ -178,6 +184,11 @@ type RoleRow = { id: Role.RoleId; team_id: Team.TeamId; name: string; is_built_i
 
 let rolesStore: RoleRow[] = [];
 
+// T-S2: call counters for the BLOCKER 2 guard pins ("...roleId belonging to another team ...
+// NOT called") — a plain `Effect.die`/filter body gives no way to assert non-invocation.
+let updateRoleCalls = 0;
+let archiveRoleByIdCalls = 0;
+
 const makeRolesRepositoryLayer = () =>
   Layer.succeed(RolesRepository, {
     findRolesByTeamId: () => Effect.succeed([]),
@@ -196,8 +207,16 @@ const makeRolesRepositoryLayer = () =>
       rolesStore.push(role);
       return Effect.succeed(role);
     },
-    updateRole: () => Effect.die(new Error('Not implemented')),
+    updateRole: (id: Role.RoleId, name: Option.Option<string>) => {
+      updateRoleCalls += 1;
+      const existing = rolesStore.find((r) => r.id === id);
+      if (!existing) return Effect.die(new Error('Not implemented'));
+      const updated = { ...existing, name: Option.getOrElse(name, () => existing.name) };
+      rolesStore = rolesStore.map((r) => (r.id === id ? updated : r));
+      return Effect.succeed(updated);
+    },
     archiveRoleById: (id: Role.RoleId) => {
+      archiveRoleByIdCalls += 1;
       rolesStore = rolesStore.filter((r) => r.id !== id);
       return Effect.void;
     },
@@ -520,10 +539,16 @@ afterAll(async () => {
 beforeEach(() => {
   recordedEvents = [];
   emitShouldFail = false;
-  rolesStore = [{ id: TEST_ROLE_ID, team_id: TEST_TEAM_ID, name: 'Coach', is_built_in: false }];
+  rolesStore = [
+    { id: TEST_ROLE_ID, team_id: TEST_TEAM_ID, name: 'Coach', is_built_in: false },
+    { id: BUILT_IN_ROLE_ID, team_id: TEST_TEAM_ID, name: 'Player', is_built_in: true },
+    { id: OTHER_TEAM_ROLE_ID, team_id: OTHER_TEAM_ID, name: 'Foreign', is_built_in: false },
+  ];
   recordedNotifications = [];
   effectiveRolesAfterUnassign = new Map();
   effectiveRolesLookupShouldDie = false;
+  updateRoleCalls = 0;
+  archiveRoleByIdCalls = 0;
 });
 
 const authHeaders = { Authorization: 'Bearer admin-token' };
@@ -682,5 +707,93 @@ describe('role.ts — root cause D: role sync event emission', () => {
 
     expect(response.status).toBe(204);
     expect(recordedEvents).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-S2 (`.work-plans/configurable-default-roles.md`) — BLOCKER 2 (cross-tenant role lookups)
+// + the `CannotModifyBuiltIn` false-alarm pins. Cases 1-3 should already PASS on `main`: the
+// team-scope guard on `getRole`/`updateRole`/`deleteRole` was implemented ahead of this test
+// suite. They stay here as regression pins — a future refactor of `findRoleById` (e.g. adding a
+// team-scoped variant and dropping the app-level check as "redundant") would silently reopen the
+// IDOR the guard closes. Cases 4-5 pin that the built-in guard stays name-only in both
+// directions, per the plan's "verified, keep the pins" note.
+// ---------------------------------------------------------------------------
+
+describe('role.ts — BLOCKER 2: cross-tenant role lookups are rejected', () => {
+  it('1. getRole with a roleId from another team → 404, not that role detail', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/roles/${OTHER_TEAM_ROLE_ID}`, {
+        method: 'GET',
+        headers: authHeaders,
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { _tag?: string };
+    expect(body._tag).toBe('RoleNotFound');
+  });
+
+  it('2. updateRole with a roleId from another team → 404, roles.updateRole NOT called', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/roles/${OTHER_TEAM_ROLE_ID}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Hijacked', permissions: null }),
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { _tag?: string };
+    expect(body._tag).toBe('RoleNotFound');
+    expect(updateRoleCalls).toBe(0);
+  });
+
+  it('3. deleteRole with a roleId from another team → 404, archiveRoleById NOT called', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/roles/${OTHER_TEAM_ROLE_ID}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { _tag?: string };
+    expect(body._tag).toBe('RoleNotFound');
+    expect(archiveRoleByIdCalls).toBe(0);
+    // The foreign role must still exist — nothing was archived.
+    expect(rolesStore.find((r) => r.id === OTHER_TEAM_ROLE_ID)).toBeDefined();
+  });
+});
+
+describe('role.ts — the CannotModifyBuiltIn guard stays name-only (false-alarm pins)', () => {
+  it('4. updateRole on a BUILT-IN role with name: None + permissions succeeds (200)', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/roles/${BUILT_IN_ROLE_ID}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: null, permissions: ['roster:view'] }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    // The name-only guard never fires when `name` is absent — permissions on a built-in role are
+    // editable today, and this pin stops that from being "hardened" into a blanket built-in block.
+    expect(updateRoleCalls).toBe(0);
+  });
+
+  it("5. updateRole on a built-in with name: Some('X') still 400s CannotModifyBuiltIn", async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/roles/${BUILT_IN_ROLE_ID}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Renamed', permissions: null }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { _tag?: string };
+    expect(body._tag).toBe('CannotModifyBuiltIn');
+    expect(updateRoleCalls).toBe(0);
   });
 });
