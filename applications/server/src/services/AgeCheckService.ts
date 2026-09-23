@@ -15,21 +15,12 @@ import {
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
-import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
-import {
-  captureGroupRoleSnapshot,
-  emitGroupRoleChanges,
-  type GroupRoleSyncTarget,
-} from '~/utils/syncGroupRoleMembers.js';
 
 interface Dependencies {
   thresholds: ServiceMap.Service.Shape<typeof AgeThresholdRepository>;
   groups: ServiceMap.Service.Shape<typeof GroupsRepository>;
   notifications: ServiceMap.Service.Shape<typeof NotificationsRepository>;
   channelSync: ServiceMap.Service.Shape<typeof ChannelSyncEventsRepository>;
-  roleSyncEvents: ServiceMap.Service.Shape<typeof RoleSyncEventsRepository>;
-  teamMembersRepository: ServiceMap.Service.Shape<typeof TeamMembersRepository>;
 }
 
 interface Change {
@@ -203,47 +194,8 @@ const notifyAdmins = (
     Effect.catchTag('NoSuchElementError', () => Effect.void),
   );
 
-// `fix/group-role-discord-sync` (decision 5): automatic age-based group adds/removes
-// (`commitChange` above) had NO role-sync emission at all, unlike the equivalent HTTP
-// `addGroupMember` / `removeGroupMember` handlers (`api/group.ts`, via
-// `utils/syncGroupRoleMembers.ts`). The removal direction in particular was a live permissions
-// leak: a member who aged out of a group kept that group's Discord role forever, because nothing
-// ever told the bot to revoke it.
-//
-// This now routes through the SAME shared before/after effective-roles diff every group-shaped
-// HTTP handler uses (`captureGroupRoleSnapshot` / `emitGroupRoleChanges`,
-// `utils/syncGroupRoleMembers.ts`), rather than emitting directly from
-// `groups.getRolesForGroup(change.groupId)` (the earlier, narrower approach). That approach
-// stripped a role the member still held through another group, an ancestor, or a direct
-// `member_roles` grant — reachable in practice (e.g. a role attached to both `U14` and `Juniors`:
-// a member ages out of `U14` but is still in `Juniors`, and would have had the role stripped in
-// Discord regardless). The shared diff computes effective roles (group-inherited, ancestor-walked,
-// `is_archived`-filtered) before and after the batch of `commitChanges` writes below, and gates
-// every removal on `member_role_grants`, so a role still held any other way is never emitted as
-// `role_unassigned`. It also applies the same per-operation cap
-// (`MAX_ROLE_SYNC_EMISSIONS_PER_GROUP_OPERATION`) the HTTP handlers get — this cron evaluates
-// every team with rules with no team/guild predicate on the drain side, making it the single
-// largest fan-out in the system.
-const buildRoleSyncTargets = (changes: readonly Change[]): ReadonlyArray<GroupRoleSyncTarget> => {
-  const seen = new Set<TeamMember.TeamMemberId>();
-  const targets: Array<GroupRoleSyncTarget> = [];
-  for (const change of changes) {
-    if (seen.has(change.memberId)) continue;
-    seen.add(change.memberId);
-    targets.push({ teamMemberId: change.memberId, discordUserId: change.discordId });
-  }
-  return targets;
-};
-
 const evaluateTeam =
-  ({
-    thresholds,
-    groups,
-    notifications,
-    channelSync,
-    roleSyncEvents,
-    teamMembersRepository,
-  }: Dependencies) =>
+  ({ thresholds, groups, notifications, channelSync }: Dependencies) =>
   (teamId: Team.TeamId, today: Date) =>
     Effect.Do.pipe(
       Effect.bind('rules', () => thresholds.findRulesByTeamId(teamId)),
@@ -254,13 +206,6 @@ const evaluateTeam =
       ),
       Effect.tap(({ changes }) =>
         Effect.logInfo(`Detected ${changes.length} changes to be made with age-based groups!`),
-      ),
-      // MUST run BEFORE `commitChanges` below — this is the "before" snapshot the shared diff
-      // computes against (see `buildRoleSyncTargets`'s header comment).
-      Effect.bind('roleSyncSnapshot', ({ changes }) =>
-        captureGroupRoleSnapshot(buildRoleSyncTargets(changes)).pipe(
-          Effect.provideService(TeamMembersRepository, teamMembersRepository),
-        ),
       ),
       Effect.bind('commited', ({ changes }) => commitChanges(groups, changes)),
       Effect.tap(({ changes }) =>
@@ -314,16 +259,6 @@ const evaluateTeam =
           Effect.asVoid,
         ),
       ),
-      // Best-effort (never fails, degrades internally — see `syncGroupRoleMembers.ts`'s header):
-      // re-reads the same members' effective roles now that `commitChanges` has run, diffs against
-      // `roleSyncSnapshot.before`, and emits exactly the roles gained/lost as a result of THIS
-      // evaluation's group changes.
-      Effect.tap(({ roleSyncSnapshot }) =>
-        emitGroupRoleChanges(teamId, roleSyncSnapshot, { operation: 'ageCheck' }).pipe(
-          Effect.provideService(TeamMembersRepository, teamMembersRepository),
-          Effect.provideService(RoleSyncEventsRepository, roleSyncEvents),
-        ),
-      ),
       Effect.map(({ changes }) =>
         Array.map(
           changes,
@@ -345,8 +280,6 @@ const make = Effect.Do.pipe(
   Effect.bind('groups', () => GroupsRepository.asEffect()),
   Effect.bind('notifications', () => NotificationsRepository.asEffect()),
   Effect.bind('channelSync', () => ChannelSyncEventsRepository.asEffect()),
-  Effect.bind('roleSyncEvents', () => RoleSyncEventsRepository.asEffect()),
-  Effect.bind('teamMembersRepository', () => TeamMembersRepository.asEffect()),
   Effect.let('evaluateTeam', evaluateTeam),
   Effect.map(({ evaluateTeam }) => ({
     evaluate: (teamId: Team.TeamId, today: Date) => evaluateTeam(teamId, today),

@@ -36,7 +36,6 @@ import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -535,24 +534,8 @@ const MockAgeCheckServiceLayer = Layer.succeed(AgeCheckService, {
 // U4 (bug 3da93506): `joinViaInvite`'s group-add tap must never emit — the member is not in the
 // guild yet at accept time (see the tap's doc comment in `api/invite.ts`). Tracked with a plain
 // call count rather than per-event detail; U4 only needs "did this fire at all".
-let roleSyncEmitCallCount = 0;
+const roleSyncEmitCallCount = 0;
 let channelSyncEmitCallCount = 0;
-
-const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository, {
-  emitRoleCreated: () => Effect.void,
-  emitRoleDeleted: () => Effect.void,
-  emitRoleAssigned: () => {
-    roleSyncEmitCallCount += 1;
-    return Effect.void;
-  },
-  emitRoleUnassigned: () => {
-    roleSyncEmitCallCount += 1;
-    return Effect.void;
-  },
-  findUnprocessed: () => Effect.succeed([]),
-  markProcessed: () => Effect.void,
-  markFailed: () => Effect.void,
-} as any);
 
 const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepository, {
   emitChannelCreated: () => Effect.void,
@@ -856,7 +839,7 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockHttpClientLayer),
   Layer.provide(MockAgeCheckServiceLayer),
   Layer.provide(MockAgeThresholdRepositoryLayer),
-  Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+  Layer.provide(MockNotificationsRepositoryLayer),
   Layer.provide(
     Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
   ),
@@ -1685,9 +1668,7 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
       Layer.provide(MockHttpClientLayer),
       Layer.provide(MockAgeCheckServiceLayer),
       Layer.provide(MockAgeThresholdRepositoryLayer),
-      Layer.provide(
-        Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer),
-      ),
+      Layer.provide(MockNotificationsRepositoryLayer),
       Layer.provide(
         Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
       ),
@@ -2185,7 +2166,7 @@ describe('Invite API — resolveOrCreateAcceptance / requiresReauth gating (TDD:
     Layer.provide(MockHttpClientLayer),
     Layer.provide(MockAgeCheckServiceLayer),
     Layer.provide(MockAgeThresholdRepositoryLayer),
-    Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+    Layer.provide(MockNotificationsRepositoryLayer),
     Layer.provide(
       Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
     ),
@@ -2646,7 +2627,7 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
     Layer.provide(MockHttpClientLayer),
     Layer.provide(MockAgeCheckServiceLayer),
     Layer.provide(MockAgeThresholdRepositoryLayer),
-    Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+    Layer.provide(MockNotificationsRepositoryLayer),
     Layer.provide(
       Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
     ),

@@ -24,7 +24,6 @@ import { beforeEach, describe, expect } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -47,7 +46,6 @@ const PlainRepositories = Layer.mergeAll(
   TeamsRepository.Default,
   UsersRepository.Default,
   TeamMembersRepository.Default,
-  DiscordRoleMappingRepository.Default,
   DiscordChannelMappingRepository.Default,
   GroupsRepository.Default,
   InviteAcceptancesRepository.Default,

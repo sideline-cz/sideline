@@ -40,7 +40,6 @@ import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -276,16 +275,6 @@ const MockAgeThresholdRepositoryLayer = Layer.succeed(AgeThresholdRepository, {
 const MockAgeCheckServiceLayer = Layer.succeed(AgeCheckService, {
   evaluateTeam: () => Effect.succeed([]),
   evaluate: () => Effect.succeed([]),
-} as any);
-
-const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository, {
-  emitRoleCreated: () => Effect.void,
-  emitRoleDeleted: () => Effect.void,
-  emitRoleAssigned: () => Effect.void,
-  emitRoleUnassigned: () => Effect.void,
-  findUnprocessed: () => Effect.succeed([]),
-  markProcessed: () => Effect.void,
-  markFailed: () => Effect.void,
 } as any);
 
 const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepository, {
@@ -571,7 +560,7 @@ const buildNotificationTestLayer = (
     ),
     Layer.provide(MockAgeCheckServiceLayer),
     Layer.provide(MockAgeThresholdRepositoryLayer),
-    Layer.provide(Layer.merge(TrackingNotificationsLayer, MockRoleSyncEventsRepositoryLayer)),
+    Layer.provide(TrackingNotificationsLayer),
     Layer.provide(
       Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
     ),

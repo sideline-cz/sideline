@@ -25,7 +25,7 @@ import { SyncRpc } from '~/services/SyncRpc.js';
 const GUILD_ID = '111111111111111111';
 
 // ---------------------------------------------------------------------------
-// Log capture (mirrors handleRosterChannelCreated.test.ts / ensureMapping.test.ts)
+// Log capture (mirrors handleRosterChannelCreated.test.ts)
 // ---------------------------------------------------------------------------
 
 const makeLogCapture = (): { messages: string[]; levels: string[]; layer: Layer.Layer<never> } => {

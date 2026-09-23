@@ -11,7 +11,6 @@ import { GuildsRpcLive } from './guild/index.js';
 import { InvitesRpcLive } from './invite/index.js';
 import { PersonalEventsRpcLive } from './personalEvents/index.js';
 import { PollsRpcLive } from './poll/index.js';
-import { RolesRpcLive } from './role/index.js';
 import { RoleProvisionRpcLive } from './roleProvision/index.js';
 import { RulesRpcLive } from './rules/index.js';
 import { RulesQuizRpcLive } from './rulesQuiz/index.js';
@@ -20,7 +19,6 @@ import { TeamChallengeSyncEventsRpcLive } from './teamChallenge/index.js';
 import { WeeklySummaryRpcLive } from './weeklySummary/index.js';
 
 export const SyncRpcsLive = Layer.mergeAll(
-  RolesRpcLive,
   ChannelsRpcLive,
   GuildsRpcLive,
   EventsRpcLive,

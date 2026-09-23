@@ -15,7 +15,6 @@ export {
   OnboardingSyncService,
   PersonalEventsSyncService,
   RoleProvisionSyncService,
-  RoleSyncService,
   RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,

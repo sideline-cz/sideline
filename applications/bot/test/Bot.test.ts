@@ -15,7 +15,6 @@ import {
   OnboardingSyncService,
   PersonalEventsSyncService,
   RoleProvisionSyncService,
-  RoleSyncService,
   RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,
@@ -61,11 +60,6 @@ const MockDiscordRESTLayer = Layer.succeed(
 const MockRulesQuizSyncServiceLayer = Layer.succeed(RulesQuizSyncService, {
   processTick: Effect.void,
 });
-
-const MockRoleSyncServiceLayer = Layer.succeed(RoleSyncService, {
-  processTick: Effect.void,
-  discord: undefined as never,
-} as never);
 
 const MockChannelSyncServiceLayer = Layer.succeed(ChannelSyncService, {
   processTick: Effect.void,
@@ -153,7 +147,6 @@ describe('Bot', () => {
       MockDiscordGatewayLayer,
       MockInteractionsRegistryLayer,
       MockDiscordRESTLayer,
-      MockRoleSyncServiceLayer,
       MockRulesQuizSyncServiceLayer,
       MockChannelSyncServiceLayer,
       MockEventSyncServiceLayer,

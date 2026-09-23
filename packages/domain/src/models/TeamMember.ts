@@ -25,7 +25,7 @@ export class TeamMember extends Model.Class<TeamMember>('TeamMember')({
   joined_at: Model.DateTimeInsertFromDate,
   // PR-8 (CC-10): tri-state ("have we ever observed this user in the guild"), NULL = unknown.
   // Written by `Guild/RegisterMember` (idempotent COALESCE) and `Guild/ReconcileMembers`, cleared
-  // by `Guild/RemoveMember`. It does NOT gate role-sync emission — see reconcileMemberDiscordRoles.ts.
+  // by `Guild/RemoveMember`.
   discord_joined_at: Model.FieldExcept(['insert'])(
     Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   ),

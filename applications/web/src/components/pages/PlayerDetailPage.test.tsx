@@ -88,16 +88,6 @@ vi.mock('~/lib/translations.js', () => ({
       roles_removeRoleCancel: 'Cancel',
       members_unsavedChanges: 'Unsaved changes',
       stats_activityEmptyCta: 'Log your first activity',
-      discord_syncRolesFor: 'Sync Discord roles',
-      discord_syncing: 'Syncing…',
-      discord_syncCooldown: 'Synced — try again soon',
-      discord_syncQueuedResult: 'Queued {added} additions and {removed} removals.',
-      discord_syncLastSyncedRelative: 'Synced {relativeTime}',
-      discord_syncError_captainAction:
-        'The bot needs a captain to fix something in Discord (permissions or the role hierarchy).',
-      discord_syncError_retryable: "We'll retry automatically — nothing for you to do.",
-      discord_syncError_unknown: 'Something went wrong syncing this role.',
-      discord_syncError_userAction: "This member needs to rejoin the team's Discord server.",
     };
     const template = map[key] ?? key;
     if (!params) return template;
@@ -272,14 +262,6 @@ const baseProps = {
   onSave: vi.fn().mockResolvedValue(undefined),
   onAssignRole: vi.fn().mockResolvedValue(undefined),
   onUnassignRole: vi.fn().mockResolvedValue(undefined),
-  onSyncDiscordRoles: vi.fn().mockResolvedValue({
-    addedCount: 0,
-    removedCount: 0,
-    skippedCount: 0,
-    roleSyncState: 'never',
-    lastRoleSyncAt: Option.none(),
-    lastRoleSyncError: Option.none(),
-  }),
   onAddToRoster: vi.fn().mockResolvedValue(undefined),
   onRemoveFromRoster: vi.fn().mockResolvedValue(undefined),
   onAddToGroup: vi.fn().mockResolvedValue(undefined),

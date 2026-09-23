@@ -26,7 +26,6 @@ import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRep
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
@@ -43,7 +42,6 @@ import { NotificationsRepository } from '~/repositories/NotificationsRepository.
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -440,7 +438,6 @@ const MockNoopLayers = Layer.mergeAll(
   noopMockLayer(TrainingTypesRepository),
   noopMockLayer(RostersRepository),
   noopMockLayer(DiscordChannelsRepository),
-  noopMockLayer(DiscordRoleMappingRepository),
   noopMockLayer(DiscordRolesRepository),
   noopMockLayer(DiscordChannelMappingRepository),
   noopMockLayer(EventsRepository),
@@ -451,7 +448,6 @@ const MockNoopLayers = Layer.mergeAll(
   noopMockLayer(ActivityTypesRepository),
   noopMockLayer(LeaderboardRepository),
   noopMockLayer(NotificationsRepository),
-  noopMockLayer(RoleSyncEventsRepository),
   noopMockLayer(ChannelSyncEventsRepository),
   noopMockLayer(EventSyncEventsRepository),
   noopMockLayer(AgeThresholdRepository),

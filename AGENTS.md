@@ -254,7 +254,7 @@ Typed errors automatically merge into unions. Handle specific errors with `Effec
      ),
    )
    ```
-   Never substitute the callee's `never` error channel for this wrap. References: `emitMemberGroupChannelRoles` at its call site in `applications/server/src/rpc/guild/index.ts` (unwrapped, it would have skipped `reconcileMemberDiscordRoles` and the welcome message), `reapplyGroupGrants` at both `applications/server/src/rpc/channel/index.ts` call sites.
+   Never substitute the callee's `never` error channel for this wrap. References: `emitMemberGroupChannelRoles` at its call site in `applications/server/src/rpc/guild/index.ts` (unwrapped, it would have skipped the welcome message below it), `reapplyGroupGrants` at both `applications/server/src/rpc/channel/index.ts` call sites.
 
 ### Stateful Loops — `Effect.suspend` Self-Recursion
 

@@ -14,14 +14,13 @@ import {
 } from '@sideline/domain';
 import { LogicError, Schemas } from '@sideline/effect-lib';
 import { applyTemplate, sanitizeHexColor, sanitizeRendered } from '@sideline/template-renderer';
-import { Array, DateTime, Effect, Option, pipe, Ref, Schema } from 'effect';
+import { Array, DateTime, Effect, Option, pipe, Schema } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { eventDayOrder, eventVisibleNow } from '~/repositories/eventVisibility.js';
@@ -39,11 +38,6 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 import { emitMemberGroupChannelRoles } from '~/utils/emitMemberGroupChannelRoles.js';
-import {
-  MAX_ROLE_SYNC_EMISSIONS_PER_GUILD_RECONCILE,
-  type ReconcileMemberRolesResult,
-  reconcileMemberDiscordRoles,
-} from '~/utils/reconcileMemberDiscordRoles.js';
 
 const toSnowflake = Schema.decodeSync(Discord.Snowflake);
 
@@ -71,18 +65,13 @@ type RegisterMemberPayload = {
 
 /**
  * Per-call options for `registerMemberWithReconcile`, distinct from the wire payload:
- * - `guildBudget` — the shared per-`ReconcileMembers`-call emission budget (see
- *   `reconcileMemberDiscordRoles.ts`). Should-fix 7 (whole-series review of commit 46806427):
- *   direct `member_add` calls pass no budget (unbounded — they only ever touch one member).
- *   `source`'s union (below) is exactly `'member_add' | 'reconcile'` — there is no `'interaction'`
- *   variant to pass a budget for; this comment used to claim otherwise.
  * - `markDiscordJoined` — defaults to `true` (any `Some(source)` observation is a real, complete
  *   sighting of the member). `Guild/ReconcileMembers` overrides this to `complete` because a
  *   truncated member-list page cannot be trusted to certify `bot_guilds.members_backfilled_at`-
- *   grade completeness; it still lets the per-member role diff run regardless (CC-10 S6).
+ *   grade completeness; it still lets the per-member group-channel-role emit run regardless
+ *   (CC-10 S6).
  */
 type RegisterMemberOptions = {
-  readonly guildBudget?: Option.Option<Ref.Ref<number>>;
   readonly markDiscordJoined?: boolean;
 };
 
@@ -134,7 +123,6 @@ export const GuildsRpcLive = Effect.Do.pipe(
   Effect.bind('teams', () => TeamsRepository.asEffect()),
   Effect.bind('users', () => UsersRepository.asEffect()),
   Effect.bind('members', () => TeamMembersRepository.asEffect()),
-  Effect.bind('roleMappings', () => DiscordRoleMappingRepository.asEffect()),
   Effect.bind('channelMappings', () => DiscordChannelMappingRepository.asEffect()),
   Effect.bind('groups', () => GroupsRepository.asEffect()),
   Effect.bind('acceptances', () => InviteAcceptancesRepository.asEffect()),
@@ -159,20 +147,6 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 onNone: () => Effect.logInfo('No default role found, skipping'),
                 onSome: (defaultRole) => deps.members.assignRole(newMember.id, defaultRole.id),
               }),
-            ),
-          ),
-        ),
-        Effect.tap(() =>
-          deps.roleMappings.findAllByTeam(team.id).pipe(
-            Effect.flatMap((mappings) =>
-              Effect.all(
-                pipe(
-                  mappings,
-                  Array.filter((m) => roles.includes(m.discord_role_id)),
-                  Array.map((m) => deps.members.assignRole(newMember.id, m.role_id)),
-                ),
-                { concurrency: 'unbounded' },
-              ),
             ),
           ),
         ),
@@ -268,13 +242,8 @@ export const GuildsRpcLive = Effect.Do.pipe(
      * that make the bot grant the group's own Discord role
      * (`discord_channel_mappings.discord_role_id`, created by `createGroup`'s
      * `emitChannelCreated`) for the group and every active ancestor. This handler was the only
-     * group-add that wrote the row and emitted nothing — and `reconcileMemberDiscordRoles`
-     * cannot cover for it, because it reads `discord_role_mappings`, a different table. A group
-     * with no explicitly linked Sideline role (i.e. no `role_groups` row — the state of every
-     * group at creation) contributes NOTHING to the role diff, so the channel emit is not a
-     * nicety here: it is the only thing that gets the majority of groups their Discord role.
-     * (`setupNewMember`'s group-add needs no emit — it matched the member BECAUSE they already
-     * hold that Discord role.)
+     * group-add that wrote the row and emitted nothing — it is the only thing that gets the
+     * majority of groups their Discord role.
      *
      * Ancestors come from `getActiveAncestors`, NOT `getAncestorsIncludingArchived`: an archived ancestor whose
      * `discord_channel_mappings` row `deleteGroup` already removed would otherwise make the
@@ -283,12 +252,10 @@ export const GuildsRpcLive = Effect.Do.pipe(
      *
      * Returns the group ids it emitted `member_added` for — the bound group PLUS its active
      * ancestors. Only the first of those got an `addMemberById`; membership in an ancestor is
-     * implied by the subgroup tree, not stored. `registerMemberWithReconcile` destructures that
-     * value in the `reconcile` bind, which makes it a COMPILE ERROR in `Effect.Do` to run the
-     * role diff first: the diff reads `findEffectiveRoleIdsForMember` (`member_roles` UNION the
-     * group-inherited walk, `repositories/effectiveRoles.ts`) from the database at call time and
-     * would miss any group bound after it. That structural dependency, not a comment, is what
-     * keeps this ordering.
+     * implied by the subgroup tree, not stored. `registerMemberWithReconcile` passes that value
+     * straight to `observeGuildMembership` as `alreadyEmittedGroupIds`, so its own
+     * group-channel-role emit never double-emits a group this call already covered. That
+     * structural dependency, not a comment, is what keeps this ordering.
      *
      * `group_id` and `group_name` come from the same `LEFT JOIN groups g ON g.id = ti.group_id
      * AND g.is_archived = false` in both acceptance queries, so they are strictly co-present —
@@ -443,14 +410,12 @@ export const GuildsRpcLive = Effect.Do.pipe(
 
     type RegisterMemberOutcome = {
       readonly welcomeMeta: Option.Option<WelcomeMeta>;
-      readonly reconcile: Option.Option<ReconcileMemberRolesResult>;
     };
     const noOutcome: RegisterMemberOutcome = {
       welcomeMeta: Option.none(),
-      reconcile: Option.none(),
     };
 
-    // PR-8 (CC-10): runs the level-based role diff on EVERY observation of the member (a fresh
+    // PR-8 (CC-10): runs the group-channel-role emit on EVERY observation of the member (a fresh
     // join, a re-join, or — critically, the reporter's exact bug — a member already active on
     // the team who is only now being seen in the guild). `payload.source` gates whether this runs
     // at all (`None` = an un-upgraded bot; skip entirely and pick the member up on the next
@@ -460,25 +425,19 @@ export const GuildsRpcLive = Effect.Do.pipe(
       newMember: { readonly id: TeamMember.TeamMemberId },
       payload: RegisterMemberPayload,
       options: RegisterMemberOptions,
-      // ORDER-CRITICAL, not decorative. To be precise about what enforces what: the thing that
-      // makes running the role diff before `applyInviteGroup` a COMPILE ERROR is the
-      // `{ newMember, boundGroupIds }` destructure at the `reconcile` bind in
-      // `registerMemberWithReconcile` — `Effect.Do` only exposes keys bound earlier, so hoisting
-      // `reconcile` above `boundGroupIds` stops type-checking. This parameter is what gives that
-      // destructure a reason to exist. It is ALSO now a real, functional argument in its own
-      // right (bug fix-group-channel-discord-join, PR 1): passed straight through to
+      // ORDER-CRITICAL, not decorative. It is passed straight through to
       // `emitMemberGroupChannelRoles` below as `alreadyEmittedGroupIds`, so a group-scoped
       // invite's own `member_added` emit (from `applyInviteGroup`, bound above this call) is
       // never double-emitted by this function's own group-channel-role diff. Do not "tidy this
-      // away" — it now has two independent reasons to exist, not one.
+      // away".
       boundGroupIds: ReadonlyArray<GroupModel.GroupId>,
     ) =>
       Option.match(payload.source, {
         onNone: () =>
           Effect.logDebug(
             `RegisterMember: no source on payload for discord_id ${payload.discord_id} in team ${team.id} ` +
-              `(pre-PR-8 bot); skipping discord_joined_at + role diff`,
-          ).pipe(Effect.as(Option.none<ReconcileMemberRolesResult>())),
+              `(pre-PR-8 bot); skipping discord_joined_at + group-channel-role emit`,
+          ),
         onSome: (source) =>
           Effect.Do.pipe(
             Effect.tap(() =>
@@ -506,11 +465,11 @@ export const GuildsRpcLive = Effect.Do.pipe(
             // `emitMemberGroupChannelRoles` pipes `catchSqlErrors` (`Effect.die(LogicError)`), so a
             // transient failure here is a DEFECT, not a typed error — despite the `never` error
             // channel. Left unguarded, that defect would short-circuit this whole `Effect.tap` and
-            // skip `reconcileMemberDiscordRoles` plus the welcome message below, breaking
-            // pre-existing behavior for the sake of an additive fix. Same convention as
-            // `reapplyGroupGrants`'s wrap in `rpc/channel/index.ts:220-221` / `:245-246` (see
-            // `applications/server/AGENTS.md`: "a grant-reapply error is observability noise, not a
-            // reason to reject the role mapping").
+            // skip the welcome message below, breaking pre-existing behavior for the sake of an
+            // additive fix. Same convention as `reapplyGroupGrants`'s wrap in
+            // `rpc/channel/index.ts:220-221` / `:245-246` (see `applications/server/AGENTS.md`: "a
+            // grant-reapply error is observability noise, not a reason to reject the role
+            // mapping").
             Effect.tap(() =>
               source === 'member_add'
                 ? emitMemberGroupChannelRoles(
@@ -530,16 +489,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       `re-derive it — see AGENTS.md's accepted gap and today's manual "Sync role members" remedy)`,
                   ),
             ),
-            Effect.flatMap(() =>
-              reconcileMemberDiscordRoles(
-                team,
-                newMember,
-                toSnowflake(payload.discord_id),
-                payload.roles,
-                options.guildBudget ?? Option.none(),
-              ),
-            ),
-            Effect.map(Option.some),
+            Effect.asVoid,
           ),
       });
 
@@ -597,23 +547,22 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 // welcome DTO at the bottom of this chain consume the same context, and
                 // previously each re-derived it inside `resolveWelcomeMeta`.
                 Effect.bind('inviteContext', () => resolveInviteContext(team, payload)),
-                // ORDER-CRITICAL — see `applyInviteGroup`. Enforced by `reconcile`'s
-                // `boundGroupIds` destructure below, not by this comment.
+                // ORDER-CRITICAL — see `applyInviteGroup`. Enforced by `observeGuildMembership`'s
+                // `boundGroupIds` parameter below, not by this comment.
                 Effect.bind('boundGroupIds', ({ newMember, inviteContext }) =>
                   applyInviteGroup(team, newMember, payload, inviteContext),
                 ),
                 // Runs on every branch above — including "already active", which is exactly the
                 // reporter's case (a member registered via web who only later joins Discord).
-                Effect.bind('reconcile', ({ newMember, boundGroupIds }) =>
+                Effect.tap(({ newMember, boundGroupIds }) =>
                   observeGuildMembership(team, newMember, payload, options, boundGroupIds),
                 ),
                 Effect.bind('welcomeMeta', ({ user, inviteContext }) =>
                   buildWelcomeMeta(team, user, payload, inviteContext),
                 ),
                 Effect.map(
-                  ({ welcomeMeta, reconcile }): RegisterMemberOutcome => ({
+                  ({ welcomeMeta }): RegisterMemberOutcome => ({
                     welcomeMeta: Option.some(welcomeMeta),
-                    reconcile,
                   }),
                 ),
               ),
@@ -829,12 +778,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
           Effect.tap(() =>
             Effect.logInfo(`Reconciling ${membersList.length} members for guild ${guild_id}`),
           ),
-          // Per-guild-per-pass emission budget (CC-10 S6 / PR-8 step 6) — shared across every
-          // member processed in this call so the first post-deploy backfill of a large,
-          // long-unsynced guild drains over several reconnects instead of dumping thousands of
-          // role_sync_events into the bot's `concurrency: 1` drain loop in one shot.
-          Effect.bind('budget', () => Ref.make(MAX_ROLE_SYNC_EMISSIONS_PER_GUILD_RECONCILE)),
-          Effect.bind('results', ({ budget }) =>
+          Effect.tap(() =>
             Effect.all(
               Array.map(membersList, (member) =>
                 registerMemberWithReconcile(
@@ -852,10 +796,9 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     source: Option.some('reconcile'),
                   },
                   {
-                    guildBudget: Option.some(budget),
                     // A truncated page cannot certify "we have seen this member" the way a
-                    // realtime member_add can — see CC-10 S6. The diff still runs unconditionally
-                    // (below, independent of `complete`).
+                    // realtime member_add can — see CC-10 S6. The group-channel-role emit still
+                    // runs unconditionally (below, independent of `complete`).
                     markDiscordJoined: complete,
                   },
                 ),
@@ -863,18 +806,6 @@ export const GuildsRpcLive = Effect.Do.pipe(
               { concurrency: 5 },
             ),
           ),
-          Effect.tap(({ results }) => {
-            const skipped = results.reduce(
-              (acc, { reconcile }) =>
-                acc + Option.match(reconcile, { onNone: () => 0, onSome: (r) => r.skippedForCap }),
-              0,
-            );
-            return skipped > 0
-              ? Effect.logWarning(
-                  `Guild/ReconcileMembers: per-guild emission cap reached for guild ${guild_id}; ${skipped} role_sync_events deferred to the next reconcile`,
-                )
-              : Effect.void;
-          }),
           Effect.tap(() =>
             complete ? deps.botGuilds.markMembersBackfilled(guild_id) : Effect.void,
           ),

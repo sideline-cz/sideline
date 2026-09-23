@@ -27,7 +27,6 @@ import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -296,9 +295,6 @@ const MockAgeThresholdRepositoryLayer = Layer.succeed(AgeThresholdRepository, {
 const MockNotificationsRepositoryLayer = Layer.succeed(NotificationsRepository, {
   _tag: 'api/NotificationsRepository',
 } as any);
-const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository, {
-  _tag: 'api/RoleSyncEventsRepository',
-} as any);
 const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepository, {
   _tag: 'api/ChannelSyncEventsRepository',
   hasUnprocessedForGroups: () => Effect.succeed([]),
@@ -437,7 +433,7 @@ const TestLayer = ApiLive.pipe(
   ),
   Layer.provide(Layer.merge(MockHttpClientLayer, MockAgeCheckServiceLayer)),
   Layer.provide(MockAgeThresholdRepositoryLayer),
-  Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+  Layer.provide(MockNotificationsRepositoryLayer),
   Layer.provide(
     Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
   ),

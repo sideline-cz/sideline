@@ -7,7 +7,6 @@ import { GuildJoinSyncService } from './guildJoin/index.js';
 import { InviteGeneratorService } from './inviteGenerator/index.js';
 import { OnboardingSyncService } from './onboarding/index.js';
 import { PersonalEventsSyncService } from './personalEvents/index.js';
-import { RoleSyncService } from './role/index.js';
 import { RoleProvisionSyncService } from './roleProvision/index.js';
 import { RulesQuizSyncService } from './rulesQuiz/index.js';
 import { TeamChallengeSyncService } from './teamChallenge/index.js';
@@ -25,7 +24,6 @@ export {
   OnboardingSyncService,
   PersonalEventsSyncService,
   RoleProvisionSyncService,
-  RoleSyncService,
   RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,

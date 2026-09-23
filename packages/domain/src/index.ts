@@ -311,8 +311,6 @@ export * as Discord from './models/Discord.js';
 
 export * as DiscordChannelMapping from './models/DiscordChannelMapping.js';
 
-export * as DiscordRoleMapping from './models/DiscordRoleMapping.js';
-
 /**
  * The four name slots used to resolve a display name.
  * Precedence: profile name → Discord nickname → Discord display name → username.
@@ -382,8 +380,6 @@ export * as Poll from './models/Poll.js';
 export * as Role from './models/Role.js';
 
 export * as RoleGroup from './models/RoleGroup.js';
-
-export * as RoleSyncEvent from './models/RoleSyncEvent.js';
 
 export * as RosterMemberModel from './models/RosterMemberModel.js';
 
@@ -600,9 +596,6 @@ export * as InviteRpcGroup from './rpc/invite/InviteRpcGroup.js';
 export * as PersonalEventsRpcGroup from './rpc/personalEvents/PersonalEventsRpcGroup.js';
 export * as PollRpcGroup from './rpc/poll/PollRpcGroup.js';
 export * as PollRpcModels from './rpc/poll/PollRpcModels.js';
-export * as RoleRpcEvents from './rpc/role/RoleRpcEvents.js';
-export * as RoleRpcGroup from './rpc/role/RoleRpcGroup.js';
-export * as RoleRpcModels from './rpc/role/RoleRpcModels.js';
 export * as RoleProvisionRpcGroup from './rpc/roleProvision/RoleProvisionRpcGroup.js';
 /**
  * The bot's user-scoped write path into the rules trainer.

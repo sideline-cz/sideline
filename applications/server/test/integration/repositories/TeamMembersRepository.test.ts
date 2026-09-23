@@ -9,7 +9,6 @@
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Team, User } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
-import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
@@ -274,76 +273,6 @@ describe('TeamMembersRepository — findDiscordJoinedAt', () => {
   );
 });
 
-// PR-9c — `findLastRoleSync` reads `team_members.last_role_sync_*`
-// (`RoleSyncEventsRepository.recordLastRoleSync` is the only writer). Exercised against REAL,
-// non-null TIMESTAMPTZ rows on purpose: a `Schema.DateTimeUtc` vs `Schema.DateTimeUtcFromDate`
-// mixup on this column type-checks and passes against every mocked test (`Schema.OptionFromNullOr`
-// short-circuits on NULL, so the inner decoder is never reached), and only throws once a real
-// non-null timestamp comes back from node-pg as a JS `Date`.
-describe('TeamMembersRepository — findLastRoleSync', () => {
-  const setLastRoleSync = (memberId: string, state: 'ok' | 'failed', errorCode: string | null) =>
-    SqlClient.SqlClient.asEffect().pipe(
-      Effect.andThen(
-        (sql) => sql`
-          UPDATE team_members
-          SET last_role_sync_at = now(), last_role_sync_state = ${state}, last_role_sync_error = ${errorCode}
-          WHERE id = ${memberId}
-        `,
-      ),
-    );
-
-  it.effect('returns None for a member that has never completed a role sync', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('800000000000000040', 'lastsync-none');
-      const team = yield* createTeam('800700000000000040' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      const members = yield* TeamMembersRepository.asEffect();
-
-      const result = yield* members.findLastRoleSync(member.id);
-      expect(Option.isNone(result)).toBe(true);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('returns Some with a real DateTime.Utc and no error code for state=ok', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('800000000000000041', 'lastsync-ok');
-      const team = yield* createTeam('800700000000000041' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      yield* setLastRoleSync(member.id, 'ok', null);
-
-      const members = yield* TeamMembersRepository.asEffect();
-      const result = yield* members.findLastRoleSync(member.id);
-
-      expect(Option.isSome(result)).toBe(true);
-      const value = Option.getOrThrow(result);
-      expect(value.state).toBe('ok');
-      expect(Option.isNone(value.errorCode)).toBe(true);
-      // The regression this guards: `at` MUST decode into a real DateTime.Utc from the non-null
-      // column, not silently pass through as an undecoded/NULL value.
-      expect(DateTime.isDateTime(value.at)).toBe(true);
-      expect(Math.abs(DateTime.toEpochMillis(value.at) - Date.now())).toBeLessThan(60_000);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('returns Some with the recorded error code for state=failed', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('800000000000000042', 'lastsync-failed');
-      const team = yield* createTeam('800700000000000042' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      yield* setLastRoleSync(member.id, 'failed', 'captain_action');
-
-      const members = yield* TeamMembersRepository.asEffect();
-      const result = yield* members.findLastRoleSync(member.id);
-
-      expect(Option.isSome(result)).toBe(true);
-      const value = Option.getOrThrow(result);
-      expect(value.state).toBe('failed');
-      expect(Option.getOrNull(value.errorCode)).toBe('captain_action');
-      expect(DateTime.isDateTime(value.at)).toBe(true);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-});
-
 // ---------------------------------------------------------------------------
 // findRosterMemberByIds — includeInactive option
 //
@@ -428,117 +357,6 @@ describe('TeamMembersRepository — reactivateMember', () => {
       );
       expect(Option.isSome(reactivated)).toBe(true);
       expect(Option.getOrThrow(reactivated).active).toBe(true);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-});
-
-// ---------------------------------------------------------------------------
-// recordRoleGrant / clearRoleGrant / findGrantedRoleIds — member_role_grants (blocker,
-// whole-series review of commit 46806427). Per-member Discord-role provenance: which roles THIS
-// member was actually given by Sideline, as opposed to `discord_role_mappings.adopted`, which
-// only says whether the MAPPING itself was adopted vs. created — see
-// `packages/migrations/src/before/1791100000_create_member_role_grants.ts` for the full
-// rationale.
-// ---------------------------------------------------------------------------
-
-describe('TeamMembersRepository — recordRoleGrant / clearRoleGrant / findGrantedRoleIds', () => {
-  it.effect('findGrantedRoleIds is empty for a member with no recorded grants', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('800000000000000050', 'grants-none');
-      const team = yield* createTeam('800800000000000050' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-
-      const members = yield* TeamMembersRepository.asEffect();
-      const granted = yield* members.findGrantedRoleIds(member.id);
-
-      expect(granted).toEqual([]);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('recordRoleGrant makes the role id show up in findGrantedRoleIds', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('800000000000000051', 'grants-record');
-      const team = yield* createTeam('800800000000000051' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      const roles = yield* RolesRepository.asEffect();
-      const role = yield* roles.insertRole(team.id, 'Captain');
-
-      const members = yield* TeamMembersRepository.asEffect();
-      yield* members.recordRoleGrant(member.id, role.id);
-
-      const granted = yield* members.findGrantedRoleIds(member.id);
-      expect(granted).toEqual([role.id]);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect(
-    'recordRoleGrant is idempotent — recording the same grant twice does not duplicate it',
-    () =>
-      Effect.gen(function* () {
-        const userId = yield* createUser('800000000000000052', 'grants-idempotent');
-        const team = yield* createTeam('800800000000000052' as Discord.Snowflake, userId);
-        const member = yield* addActiveMember(team.id, userId);
-        const roles = yield* RolesRepository.asEffect();
-        const role = yield* roles.insertRole(team.id, 'Captain');
-
-        const members = yield* TeamMembersRepository.asEffect();
-        yield* members.recordRoleGrant(member.id, role.id);
-        yield* members.recordRoleGrant(member.id, role.id);
-
-        const granted = yield* members.findGrantedRoleIds(member.id);
-        expect(granted).toEqual([role.id]);
-      }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('clearRoleGrant removes a previously recorded grant', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('800000000000000053', 'grants-clear');
-      const team = yield* createTeam('800800000000000053' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      const roles = yield* RolesRepository.asEffect();
-      const role = yield* roles.insertRole(team.id, 'Captain');
-
-      const members = yield* TeamMembersRepository.asEffect();
-      yield* members.recordRoleGrant(member.id, role.id);
-      yield* members.clearRoleGrant(member.id, role.id);
-
-      const granted = yield* members.findGrantedRoleIds(member.id);
-      expect(granted).toEqual([]);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('clearRoleGrant on a role never granted is a no-op, not an error', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('800000000000000054', 'grants-clear-noop');
-      const team = yield* createTeam('800800000000000054' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      const roles = yield* RolesRepository.asEffect();
-      const role = yield* roles.insertRole(team.id, 'Captain');
-
-      const members = yield* TeamMembersRepository.asEffect();
-      // Must not throw even though no grant row exists for this (member, role) pair.
-      yield* members.clearRoleGrant(member.id, role.id);
-
-      const granted = yield* members.findGrantedRoleIds(member.id);
-      expect(granted).toEqual([]);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('grants are scoped per member — recording one member does not grant another', () =>
-    Effect.gen(function* () {
-      const userA = yield* createUser('800000000000000055', 'grants-member-a');
-      const userB = yield* createUser('800000000000000056', 'grants-member-b');
-      const team = yield* createTeam('800800000000000055' as Discord.Snowflake, userA);
-      const memberA = yield* addActiveMember(team.id, userA);
-      const memberB = yield* addActiveMember(team.id, userB);
-      const roles = yield* RolesRepository.asEffect();
-      const role = yield* roles.insertRole(team.id, 'Captain');
-
-      const members = yield* TeamMembersRepository.asEffect();
-      yield* members.recordRoleGrant(memberA.id, role.id);
-
-      expect(yield* members.findGrantedRoleIds(memberA.id)).toEqual([role.id]);
-      expect(yield* members.findGrantedRoleIds(memberB.id)).toEqual([]);
     }).pipe(Effect.provide(TestLayer)),
   );
 });

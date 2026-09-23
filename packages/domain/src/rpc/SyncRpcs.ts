@@ -11,7 +11,6 @@ import { GuildRpcGroup } from './guild/GuildRpcGroup.js';
 import { InviteRpcGroup } from './invite/InviteRpcGroup.js';
 import { PersonalEventsRpcGroup } from './personalEvents/PersonalEventsRpcGroup.js';
 import { PollRpcGroup } from './poll/PollRpcGroup.js';
-import { RoleRpcGroup } from './role/RoleRpcGroup.js';
 import { RoleProvisionRpcGroup } from './roleProvision/RoleProvisionRpcGroup.js';
 import { RulesRpcGroup } from './rules/RulesRpcGroup.js';
 import { RulesQuizRpcGroup } from './rulesQuiz/RulesQuizRpcGroup.js';
@@ -20,7 +19,6 @@ import { TeamChallengeSyncEventsRpcGroup } from './teamChallenge/TeamChallengeSy
 import { WeeklySummaryRpcGroup } from './weeklySummary/WeeklySummaryRpcGroup.js';
 
 export class SyncRpcs extends RpcGroup.make().merge(
-  RoleRpcGroup,
   ChannelRpcGroup,
   GuildRpcGroup,
   EventRpcGroup,

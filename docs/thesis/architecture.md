@@ -199,7 +199,7 @@ For the bot, `AppLive` composes:
 
 - `HealthServerLive` — lightweight HTTP health-check server
 - `DiscordIxLive` — dfx Gateway connection (WebSocket to Discord)
-- `SyncLive` — `RoleSyncService`, `ChannelSyncService`, `ChannelBackfillService`, `EventSyncService`, `AchievementSyncService`, `RoleProvisionSyncService`, `EmailSyncService` (all backed by `SyncRpc` which calls the server over RPC)
+- `SyncLive` — `ChannelSyncService`, `ChannelBackfillService`, `EventSyncService`, `AchievementSyncService`, `RoleProvisionSyncService`, `EmailSyncService` (all backed by `SyncRpc` which calls the server over RPC)
 - `FinanceCommand` — `/finance` slash command group (ephemeral, calls `Finance/GetMyStatus` RPC)
 
 ### `run.ts` — deployment entrypoint

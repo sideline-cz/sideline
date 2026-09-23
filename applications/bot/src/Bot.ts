@@ -20,7 +20,6 @@ import {
   OnboardingSyncService,
   PersonalEventsSyncService,
   RoleProvisionSyncService,
-  RoleSyncService,
   RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,
@@ -141,7 +140,6 @@ export const program = Effect.Do.pipe(
     ).pipe(Effect.forkDetach),
   ),
   Effect.bind('events', () => eventHandlers),
-  Effect.bind('roles', () => RoleSyncService.asEffect()),
   Effect.bind('rulesQuiz', () => RulesQuizSyncService.asEffect()),
   Effect.bind('channels', () => ChannelSyncService.asEffect()),
   Effect.bind('eventSync', () => EventSyncService.asEffect()),
@@ -166,7 +164,6 @@ export const program = Effect.Do.pipe(
   Effect.andThen(
     ({
       events,
-      roles,
       rulesQuiz,
       channels,
       eventSync,
@@ -193,7 +190,6 @@ export const program = Effect.Do.pipe(
           ...events,
           Effect.all(
             [
-              pollLoop(roles.processTick),
               // Scheduled quiz: the cron only enqueues on the minute, so a 5s
               // drain is plenty and keeps it beside every other sync loop.
               pollLoop(rulesQuiz.processTick),
@@ -226,7 +222,6 @@ export const program = Effect.Do.pipe(
   | DiscordGateway
   | DiscordREST
   | SyncRpc
-  | RoleSyncService
   | RulesQuizSyncService
   | ChannelSyncService
   | ChannelBackfillService

@@ -26,7 +26,6 @@ import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsR
 import { DashboardLayoutsRepository } from '~/repositories/DashboardLayoutsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsRepository.js';
@@ -60,7 +59,6 @@ import { PersonalEventMessagesRepository } from '~/repositories/PersonalEventMes
 import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
 import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
 import { PollsRepository } from '~/repositories/PollsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { RulesAttemptsRepository } from '~/repositories/RulesAttemptsRepository.js';
@@ -135,8 +133,6 @@ export const Repositories = Layer.mergeAll(
   InviteAcceptancesRepository.Default,
   AgeThresholdRepository.Default,
   NotificationsRepository.Default,
-  RoleSyncEventsRepository.Default,
-  DiscordRoleMappingRepository.Default,
   ChannelSyncEventsRepository.Default,
   EventSyncEventsRepository.Default,
   DiscordChannelMappingRepository.Default,

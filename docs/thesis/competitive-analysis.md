@@ -395,7 +395,7 @@ The following SWOT analysis evaluates Sideline's strategic position in the sport
 | S2 | Open-source MIT licence builds trust, enables community contributions, and removes lock-in concerns |
 | S3 | Self-hostable via Docker, supporting data sovereignty and institutional deployment |
 | S4 | Activity tracking with leaderboard gamification is a unique capability in this market |
-| S5 | Role-based access control with Discord role sync eliminates permission duplication overhead |
+| S5 | Fine-grained, permission-based role-based access control avoids the all-or-nothing admin/member split of most Discord-native competitors |
 | S6 | Group hierarchy with Discord channel sync supports complex club structures |
 | S7 | Modern, type-safe Effect-TS codebase with high maintainability and testability |
 | S8 | Recurring event series with rolling-horizon generation is more robust than competitor implementations |

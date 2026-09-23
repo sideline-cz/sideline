@@ -50,7 +50,6 @@ import { NotificationsRepository } from '~/repositories/NotificationsRepository.
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -750,16 +749,6 @@ const MockAgeCheckServiceLayer = Layer.succeed(AgeCheckService, {
   evaluate: () => Effect.succeed([]),
 } as any);
 
-const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository, {
-  emitRoleCreated: () => Effect.void,
-  emitRoleDeleted: () => Effect.void,
-  emitRoleAssigned: () => Effect.void,
-  emitRoleUnassigned: () => Effect.void,
-  findUnprocessed: () => Effect.succeed([]),
-  markProcessed: () => Effect.void,
-  markFailed: () => Effect.void,
-} as any);
-
 const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepository, {
   emitChannelCreated: () => Effect.void,
   emitChannelDeleted: () => Effect.void,
@@ -957,7 +946,7 @@ const TestLayer = ApiLive.pipe(
       MockAgeThresholdRepositoryLayer,
     ),
   ),
-  Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+  Layer.provide(MockNotificationsRepositoryLayer),
   Layer.provide(
     Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
   ),

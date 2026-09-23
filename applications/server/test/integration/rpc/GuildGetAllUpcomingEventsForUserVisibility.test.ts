@@ -28,7 +28,6 @@ import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDivid
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
 import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
@@ -59,7 +58,6 @@ const PlainRepositories = Layer.mergeAll(
   TeamsRepository.Default,
   UsersRepository.Default,
   TeamMembersRepository.Default,
-  DiscordRoleMappingRepository.Default,
   DiscordChannelMappingRepository.Default,
   GroupsRepository.Default,
   InviteAcceptancesRepository.Default,

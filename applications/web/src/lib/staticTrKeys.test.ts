@@ -23,8 +23,8 @@
 //    happens to be in `src/` right now.
 //
 // 2. Several real call sites build the key itself and can never be seen by a literal-argument
-//    scan: `SyncRolesButton.tsx`'s `discord_syncError_${bucket}`, `ConnectDiscordPage.tsx`'s
-//    `errorCopyKey` (returns one of several string literals, but the `tr(...)` call site itself
+//    scan: `ConnectDiscordPage.tsx`'s `errorCopyKey` (returns one of several string literals,
+//    but the `tr(...)` call site itself
 //    receives a variable), `AccessLevelSelect`'s `labelMap`/`helpMap`, `DashboardCustomizer`'s
 //    `WIDGET_LABELS`, and `PaymentStatusBadge`'s `` tr(`finance_status_${status}`) ``. This test
 //    cannot safely resolve any of them — nor can it catch the reverse mistake, a key deleted from
@@ -87,7 +87,7 @@ describe('extractStaticTrKeys (regex behavior, synthetic fixtures)', () => {
   });
 
   it('skips a concatenated key instead of mis-capturing the leading fragment', () => {
-    expect(extractStaticTrKeys(`tr('discord_syncError_' + bucket)`)).toEqual([]);
+    expect(extractStaticTrKeys(`tr('discord_connect_error_' + bucket)`)).toEqual([]);
   });
 
   it('skips a concatenated key with a double-quoted fragment and later whitespace before +', () => {
@@ -141,18 +141,6 @@ describe('known dynamic tr() key families resolve against the i18n catalogue', (
   const knownKeys = new Set(messageKeys);
 
   const families: ReadonlyArray<{ readonly name: string; readonly keys: ReadonlyArray<string> }> = [
-    {
-      // SyncRolesButton.tsx's errorCopyKey: `discord_syncError_${code === 'captain_action' ?
-      // 'captainAction' : code === 'user_action' ? 'userAction' : code}` over
-      // 'retryable' | 'captain_action' | 'user_action' | 'unknown'.
-      name: 'SyncRolesButton discord_syncError_*',
-      keys: [
-        'discord_syncError_retryable',
-        'discord_syncError_captainAction',
-        'discord_syncError_userAction',
-        'discord_syncError_unknown',
-      ],
-    },
     {
       // ConnectDiscordPage.tsx's errorCopyKey: every branch of the Option.match over
       // Invite.JoinStatusErrorCode plus the None case.

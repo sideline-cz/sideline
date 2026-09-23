@@ -23,7 +23,6 @@ import {
 } from '~/utils/applyDiscordFormat.js';
 import { backfillGroupRoleMembers } from '~/utils/backfillGroupRoleMembers.js';
 import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
-import { descendantTargets, withGroupRoleSync } from '~/utils/syncGroupRoleMembers.js';
 
 type GroupRowLike = {
   readonly id: GroupModel.GroupId;
@@ -412,14 +411,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               ),
               Effect.bind('mapping', () => channelMappings.findByGroupId(teamId, groupId)),
               Effect.bind('settings', () => teamSettings.findByTeamId(teamId)),
-              Effect.tap(() =>
-                withGroupRoleSync(
-                  teamId,
-                  descendantTargets(groupId),
-                  { groupId, operation: 'deleteGroup' },
-                  groups.archiveGroupById(groupId),
-                ),
-              ),
+              Effect.tap(() => groups.archiveGroupById(groupId)),
               Effect.tap(({ existing, mapping, settings }) =>
                 Option.match(mapping, {
                   onNone: () => Effect.void,
@@ -515,16 +507,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              Effect.tap(({ _member }) =>
-                withGroupRoleSync(
-                  teamId,
-                  Effect.succeed([
-                    { teamMemberId: payload.memberId, discordUserId: _member.discord_id },
-                  ]),
-                  { groupId, operation: 'addGroupMember' },
-                  groups.addMemberById(groupId, payload.memberId),
-                ),
-              ),
+              Effect.tap(() => groups.addMemberById(groupId, payload.memberId)),
               Effect.tap(({ _group, _member }) =>
                 users.findById(_member.user_id).pipe(
                   Effect.flatMap(
@@ -598,14 +581,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              Effect.tap(({ _member }) =>
-                withGroupRoleSync(
-                  teamId,
-                  Effect.succeed([{ teamMemberId: memberId, discordUserId: _member.discord_id }]),
-                  { groupId, operation: 'removeGroupMember' },
-                  groups.removeMemberById(groupId, memberId),
-                ),
-              ),
+              Effect.tap(() => groups.removeMemberById(groupId, memberId)),
               Effect.tap(({ _group, _member }) =>
                 users.findById(_member.user_id).pipe(
                   Effect.flatMap(
@@ -667,14 +643,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              Effect.tap(() =>
-                withGroupRoleSync(
-                  teamId,
-                  descendantTargets(groupId),
-                  { groupId, operation: 'assignGroupRole' },
-                  roles.assignRoleToGroup(payload.roleId, groupId),
-                ),
-              ),
+              Effect.tap(() => roles.assignRoleToGroup(payload.roleId, groupId)),
               Effect.asVoid,
             ),
           )
@@ -700,14 +669,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              Effect.tap(() =>
-                withGroupRoleSync(
-                  teamId,
-                  descendantTargets(groupId),
-                  { groupId, operation: 'unassignGroupRole' },
-                  roles.unassignRoleFromGroup(roleId, groupId),
-                ),
-              ),
+              Effect.tap(() => roles.unassignRoleFromGroup(roleId, groupId)),
               Effect.asVoid,
             ),
           )
@@ -753,48 +715,37 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               // background sweeps that can safely block forever: `deactivateMemberAndCascade` is
               // reached from the interactive `deactivateMember` endpoint (`api/roster.ts`), a
               // pre-existing gap this change does not close.
-              //
-              // `withGroupRoleSync` is deliberately NOT transactional (see its header), so the
-              // transaction goes INSIDE it as the write it wraps, never around it. That leaves
-              // its BEFORE snapshot outside the lock and so computable against a stale tree —
-              // a pre-existing, documented trade-off we are keeping: pulling the snapshot inside
-              // would hold a team-wide lock across its two 10s timeouts.
               Effect.bind('updated', ({ sql }) =>
-                withGroupRoleSync(
-                  teamId,
-                  descendantTargets(groupId),
-                  { groupId, operation: 'moveGroup' },
-                  sql
-                    .withTransaction(
-                      Effect.Do.pipe(
-                        Effect.tap(() => sql`SET LOCAL lock_timeout = '5s'`),
-                        Effect.tap(() => sql`SELECT pg_advisory_xact_lock(hashtext(${teamId}))`),
-                        Effect.tap(() => requireSameTeamParent(groups, teamId, payload.parentId)),
-                        Effect.tap(() =>
-                          Option.match(payload.parentId, {
-                            onNone: () => Effect.void,
-                            onSome: (pid) =>
-                              // `getAncestorIds` seeds from the group's `parent_id`, so it never
-                              // reports the group itself — `parentId === groupId` is a one-request
-                              // cycle it cannot see, and has to be rejected separately.
-                              pid === groupId
-                                ? Effect.fail(forbidden)
-                                : groups
-                                    .getAncestorIds(pid)
-                                    .pipe(
-                                      Effect.flatMap((ancestors) =>
-                                        pipe(ancestors, Array.contains(groupId))
-                                          ? Effect.fail(forbidden)
-                                          : Effect.void,
-                                      ),
+                sql
+                  .withTransaction(
+                    Effect.Do.pipe(
+                      Effect.tap(() => sql`SET LOCAL lock_timeout = '5s'`),
+                      Effect.tap(() => sql`SELECT pg_advisory_xact_lock(hashtext(${teamId}))`),
+                      Effect.tap(() => requireSameTeamParent(groups, teamId, payload.parentId)),
+                      Effect.tap(() =>
+                        Option.match(payload.parentId, {
+                          onNone: () => Effect.void,
+                          onSome: (pid) =>
+                            // `getAncestorIds` seeds from the group's `parent_id`, so it never
+                            // reports the group itself — `parentId === groupId` is a one-request
+                            // cycle it cannot see, and has to be rejected separately.
+                            pid === groupId
+                              ? Effect.fail(forbidden)
+                              : groups
+                                  .getAncestorIds(pid)
+                                  .pipe(
+                                    Effect.flatMap((ancestors) =>
+                                      pipe(ancestors, Array.contains(groupId))
+                                        ? Effect.fail(forbidden)
+                                        : Effect.void,
                                     ),
-                          }),
-                        ),
-                        Effect.flatMap(() => groups.moveGroup(groupId, payload.parentId)),
+                                  ),
+                        }),
                       ),
-                    )
-                    .pipe(catchSqlErrors),
-                ),
+                      Effect.flatMap(() => groups.moveGroup(groupId, payload.parentId)),
+                    ),
+                  )
+                  .pipe(catchSqlErrors),
               ),
               Effect.bind('memberCount', () => groups.getMemberCount(groupId)),
               Effect.bind('provisioningIds', () => channelSync.hasUnprocessedForGroups([groupId])),
