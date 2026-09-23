@@ -1,14 +1,24 @@
-// Integration coverage for PR-7 (root cause D):
-//   - emitRoleAssigned actually inserts a row that the bot's findUnprocessed query returns
-//     (root cause D was that nothing ever called these emit* functions in production).
-//   - emitRoleAssigned no-ops (writes nothing) when `lookupGuildId` finds no matching team row —
-//     the `_emitIfGuildLinked` onNone branch.
-//   - TeamMembersRepository.findEffectiveRoleIdsForMember (PR-7 step 3) returns both directly
-//     assigned and group-inherited roles, deduplicated.
+// Integration coverage for `fix/discord-roles-sync`:
+//   - Every emit* on RoleSyncEventsRepository writes NOTHING. A Sideline role is a permissions
+//     construct and is never mirrored into a Discord guild role; Discord roles come from groups
+//     and rosters (`channel_sync_events`) and achievements (`role_provision_events`), none of
+//     which touch this repository.
+//   - findUnprocessed drains nothing either, so rows enqueued before this change cannot mint a
+//     Discord role after deploy.
+//   - TeamMembersRepository.findEffectiveRoleIdsForMember still returns both directly assigned
+//     and group-inherited roles, deduplicated — Sideline-side role resolution is unchanged, only
+//     its propagation to Discord is gone.
+//
+// The `markProcessed` / `markFailed` fidelity and same-tick-guard describes that used to live
+// here were removed with this change: both functions are only ever called by the bot's role
+// ProcessorService on an event `findUnprocessed` handed it, so with the queue no longer drained
+// they are unreachable, and the only way to keep exercising them would be to seed `role_sync_events`
+// by raw SQL — testing a path production can no longer take. They are deleted along with the rest
+// of the subsystem in the follow-up ticket.
 
 import { describe, expect, it } from '@effect/vitest';
-import type { Discord, Role, Team, TeamMember, User } from '@sideline/domain';
-import { DateTime, Effect, Layer, Option } from 'effect';
+import type { Discord, Team, User } from '@sideline/domain';
+import { Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -78,12 +88,30 @@ const addActiveMember = (teamId: Team.TeamId, userId: User.UserId) =>
     ),
   );
 
-describe('RoleSyncEventsRepository — emitRoleAssigned', () => {
-  it.effect('inserts a row that findUnprocessed returns', () =>
+const countEvents = () =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql<{ count: string }>`SELECT count(*)::text AS count FROM role_sync_events`,
+    ),
+    Effect.map((rows) => Number(rows[0]?.count ?? '0')),
+  );
+
+describe('RoleSyncEventsRepository — Sideline roles are never mirrored into Discord', () => {
+  const seedTeamAndMember = (discordSuffix: string, guildId: string, username: string) =>
     Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000001', 'emit-1');
-      const team = yield* createTeam('900100000000000000' as Discord.Snowflake, userId);
+      const userId = yield* createUser(discordSuffix, username);
+      const team = yield* createTeam(guildId as Discord.Snowflake, userId);
       const member = yield* addActiveMember(team.id, userId);
+      return { team, member };
+    });
+
+  it.effect('emitRoleAssigned writes nothing, even for a linked team and a custom role', () =>
+    Effect.gen(function* () {
+      const { team, member } = yield* seedTeamAndMember(
+        '900000000000000001',
+        '900100000000000000',
+        'emit-1',
+      );
       const roles = yield* RolesRepository.asEffect();
       const role = yield* roles.insertRole(team.id, 'Coach');
 
@@ -96,281 +124,128 @@ describe('RoleSyncEventsRepository — emitRoleAssigned', () => {
         '111111111111111111' as Discord.Snowflake,
       );
 
-      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
-      expect(unprocessed).toHaveLength(1);
-      expect(unprocessed[0]?.team_id).toBe(team.id);
-      expect(unprocessed[0]?.role_id).toBe(role.id);
-      expect(unprocessed[0]?.event_type).toBe('role_assigned');
-      expect(Option.getOrNull(unprocessed[0]?.team_member_id ?? Option.none())).toBe(member.id);
+      expect(yield* countEvents()).toBe(0);
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  it.effect('inserts nothing when the team cannot be found (the lookupGuildId onNone branch)', () =>
+  // The removal direction matters as much as the assign direction: a `role_unassigned` would make
+  // the bot resolve a mapping for the role in order to strip it, creating the guild role on the way.
+  it.effect('emitRoleUnassigned writes nothing', () =>
     Effect.gen(function* () {
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      const nonExistentTeamId = '00000000-0000-0000-0000-0000000000ff' as Team.TeamId;
-      const fakeRoleId = '00000000-0000-0000-0000-0000000000fe' as Role.RoleId;
-      const fakeMemberId = '00000000-0000-0000-0000-0000000000fd' as TeamMember.TeamMemberId;
-
-      yield* roleSyncEvents.emitRoleAssigned(
-        nonExistentTeamId,
-        fakeRoleId,
-        'Ghost Role',
-        fakeMemberId,
-        '123' as Discord.Snowflake,
+      const { team, member } = yield* seedTeamAndMember(
+        '900000000000000002',
+        '900100000000000001',
+        'emit-2',
       );
-
-      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
-      expect(unprocessed).toHaveLength(0);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-});
-
-// PR-9, 9b — `Role/MarkEventProcessed` / `Role/MarkEventFailed` also write
-// `team_members.last_role_sync_*`, which is what fills `roleSyncState` / `lastRoleSyncAt` /
-// `lastRoleSyncError` on `RoleApi.SyncMemberRolesResult` (PR-7's DTO).
-describe('RoleSyncEventsRepository — markProcessed / markFailed fidelity fields (9b)', () => {
-  const readLastRoleSync = (memberId: TeamMember.TeamMemberId) =>
-    SqlClient.SqlClient.asEffect().pipe(
-      Effect.andThen(
-        (sql) =>
-          sql<{
-            last_role_sync_at: Date | null;
-            last_role_sync_state: string | null;
-            last_role_sync_error: string | null;
-          }>`SELECT last_role_sync_at, last_role_sync_state, last_role_sync_error FROM team_members WHERE id = ${memberId}`,
-      ),
-      Effect.map((rows) => rows[0]),
-    );
-
-  it.effect('markProcessed writes last_role_sync_state=ok and clears any prior error', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000010', 'fidelity-ok');
-      const team = yield* createTeam('900100000000000010' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
       const roles = yield* RolesRepository.asEffect();
       const role = yield* roles.insertRole(team.id, 'Coach');
 
       const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleAssigned(
+      yield* roleSyncEvents.emitRoleUnassigned(
         team.id,
         role.id,
         role.name,
         member.id,
         '111111111111111111' as Discord.Snowflake,
       );
-      const [event] = yield* roleSyncEvents.findUnprocessed(10);
-      if (event === undefined) throw new Error('expected one unprocessed event');
 
-      yield* roleSyncEvents.markProcessed(event.id, DateTime.nowUnsafe());
-
-      const row = yield* readLastRoleSync(member.id);
-      expect(row?.last_role_sync_state).toBe('ok');
-      expect(row?.last_role_sync_at).not.toBeNull();
-      expect(row?.last_role_sync_error).toBeNull();
+      expect(yield* countEvents()).toBe(0);
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  it.effect(
-    'markFailed with a terminal error_code writes last_role_sync_state=failed and the code',
-    () =>
-      Effect.gen(function* () {
-        const userId = yield* createUser('900000000000000011', 'fidelity-failed');
-        const team = yield* createTeam('900100000000000011' as Discord.Snowflake, userId);
-        const member = yield* addActiveMember(team.id, userId);
-        const roles = yield* RolesRepository.asEffect();
-        const role = yield* roles.insertRole(team.id, 'Coach');
-
-        const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-        yield* roleSyncEvents.emitRoleAssigned(
-          team.id,
-          role.id,
-          role.name,
-          member.id,
-          '111111111111111111' as Discord.Snowflake,
-        );
-        const [event] = yield* roleSyncEvents.findUnprocessed(10);
-        if (event === undefined) throw new Error('expected one unprocessed event');
-
-        yield* roleSyncEvents.markFailed(
-          event.id,
-          'Discord error 50013: Missing Permissions',
-          Option.some('captain_action'),
-        );
-
-        const row = yield* readLastRoleSync(member.id);
-        expect(row?.last_role_sync_state).toBe('failed');
-        expect(row?.last_role_sync_error).toBe('captain_action');
-        expect(row?.last_role_sync_at).not.toBeNull();
-      }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect(
-    'markFailed with error_code=None (transient/CC-0) does NOT touch team_members at all',
-    () =>
-      Effect.gen(function* () {
-        const userId = yield* createUser('900000000000000012', 'fidelity-transient');
-        const team = yield* createTeam('900100000000000012' as Discord.Snowflake, userId);
-        const member = yield* addActiveMember(team.id, userId);
-        const roles = yield* RolesRepository.asEffect();
-        const role = yield* roles.insertRole(team.id, 'Coach');
-
-        const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-        yield* roleSyncEvents.emitRoleAssigned(
-          team.id,
-          role.id,
-          role.name,
-          member.id,
-          '111111111111111111' as Discord.Snowflake,
-        );
-        const [event] = yield* roleSyncEvents.findUnprocessed(10);
-        if (event === undefined) throw new Error('expected one unprocessed event');
-
-        yield* roleSyncEvents.markFailed(event.id, 'HTTP 503: Discord server error', Option.none());
-
-        const row = yield* readLastRoleSync(member.id);
-        expect(row?.last_role_sync_state).toBeNull();
-        expect(row?.last_role_sync_error).toBeNull();
-        expect(row?.last_role_sync_at).toBeNull();
-      }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('markProcessed on a team-scoped event (no team_member_id) does not error', () =>
+  it.effect('emitRoleCreated and emitRoleDeleted write nothing', () =>
     Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000013', 'fidelity-team-scoped');
-      const team = yield* createTeam('900100000000000013' as Discord.Snowflake, userId);
+      const { team } = yield* seedTeamAndMember(
+        '900000000000000003',
+        '900100000000000002',
+        'emit-3',
+      );
       const roles = yield* RolesRepository.asEffect();
       const role = yield* roles.insertRole(team.id, 'Coach');
 
       const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
       yield* roleSyncEvents.emitRoleCreated(team.id, role.id, role.name);
-      const [event] = yield* roleSyncEvents.findUnprocessed(10);
-      if (event === undefined) throw new Error('expected one unprocessed event');
+      yield* roleSyncEvents.emitRoleDeleted(team.id, role.id, role.name);
 
-      // Must not throw even though there is no team_member_id to update.
-      yield* roleSyncEvents.markProcessed(event.id, DateTime.nowUnsafe());
+      expect(yield* countEvents()).toBe(0);
     }).pipe(Effect.provide(TestLayer)),
   );
-});
 
-// Should-fix 1 (whole-series review of commit 46806427): `role_sync_events` rows for one member's
-// several roles are emitted with no `ORDER BY` guaranteeing a stable order, so which of a
-// member's events a `concurrency: 1` drain processes LAST within one poll tick is not meaningful.
-// Without a guard, a healthy role's `markProcessed` (`state: 'ok'`) landing after a
-// dangerous-permission role's `markFailed` (`state: 'failed'`, `captain_action`) erased the
-// failure reason the UI has dedicated copy for.
-describe('RoleSyncEventsRepository — markProcessed same-tick guard (should-fix 1)', () => {
-  const readLastRoleSync = (memberId: TeamMember.TeamMemberId) =>
-    SqlClient.SqlClient.asEffect().pipe(
-      Effect.andThen(
-        (sql) =>
-          sql<{
-            last_role_sync_at: Date | null;
-            last_role_sync_state: string | null;
-            last_role_sync_error: string | null;
-          }>`SELECT last_role_sync_at, last_role_sync_state, last_role_sync_error FROM team_members WHERE id = ${memberId}`,
-      ),
-      Effect.map((rows) => rows[0]),
-    );
+  // `syncGroupRoleMembers.ts`'s batched path — one call per group operation rather than per member.
+  it.effect('emitRoleEventsBatch writes nothing for a full batch', () =>
+    Effect.gen(function* () {
+      const { team, member } = yield* seedTeamAndMember(
+        '900000000000000004',
+        '900100000000000003',
+        'emit-4',
+      );
+      const roles = yield* RolesRepository.asEffect();
+      const roleOne = yield* roles.insertRole(team.id, 'Batch One');
+      const roleTwo = yield* roles.insertRole(team.id, 'Batch Two');
 
-  it.effect(
-    'a same-tick markProcessed (ok) does NOT clobber a same-tick markFailed (failed) recorded moments earlier',
-    () =>
-      Effect.gen(function* () {
-        const userId = yield* createUser('900000000000000020', 'tick-guard-1');
-        const team = yield* createTeam('900100000000000020' as Discord.Snowflake, userId);
-        const member = yield* addActiveMember(team.id, userId);
-        const roles = yield* RolesRepository.asEffect();
-        const dangerousRole = yield* roles.insertRole(team.id, 'Captain');
-        const healthyRole = yield* roles.insertRole(team.id, 'Coach');
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleEventsBatch({
+        teamId: team.id,
+        entries: [
+          {
+            eventType: 'role_assigned',
+            roleId: roleOne.id,
+            roleName: roleOne.name,
+            teamMemberId: member.id,
+            discordUserId: '111111111111111111' as Discord.Snowflake,
+          },
+          {
+            eventType: 'role_unassigned',
+            roleId: roleTwo.id,
+            roleName: roleTwo.name,
+            teamMemberId: member.id,
+            discordUserId: '111111111111111111' as Discord.Snowflake,
+          },
+        ],
+      });
 
-        const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-        const discordId = '111111111111111111' as Discord.Snowflake;
-        yield* roleSyncEvents.emitRoleAssigned(
-          team.id,
-          dangerousRole.id,
-          dangerousRole.name,
-          member.id,
-          discordId,
-        );
-        yield* roleSyncEvents.emitRoleAssigned(
-          team.id,
-          healthyRole.id,
-          healthyRole.name,
-          member.id,
-          discordId,
-        );
-        const events = yield* roleSyncEvents.findUnprocessed(10);
-        const dangerousEvent = events.find((e) => e.role_id === dangerousRole.id);
-        const healthyEvent = events.find((e) => e.role_id === healthyRole.id);
-        if (dangerousEvent === undefined || healthyEvent === undefined) {
-          throw new Error('expected two unprocessed events');
-        }
-
-        const tickStartedAt = DateTime.nowUnsafe();
-
-        // The dangerous role's assignment fails first (captain_action)...
-        yield* roleSyncEvents.markFailed(
-          dangerousEvent.id,
-          'Refused to assign Discord role: dangerous permissions',
-          Option.some('captain_action'),
-        );
-        // ...then the healthy role's assignment succeeds, in the SAME tick.
-        yield* roleSyncEvents.markProcessed(healthyEvent.id, tickStartedAt);
-
-        const row = yield* readLastRoleSync(member.id);
-        expect(row?.last_role_sync_state).toBe('failed');
-        expect(row?.last_role_sync_error).toBe('captain_action');
-      }).pipe(Effect.provide(TestLayer)),
+      expect(yield* countEvents()).toBe(0);
+    }).pipe(Effect.provide(TestLayer)),
   );
 
-  it.effect(
-    'a markProcessed (ok) from a genuinely NEW tick still clears a stale failure recorded in an earlier tick',
-    () =>
-      Effect.gen(function* () {
-        const userId = yield* createUser('900000000000000021', 'tick-guard-2');
-        const team = yield* createTeam('900100000000000021' as Discord.Snowflake, userId);
-        const member = yield* addActiveMember(team.id, userId);
-        const roles = yield* RolesRepository.asEffect();
-        const role = yield* roles.insertRole(team.id, 'Coach');
+  it.effect('an empty entries array is still a no-op', () =>
+    Effect.gen(function* () {
+      const { team } = yield* seedTeamAndMember(
+        '900000000000000005',
+        '900100000000000004',
+        'emit-5',
+      );
 
-        const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-        const discordId = '111111111111111111' as Discord.Snowflake;
-        yield* roleSyncEvents.emitRoleAssigned(team.id, role.id, role.name, member.id, discordId);
-        const [firstEvent] = yield* roleSyncEvents.findUnprocessed(10);
-        if (firstEvent === undefined) throw new Error('expected one unprocessed event');
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleEventsBatch({ teamId: team.id, entries: [] });
 
-        // First tick: this role fails.
-        yield* roleSyncEvents.markFailed(
-          firstEvent.id,
-          'Discord error 50013: Missing Permissions',
-          Option.some('captain_action'),
-        );
+      expect(yield* countEvents()).toBe(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
 
-        // A captain fixes the permission; the level-based diff re-emits the same assignment.
-        yield* roleSyncEvents.emitRoleAssigned(team.id, role.id, role.name, member.id, discordId);
-        const events = yield* roleSyncEvents.findUnprocessed(10);
-        const secondEvent = events.find((e) => e.id !== firstEvent.id);
-        if (secondEvent === undefined) throw new Error('expected a second unprocessed event');
+  // The production reason `findUnprocessed` short-circuits rather than draining: rows enqueued
+  // before this change are still in the table, and draining them would mint exactly the Discord
+  // roles this change removes — once, right after deploy.
+  it.effect('findUnprocessed returns nothing even when a legacy row exists in the table', () =>
+    Effect.gen(function* () {
+      const { team, member } = yield* seedTeamAndMember(
+        '900000000000000006',
+        '900100000000000005',
+        'emit-6',
+      );
+      const roles = yield* RolesRepository.asEffect();
+      const role = yield* roles.insertRole(team.id, 'Coach');
 
-        // Derive the second tick's start from the FIRST tick's own recorded failure timestamp
-        // (read back from Postgres) plus a fixed offset, rather than a real-time wait — this
-        // cannot be flaky against clock/timestamp rounding between the test process and Postgres,
-        // and does not depend on wall-clock delay to prove the guard's direction.
-        const afterFirstFailure = yield* readLastRoleSync(member.id);
-        if (afterFirstFailure?.last_role_sync_at == null) {
-          throw new Error('expected last_role_sync_at to be set after the first failure');
-        }
-        const secondTickStartedAt = DateTime.add(
-          DateTime.fromDateUnsafe(afterFirstFailure.last_role_sync_at),
-          { seconds: 1 },
-        );
-        yield* roleSyncEvents.markProcessed(secondEvent.id, secondTickStartedAt);
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT INTO role_sync_events (team_id, guild_id, event_type, role_id, role_name, team_member_id, discord_user_id)
+        VALUES (${team.id}, '900100000000000005', 'role_assigned', ${role.id}, ${role.name}, ${member.id}, '111111111111111111')
+      `;
+      expect(yield* countEvents()).toBe(1);
 
-        const row = yield* readLastRoleSync(member.id);
-        expect(row?.last_role_sync_state).toBe('ok');
-        expect(row?.last_role_sync_error).toBeNull();
-      }).pipe(Effect.provide(TestLayer)),
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      expect(yield* roleSyncEvents.findUnprocessed(10)).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
   );
 });
 
@@ -433,274 +308,6 @@ describe('TeamMembersRepository — findEffectiveRoleIdsForMember', () => {
       const effectiveRoles = yield* members.findEffectiveRoleIdsForMember(member.id);
 
       expect(effectiveRoles).toHaveLength(0);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-});
-
-// TDD — regression tests for `fix/group-role-discord-sync`.
-//
-// `RoleSyncEventsRepository.emitRoleEventsBatch` does not exist yet — it is the multi-row batch
-// insert `syncGroupRoleMembers.ts` needs so one group operation costs one `lookupGuildId` + one
-// `INSERT` regardless of how many (member, role) pairs it touches, instead of N calls to
-// `emitRoleAssigned`/`emitRoleUnassigned` each re-running `lookupGuildId` on its own. Modelled on
-// `ChannelSyncEventsRepository._emitGroupMembersBatch`. Every test below is expected to FAIL until
-// `emitRoleEventsBatch` is added to `RoleSyncEventsRepository` — calling it today throws a
-// TypeError (`roleSyncEvents.emitRoleEventsBatch is not a function`).
-describe('RoleSyncEventsRepository — emitRoleEventsBatch', () => {
-  it.effect('writes N rows in one call, with the right guild_id and event_types', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000030', 'batch-emit-1');
-      const team = yield* createTeam('900400000000000030' as Discord.Snowflake, userId);
-      const memberA = yield* addActiveMember(team.id, userId);
-      const userB = yield* createUser('900000000000000031', 'batch-emit-1b');
-      const memberB = yield* addActiveMember(team.id, userB);
-      const roles = yield* RolesRepository.asEffect();
-      const roleOne = yield* roles.insertRole(team.id, 'Batch One');
-      const roleTwo = yield* roles.insertRole(team.id, 'Batch Two');
-
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleEventsBatch({
-        teamId: team.id,
-        entries: [
-          {
-            eventType: 'role_assigned',
-            roleId: roleOne.id,
-            roleName: roleOne.name,
-            teamMemberId: memberA.id,
-            discordUserId: '111111111111111111' as Discord.Snowflake,
-          },
-          {
-            eventType: 'role_unassigned',
-            roleId: roleTwo.id,
-            roleName: roleTwo.name,
-            teamMemberId: memberB.id,
-            discordUserId: '222222222222222222' as Discord.Snowflake,
-          },
-        ],
-      });
-
-      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
-      expect(unprocessed).toHaveLength(2);
-      const assigned = unprocessed.find(
-        (e: { event_type: string }) => e.event_type === 'role_assigned',
-      );
-      const unassigned = unprocessed.find(
-        (e: { event_type: string }) => e.event_type === 'role_unassigned',
-      );
-      expect(assigned?.role_id).toBe(roleOne.id);
-      expect(assigned?.guild_id).toBe('900400000000000030');
-      expect(unassigned?.role_id).toBe(roleTwo.id);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('an empty entries array writes nothing', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000032', 'batch-emit-2');
-      const team = yield* createTeam('900400000000000031' as Discord.Snowflake, userId);
-
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleEventsBatch({ teamId: team.id, entries: [] });
-
-      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
-      expect(unprocessed).toHaveLength(0);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('writes nothing for a team id that cannot be found (unlinked-team equivalent)', () =>
-    Effect.gen(function* () {
-      const nonExistentTeamId = '00000000-0000-0000-0000-0000000000aa' as Team.TeamId;
-      const fakeRoleId = '00000000-0000-0000-0000-0000000000ab' as Role.RoleId;
-      const fakeMemberId = '00000000-0000-0000-0000-0000000000ac' as TeamMember.TeamMemberId;
-
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleEventsBatch({
-        teamId: nonExistentTeamId,
-        entries: [
-          {
-            eventType: 'role_assigned',
-            roleId: fakeRoleId,
-            roleName: 'Ghost',
-            teamMemberId: fakeMemberId,
-            discordUserId: '333333333333333333' as Discord.Snowflake,
-          },
-        ],
-      });
-
-      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
-      expect(unprocessed).toHaveLength(0);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-});
-
-// Regression coverage for `fix/discord-roles-sync`: a team's built-in roles (Admin / Captain /
-// Player / Treasurer) describe Sideline permissions, not Discord membership, and must never reach
-// `role_sync_events` — the bot's `handleAssigned` calls `ensureMapping` (adopt-or-create), so one
-// leaked `role_assigned` is enough to mint a guild role named "Player".
-//
-// The guard lives on the two statements that write the table rather than on the five call sites
-// that emit, so these tests drive the repository directly: that is the boundary the invariant is
-// actually defended at.
-describe('RoleSyncEventsRepository — built-in roles never reach role_sync_events', () => {
-  const builtInRole = (teamId: Team.TeamId, name: string) =>
-    Effect.gen(function* () {
-      const roles = yield* RolesRepository.asEffect();
-      yield* roles.initializeTeamRoles(teamId);
-      const role = yield* roles.findRoleByTeamAndName(teamId, name);
-      return yield* Option.match(role, {
-        onNone: () => Effect.die(new Error(`expected seeded built-in role ${name}`)),
-        onSome: Effect.succeed,
-      });
-    });
-
-  it.effect('emitRoleAssigned writes nothing for a built-in role', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000040', 'builtin-assign');
-      const team = yield* createTeam('900500000000000040' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      const player = yield* builtInRole(team.id, 'Player');
-      expect(player.is_built_in).toBe(true);
-
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleAssigned(
-        team.id,
-        player.id,
-        player.name,
-        member.id,
-        '444444444444444444' as Discord.Snowflake,
-      );
-
-      expect(yield* roleSyncEvents.findUnprocessed(10)).toHaveLength(0);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  // The removal direction matters as much as the assign direction: were `role_unassigned` still
-  // emitted, the bot would resolve a mapping for the built-in role to strip it from — creating the
-  // very Discord role this fix exists to prevent.
-  it.effect('emitRoleUnassigned writes nothing for a built-in role', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000041', 'builtin-unassign');
-      const team = yield* createTeam('900500000000000041' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      const admin = yield* builtInRole(team.id, 'Admin');
-
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleUnassigned(
-        team.id,
-        admin.id,
-        admin.name,
-        member.id,
-        '444444444444444444' as Discord.Snowflake,
-      );
-
-      expect(yield* roleSyncEvents.findUnprocessed(10)).toHaveLength(0);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  it.effect('a custom role on the same team still emits — the guard is not a blanket block', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000042', 'builtin-custom');
-      const team = yield* createTeam('900500000000000042' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      yield* builtInRole(team.id, 'Player');
-      const roles = yield* RolesRepository.asEffect();
-      const coach = yield* roles.insertRole(team.id, 'Coach');
-
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleAssigned(
-        team.id,
-        coach.id,
-        coach.name,
-        member.id,
-        '444444444444444444' as Discord.Snowflake,
-      );
-
-      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
-      expect(unprocessed).toHaveLength(1);
-      expect(unprocessed[0]?.role_id).toBe(coach.id);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  // A group operation is the highest-volume producer here: `role_groups` can attach a built-in
-  // role to a group, fanning it out across every member of that group and its subgroups.
-  it.effect('emitRoleEventsBatch drops built-in entries and keeps the custom ones', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000043', 'builtin-batch');
-      const team = yield* createTeam('900500000000000043' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      const player = yield* builtInRole(team.id, 'Player');
-      const roles = yield* RolesRepository.asEffect();
-      const coach = yield* roles.insertRole(team.id, 'Coach');
-
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleEventsBatch({
-        teamId: team.id,
-        entries: [
-          {
-            eventType: 'role_assigned',
-            roleId: player.id,
-            roleName: player.name,
-            teamMemberId: member.id,
-            discordUserId: '555555555555555555' as Discord.Snowflake,
-          },
-          {
-            eventType: 'role_assigned',
-            roleId: coach.id,
-            roleName: coach.name,
-            teamMemberId: member.id,
-            discordUserId: '555555555555555555' as Discord.Snowflake,
-          },
-        ],
-      });
-
-      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
-      expect(unprocessed).toHaveLength(1);
-      expect(unprocessed[0]?.role_id).toBe(coach.id);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  // A batch consisting only of built-in roles must not fall through to an `INSERT ... VALUES`
-  // with an empty VALUES list, which is a syntax error rather than a no-op.
-  it.effect('emitRoleEventsBatch writes nothing when every entry is built-in', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000044', 'builtin-batch-all');
-      const team = yield* createTeam('900500000000000044' as Discord.Snowflake, userId);
-      const member = yield* addActiveMember(team.id, userId);
-      const player = yield* builtInRole(team.id, 'Player');
-
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleEventsBatch({
-        teamId: team.id,
-        entries: [
-          {
-            eventType: 'role_assigned',
-            roleId: player.id,
-            roleName: player.name,
-            teamMemberId: member.id,
-            discordUserId: '555555555555555555' as Discord.Snowflake,
-          },
-        ],
-      });
-
-      expect(yield* roleSyncEvents.findUnprocessed(10)).toHaveLength(0);
-    }).pipe(Effect.provide(TestLayer)),
-  );
-
-  // `deleteRole` soft-deletes (`UPDATE roles SET is_archived = true`) and emits `role_deleted`
-  // afterwards, so the guard must still find the row and let a custom role's deletion through.
-  it.effect('emitRoleDeleted still emits for an archived custom role', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('900000000000000045', 'builtin-archived');
-      const team = yield* createTeam('900500000000000045' as Discord.Snowflake, userId);
-      const roles = yield* RolesRepository.asEffect();
-      const coach = yield* roles.insertRole(team.id, 'Coach');
-      yield* roles.archiveRoleById(coach.id);
-
-      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
-      yield* roleSyncEvents.emitRoleDeleted(team.id, coach.id, coach.name);
-
-      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
-      expect(unprocessed).toHaveLength(1);
-      expect(unprocessed[0]?.event_type).toBe('role_deleted');
     }).pipe(Effect.provide(TestLayer)),
   );
 });

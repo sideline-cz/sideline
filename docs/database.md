@@ -755,7 +755,9 @@ Outbox table driving role-assignment changes in Discord. Polled by the bot's Rol
 
 **Indexes**: `idx_role_sync_events_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`
 
-**Notes**: `role_id` and `team_member_id` are stored as plain UUID (no FK constraint) so that rows are retained even after the referenced entities are deleted, providing a complete audit trail. A team's four built-in roles (`roles.is_built_in = true` — Admin, Captain, Player, Treasurer) never get a row here: `RoleSyncEventsRepository`'s `findSyncableRoleIds` filters `is_built_in = false` inside both statements that write this table, so only a team's custom roles are ever mirrored into Discord.
+**Notes**: `role_id` and `team_member_id` are stored as plain UUID (no FK constraint) so that rows are retained even after the referenced entities are deleted, providing a complete audit trail.
+
+**No longer written or read.** A Sideline role is a permissions construct and is never mirrored into a Discord guild role, so `RoleSyncEventsRepository`'s emit functions are no-ops and `findUnprocessed` returns nothing — rows enqueued before that change are left unprocessed rather than drained, because draining them would create exactly the Discord roles the change removes. Discord roles come from groups and rosters (`channel_sync_events` → `discord_channel_mappings`) and from achievements (`role_provision_events`). This table is dropped in a follow-up migration.
 
 ---
 

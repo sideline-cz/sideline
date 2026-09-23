@@ -128,24 +128,15 @@ type EmitEntry = {
   readonly discordUserId: Discord.Snowflake;
 };
 
-// Both the BEFORE and the AFTER snapshot funnel through here, so dropping built-in roles once
-// keeps the diff symmetric: a built-in role is absent from both sides and can therefore never
-// appear as a gain or a loss. Doing it here rather than leaving it to
-// `RoleSyncEventsRepository` also keeps built-in roles from consuming
-// `MAX_ROLE_SYNC_EMISSIONS_PER_GROUP_OPERATION` slots — a built-in role attached to a group
-// (`role_groups`) fans out across every member of that group and its subgroups, which is the
-// single largest source of these emissions.
 const rolesByMember = (
   rows: ReadonlyArray<{
     readonly team_member_id: TeamMember.TeamMemberId;
     readonly role_id: Role.RoleId;
     readonly role_name: string;
-    readonly is_built_in: boolean;
   }>,
 ): ReadonlyMap<TeamMember.TeamMemberId, ReadonlyMap<Role.RoleId, string>> => {
   const map = new Map<TeamMember.TeamMemberId, Map<Role.RoleId, string>>();
   for (const row of rows) {
-    if (row.is_built_in) continue;
     const forMember = map.get(row.team_member_id) ?? new Map<Role.RoleId, string>();
     forMember.set(row.role_id, row.role_name);
     map.set(row.team_member_id, forMember);

@@ -256,12 +256,6 @@ const make = Effect.gen(function* () {
   const EffectiveRoleRow = Schema.Struct({
     role_id: Role.RoleId,
     role_name: Schema.String,
-    // Built-in roles (Admin / Captain / Player / Treasurer) are effective roles like any other
-    // for permissions, but are never mirrored into Discord — see `RoleSyncEventsRepository`'s
-    // `findSyncableRoleIds`. Projected here so the role-sync diffs can drop them BEFORE their
-    // fan-out caps and reported counts are computed, rather than emitting rows the writer throws
-    // away.
-    is_built_in: Schema.Boolean,
   });
 
   // Built directly on `effectiveRolesFrom` (see that file's header) — the same shared
@@ -277,7 +271,7 @@ const make = Effect.gen(function* () {
     Request: Schema.String,
     Result: EffectiveRoleRow,
     execute: (teamMemberId) => sql`
-      SELECT er.role_id AS role_id, er.name AS role_name, er.is_built_in AS is_built_in
+      SELECT er.role_id AS role_id, er.name AS role_name
       FROM team_members tm
       JOIN LATERAL ${sql.unsafe(effectiveRolesFrom('tm'))} er ON true
       WHERE tm.id = ${teamMemberId}
@@ -291,8 +285,6 @@ const make = Effect.gen(function* () {
     team_member_id: TeamMember.TeamMemberId,
     role_id: Role.RoleId,
     role_name: Schema.String,
-    // Same reason as `EffectiveRoleRow.is_built_in` above.
-    is_built_in: Schema.Boolean,
   });
 
   // Batched form of `findEffectiveRoleIdsForMemberQuery` above, for `utils/syncGroupRoleMembers.ts`
@@ -313,8 +305,7 @@ const make = Effect.gen(function* () {
     Request: Schema.Array(TeamMember.TeamMemberId),
     Result: BatchEffectiveRoleRow,
     execute: (memberIds) => sql`
-      SELECT tm.id AS team_member_id, er.role_id AS role_id, er.name AS role_name,
-             er.is_built_in AS is_built_in
+      SELECT tm.id AS team_member_id, er.role_id AS role_id, er.name AS role_name
       FROM team_members tm
       JOIN LATERAL ${sql.unsafe(effectiveRolesFrom('tm'))} er ON true
       WHERE tm.id IN ${sql.in(memberIds)}

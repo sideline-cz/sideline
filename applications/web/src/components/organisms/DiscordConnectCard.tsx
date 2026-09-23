@@ -1,56 +1,25 @@
-import type { Auth, TeamMember } from '@sideline/domain';
+import type { Auth } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
-import { Effect, Option } from 'effect';
 import { AlertTriangle } from 'lucide-react';
-import React from 'react';
 import { DiscordConnectionBadge } from '~/components/molecules/DiscordConnectionBadge.js';
-import { SyncRolesButton } from '~/components/molecules/SyncRolesButton.js';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent } from '~/components/ui/card';
-import { ApiClient, SilentClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
 interface DiscordConnectCardProps {
   readonly team: Auth.UserTeam;
-  /** The calling user's own `team_members.id` for `team`, when known — required to wire the
-   * "Sync roles" affordance (`role.syncMemberDiscordRoles`). Omitted on surfaces that have no
-   * cheap way to resolve it (e.g. `MyProfilePage`, which lists every team the user belongs to
-   * without loading each one's dashboard) — the card degrades gracefully by omitting the
-   * button rather than fetching it separately. */
-  readonly myMemberId?: TeamMember.TeamMemberId;
 }
 
 /**
- * The designer's §2.2/§5.2 card: amber + non-dismissible when `not_connected`, neutral with the
- * role-sync affordance when `connected`. `'unknown'` renders NOTHING (CC-15/§3.6) — this is the
+ * The designer's §2.2/§5.2 card: amber + non-dismissible when `not_connected`, neutral when
+ * `connected`. `'unknown'` renders NOTHING (CC-15/§3.6) — this is the
  * one component that reads `Auth.UserTeam.discordJoined`, so `MyProfilePage`'s per-team row and
  * `TeamDetailPage`'s dashboard slot can never disagree (CC-11).
  *
  * Deliberately has no dismiss control anywhere in this file — the reporter's original complaint
  * was precisely that the old banner could be dismissed and forgotten (designer §3.3).
  */
-export function DiscordConnectCard({ team, myMemberId }: DiscordConnectCardProps) {
-  const run = useRun();
-
-  const handleSync = React.useCallback(async () => {
-    if (myMemberId === undefined) {
-      throw new Error('DiscordConnectCard: handleSync called without myMemberId');
-    }
-    const result = await ApiClient.asEffect().pipe(
-      Effect.flatMap((api) =>
-        api.role.syncMemberDiscordRoles({ params: { teamId: team.teamId, memberId: myMemberId } }),
-      ),
-      Effect.mapError(() => new SilentClientError({ message: '' })),
-      run(),
-    );
-    return Option.match(result, {
-      onNone: () => {
-        throw new Error('Discord role sync failed');
-      },
-      onSome: (value) => value,
-    });
-  }, [team.teamId, myMemberId, run]);
-
+export function DiscordConnectCard({ team }: DiscordConnectCardProps) {
   if (team.discordJoined === 'unknown') return null;
 
   if (team.discordJoined === 'not_connected') {
@@ -86,7 +55,6 @@ export function DiscordConnectCard({ team, myMemberId }: DiscordConnectCardProps
           <p className='text-sm font-semibold'>Discord</p>
           <DiscordConnectionBadge state={team.discordJoined} />
         </div>
-        {myMemberId !== undefined && <SyncRolesButton onSync={handleSync} />}
       </CardContent>
     </Card>
   );

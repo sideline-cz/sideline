@@ -8,9 +8,8 @@
 // Heavy child organisms are mocked as identifiable stubs so this file tests
 // composition/gating only, not their internals.
 
-import { getLocale } from '@sideline/i18n/runtime';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { DateTime, Option } from 'effect';
+import { Option } from 'effect';
 import type React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -1219,219 +1218,24 @@ describe('PlayerDetailPage — deactivate/reactivate (item 3)', () => {
   });
 });
 
-describe('PlayerDetailPage — Discord role sync (PR-7)', () => {
-  it('canManageRoles=true → renders the sync button', () => {
+describe('PlayerDetailPage — Discord role sync removed (fix/discord-roles-sync)', () => {
+  // Sideline roles are a permissions construct and are no longer mirrored into Discord guild
+  // roles, so the per-member "Sync Discord roles" button and its `onSyncDiscordRoles` prop are
+  // gone. Discord roles come from groups and rosters instead, which are provisioned through
+  // `channel_sync_events` and need no per-member affordance. The six cases this replaces all
+  // drove that button's cooldown/result/last-attempt rendering.
+  it('renders no sync button even for a caller who can manage roles', () => {
     render(
       <PlayerDetailPage
         {...(baseProps as any)}
         player={makePlayer() as any}
         canEdit={false}
         canManageRoles={true}
-        isOwnProfile={false}
-        activityStats={makeActivityStats() as any}
-      />,
-    );
-
-    expect(screen.getByRole('button', { name: 'Sync Discord roles' })).not.toBeNull();
-  });
-
-  it('canManageRoles=false → the sync button is not rendered', () => {
-    render(
-      <PlayerDetailPage
-        {...(baseProps as any)}
-        player={makePlayer() as any}
-        canEdit={false}
-        canManageRoles={false}
         isOwnProfile={false}
         activityStats={makeActivityStats() as any}
       />,
     );
 
     expect(screen.queryByRole('button', { name: 'Sync Discord roles' })).toBeNull();
-  });
-
-  it('the button is disabled during the cooldown after a click', async () => {
-    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
-      addedCount: 1,
-      removedCount: 0,
-      skippedCount: 0,
-      roleSyncState: 'queued',
-      lastRoleSyncAt: Option.none(),
-      lastRoleSyncError: Option.none(),
-    });
-    render(
-      <PlayerDetailPage
-        {...(baseProps as any)}
-        player={makePlayer() as any}
-        canEdit={false}
-        canManageRoles={true}
-        isOwnProfile={false}
-        activityStats={makeActivityStats() as any}
-        onSyncDiscordRoles={onSyncDiscordRoles}
-      />,
-    );
-
-    const button = screen.getByRole('button', { name: 'Sync Discord roles' });
-    expect(button.hasAttribute('disabled')).toBe(false);
-
-    await act(async () => {
-      fireEvent.click(button);
-    });
-
-    await waitFor(() => {
-      expect(onSyncDiscordRoles).toHaveBeenCalled();
-    });
-    await waitFor(() => {
-      // `SyncRolesButton` (the shared molecule) keeps the same accessible name across
-      // idle/cooldown — only its icon and `disabled` state change — so assert on `disabled`
-      // rather than a state-specific name.
-      expect(
-        screen.getByRole('button', { name: 'Sync Discord roles' }).hasAttribute('disabled'),
-      ).toBe(true);
-    });
-  });
-
-  it('renders discord_syncQueuedResult with both counts after a successful sync', async () => {
-    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
-      addedCount: 3,
-      removedCount: 2,
-      skippedCount: 0,
-      roleSyncState: 'queued',
-      lastRoleSyncAt: Option.none(),
-      lastRoleSyncError: Option.none(),
-    });
-    render(
-      <PlayerDetailPage
-        {...(baseProps as any)}
-        player={makePlayer() as any}
-        canEdit={false}
-        canManageRoles={true}
-        isOwnProfile={false}
-        activityStats={makeActivityStats() as any}
-        onSyncDiscordRoles={onSyncDiscordRoles}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Sync Discord roles' }));
-    });
-
-    // `SyncRolesButton` appends a "· Synced …" relative-time suffix to this same line (using its
-    // local click-stamp as a fallback, since this result carries no `lastRoleSyncAt`) — match on
-    // the leading counts text rather than the full line.
-    await waitFor(() => {
-      expect(screen.getByText(/^Queued 3 additions and 2 removals\./)).not.toBeNull();
-    });
-  });
-
-  // Closes the read-side gap: `roleSyncState` / `lastRoleSyncAt` / `lastRoleSyncError` describe
-  // the member's PREVIOUS completed attempt (a different axis from `addedCount`/`removedCount`,
-  // this click's fresh enqueue) — see `syncMemberDiscordRoles.ts`'s doc comment on the server.
-  it('renders the recorded failure reason from a previous attempt using existing copy', async () => {
-    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
-      addedCount: 0,
-      removedCount: 0,
-      skippedCount: 0,
-      roleSyncState: 'failed',
-      lastRoleSyncAt: Option.some(DateTime.makeUnsafe('2026-01-01T00:00:00Z')),
-      lastRoleSyncError: Option.some('captain_action'),
-    });
-    render(
-      <PlayerDetailPage
-        {...(baseProps as any)}
-        player={makePlayer() as any}
-        canEdit={false}
-        canManageRoles={true}
-        isOwnProfile={false}
-        activityStats={makeActivityStats() as any}
-        onSyncDiscordRoles={onSyncDiscordRoles}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Sync Discord roles' }));
-    });
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(
-          'The bot needs a captain to fix something in Discord (permissions or the role hierarchy).',
-        ),
-      ).not.toBeNull();
-    });
-  });
-
-  it('does not render a failure reason when lastRoleSyncError is absent', async () => {
-    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
-      addedCount: 1,
-      removedCount: 0,
-      skippedCount: 0,
-      roleSyncState: 'queued',
-      lastRoleSyncAt: Option.none(),
-      lastRoleSyncError: Option.none(),
-    });
-    render(
-      <PlayerDetailPage
-        {...(baseProps as any)}
-        player={makePlayer() as any}
-        canEdit={false}
-        canManageRoles={true}
-        isOwnProfile={false}
-        activityStats={makeActivityStats() as any}
-        onSyncDiscordRoles={onSyncDiscordRoles}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Sync Discord roles' }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText(/^Queued 1 additions and 0 removals\./)).not.toBeNull();
-    });
-    expect(screen.queryByRole('alert')).toBeNull();
-  });
-
-  // `SyncRolesButton` (the shared molecule) tracks its own `syncedAt` local click-stamp as a
-  // fallback, but the server's `lastRoleSyncAt` (the previous completed attempt) is the correct
-  // value to show — see the molecule's doc comment. Regression guard for the consolidation: a
-  // captain retrying after fixing a Discord permission must see when the last REAL attempt
-  // happened, not "just now" from their own click.
-  it('renders the server-recorded lastRoleSyncAt, not the local click timestamp', async () => {
-    const twoHoursAgo = DateTime.makeUnsafe(
-      new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    );
-    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
-      addedCount: 1,
-      removedCount: 0,
-      skippedCount: 0,
-      roleSyncState: 'queued',
-      lastRoleSyncAt: Option.some(twoHoursAgo),
-      lastRoleSyncError: Option.none(),
-    });
-    render(
-      <PlayerDetailPage
-        {...(baseProps as any)}
-        player={makePlayer() as any}
-        canEdit={false}
-        canManageRoles={true}
-        isOwnProfile={false}
-        activityStats={makeActivityStats() as any}
-        onSyncDiscordRoles={onSyncDiscordRoles}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Sync Discord roles' }));
-    });
-
-    const expectedRelative = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' }).format(
-      -2,
-      'hour',
-    );
-    const escapedRelative = expectedRelative.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    await waitFor(() => {
-      expect(screen.getByText(new RegExp(`Synced ${escapedRelative}`))).not.toBeNull();
-    });
   });
 });

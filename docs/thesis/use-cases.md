@@ -667,7 +667,7 @@ flowchart LR
     end
 
     subgraph SYNC["Background Sync (RPC)"]
-        UC_SYNC_ROLES["Sync Discord Roles\nApplies / removes Discord guild roles\nwhen a team's CUSTOM role assignments change\n(built-in roles Admin/Captain/Player/Treasurer never enqueue)\n(Role/GetUnprocessedEvents → Role/MarkEventProcessed)"]
+        UC_SYNC_ROLES["Sync Discord Roles (RETIRED)\nSideline roles are permissions only and are\nno longer mirrored into Discord guild roles;\ngroups and rosters provision them instead"]
         UC_SYNC_CHANNELS["Sync Discord Channels\nCreates / updates channel permissions\nwhen group channel mappings change\n(Channel RPC group)"]
         UC_POST_EMBED["Post Event Embed\nPosts or updates an event embed message\nin the configured Discord channel\nwhen an event is created or updated\n(Event/GetUnprocessedEvents → Event/MarkEventProcessed)"]
         UC_CLAIM_THREAD["Post Training Claim Embed\nPosts claim embed into persistent owners-group thread\n(Event/GetOwnerClaimThread → Event/SaveOwnerClaimThread\n→ Event/SaveClaimDiscordMessageId)\nThread is reused across all trainings for the same owner group"]
@@ -857,8 +857,8 @@ The following structured descriptions cover the most significant use cases in th
 |---|---|
 | **Actor** | Admin, Captain (limited) |
 | **Precondition** | The actor holds `role:manage` permission. The target member is an active team member. |
-| **Main Flow** | 1. The actor navigates to the Roles section or the member's detail page. 2. The actor selects a role to assign to a member. 3. The application calls `POST /teams/:teamId/members/:memberId/roles` with the chosen `roleId`. 4. If the role is a custom role, the server persists the assignment and enqueues a role sync event; if the role is one of the team's four built-in roles (Admin, Captain, Player, Treasurer), the server persists the assignment only — no role sync event is ever enqueued for a built-in role. 5. For a custom role, the Discord bot sync worker calls `Role/GetUnprocessedEvents`, processes the event by updating the member's Discord guild role, and calls `Role/MarkEventProcessed`. |
-| **Postcondition** | The member holds the assigned role. For a custom role, the member's Discord guild role is updated to reflect the new assignment. Built-in roles are never mirrored into Discord — they describe Sideline permissions, not guild membership. |
+| **Main Flow** | 1. The actor navigates to the Roles section or the member's detail page. 2. The actor selects a role to assign to a member. 3. The application calls `POST /teams/:teamId/members/:memberId/roles` with the chosen `roleId`. 4. The server persists the assignment. No Discord work is triggered — a role grants Sideline permissions only. |
+| **Postcondition** | The member holds the assigned role and the permissions it carries. Discord guild membership is unchanged: guild roles are granted through groups and rosters, not through roles. |
 
 ---
 
