@@ -54,7 +54,12 @@ export function RootDocument({ children }: RootDocumentProps) {
   }, []);
 
   return (
-    <html lang={locale}>
+    // Load-bearing, not a preference: Google Translate swaps text nodes for `<font>`
+    // wrappers behind React's back, so the next reconciliation that removes one throws
+    // `NotFoundError: removeChild` — AppErrorBoundary then auto-reloads and the user
+    // loses what they typed. `FormMessage` (ui/form.tsx) unmounts exactly when
+    // validation errors appear on submit, so this hit every form in the app.
+    <html lang={locale} translate='no'>
       <head>
         <HeadContent />
         {/* Pre-mount watchdog: injected before the bundle to set up error guards.

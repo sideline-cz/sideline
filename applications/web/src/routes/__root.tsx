@@ -51,6 +51,12 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
       {
         charSet: 'utf-8',
       },
+      // Pairs with `translate='no'` on <html> in RootDocument (see the why there) —
+      // this is the half that stops Chrome offering to translate the page at all.
+      {
+        name: 'google',
+        content: 'notranslate',
+      },
       {
         name: 'viewport',
         content: 'width=device-width, initial-scale=1, viewport-fit=cover',

@@ -250,6 +250,33 @@ Rules:
 2. **The shell receives only `{ children }`.** Do not add context-derived props (`run`, `serverUrl`) to `RootDocument` — it is a pure document wrapper. Context-dependent providers belong in `RootComponent`.
 3. **Guard any `useQuery` that consumes `serverUrl` against the empty/unresolved base URL.** `TranslationOverridesProvider` sets `enabled: serverUrl.length > 0` and keys its query by `serverUrl` (`queryKey: ['translations', serverUrl]`) so it refetches against the correct base once resolved. An empty base URL would silently target the page origin.
 
+### The Translate Opt-Out Is Load-Bearing — Never Remove It
+
+The document shell declares a machine-translation opt-out in two halves that must stay in sync:
+
+| Where | What |
+|-------|------|
+| `components/layouts/RootDocument.tsx` | `translate='no'` on `<html>` |
+| `routes/__root.tsx` `head().meta` | `<meta name="google" content="notranslate">` |
+
+Neither is a preference or an SEO tweak. Google Translate (and the Safari/Edge built-in
+translators) rewrite text nodes into `<font>` wrappers behind React's back; the next
+reconciliation that removes or patches one throws
+`NotFoundError: Failed to execute 'removeChild'`. `AppErrorBoundary` catches it and
+auto-reloads the page, so the user silently loses everything they had typed.
+
+`FormMessage` (`components/ui/form.tsx`) returns `null` until a validation error exists and a
+`<p>` afterwards — it mounts *exactly* on submit of an invalid form. That made every form in
+the app (22 files import `ui/form`; 30 `<form>` tags) fail on its unhappy path, which is how
+this shipped as "Google Translate ruins form submissions (for example complete account)".
+
+The opt-out is deliberately site-wide rather than scoped to forms: a crash anywhere in the
+tree (a toast, a sidebar conditional, any `{cond ? 'a' : 'b'}`) unmounts the whole app, so a
+form-only opt-out fixes nothing. The app ships native `cs`/`en` via Paraglide, so in-browser
+machine translation is redundant here. `e2e/tests/translate-optout.spec.ts` guards both halves
+against the served document.
+
+
 ## URL-Synced Tabs Via `validateSearch`
 
 When a page renders a tab bar and the active tab must be deep-linkable (sharable URL, back/forward navigation, browser refresh preserves selection), sync the tab to a search param via TanStack Router's `validateSearch` instead of `React.useState`. The page component supports both modes (controlled URL-driven and uncontrolled local-state) via optional `activeTab` / `onTabChange` props so it stays testable in isolation.
