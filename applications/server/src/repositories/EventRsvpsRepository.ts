@@ -2,7 +2,7 @@ import { Discord, Event, EventRsvp, type Team, TeamMember } from '@sideline/doma
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
-import { effectiveRolesFrom } from '~/repositories/effectiveRoles.js';
+import { effectiveRolesFrom, holdsDefaultRoleWhere } from '~/repositories/effectiveRoles.js';
 
 class RsvpWithMemberName extends Schema.Class<RsvpWithMemberName>('RsvpWithMemberName')({
   id: EventRsvp.EventRsvpId,
@@ -277,7 +277,7 @@ const make = Effect.gen(function* () {
           AND EXISTS (
             SELECT 1 FROM ${sql.unsafe(effectiveRolesFrom('tm'))} eff
             WHERE eff.team_id = ${input.team_id}
-              AND eff.name = 'Player' AND eff.is_built_in = true
+              AND ${sql.unsafe(holdsDefaultRoleWhere('eff'))}
           )
       )
       SELECT em.team_member_id, u.name AS member_name, u.discord_nickname AS nickname, u.username, u.discord_display_name AS display_name, u.discord_id, em.rsvp_reminder_dms
@@ -313,7 +313,7 @@ const make = Effect.gen(function* () {
         AND EXISTS (
           SELECT 1 FROM ${sql.unsafe(effectiveRolesFrom('tm'))} eff
           WHERE eff.team_id = ${input.team_id}
-            AND eff.name = 'Player' AND eff.is_built_in = true
+            AND ${sql.unsafe(holdsDefaultRoleWhere('eff'))}
         )
         AND NOT EXISTS (
           SELECT 1 FROM event_rsvps er

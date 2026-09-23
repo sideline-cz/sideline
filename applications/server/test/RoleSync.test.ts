@@ -404,7 +404,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
     );
   },
   deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-  getPlayerRoleId: () => Effect.succeed(Option.some({ id: TEST_PLAYER_ROLE_ID })),
+  getDefaultRoleId: () => Effect.succeed(Option.some({ id: TEST_PLAYER_ROLE_ID })),
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,

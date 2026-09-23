@@ -55,6 +55,10 @@ const CAPTAIN_DISCORD_ROLE_ID = '500000000000000001' as Discord.Snowflake;
 const COACH_ROLE_ID =
   '00000000-0000-0000-0000-000000000051' as import('@sideline/domain').Role.RoleId;
 const COACH_DISCORD_ROLE_ID = '500000000000000002' as Discord.Snowflake;
+// T-S5: a team-configured default role, distinct from the built-in Player and from any
+// Discord-role-mapped role above.
+const GUEST_ROLE_ID =
+  '00000000-0000-0000-0000-000000000055' as import('@sideline/domain').Role.RoleId;
 // A Discord role with NO `discord_role_mappings` row — Sideline must never touch it.
 const UNMANAGED_DISCORD_ROLE_ID = '500000000000000099' as Discord.Snowflake;
 // Blocker A (whole-series review): a mapping Sideline ADOPTED rather than created — a
@@ -101,6 +105,13 @@ const UNMAPPED_GROUP_ID = '00000000-0000-0000-0000-000000000032' as GroupModel.G
 
 let teamMembersAdded: Array<{ team_id: string; user_id: string }>;
 let groupMembersAdded: Array<{ group_id: string; member_id: string }>;
+// T-S5 (`.work-plans/configurable-default-roles.md`): every `assignRole` call `setupNewMember`
+// makes — both the default-role assignment and the Discord-role-mapping assignments — so a test
+// can assert on exactly which roles a new member ended up with, and in what order.
+let assignRoleCalls: Array<{ memberId: string; roleId: string }>;
+// T-S5: the team's resolved default role for `setupNewMember`'s `getDefaultRoleId` call.
+// Defaults to `None` (preserves every pre-existing test's behaviour); individual tests override.
+let defaultRoleIdResult: Option.Option<{ id: string; name: string }>;
 
 // Deterministic per-discord_id user id so repeated calls with the same discord_id resolve to the
 // same user (needed for the "already active member" scenarios — PR-8's actual bug).
@@ -272,6 +283,8 @@ const inviteContexts: ReadonlyMap<
 const resetStores = () => {
   teamMembersAdded = [];
   groupMembersAdded = [];
+  assignRoleCalls = [];
+  defaultRoleIdResult = Option.none();
   memberships = new Map();
   discordJoinedAt = new Map();
   effectiveRoles = new Map();
@@ -420,8 +433,11 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
       joined_at: DateTime.nowUnsafe(),
     });
   },
-  getPlayerRoleId: () => Effect.succeed(Option.none()),
-  assignRole: () => Effect.void,
+  getDefaultRoleId: () => Effect.succeed(defaultRoleIdResult),
+  assignRole: (memberId: string, roleId: string) => {
+    assignRoleCalls.push({ memberId, roleId });
+    return Effect.void;
+  },
   findByTeam: () => Effect.succeed([]),
   findByUser: () => Effect.succeed([]),
   findRosterByTeam: () => Effect.succeed([]),
@@ -1271,6 +1287,10 @@ describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
     },
   );
 
+  // T-S5 case 2 (`.work-plans/configurable-default-roles.md`): `getDefaultRoleId` → `None` (the
+  // existing default here — see `resetStores`) must not fail or skip the rest of `setupNewMember`
+  // — it logs and continues, and the Discord-role-mapping assignment (Captain, via
+  // `discordRoleMappings`) must still run.
   itEffect.effect('still runs setupNewMember for a genuinely new member', () => {
     const discordId = '400000000000000007';
     // No seeded membership — this is a brand-new member.
@@ -1286,10 +1306,43 @@ describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
           expect(teamMembersAdded.some((m) => m.user_id === userIdForDiscordId(discordId))).toBe(
             true,
           );
+          // `getDefaultRoleId` returned `None` (T-S5/2) — no default-role assignRole call.
+          expect(assignRoleCalls.some((c) => c.roleId === GUEST_ROLE_ID)).toBe(false);
+          // But the role-mapping assignment (unrelated to the default) still ran.
+          const memberId = memberships.get(userIdForDiscordId(discordId))?.id;
+          expect(assignRoleCalls).toContainEqual({ memberId, roleId: CAPTAIN_ROLE_ID });
         }),
       ),
     );
   });
+
+  // T-S5 case 1 (AC 2): the team has configured a default role (Guest) — `setupNewMember` must
+  // assign it, and the Discord-role-mapping assignment (Captain) must still run afterwards.
+  // FAILS on `main`: `rpc/guild/index.ts`'s log line and mock wiring predate `getDefaultRoleId`
+  // ever resolving a non-Player default — this pins that BOTH assignments land, not just one.
+  itEffect.effect(
+    'assigns the configured default (Guest), and the Discord role-mapping assignments still run afterwards',
+    () => {
+      const discordId = '400000000000000008';
+      defaultRoleIdResult = Option.some({ id: GUEST_ROLE_ID, name: 'Guest' });
+      // No seeded membership — this is a brand-new member.
+      return callRegisterMember({
+        discord_id: discordId,
+        username: 'guest-default-member',
+        invite_code: Option.none(),
+        roles: [CAPTAIN_DISCORD_ROLE_ID],
+        source: Option.some('member_add'),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const memberId = memberships.get(userIdForDiscordId(discordId))?.id;
+            expect(assignRoleCalls).toContainEqual({ memberId, roleId: GUEST_ROLE_ID });
+            expect(assignRoleCalls).toContainEqual({ memberId, roleId: CAPTAIN_ROLE_ID });
+          }),
+        ),
+      );
+    },
+  );
 });
 
 describe('Guild/RegisterMember — group-scoped invite binds the group before the role diff (bug 3da93506)', () => {

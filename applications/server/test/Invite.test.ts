@@ -303,7 +303,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   findRosterByTeam: () => Effect.succeed([]),
   findRosterMemberByIds: () => Effect.succeed(Option.none()),
   deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-  getPlayerRoleId: () => Effect.succeed(Option.some({ id: TEST_PLAYER_ROLE_ID })),
+  getDefaultRoleId: () => Effect.succeed(Option.some({ id: TEST_PLAYER_ROLE_ID, name: 'Player' })),
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
@@ -1379,6 +1379,8 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
   const REJOIN_TEAM_ID = '00000000-0000-0000-0000-000000000011' as Team.TeamId;
   const REJOIN_USER_ID = '00000000-0000-0000-0000-000000000003' as Auth.UserId;
   const REJOIN_PLAYER_ROLE_ID = '00000000-0000-0000-0000-000000000051' as Role.RoleId;
+  // T-S3: a team-configured default role that is NOT the built-in Player.
+  const REJOIN_GUEST_ROLE_ID = '00000000-0000-0000-0000-000000000053' as Role.RoleId;
   const REJOIN_MEMBER_ID = '00000000-0000-0000-0000-000000000021' as TeamMember.TeamMemberId;
 
   const rejoinUser = {
@@ -1400,6 +1402,9 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
   // Track which methods were called during the test run
   let reactivateCalled = false;
   let addMemberCalled = false;
+  // T-S3 (`.work-plans/configurable-default-roles.md`) — the join response must echo the role
+  // ACTUALLY assigned, not a hardcoded 'Player'.
+  let rejoinAssignRoleCalls: Array<{ memberId: string; roleId: string }> = [];
 
   // Inactive membership (the "was removed" state)
   const inactiveMembership: MembershipWithRole = {
@@ -1419,7 +1424,12 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
   // Mock members repo that has an inactive membership for the rejoin user
   const makeRejoinMembersLayer = (
     existingMembership: Option.Option<MembershipWithRole>,
-    playerRoleId: Option.Option<{ id: Role.RoleId }> = Option.some({ id: REJOIN_PLAYER_ROLE_ID }),
+    // `{ id, name }` — the resolver's Result shape (T-S3): `name` is what lets the response
+    // echo the role actually assigned instead of a hardcoded 'Player'.
+    playerRoleId: Option.Option<{ id: Role.RoleId; name: string }> = Option.some({
+      id: REJOIN_PLAYER_ROLE_ID,
+      name: 'Player',
+    }),
   ) =>
     Layer.succeed(TeamMembersRepository, {
       _tag: 'api/TeamMembersRepository',
@@ -1466,8 +1476,11 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
       findRosterByTeam: () => Effect.succeed([]),
       findRosterMemberByIds: () => Effect.succeed(Option.none()),
       deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-      getPlayerRoleId: () => Effect.succeed(playerRoleId),
-      assignRole: () => Effect.void,
+      getDefaultRoleId: () => Effect.succeed(playerRoleId),
+      assignRole: (memberId: TeamMember.TeamMemberId, roleId: Role.RoleId) => {
+        rejoinAssignRoleCalls.push({ memberId, roleId });
+        return Effect.void;
+      },
       unassignRole: () => Effect.void,
       setJerseyNumber: () => Effect.void,
     } as any);
@@ -1593,7 +1606,10 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
       createCalls: Array<{ team_invite_id: string; user_id: string }>;
       enqueueCalls: Array<{ userId: string; teamId: string }>;
     } = { createCalls: [], enqueueCalls: [] },
-    playerRoleId: Option.Option<{ id: Role.RoleId }> = Option.some({ id: REJOIN_PLAYER_ROLE_ID }),
+    playerRoleId: Option.Option<{ id: Role.RoleId; name: string }> = Option.some({
+      id: REJOIN_PLAYER_ROLE_ID,
+      name: 'Player',
+    }),
   ) =>
     ApiLive.pipe(
       Layer.provideMerge(AuthMiddlewareLive),
@@ -1820,14 +1836,16 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
     expect(reactivateCalled).toBe(false);
   });
 
-  // Should-fix 5 regression (third review of PR-4, invite.ts:83): `getPlayerRoleId` returning
-  // `Option.none()` (team renamed/deleted its "Player" role) must no longer fail the request
-  // for an already-active member re-joining — the assignRole tap is skipped entirely for that
-  // cohort, so a missing role has nothing to bite. Before the fix, `playerRole` was consumed
-  // unconditionally above the tap and 404'd every idempotent re-join for such a team.
-  // FAILS if the `getPlayerRoleId` change in invite.ts is reverted (404s InviteNotFound instead
-  // of returning the existing acceptance).
-  it('already-active member re-joins a team with no "Player" role — 200, returns existing acceptance', async () => {
+  // Should-fix 5 regression (third review of PR-4, invite.ts:83): `getDefaultRoleId` returning
+  // `Option.none()` (no configured default and no built-in "Player" role — the genuinely broken
+  // no-default state, T-S3 case 4) must no longer fail the request for an already-active member
+  // re-joining — the assignRole tap is skipped entirely for that cohort, so a missing role has
+  // nothing to bite. Before the fix, `playerRole` was consumed unconditionally above the tap and
+  // 404'd every idempotent re-join for such a team.
+  // FAILS if the `getDefaultRoleId` change in invite.ts is reverted (404s InviteNotFound instead
+  // of returning the existing acceptance). Must survive the `getPlayerRoleId` → `getDefaultRoleId`
+  // rename unchanged (T-S3/4).
+  it('already-active member re-joins a team with no default role — 200, returns existing acceptance', async () => {
     reactivateCalled = false;
     addMemberCalled = false;
     const recorders = { createCalls: [], enqueueCalls: [] };
@@ -1860,11 +1878,12 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
   });
 
   // Should-fix 5 regression, other side of the guard (invite.ts:104-115): a new member (or a
-  // reactivated one — both take the `assignRole` tap) joining a team with no "Player" role must
-  // still fail `InviteNotFound`. The role is genuinely required here since `assignRole` is about
-  // to run, so this path must keep failing closed.
+  // reactivated one — both take the `assignRole` tap) joining a team with no default role must
+  // still fail `InviteNotFound` (T-S3 case 3 — the state the destructive Alert on the roles page
+  // warns about). The role is genuinely required here since `assignRole` is about to run, so
+  // this path must keep failing closed.
   // Passes both before and after the invite.ts fix — this pins that the guard was not weakened.
-  it('new member joins a team with no "Player" role — still fails InviteNotFound', async () => {
+  it('new member joins a team with no default role — still fails InviteNotFound (T-S3/3)', async () => {
     reactivateCalled = false;
     addMemberCalled = false;
 
@@ -1885,6 +1904,83 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
     expect(response.status).toBe(404);
     expect(addMemberCalled).toBe(true);
     expect(reactivateCalled).toBe(false);
+  });
+
+  // T-S3 (`.work-plans/configurable-default-roles.md`), case 1 (AC 2 + AC 5): a team that has
+  // configured a default OTHER than the built-in Player (e.g. Poletime's Guest) must assign
+  // THAT role on join, and the response must echo its name — not a hardcoded 'Player'.
+  // FAILS on `main`: `invite.ts`'s `roleNames` is `Option.isSome(activeMembership) ? [] :
+  // ['Player']`, unconditionally 'Player' regardless of which role was actually assigned.
+  it('new member gets the configured default (Guest), response echoes its name (T-S3/1)', async () => {
+    reactivateCalled = false;
+    addMemberCalled = false;
+    rejoinAssignRoleCalls = [];
+
+    const rejoinApp = HttpRouter.toWebHandler(
+      buildRejoinLayer(
+        Option.none(),
+        { createCalls: [], enqueueCalls: [] },
+        Option.some({ id: REJOIN_GUEST_ROLE_ID, name: 'Guest' }),
+      ),
+    );
+    const rejoinHandler = rejoinApp.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await rejoinHandler(
+      new Request('http://localhost/invite/rejoin-invite/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer rejoin-token' },
+      }),
+    );
+
+    await rejoinApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(addMemberCalled).toBe(true);
+    expect(rejoinAssignRoleCalls).toContainEqual({
+      memberId: REJOIN_MEMBER_ID,
+      roleId: REJOIN_GUEST_ROLE_ID,
+    });
+    expect(body.roleNames).toEqual(['Guest']);
+  });
+
+  // T-S3 case 2: a returning ACTIVE member takes no `assignRole` tap at all (the `activeMembership`
+  // short-circuit in `invite.ts`), so `roleNames` must be empty regardless of what the team's
+  // configured default is.
+  it('returning ACTIVE member: no assignment, roleNames === [] (T-S3/2)', async () => {
+    reactivateCalled = false;
+    addMemberCalled = false;
+    rejoinAssignRoleCalls = [];
+
+    const activeMembership: MembershipWithRole = {
+      ...inactiveMembership,
+      active: true,
+    };
+
+    const rejoinApp = HttpRouter.toWebHandler(
+      buildRejoinLayer(
+        Option.some(activeMembership),
+        { createCalls: [], enqueueCalls: [] },
+        Option.some({ id: REJOIN_GUEST_ROLE_ID, name: 'Guest' }),
+      ),
+    );
+    const rejoinHandler = rejoinApp.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await rejoinHandler(
+      new Request('http://localhost/invite/rejoin-invite/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer rejoin-token' },
+      }),
+    );
+
+    await rejoinApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(reactivateCalled).toBe(false);
+    expect(addMemberCalled).toBe(false);
+    expect(rejoinAssignRoleCalls).toHaveLength(0);
+    expect(body.roleNames).toEqual([]);
   });
 });
 
@@ -1971,7 +2067,7 @@ describe('Invite API — resolveOrCreateAcceptance / requiresReauth gating (TDD:
     findRosterByTeam: () => Effect.succeed([]),
     findRosterMemberByIds: () => Effect.succeed(Option.none()),
     deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-    getPlayerRoleId: () => Effect.succeed(Option.some({ id: PR4_ROLE_ID })),
+    getDefaultRoleId: () => Effect.succeed(Option.some({ id: PR4_ROLE_ID, name: 'Player' })),
     assignRole: (memberId: string, roleId: string) => {
       pr4AssignRoleCalls.push({ memberId, roleId });
       return Effect.void;
@@ -2435,7 +2531,7 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
     findRosterByTeam: () => Effect.succeed([]),
     findRosterMemberByIds: () => Effect.succeed(Option.none()),
     deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-    getPlayerRoleId: () => Effect.succeed(Option.none()),
+    getDefaultRoleId: () => Effect.succeed(Option.none()),
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
     setJerseyNumber: () => Effect.void,

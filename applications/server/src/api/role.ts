@@ -17,6 +17,20 @@ import { syncMemberDiscordRoles } from '~/utils/syncMemberDiscordRoles.js';
 
 const forbidden = new RoleApi.Forbidden();
 
+// F1 fix (review): the ONLY reason this warning does not block privilege escalation server-side
+// is that `role:manage` is already total escalation on its own — a holder can immediately
+// `setRolePermissions(playerRoleId, ['team:manage'])` regardless of what the default role grants
+// today. So the warning must fire for `role:manage` itself, not just `team:manage`. `member:remove`
+// joins the set for the same reason: a joiner who can remove members can unilaterally strip every
+// other admin/captain from the roster. These three are the ones that let a brand-new joiner seize
+// or irreversibly damage the team; the rest of the Captain permission set (`event:cancel`,
+// `roster:manage`, etc.) is a legitimate default for a small club and would just be noise here.
+const DEFAULT_ROLE_ESCALATION_PERMISSIONS: ReadonlyArray<string> = [
+  'team:manage',
+  'role:manage',
+  'member:remove',
+];
+
 export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
@@ -31,8 +45,18 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
             Effect.tap(({ membership }) => requirePermission(membership, 'role:view', forbidden)),
             Effect.let('canManage', ({ membership }) => hasPermission(membership, 'role:manage')),
             Effect.bind('roleList', () => roles.findRolesByTeamId(teamId)),
+            // THE shared resolve expression — same call the three join paths make. Do NOT
+            // reimplement "is_default OR built-in Player" here; that is the drift this contract
+            // exists to prevent.
+            Effect.bind('defaultRole', () => members.getDefaultRoleId(teamId)),
+            Effect.bind('defaultPermissions', ({ defaultRole }) =>
+              Option.match(defaultRole, {
+                onNone: () => Effect.succeed<ReadonlyArray<string>>([]),
+                onSome: (r) => roles.getPermissionsForRoleId(r.id),
+              }),
+            ),
             Effect.map(
-              ({ roleList, canManage }) =>
+              ({ roleList, canManage, defaultRole, defaultPermissions }) =>
                 new RoleApi.RoleListResponse({
                   canManage,
                   roles: Array.map(
@@ -45,6 +69,10 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                         isBuiltIn: r.is_built_in,
                         permissionCount: r.permission_count,
                       }),
+                  ),
+                  defaultRoleId: Option.map(defaultRole, (r) => r.id),
+                  defaultRoleGrantsManage: defaultPermissions.some((p) =>
+                    DEFAULT_ROLE_ESCALATION_PERMISSIONS.includes(p),
                   ),
                 }),
             ),
@@ -79,6 +107,8 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                   isBuiltIn: role.is_built_in,
                   permissions: [...payload.permissions],
                   canManage: true,
+                  // A freshly created role is never the default.
+                  isDefaultForNewMembers: false,
                 }),
             ),
             Effect.catchTag('RoleNameAlreadyTakenError', () =>
@@ -107,9 +137,17 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                 ),
               ),
             ),
+            // `findRoleById` has no team filter, so a role id from ANOTHER team resolves here
+            // and would otherwise be read/modified by an admin of this one. Same guard as
+            // `assignRoleToMember`/`unassignRole` below. `RoleNotFound`, not `Forbidden`: a foreign
+            // role's existence is not this team's business.
+            Effect.tap(({ role }) =>
+              role.team_id !== teamId ? Effect.fail(new RoleApi.RoleNotFound()) : Effect.void,
+            ),
             Effect.bind('permissions', ({ role }) => roles.getPermissionsForRoleId(role.id)),
+            Effect.bind('defaultRole', () => members.getDefaultRoleId(teamId)),
             Effect.map(
-              ({ role, permissions, canManage }) =>
+              ({ role, permissions, canManage, defaultRole }) =>
                 new RoleApi.RoleDetail({
                   roleId: role.id,
                   teamId: teamId,
@@ -117,6 +155,10 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                   isBuiltIn: role.is_built_in,
                   permissions: [...permissions],
                   canManage,
+                  isDefaultForNewMembers: Option.match(defaultRole, {
+                    onNone: () => false,
+                    onSome: (d) => d.id === role.id,
+                  }),
                 }),
             ),
           ),
@@ -138,6 +180,13 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                 ),
               ),
             ),
+            // `findRoleById` has no team filter, so a role id from ANOTHER team resolves here
+            // and would otherwise be read/modified by an admin of this one. Same guard as
+            // `assignRoleToMember`/`unassignRole` below. `RoleNotFound`, not `Forbidden`: a foreign
+            // role's existence is not this team's business.
+            Effect.tap(({ existing }) =>
+              existing.team_id !== teamId ? Effect.fail(new RoleApi.RoleNotFound()) : Effect.void,
+            ),
             Effect.tap(({ existing }) =>
               existing.is_built_in && Option.isSome(payload.name)
                 ? Effect.fail(new RoleApi.CannotModifyBuiltIn())
@@ -156,8 +205,11 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
               }),
             ),
             Effect.bind('permissions', () => roles.getPermissionsForRoleId(roleId)),
+            // Renaming a role does not change which one is default — resolve rather than report
+            // `false`, or the detail page would flicker on an unrelated update.
+            Effect.bind('defaultRole', () => members.getDefaultRoleId(teamId)),
             Effect.map(
-              ({ updated, permissions }) =>
+              ({ updated, permissions, defaultRole }) =>
                 new RoleApi.RoleDetail({
                   roleId: updated.id,
                   teamId: teamId,
@@ -165,6 +217,10 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                   isBuiltIn: updated.is_built_in,
                   permissions: [...permissions],
                   canManage: true,
+                  isDefaultForNewMembers: Option.match(defaultRole, {
+                    onNone: () => false,
+                    onSome: (d) => d.id === updated.id,
+                  }),
                 }),
             ),
             Effect.catchTag('RoleNameAlreadyTakenError', () =>
@@ -192,6 +248,13 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                   }),
                 ),
               ),
+            ),
+            // `findRoleById` has no team filter, so a role id from ANOTHER team resolves here
+            // and would otherwise be read/modified by an admin of this one. Same guard as
+            // `assignRoleToMember`/`unassignRole` below. `RoleNotFound`, not `Forbidden`: a foreign
+            // role's existence is not this team's business.
+            Effect.tap(({ existing }) =>
+              existing.team_id !== teamId ? Effect.fail(new RoleApi.RoleNotFound()) : Effect.void,
             ),
             Effect.tap(({ existing }) =>
               existing.is_built_in ? Effect.fail(new RoleApi.CannotModifyBuiltIn()) : Effect.void,
@@ -415,6 +478,39 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
               ),
             ),
             Effect.flatMap(() => syncMemberDiscordRoles(teamId, memberId)),
+          ),
+        )
+        .handle('setDefaultRole', ({ params: { teamId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            Effect.tap(({ membership }) => requirePermission(membership, 'role:manage', forbidden)),
+            Effect.bind('role', () =>
+              roles.findRoleById(payload.roleId).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () => Effect.fail(new RoleApi.RoleNotFound()),
+                    onSome: Effect.succeed,
+                  }),
+                ),
+              ),
+            ),
+            // BLOCKER 2 fix 1 — same guard as `assignRoleToMember` (:249). `findRoleById` has no
+            // team filter, so without this a roleId from another team lands here.
+            Effect.tap(({ role }) =>
+              role.team_id !== teamId ? Effect.fail(new RoleApi.RoleNotFound()) : Effect.void,
+            ),
+            Effect.tap(({ role }) => roles.setDefaultRole(role.id)),
+            // No audit trail exists to write to — see "Escalation is silent" in the plan.
+            Effect.tap(({ role }) =>
+              Effect.logInfo('[role/setDefaultRole] default role changed', {
+                teamId,
+                roleId: role.id,
+              }),
+            ),
+            Effect.asVoid,
           ),
         ),
     ),

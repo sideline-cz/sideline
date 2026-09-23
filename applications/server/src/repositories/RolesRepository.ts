@@ -17,6 +17,7 @@ class RoleWithPermissionCount extends Schema.Class<RoleWithPermissionCount>(
   team_id: Team.TeamId,
   name: Schema.String,
   is_built_in: Schema.Boolean,
+  is_default: Schema.Boolean,
   permission_count: Schema.Number,
 }) {}
 
@@ -25,6 +26,7 @@ class RoleRow extends Schema.Class<RoleRow>('RoleRow')({
   team_id: Team.TeamId,
   name: Schema.String,
   is_built_in: Schema.Boolean,
+  is_default: Schema.Boolean,
 }) {}
 
 class PermissionRow extends Schema.Class<PermissionRow>('PermissionRow')({
@@ -73,7 +75,7 @@ const make = Effect.gen(function* () {
     Request: Schema.String,
     Result: RoleWithPermissionCount,
     execute: (teamId) => sql`
-      SELECT r.id, r.team_id, r.name, r.is_built_in,
+      SELECT r.id, r.team_id, r.name, r.is_built_in, r.is_default,
              (SELECT COUNT(*) FROM role_permissions rp WHERE rp.role_id = r.id)::int AS permission_count
       FROM roles r
       WHERE r.team_id = ${teamId} AND r.is_archived = false
@@ -85,7 +87,7 @@ const make = Effect.gen(function* () {
     Request: Role.RoleId,
     Result: RoleRow,
     execute: (id) =>
-      sql`SELECT id, team_id, name, is_built_in FROM roles WHERE id = ${id} AND is_archived = false`,
+      sql`SELECT id, team_id, name, is_built_in, is_default FROM roles WHERE id = ${id} AND is_archived = false`,
   });
 
   const findPermissions = SqlSchema.findAll({
@@ -100,7 +102,7 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       INSERT INTO roles (team_id, name, is_built_in)
       VALUES (${input.team_id}, ${input.name}, ${input.is_built_in})
-      RETURNING id, team_id, name, is_built_in
+      RETURNING id, team_id, name, is_built_in, is_default
     `,
   });
 
@@ -111,13 +113,13 @@ const make = Effect.gen(function* () {
       UPDATE roles
       SET name = COALESCE(${input.name}, name)
       WHERE id = ${input.id}
-      RETURNING id, team_id, name, is_built_in
+      RETURNING id, team_id, name, is_built_in, is_default
     `,
   });
 
   const archiveRoleQuery = SqlSchema.void({
     Request: Role.RoleId,
-    execute: (id) => sql`UPDATE roles SET is_archived = true WHERE id = ${id}`,
+    execute: (id) => sql`UPDATE roles SET is_archived = true, is_default = false WHERE id = ${id}`,
   });
 
   const deletePermissions = SqlSchema.void({
@@ -138,7 +140,7 @@ const make = Effect.gen(function* () {
     Request: FindByTeamAndNameInput,
     Result: RoleRow,
     execute: (input) =>
-      sql`SELECT id, team_id, name, is_built_in FROM roles WHERE team_id = ${input.team_id} AND name = ${input.name} AND is_archived = false`,
+      sql`SELECT id, team_id, name, is_built_in, is_default FROM roles WHERE team_id = ${input.team_id} AND name = ${input.name} AND is_archived = false`,
   });
 
   // Effective holder count — `member_roles` (direct) UNION group-inherited, deduped, and
@@ -171,13 +173,18 @@ const make = Effect.gen(function* () {
 
   const initTeamRoles = SqlSchema.void({
     Request: InitTeamRolesInput,
+    // PRECONDITION: the team has no `is_default` role yet. `ON CONFLICT (team_id, name)` catches a
+    // re-seed of the same names, NOT a conflict on `idx_roles_team_default` — seeding a team that
+    // already has a different default raises 23505. Safe today: the only caller is
+    // `provisionNewTeam.ts:112`, on a team created moments earlier. Do not call this on an
+    // established team without clearing its default first.
     execute: (input) => sql`
-      INSERT INTO roles (team_id, name, is_built_in)
+      INSERT INTO roles (team_id, name, is_built_in, is_default)
       VALUES
-        (${input.team_id}, 'Admin', true),
-        (${input.team_id}, 'Captain', true),
-        (${input.team_id}, 'Player', true),
-        (${input.team_id}, 'Treasurer', true)
+        (${input.team_id}, 'Admin', true, false),
+        (${input.team_id}, 'Captain', true, false),
+        (${input.team_id}, 'Player', true, true),
+        (${input.team_id}, 'Treasurer', true, false)
       ON CONFLICT (team_id, name) DO NOTHING
     `,
   });
@@ -211,6 +218,37 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // Locks every role row of the role's team for the rest of the transaction. Without it, two
+  // concurrent `setDefaultRole` calls both 23505 under READ COMMITTED: TX2's `WHERE is_default =
+  // true` re-evaluates only AFTER TX1 commits and does not see the row TX1 just set (it was
+  // `false` in TX2's original snapshot), so both end up setting `true`. The transaction alone
+  // prevents a TORN state, not a concurrent one — it is not a substitute for this lock.
+  const lockTeamRolesQuery = SqlSchema.findAll({
+    Request: Role.RoleId,
+    Result: Schema.Struct({ id: Role.RoleId }),
+    execute: (roleId) => sql`
+      SELECT id FROM roles
+      WHERE team_id = (SELECT team_id FROM roles WHERE id = ${roleId})
+      FOR UPDATE
+    `,
+  });
+
+  // BLOCKER 2 fix 2: the team is derived from the ROLE ROW, never from a path param, so a
+  // cross-tenant roleId can only ever clear its OWN team's default. `api/role.ts` guards the
+  // boundary too; this is defence in depth.
+  const clearDefaultByRoleTeamQuery = SqlSchema.void({
+    Request: Role.RoleId,
+    execute: (roleId) => sql`
+      UPDATE roles SET is_default = false
+      WHERE team_id = (SELECT team_id FROM roles WHERE id = ${roleId}) AND is_default = true
+    `,
+  });
+
+  const markDefaultQuery = SqlSchema.void({
+    Request: Role.RoleId,
+    execute: (roleId) => sql`UPDATE roles SET is_default = true WHERE id = ${roleId}`,
+  });
+
   const findRolesByTeamId = (teamId: Team.TeamId) => findByTeamId(teamId).pipe(catchSqlErrors);
 
   const findRoleById = (roleId: Role.RoleId) => findById(roleId).pipe(catchSqlErrors);
@@ -231,6 +269,20 @@ const make = Effect.gen(function* () {
     );
 
   const archiveRoleById = (roleId: Role.RoleId) => archiveRoleQuery(roleId).pipe(catchSqlErrors);
+
+  // Two UPDATEs, not one `SET is_default = (id = ${roleId})`: a single multi-row UPDATE transiently
+  // holds two `is_default` rows for the team and trips `idx_roles_team_default`.
+  //
+  // `setDefaultRole` takes no `teamId` — that is BLOCKER 2 fix 2.
+  const setDefaultRole = (roleId: Role.RoleId) =>
+    sql
+      .withTransaction(
+        lockTeamRolesQuery(roleId).pipe(
+          Effect.flatMap(() => clearDefaultByRoleTeamQuery(roleId)),
+          Effect.flatMap(() => markDefaultQuery(roleId)),
+        ),
+      )
+      .pipe(catchSqlErrors);
 
   const setRolePermissions = (roleId: Role.RoleId, permissions: ReadonlyArray<Role.Permission>) =>
     deletePermissions(roleId).pipe(
@@ -285,6 +337,7 @@ const make = Effect.gen(function* () {
     insertRole,
     updateRole,
     archiveRoleById,
+    setDefaultRole,
     setRolePermissions,
     initializeTeamRoles,
     findRoleByTeamAndName,

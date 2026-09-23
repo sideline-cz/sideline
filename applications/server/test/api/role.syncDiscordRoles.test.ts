@@ -263,7 +263,7 @@ const makeTeamMembersRepositoryLayer = () =>
         : Effect.succeed([]),
     recordRoleGrant: () => Effect.void,
     clearRoleGrant: () => Effect.void,
-    getPlayerRoleId: () => Effect.succeed(Option.none()),
+    getDefaultRoleId: () => Effect.succeed(Option.none()),
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
     setJerseyNumber: () => Effect.die(new Error('Not implemented')),

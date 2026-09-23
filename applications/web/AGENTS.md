@@ -1356,6 +1356,17 @@ Rules:
 3. **A role whose `source` is `'inherited'` gets no remove control.** Deleting the direct `member_roles` row would be a no-op the server refuses to sync; render a link to the granting group instead (`InheritedRoleForwardControl`, gated on `group:manage`). A `'both'` role KEEPS its remove control — the direct grant is real — but its confirm copy must say the role stays via the group (`roles_removeRoleStillInheritedDescription`).
 4. **Filter the "assign a role" select against the full effective set by `roleId`, not by `name`.** `PlayerDetailPage`'s `RolesSection` builds `effectiveRoleIds` from the resolved list so a role already shown as an inherited badge is never also offered for assignment.
 
+### The Default Role Is Server-Resolved — Never Re-Derive It In The Browser
+
+"Which role do new members of this team get" is answered by ONE server-side SQL expression that carries a fallback (`TeamMembersRepository.getDefaultRoleId`). The web reads the resolved answer and nothing else: `RoleApi.RoleListResponse.defaultRoleId` (an `Option<Role.RoleId>`) plus `.defaultRoleGrantsManage`, and `RoleApi.RoleDetail.isDefaultForNewMembers` on the detail page.
+
+Rules:
+
+1. **Never compute the default from `RoleInfo`.** `roles.find((r) => r.isBuiltIn && r.name === 'Player')` is forbidden — it reproduces only the fallback half and reports the wrong role for every team that configured a custom default. `RoleInfo` deliberately carries no `isDefault` field for this reason.
+2. **`Option.isNone(defaultRoleId)` means "new members get NO role", not "not loaded".** It is a genuinely broken team state (every invite link is currently failing server-side), so it renders a `destructive` `Alert`, never an empty control or a spinner.
+3. **The control lives on `RolesListPage` only; `RoleDetailPage` renders the badge read-only.** Both the `SearchableSelect` and the `defaultRoleGrantsManage` escalation warning belong next to each other on the list page — the warning must sit with the control that causes it.
+4. **`e2e/fixtures/mock-data.ts` `mockRoleList` must carry `defaultRoleId` and `defaultRoleGrantsManage`.** Both fields decode tolerantly (`Schema.withDecodingDefaultKey`), so omitting them from a fixture silently yields "no default" and the destructive alert instead of a decode failure.
+
 ### AI Assistant Client Rules — `src/lib/assistant/`
 
 The assistant surface (`routes/(authenticated)/teams/$teamId/assistant.tsx` → `AssistantPage` → `AssistantConversation`) renders **model-authored prose** and server-authored entity data. The separation is the whole security model: the model chooses which server-held entity a sentence cites, never the facts shown on the card.

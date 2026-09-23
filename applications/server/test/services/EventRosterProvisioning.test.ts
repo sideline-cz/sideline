@@ -355,7 +355,7 @@ const makeTeamMembersRepository = (): Layer.Layer<TeamMembersRepository> =>
     findMembershipByDiscordAndTeam: () => Effect.succeed(Option.none()),
     deactivateMemberByIds: () => Effect.die(new Error('deactivateMemberByIds not expected')),
     reactivateMember: () => Effect.die(new Error('reactivateMember not expected')),
-    getPlayerRoleId: () => Effect.succeed(Option.none()),
+    getDefaultRoleId: () => Effect.succeed(Option.none()),
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
     setJerseyNumber: () => Effect.void,

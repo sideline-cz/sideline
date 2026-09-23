@@ -333,6 +333,9 @@ export const mockRoleList = {
       permissionCount: 5,
     },
   ],
+  // RESOLVED default (`RoleApi.RoleListResponse.defaultRoleId`) — see `RolesListPage.tsx`.
+  defaultRoleId: ROLE_ID,
+  defaultRoleGrantsManage: false,
 };
 
 export const mockGroups = [

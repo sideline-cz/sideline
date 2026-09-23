@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-23 — New: choose which role new members get
+
+Previously every new member — via an invite link, auto-join, or joining the linked Discord server directly — always received the built-in **Player** role. **Team → Roles** now has a **"New members receive"** picker so an admin can point new joins at any role instead, including a custom one.
+
+- Only one role can be the default at a time; the roles list marks it with a **Default** badge.
+- If the default role would grant broad management permissions (team, role, or member-removal), the page warns you before new joiners silently inherit them.
+- If no role is set as default (for example, it was just deleted), invite links stop working until an admin picks a new one — the page shows a warning telling you to fix it.
+- API integrators: `RoleListResponse` gains `defaultRoleId` and `defaultRoleGrantsManage`; `RoleDetail` gains `isDefaultForNewMembers`; a new `PUT /teams/:teamId/default-role` endpoint sets it. See the API reference.
+
 ## 2026-09-23 — New: customize the verify-channel intro message
 
 If you have **Require a complete profile** turned on, new members with an unfinished profile land in a read-only **#start-here** channel with a pinned card. You can now write your own text for that card from **Team settings → Onboarding**, under **Intro message for new members** — plain text, up to 2000 characters, no placeholders. Leave it empty to keep the default wording. Editing it updates the pinned card automatically within a few minutes; you don't need to repost or re-pin anything yourself.

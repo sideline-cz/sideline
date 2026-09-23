@@ -93,7 +93,7 @@ const make = Effect.gen(function* () {
           -- One role name for display only (the generator itself never reads it).
           -- LIMIT 1 needs a total order or Postgres is free to return a different
           -- role on every run: custom roles first, so a position role ("Handler")
-          -- wins over the built-ins every member carries ("Player", "Admin").
+          -- wins over the built-ins a member typically carries ("Player", "Admin").
           SELECT r.name
           FROM member_roles mr
           JOIN roles r ON r.id = mr.role_id

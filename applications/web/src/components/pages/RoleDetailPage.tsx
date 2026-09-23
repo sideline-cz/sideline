@@ -2,8 +2,10 @@ import type { RoleApi } from '@sideline/domain';
 import { Role, Team } from '@sideline/domain';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
+import { UserPlus } from 'lucide-react';
 import React from 'react';
 
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
@@ -82,7 +84,10 @@ export function RoleDetailPage({ teamId, role, canManage }: RoleDetailPageProps)
   }, [teamIdBranded, roleIdBranded, name, permissions, run, router, role.isBuiltIn]);
 
   const handleDelete = React.useCallback(async () => {
-    if (!window.confirm(tr('role_deleteRoleConfirm'))) return;
+    const confirmMessage = role.isDefaultForNewMembers
+      ? `${tr('role_deleteRoleConfirm')}\n\n${tr('role_defaultDeleteWarning')}`
+      : tr('role_deleteRoleConfirm');
+    if (!window.confirm(confirmMessage)) return;
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.role.deleteRole({ params: { teamId: teamIdBranded, roleId: roleIdBranded } }),
@@ -93,7 +98,7 @@ export function RoleDetailPage({ teamId, role, canManage }: RoleDetailPageProps)
     if (Option.isSome(result)) {
       navigate({ to: '/teams/$teamId/roles', params: { teamId } });
     }
-  }, [teamIdBranded, roleIdBranded, teamId, navigate, run]);
+  }, [teamIdBranded, roleIdBranded, teamId, navigate, run, role.isDefaultForNewMembers]);
 
   return (
     <div>
@@ -107,6 +112,16 @@ export function RoleDetailPage({ teamId, role, canManage }: RoleDetailPageProps)
         <span className={role.isBuiltIn ? 'text-blue-700 font-medium' : 'text-muted-foreground'}>
           {role.isBuiltIn ? tr('role_builtIn') : tr('role_custom')}
         </span>
+        {role.isDefaultForNewMembers && (
+          <Badge
+            variant='secondary'
+            className='ml-2 align-middle'
+            aria-label={tr('role_defaultForNewMembers')}
+          >
+            <UserPlus className='size-3' aria-hidden='true' />
+            {tr('role_default')}
+          </Badge>
+        )}
       </header>
 
       <div className='flex flex-col gap-4'>

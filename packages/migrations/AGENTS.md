@@ -177,6 +177,33 @@ Effect.tap(
 
 Partial indexes only contain the matching rows, so they stay small and avoid bloat from inactive/historical data.
 
+### A "One Row Per Team" Flag: Column → Backfill → Partial Unique Index, In That Order
+
+A boolean that may be `true` for at most one row per team (`roles.is_default` — which role new members receive) is enforced by the DB, never by application code. The three statements MUST appear in this order in one migration:
+
+```typescript
+// 1. Add the column with the value that preserves today's behaviour.
+Effect.tap(() => sql`ALTER TABLE roles ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT false`),
+// 2. Backfill the row that already had the behaviour implicitly.
+Effect.tap(() => sql`
+  UPDATE roles SET is_default = true
+  WHERE name = 'Player' AND is_built_in = true AND is_archived = false AND is_default = false
+`),
+// 3. Index LAST, so it validates the state the backfill just produced.
+Effect.tap(() => sql`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_roles_team_default
+  ON roles(team_id) WHERE is_default AND NOT is_archived
+`),
+```
+
+Rules:
+
+1. **Create the unique index AFTER the backfill, never before.** Creating it first lets a backfill that produces two `true` rows for one team abort the migration mid-flight — and `MigrateBefore` runs inside server boot, so an aborted migration means the container never starts (see "Widening a UNIQUE Constraint"). Index-last turns the same bad backfill into a failure that names the index and the duplicate key.
+2. **The backfill must be behaviour-preserving and idempotent.** `AND is_default = false` makes a re-run a no-op; the `WHERE` must select exactly the row that already had the behaviour implicitly (here: the built-in `Player` every team was seeding into new members before the column existed). A migration that picks a *new* winner is a behaviour change disguised as a backfill.
+3. **Exclude soft-deleted rows from the index predicate** (`WHERE is_default AND NOT is_archived`), so an archived row never occupies the team's single slot. The application must clear the flag in the same statement that archives (`UPDATE roles SET is_archived = true, is_default = false`), or un-archiving later resurrects a second default.
+4. **Verify the backfill cannot collide with the index before writing it.** Here it cannot: `idx_roles_team_name` is a full unique index on `(team_id, name)`, so at most one `'Player'` row exists per team. State that reasoning in a comment on the backfill — a reviewer cannot re-derive it from the migration alone.
+5. **Application writes against this index need a row lock, not just a transaction** — see `applications/server/AGENTS.md` → "The Team's Default Role Resolves In Exactly One Place", rules 4 and 5.
+
 ### Updating CHECK Constraints
 
 To add a new value to an existing CHECK constraint (e.g. adding a status enum value), drop the old constraint and create a new one:

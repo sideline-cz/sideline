@@ -8,6 +8,7 @@ import {
   effectiveRoleNamesAgg,
   effectiveRolesAggLateral,
   effectiveRolesFrom,
+  holdsDefaultRoleWhere,
 } from '~/repositories/effectiveRoles.js';
 
 export class MemberAlreadyExistsError extends Schema.TaggedErrorClass<MemberAlreadyExistsError>()(
@@ -454,11 +455,32 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  const findPlayerRoleIdQuery = SqlSchema.findOneOption({
+  // THE resolve expression. Five consumers: invite accept (`api/invite.ts`), `autoJoinTeams`
+  // (`api/auth.ts`), Discord guild registration (`rpc/guild/index.ts`), and — so the UI can never
+  // drift from the joiner — `api/role.ts`'s `listRoles` and `getRole`. Fix here, never in a caller,
+  // and never hand-roll a second copy to answer "what is this team's default".
+  //
+  // The fallback is folded into the query, not the app: a team with no `is_default` row (never
+  // configured one, or archived the one it had) still gets the built-in Player rather than a
+  // role-less member. `is_default DESC` makes a configured default beat that fallback.
+  //
+  // Shares `holdsDefaultRoleWhere` with the two RSVP-eligibility queries — see that fragment's
+  // header for why they must not drift. This query PICKS ONE by priority; those two test SET
+  // MEMBERSHIP over the union. Same predicate, different consumption.
+  //
+  // `name` is returned because the invite / auto-join responses echo the role actually assigned.
+  const findDefaultRoleQuery = SqlSchema.findOneOption({
     Request: Schema.String,
-    Result: Schema.Struct({ id: Role.RoleId }),
-    execute: (teamId) =>
-      sql`SELECT id FROM roles WHERE team_id = ${teamId} AND name = 'Player' AND is_built_in = true`,
+    Result: Schema.Struct({ id: Role.RoleId, name: Schema.String }),
+    execute: (teamId) => sql`
+      SELECT r.id, r.name
+      FROM roles r
+      WHERE r.team_id = ${teamId}
+        AND r.is_archived = false
+        AND ${sql.unsafe(holdsDefaultRoleWhere('r'))}
+      ORDER BY r.is_default DESC
+      LIMIT 1
+    `,
   });
 
   const findByIdQuery = SqlSchema.findOneOption({
@@ -506,8 +528,8 @@ const make = Effect.gen(function* () {
   const reactivateMember = (memberId: TeamMember.TeamMemberId) =>
     reactivateMemberQuery({ member_id: memberId }).pipe(catchSqlErrors);
 
-  const getPlayerRoleId = (teamId: Team.TeamId) =>
-    findPlayerRoleIdQuery(teamId).pipe(catchSqlErrors);
+  const getDefaultRoleId = (teamId: Team.TeamId) =>
+    findDefaultRoleQuery(teamId).pipe(catchSqlErrors);
 
   const assignRole = (teamMemberId: TeamMember.TeamMemberId, roleId: Role.RoleId) =>
     assignRoleToMemberQuery({ team_member_id: teamMemberId, role_id: roleId }).pipe(catchSqlErrors);
@@ -840,7 +862,7 @@ const make = Effect.gen(function* () {
     findRosterMemberByIds,
     deactivateMemberByIds,
     reactivateMember,
-    getPlayerRoleId,
+    getDefaultRoleId,
     assignRole,
     unassignRole,
     recordRoleGrant,

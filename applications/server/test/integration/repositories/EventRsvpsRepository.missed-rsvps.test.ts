@@ -86,8 +86,8 @@ const seedRoles = (teamId: Team.TeamId) =>
 
 /** Find the built-in Player role id for a team. */
 const getPlayerRoleId = (teamId: Team.TeamId) =>
-  TeamMembersRepository.asEffect().pipe(
-    Effect.andThen((repo) => repo.getPlayerRoleId(teamId)),
+  RolesRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.findRoleByTeamAndName(teamId, 'Player')),
     Effect.flatMap(
       Option.match({
         onNone: () => Effect.fail(new Error('Player role not found')),

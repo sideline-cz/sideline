@@ -506,7 +506,7 @@ Returns the team's current settings.
 | `rsvpRemindersEnabled` | `boolean` | No | Whether RSVP reminders are enabled for this team |
 | `requireCompleteProfile` | `boolean` | No | Captain's opt-in for the profile-completeness gate: when `true`, a member with an incomplete profile (missing name/birth date/gender) is blocked from RSVPing, claiming a training, or reserving/adding a carpool car (see `RsvpProfileIncomplete`/`ClaimProfileIncomplete`/`CarpoolProfileIncomplete` below). Default `false`; also short-circuited server-wide by the `PROFILE_GATE_ENABLED` env var (see `docs/deployment.md`) |
 | `rsvpReminderDaysBefore` | `integer` | No | Days before an event the RSVP reminder is sent |
-| `maxMissedRsvps` | `integer` | No | Consecutive missed-RSVP threshold; built-in Players whose `missed_rsvps` counter reaches this value stop receiving reminder DMs and are excluded from the non-responder list (range 1–50; default 4) |
+| `maxMissedRsvps` | `integer` | No | Consecutive missed-RSVP threshold; members holding the default role (built-in `Player` or the team's configured default, see `PUT /teams/:teamId/default-role`) whose `missed_rsvps` counter reaches this value stop receiving reminder DMs and are excluded from the non-responder list (range 1–50; default 4) |
 | `claimRequestDaysBefore` | `integer` | No | Days before a training the coach claim-board message is posted (0 = on the training day; range 0–30) |
 | `rsvpReminderTime` | `string` | No | Time of day the RSVP reminder fires (HH:MM in the team's timezone, e.g. `18:00`) |
 | `remindersChannelId` | `Snowflake \| null` | Yes | Discord channel used as the fallback deep-link target in reminder DMs; reminders themselves are DM-only and nothing is posted when an event starts |
@@ -561,7 +561,7 @@ Updates the team's settings. All fields are optional; only provided fields are c
 | `rsvpRemindersEnabled` | `boolean` | No | — | Enable or disable RSVP reminders |
 | `requireCompleteProfile` | `boolean` | No | — | Enable or disable the profile-completeness gate for this team (default `false`) |
 | `rsvpReminderDaysBefore` | `integer` | No | 0–14 | Days before the event the reminder fires |
-| `maxMissedRsvps` | `integer` | No | 1–50 | Consecutive missed-RSVP threshold above which a Player stops receiving reminders (default 4) |
+| `maxMissedRsvps` | `integer` | No | 1–50 | Consecutive missed-RSVP threshold above which a default-role member stops receiving reminders (default 4) |
 | `claimRequestDaysBefore` | `integer` | No | 0–30 | Days before a training the coach claim-board message is posted; 0 posts on the training day |
 | `rsvpReminderTime` | `string` | No | Valid HH:MM, max `23:54` | Time of day the reminder fires in the team's timezone |
 | `remindersChannelId` | `Snowflake \| null` | No | — | Channel for reminders; null clears the field |
@@ -1189,6 +1189,8 @@ Four roles are automatically created for every new team and cannot be deleted or
 
 Roles are a permissions construct only — assigning or unassigning one, built-in or custom, never creates or changes a Discord guild role. Discord roles are granted through **groups** and **rosters** (and achievements). The `syncMemberDiscordRoles` endpoint still responds but enqueues nothing; it is removed in a follow-up.
 
+`Player` is also the built-in fallback: every new team starts with `Player` as the default role assigned to newly-joining members (invite accept, `autoJoinTeams`, Discord guild registration), but a team with `role:manage` can point the default at any of its roles via `PUT /teams/:teamId/default-role` — see that endpoint below.
+
 ---
 
 #### `GET /teams/:teamId/roles`
@@ -1210,6 +1212,8 @@ Lists all roles for a team.
 |---|---|---|
 | `canManage` | `boolean` | Whether the user can manage roles |
 | `roles` | `RoleInfo[]` | List of roles |
+| `defaultRoleId` | `RoleId \| null` | Role newly-joining members are assigned, resolved server-side (configured default, falling back to the built-in `Player` role if none is configured). `null` means no role would be assigned — every invite/join is currently failing until an admin picks one |
+| `defaultRoleGrantsManage` | `boolean` | Whether the resolved default role holds `team:manage`, `role:manage`, or `member:remove` — a warning signal that new members get elevated permissions automatically |
 
 `RoleInfo`:
 
@@ -1259,6 +1263,7 @@ Creates a new custom role.
 | `isBuiltIn` | `boolean` | No | Always `false` for custom roles |
 | `permissions` | `Permission[]` | No | Granted permissions |
 | `canManage` | `boolean` | No | Whether the user can manage this role |
+| `isDefaultForNewMembers` | `boolean` | No | Whether this is the role newly-joining members are assigned (resolved, same rule as `RoleListResponse.defaultRoleId`); always `false` for a role fresh off `POST` |
 
 **Errors:**
 
@@ -1411,6 +1416,36 @@ Unassigns a role from a team member. Removes only the member's **direct** grant 
 | `RoleForbidden` | 403 | Missing `role:manage` permission |
 | `MemberNotFound` | 404 | Member does not exist |
 | `RoleNotFound` | 404 | Role does not exist |
+
+---
+
+#### `PUT /teams/:teamId/default-role`
+
+Sets which role newly-joining members are assigned — via invite accept, `autoJoinTeams`, or Discord guild registration. There is no "clear" affordance: to fall back to the built-in `Player` role, set it as the default explicitly.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `role:manage`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `SetDefaultRoleRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `roleId` | `RoleId` | Yes | Role to make the default for new members |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `RoleForbidden` | 403 | Missing `role:manage` permission |
+| `RoleNotFound` | 404 | Role does not exist, or belongs to a different team |
 
 ---
 
@@ -2260,7 +2295,7 @@ Submits or updates the authenticated user's RSVP for an event.
 
 #### `GET /teams/:teamId/events/:eventId/rsvps/non-responders`
 
-Returns the list of eligible members who have not yet submitted an RSVP. The list is filtered to active team members who (a) hold the built-in `Player` role and (b) have a `missed_rsvps` count below the team's `max_missed_rsvps` threshold. Members who have exceeded the threshold are considered disengaged and are excluded from all reminder surfaces.
+Returns the list of eligible members who have not yet submitted an RSVP. The list is filtered to active team members who (a) hold the team's currently-configured default role or the built-in `Player` role (both count — a member who joined under a previous default keeps being tracked after the team changes it) and (b) have a `missed_rsvps` count below the team's `max_missed_rsvps` threshold. Members who have exceeded the threshold are considered disengaged and are excluded from all reminder surfaces.
 
 **Auth:** Bearer token (AuthMiddleware)
 
@@ -3318,7 +3353,7 @@ Returns information about an invite code. This endpoint does not require authent
 
 #### `POST /invite/:code/join`
 
-Joins a team using an invite code. The authenticated user becomes a new member of the team with default (Player) role. If the invite is group-scoped (`groupId` was set when the invite was created), the member is also added to that group immediately (`group_members`); the invite's `group_id` is authoritative for this write, independent of whatever group binding the Discord-join path (`Guild/RegisterMember`) later resolves from the accepted invite.
+Joins a team using an invite code. The authenticated user becomes a new member of the team with the team's configured default role (falls back to the built-in `Player` role if no default is configured; see `PUT /teams/:teamId/default-role`). If the invite is group-scoped (`groupId` was set when the invite was created), the member is also added to that group immediately (`group_members`); the invite's `group_id` is authoritative for this write, independent of whatever group binding the Discord-join path (`Guild/RegisterMember`) later resolves from the accepted invite.
 
 **Auth:** Bearer token (AuthMiddleware)
 
