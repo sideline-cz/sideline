@@ -107,6 +107,13 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                 ),
               ),
             ),
+            // `findRoleById` has no team filter, so a role id from ANOTHER team resolves here
+            // and would otherwise be read/modified by an admin of this one. Same guard as
+            // `assignRoleToMember`/`unassignRole` below. `RoleNotFound`, not `Forbidden`: a foreign
+            // role's existence is not this team's business.
+            Effect.tap(({ role }) =>
+              role.team_id !== teamId ? Effect.fail(new RoleApi.RoleNotFound()) : Effect.void,
+            ),
             Effect.bind('permissions', ({ role }) => roles.getPermissionsForRoleId(role.id)),
             Effect.map(
               ({ role, permissions, canManage }) =>
@@ -137,6 +144,13 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                   }),
                 ),
               ),
+            ),
+            // `findRoleById` has no team filter, so a role id from ANOTHER team resolves here
+            // and would otherwise be read/modified by an admin of this one. Same guard as
+            // `assignRoleToMember`/`unassignRole` below. `RoleNotFound`, not `Forbidden`: a foreign
+            // role's existence is not this team's business.
+            Effect.tap(({ existing }) =>
+              existing.team_id !== teamId ? Effect.fail(new RoleApi.RoleNotFound()) : Effect.void,
             ),
             Effect.tap(({ existing }) =>
               existing.is_built_in && Option.isSome(payload.name)
@@ -192,6 +206,13 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                   }),
                 ),
               ),
+            ),
+            // `findRoleById` has no team filter, so a role id from ANOTHER team resolves here
+            // and would otherwise be read/modified by an admin of this one. Same guard as
+            // `assignRoleToMember`/`unassignRole` below. `RoleNotFound`, not `Forbidden`: a foreign
+            // role's existence is not this team's business.
+            Effect.tap(({ existing }) =>
+              existing.team_id !== teamId ? Effect.fail(new RoleApi.RoleNotFound()) : Effect.void,
             ),
             Effect.tap(({ existing }) =>
               existing.is_built_in ? Effect.fail(new RoleApi.CannotModifyBuiltIn()) : Effect.void,
