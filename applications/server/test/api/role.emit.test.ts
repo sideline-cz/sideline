@@ -276,7 +276,7 @@ const makeTeamMembersRepositoryLayer = () =>
     },
     deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
     reactivateMember: () => Effect.die(new Error('Not implemented')),
-    getPlayerRoleId: () => Effect.succeed(Option.none()),
+    getDefaultRoleId: () => Effect.succeed(Option.none()),
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
     setJerseyNumber: () => Effect.die(new Error('Not implemented')),

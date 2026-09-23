@@ -149,7 +149,7 @@ const makeMockTeamMembersRepository = () =>
     findTeamMembersWithNames: () => Effect.succeed([]),
     deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
     reactivateMember: () => Effect.void,
-    getPlayerRoleId: () => Effect.succeed(Option.none()),
+    getDefaultRoleId: () => Effect.succeed(Option.none()),
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
     setJerseyNumber: () => Effect.void,

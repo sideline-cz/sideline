@@ -303,7 +303,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   findRosterByTeam: () => Effect.succeed([]),
   findRosterMemberByIds: () => Effect.succeed(Option.none()),
   deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-  getPlayerRoleId: () => Effect.succeed(Option.some({ id: TEST_PLAYER_ROLE_ID })),
+  getDefaultRoleId: () => Effect.succeed(Option.some({ id: TEST_PLAYER_ROLE_ID })),
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
@@ -1466,7 +1466,7 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
       findRosterByTeam: () => Effect.succeed([]),
       findRosterMemberByIds: () => Effect.succeed(Option.none()),
       deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-      getPlayerRoleId: () => Effect.succeed(playerRoleId),
+      getDefaultRoleId: () => Effect.succeed(playerRoleId),
       assignRole: () => Effect.void,
       unassignRole: () => Effect.void,
       setJerseyNumber: () => Effect.void,
@@ -1820,12 +1820,12 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
     expect(reactivateCalled).toBe(false);
   });
 
-  // Should-fix 5 regression (third review of PR-4, invite.ts:83): `getPlayerRoleId` returning
+  // Should-fix 5 regression (third review of PR-4, invite.ts:83): `getDefaultRoleId` returning
   // `Option.none()` (team renamed/deleted its "Player" role) must no longer fail the request
   // for an already-active member re-joining — the assignRole tap is skipped entirely for that
   // cohort, so a missing role has nothing to bite. Before the fix, `playerRole` was consumed
   // unconditionally above the tap and 404'd every idempotent re-join for such a team.
-  // FAILS if the `getPlayerRoleId` change in invite.ts is reverted (404s InviteNotFound instead
+  // FAILS if the `getDefaultRoleId` change in invite.ts is reverted (404s InviteNotFound instead
   // of returning the existing acceptance).
   it('already-active member re-joins a team with no "Player" role — 200, returns existing acceptance', async () => {
     reactivateCalled = false;
@@ -1971,7 +1971,7 @@ describe('Invite API — resolveOrCreateAcceptance / requiresReauth gating (TDD:
     findRosterByTeam: () => Effect.succeed([]),
     findRosterMemberByIds: () => Effect.succeed(Option.none()),
     deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-    getPlayerRoleId: () => Effect.succeed(Option.some({ id: PR4_ROLE_ID })),
+    getDefaultRoleId: () => Effect.succeed(Option.some({ id: PR4_ROLE_ID })),
     assignRole: (memberId: string, roleId: string) => {
       pr4AssignRoleCalls.push({ memberId, roleId });
       return Effect.void;
@@ -2435,7 +2435,7 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
     findRosterByTeam: () => Effect.succeed([]),
     findRosterMemberByIds: () => Effect.succeed(Option.none()),
     deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-    getPlayerRoleId: () => Effect.succeed(Option.none()),
+    getDefaultRoleId: () => Effect.succeed(Option.none()),
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
     setJerseyNumber: () => Effect.void,

@@ -592,7 +592,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                 Effect.flatMap(
                   Option.match({
                     onNone: () =>
-                      members.getPlayerRoleId(team.id).pipe(
+                      members.getDefaultRoleId(team.id).pipe(
                         Effect.flatMap(
                           Option.match({
                             onNone: () => Effect.succeed(Option.none<Auth.UserTeam>()),

@@ -467,7 +467,7 @@ const buildLazyHealLayer = (inFlightGroups: GroupModel.GroupId[] = []) => {
         findRosterByTeam: () => Effect.succeed([]),
         findRosterMemberByIds: () => Effect.succeed(Option.none()),
         deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-        getPlayerRoleId: () => Effect.succeed(Option.none()),
+        getDefaultRoleId: () => Effect.succeed(Option.none()),
         assignRole: () => Effect.void,
         unassignRole: () => Effect.void,
         setJerseyNumber: () => Effect.void,

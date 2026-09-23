@@ -60,7 +60,7 @@ const makeLayer = (findResult: Option.Option<MembershipWithRole>) =>
     findRosterMemberByIds: () => Effect.die(new Error('Not called in permissions tests')),
     deactivateMemberByIds: () => Effect.die(new Error('Not called in permissions tests')),
     reactivateMember: () => Effect.die(new Error('Not called in permissions tests')),
-    getPlayerRoleId: () => Effect.die(new Error('Not called in permissions tests')),
+    getDefaultRoleId: () => Effect.die(new Error('Not called in permissions tests')),
     assignRole: () => Effect.die(new Error('Not called in permissions tests')),
     unassignRole: () => Effect.die(new Error('Not called in permissions tests')),
     setJerseyNumber: () => Effect.die(new Error('Not called in permissions tests')),

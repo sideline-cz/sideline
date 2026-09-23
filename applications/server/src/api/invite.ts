@@ -81,7 +81,7 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
             // has no "Player" role. That value is only consumed by the `assignRole` tap below,
             // which itself is skipped for a returning active member — failing here unconditionally
             // 404'd every idempotent re-join for a team that renamed or deleted its Player role.
-            Effect.bind('playerRole', ({ invite }) => members.getPlayerRoleId(invite.team_id)),
+            Effect.bind('playerRole', ({ invite }) => members.getDefaultRoleId(invite.team_id)),
             // CC-14: `Invite.AlreadyMember` is no longer raised. A returning active member does
             // not get re-inserted; everyone else (new member, or a previously-removed member
             // being reactivated) runs today's insert/reactivate path. Both cases fall through to

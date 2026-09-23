@@ -454,7 +454,7 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  const findPlayerRoleIdQuery = SqlSchema.findOneOption({
+  const findDefaultRoleIdQuery = SqlSchema.findOneOption({
     Request: Schema.String,
     Result: Schema.Struct({ id: Role.RoleId }),
     execute: (teamId) =>
@@ -506,8 +506,8 @@ const make = Effect.gen(function* () {
   const reactivateMember = (memberId: TeamMember.TeamMemberId) =>
     reactivateMemberQuery({ member_id: memberId }).pipe(catchSqlErrors);
 
-  const getPlayerRoleId = (teamId: Team.TeamId) =>
-    findPlayerRoleIdQuery(teamId).pipe(catchSqlErrors);
+  const getDefaultRoleId = (teamId: Team.TeamId) =>
+    findDefaultRoleIdQuery(teamId).pipe(catchSqlErrors);
 
   const assignRole = (teamMemberId: TeamMember.TeamMemberId, roleId: Role.RoleId) =>
     assignRoleToMemberQuery({ team_member_id: teamMemberId, role_id: roleId }).pipe(catchSqlErrors);
@@ -840,7 +840,7 @@ const make = Effect.gen(function* () {
     findRosterMemberByIds,
     deactivateMemberByIds,
     reactivateMember,
-    getPlayerRoleId,
+    getDefaultRoleId,
     assignRole,
     unassignRole,
     recordRoleGrant,

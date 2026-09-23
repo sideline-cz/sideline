@@ -420,7 +420,7 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
       joined_at: DateTime.nowUnsafe(),
     });
   },
-  getPlayerRoleId: () => Effect.succeed(Option.none()),
+  getDefaultRoleId: () => Effect.succeed(Option.none()),
   assignRole: () => Effect.void,
   findByTeam: () => Effect.succeed([]),
   findByUser: () => Effect.succeed([]),
