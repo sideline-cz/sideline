@@ -242,3 +242,33 @@ describe('FinanceOverviewRepository — overviewByTeam', () => {
     ),
   );
 });
+
+describe('FinanceOverviewRepository — myStatus', () => {
+  it.effect('returns the member assignments grouped by currency', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('930000000000000005', 'my-status-user-1')),
+      Effect.bind('team', ({ user }) =>
+        createTeam('930500000000000000' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
+      Effect.bind('fee', ({ team }) => createFee(team.id, 5000, 'CZK')),
+      Effect.tap(({ fee, member }) => assignFee(fee.id, (member as any).id)),
+      Effect.bind('status', ({ team, user }) =>
+        FinanceOverviewRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.myStatus(team.id, user.id)),
+        ),
+      ),
+      Effect.tap(({ status }) =>
+        Effect.sync(() => {
+          expect(status).toHaveLength(1);
+          expect(status[0]?.currency).toBe('CZK');
+          expect(status[0]?.totalOutstandingMinor).toBe(5000);
+          expect(status[0]?.assignments).toHaveLength(1);
+          expect(status[0]?.assignments[0]?.due_minor).toBe(5000);
+          expect(status[0]?.assignments[0]?.paid_minor).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
