@@ -8,12 +8,16 @@
 // (`member_roles`) AND through membership in G. G is then ARCHIVED. Only then is the
 // DIRECT grant removed via `DELETE /teams/:teamId/members/:memberId/roles/:roleId`.
 //
-// Expected: `role_unassigned` IS emitted (a `role_sync_events` row is written) and the
-// `role_removed` notification IS created, because an archived group no longer grants —
-// M genuinely lost R when the direct grant was deleted. Before the fix, the unmigrated
-// "still held?" query saw R through the archived group (it didn't filter `is_archived`)
-// and suppressed the emit, so Sideline reported "role removed" while Discord silently
-// kept the role forever.
+// Expected: the `role_removed` notification IS created, because an archived group no
+// longer grants — M genuinely lost R when the direct grant was deleted. Before the fix,
+// the unmigrated "still held?" query saw R through the archived group (it didn't filter
+// `is_archived`) and suppressed it, so M was never told they had lost the role.
+//
+// `fix/discord-roles-sync` retargeted this onto the NOTIFICATION. The guard used to gate
+// a `role_unassigned` emit as well, and that was what this file originally asserted; the
+// notification is now the guard's only live consumer, since Sideline roles are no longer
+// mirrored into Discord. The `role_sync_events` assertion is kept, inverted, as the
+// end-to-end pin that a captain's role removal writes nothing to that queue.
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, GroupModel, Role, Team, TeamMember, User } from '@sideline/domain';
@@ -217,6 +221,19 @@ const seedFixture = () =>
     Effect.runPromise,
   );
 
+const countRoleRemovedNotifications = (userId: User.UserId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql<{ count: string }>`
+        SELECT COUNT(*)::text AS count FROM notifications
+        WHERE type = 'role_removed' AND user_id = ${userId}
+      `,
+    ),
+    Effect.map((rows) => Number(rows[0]?.count ?? '0')),
+    Effect.provide(SeedLayer),
+    Effect.runPromise,
+  );
+
 const countUnassignedEvents = (memberId: TeamMember.TeamMemberId, roleId: Role.RoleId) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen(
@@ -251,10 +268,14 @@ describe('role.ts unassignRole — archived-group guard, end to end', () => {
 
     expect(response.status).toBe(204);
 
-    // Before the fix, the unmigrated "still held effectively?" re-check saw the role
-    // through the archived group and suppressed this — Sideline said "removed" but
-    // Discord kept the role forever.
+    // The guard's live consumer: before the fix, the unmigrated "still held effectively?"
+    // re-check saw the role through the ARCHIVED group and suppressed this, so a member
+    // who had genuinely lost the role was never told.
+    expect(await countRoleRemovedNotifications(fixture.memberUserId)).toBe(1);
+
+    // ...and nothing reaches the Discord role queue, because Sideline roles are not
+    // mirrored into guild roles at all any more.
     const emittedCount = await countUnassignedEvents(fixture.memberId, fixture.coachRoleId);
-    expect(emittedCount).toBe(1);
+    expect(emittedCount).toBe(0);
   });
 });

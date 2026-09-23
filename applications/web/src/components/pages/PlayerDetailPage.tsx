@@ -18,7 +18,6 @@ import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { DirtyFieldLabel } from '~/components/molecules/DirtyFieldLabel.js';
 import { RoleBadge } from '~/components/molecules/RoleBadge.js';
-import { SyncRolesButton } from '~/components/molecules/SyncRolesButton.js';
 import { AchievementsGridI18n } from '~/components/organisms/AchievementsGrid.js';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList';
 import { ActivityStatsCard } from '~/components/organisms/ActivityStatsCard';
@@ -125,7 +124,6 @@ interface PlayerDetailPageProps {
   variableSymbolConflict?: { holderMemberId: string; holderName: string | null } | null;
   onAssignRole: (roleId: string) => Promise<void>;
   onUnassignRole: (roleId: string) => Promise<void>;
-  onSyncDiscordRoles: () => Promise<RoleApi.SyncMemberRolesResult | undefined>;
   onAddToRoster: (rosterId: string) => Promise<void>;
   onRemoveFromRoster: (rosterId: string) => Promise<void>;
   onAddToGroup: (groupId: string) => Promise<void>;
@@ -175,7 +173,6 @@ export function PlayerDetailPage({
   variableSymbolConflict,
   onAssignRole,
   onUnassignRole,
-  onSyncDiscordRoles,
   onAddToRoster,
   onRemoveFromRoster,
   onAddToGroup,
@@ -263,18 +260,6 @@ export function PlayerDetailPage({
   const handleFocusActivityLog = React.useCallback(() => {
     activityLogCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
-
-  // `SyncRolesButton` owns the idle/syncing/cooldown state machine and the 60s cooldown itself
-  // (it amplifies Discord writes and the bot's role loop runs at concurrency: 1) — this adapter
-  // only bridges `onSyncDiscordRoles`'s `| undefined` failure signal (already toasted by the
-  // route's `run()`) into a rejection, matching `DiscordConnectCard`'s `handleSync`.
-  const handleSyncDiscordRoles = React.useCallback(async () => {
-    const result = await onSyncDiscordRoles();
-    if (result === undefined) {
-      throw new Error('Discord role sync failed');
-    }
-    return result;
-  }, [onSyncDiscordRoles]);
 
   return (
     <div className='mx-auto flex max-w-3xl flex-col gap-6 lg:max-w-5xl'>
@@ -464,11 +449,8 @@ export function PlayerDetailPage({
         </Card>
 
         <Card>
-          <CardHeader className='flex items-center justify-between'>
+          <CardHeader>
             <CardTitle>{tr('roles_currentRoles')}</CardTitle>
-            {canManageRoles && !isInactive ? (
-              <SyncRolesButton onSync={handleSyncDiscordRoles} />
-            ) : null}
           </CardHeader>
           <CardContent>
             <RolesSection

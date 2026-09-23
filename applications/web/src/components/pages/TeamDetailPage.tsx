@@ -585,7 +585,7 @@ export function TeamDetailPage({
       {/* PR-9 / designer §2.2 — the durable Discord card. Deliberately NOT part of the
           customizable widget grid below: it is never dismissible and never hidden, which the
           widget registry's opt-out semantics would otherwise allow. */}
-      {team !== undefined && <DiscordConnectCard team={team} myMemberId={dashboard.myMemberId} />}
+      {team !== undefined && <DiscordConnectCard team={team} />}
 
       {/* Configurable widget region — banners are now part of the grid */}
       <DashboardCustomizer

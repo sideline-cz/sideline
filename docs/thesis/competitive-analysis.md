@@ -346,9 +346,9 @@ Sideline is the only platform in this analysis designed from the ground up aroun
 
 All competitors evaluated in this analysis are proprietary, closed-source platforms. Sideline is released under the MIT licence, meaning its source code is publicly available, auditable, and modifiable. This has significant implications for organisations that are concerned about data privacy (particularly in regions with strict data protection regulation such as the EU), for developers who wish to extend the platform, and for the long-term sustainability of the project independent of a commercial entity.
 
-### 5.3 Role-Based Permissions with Discord Role Sync
+### 5.3 Role-Based Permissions
 
-Sideline implements a granular, sports-specific role model that synchronises bidirectionally with Discord roles. Permissions such as event creation, roster access, member management, and settings administration are controlled through a structured RBAC system. Role changes in Discord propagate to Sideline automatically, ensuring that access control remains consistent without manual duplication of effort.
+Sideline implements a granular, sports-specific role model. Permissions such as event creation, roster access, member management, and settings administration are controlled through a structured RBAC system. Roles are deliberately a Sideline-side construct and are not mirrored into Discord guild roles — Discord membership is expressed through groups and rosters instead, which map onto guild roles and channels, so a member's Discord access follows the squads they actually belong to rather than the permission buckets an admin happens to have defined.
 
 ### 5.4 Group Hierarchy with Discord Channel Sync
 

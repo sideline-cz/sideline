@@ -1185,6 +1185,8 @@ Four roles are automatically created for every new team and cannot be deleted or
 | **Player** | `roster:view`, `member:view` |
 | **Treasurer** | `finance:view`, `finance:manage_fees`, `finance:record_payments` |
 
+Roles are a permissions construct only — assigning or unassigning one, built-in or custom, never creates or changes a Discord guild role. Discord roles are granted through **groups** and **rosters** (and achievements). The `syncMemberDiscordRoles` endpoint still responds but enqueues nothing; it is removed in a follow-up.
+
 ---
 
 #### `GET /teams/:teamId/roles`
