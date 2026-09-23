@@ -17,7 +17,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
 | **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/complete`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`, `/summarize`, `/sudo`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons, Leave sudo button). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
 | **Global Admin** | A user who is a global admin by either having the `users.is_global_admin` database flag set to `true` or having their Discord ID listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (the two sources are ORed). The first user to register on a fresh database is automatically promoted via the DB flag. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. Can manage the global-admin roster via `GET/POST/DELETE /auth/global-admins` — granting or revoking `users.is_global_admin` for other users, subject to self-revoke, last-admin, and env-managed safeguards. A global admin with no team memberships is redirected to `/admin/onboarding-tokens` instead of `/no-team`. Additionally, global admins have **read-only access to every team** regardless of membership: all read endpoints for members, rosters, roles, finance, activity stats, and team info use a `requireReadAccess` helper that synthesises a read-only membership (with `roster:view`, `member:view`, `role:view`, `finance:view` permissions) when the caller is a global admin but not a real team member. Write endpoints still require actual membership. |
-| **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes (and incrementing the `missed_rsvps` counter for non-responding built-in Players in the event's member group), sending RSVP reminder notifications before events (targeting only Players whose `missed_rsvps` count is below the team's `max_missed_rsvps` threshold), auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. `BankSyncPoller` additionally runs hourly for every team with an enabled Fio connection: it pulls new bank movements, ingests them, and runs the auto-matcher inline (UC-38). `BankTokenExpiryCron` runs daily to warn treasurers by Discord DM before a connected Fio token expires (UC-36). |
+| **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes (and incrementing the `missed_rsvps` counter for non-responding default-role members in the event's member group), sending RSVP reminder notifications before events (targeting only default-role members whose `missed_rsvps` count is below the team's `max_missed_rsvps` threshold), auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. `BankSyncPoller` additionally runs hourly for every team with an enabled Fio connection: it pulls new bank movements, ingests them, and runs the auto-matcher inline (UC-38). `BankTokenExpiryCron` runs daily to warn treasurers by Discord DM before a connected Fio token expires (UC-36). |
 
 ---
 
@@ -409,7 +409,7 @@ flowchart LR
 
 ### 3.3 Roles & Permissions
 
-Roles are team-scoped and carry a set of permissions. Four built-in roles (Admin, Captain, Player, Treasurer) exist for every team and cannot be deleted or renamed. Custom roles can be created by users with the `role:manage` permission.
+Roles are team-scoped and carry a set of permissions. Four built-in roles (Admin, Captain, Player, Treasurer) exist for every team and cannot be deleted or renamed. Custom roles can be created by users with the `role:manage` permission. One role per team is the **default role**: the role a newly-joining member is assigned (invite accept, `autoJoinTeams`, or a Discord guild join with no matching invite). Every team starts with `Player` as the default; a holder of `role:manage` can point it at any role via `PUT /teams/:teamId/default-role`.
 
 ```mermaid
 flowchart LR
@@ -425,6 +425,7 @@ flowchart LR
     UC_DELETE_ROLE["Delete Custom Role\n(DELETE /teams/:teamId/roles/:roleId)\nrequires: role:manage\nnot allowed on built-in roles"]
     UC_ASSIGN_ROLE["Assign Role to Member\n(POST /teams/:teamId/members/:memberId/roles)\nrequires: role:manage"]
     UC_UNASSIGN_ROLE["Remove Role from Member\n(DELETE /teams/:teamId/members/:memberId/roles/:roleId)\nrequires: role:manage"]
+    UC_SET_DEFAULT_ROLE["Set Default Role for New Members\n(PUT /teams/:teamId/default-role)\nrequires: role:manage"]
 
     PL --> UC_LIST_ROLES
     PL --> UC_GET_ROLE
@@ -437,6 +438,7 @@ flowchart LR
     AD --> UC_DELETE_ROLE
     AD --> UC_ASSIGN_ROLE
     AD --> UC_UNASSIGN_ROLE
+    AD --> UC_SET_DEFAULT_ROLE
 ```
 
 ### 3.4 Groups
@@ -520,7 +522,7 @@ flowchart LR
         UC_CREATE_EVENT["Create Event\n(POST /teams/:teamId/events)\nrequires: event:create\ntitle · type · startAt · endAt\nlocation · trainingTypeId\ndiscordChannelId · ownerGroupId · memberGroupId"]
         UC_EDIT_EVENT["Edit Event\n(PATCH /teams/:teamId/events/:eventId)\nrequires: event:edit"]
         UC_CANCEL_EVENT["Cancel Event\n(POST /teams/:teamId/events/:eventId/cancel)\nrequires: event:cancel"]
-        UC_START_EVENT["Mark Event as Started\n(background scheduler)\ntransitions status: active → started\nincrements missed_rsvps for non-responding Players in member group\nposts nothing to Discord\nfor trainings: deletes the owners-thread claim message"]
+        UC_START_EVENT["Mark Event as Started\n(background scheduler)\ntransitions status: active → started\nincrements missed_rsvps for non-responding default-role members in member group\nposts nothing to Discord\nfor trainings: deletes the owners-thread claim message"]
     end
 
     subgraph SERIES["Event Series (Recurring)"]
@@ -535,8 +537,8 @@ flowchart LR
     subgraph RSVP["RSVP"]
         UC_GET_RSVPS["View RSVP List\n(GET /teams/:teamId/events/:eventId/rsvps)"]
         UC_SUBMIT_RSVP["Submit RSVP\n(PUT /teams/:teamId/events/:eventId/rsvp)\nresponse: yes / no / coming later / not sure\nmessage required for coming later and not sure"]
-        UC_NON_RESPONDERS["View Non-Responders\n(GET /teams/:teamId/events/:eventId/rsvps/non-responders)\nbuilt-in Players with missed_rsvps < max_missed_rsvps"]
-        UC_RSVP_REMINDER["Send RSVP Reminder Notification\n(background scheduler)\nDM-only, targets Players with missed_rsvps < max_missed_rsvps"]
+        UC_NON_RESPONDERS["View Non-Responders\n(GET /teams/:teamId/events/:eventId/rsvps/non-responders)\ndefault-role members with missed_rsvps < max_missed_rsvps"]
+        UC_RSVP_REMINDER["Send RSVP Reminder Notification\n(background scheduler)\nDM-only, targets default-role members with missed_rsvps < max_missed_rsvps"]
     end
 
     PL --> UC_LIST_EVENTS
@@ -795,10 +797,10 @@ The following structured descriptions cover the most significant use cases in th
 |---|---|
 | **Actor** | Unauthenticated User, Authenticated User |
 | **Precondition** | A valid invite link with an active code exists. |
-| **Main Flow** | 1. The user opens the invite URL (e.g., `https://sideline.app/invite/ABC123`). 2. The application calls `GET /invite/:code` to fetch the team name and validate the code. 3. If the user is not authenticated, they are redirected to log in (UC-01) and then returned to this flow. 4. The user confirms joining the team. 5. The application calls `POST /invite/:code/join`, which creates a team membership with the default Player role. 6. If the user's profile is incomplete, they are redirected to complete it. |
-| **Postcondition** | The user is a member of the team with the Player role. |
+| **Main Flow** | 1. The user opens the invite URL (e.g., `https://sideline.app/invite/ABC123`). 2. The application calls `GET /invite/:code` to fetch the team name and validate the code. 3. If the user is not authenticated, they are redirected to log in (UC-01) and then returned to this flow. 4. The user confirms joining the team. 5. The application calls `POST /invite/:code/join`, which creates a team membership with the team's configured default role (falls back to the built-in `Player` role if the team has not set one). 6. If the user's profile is incomplete, they are redirected to complete it. |
+| **Postcondition** | The user is a member of the team with the team's default role. |
 | **Alternate Flow A** | If the user is already a member, the API returns `409 AlreadyMember` and the UI shows an appropriate message. |
-| **Alternate Flow C** | The user instead joins the team's linked Discord guild directly (e.g. via a plain, captain-made Discord invite with no Sideline invite code attached), skipping the web flow entirely. The bot's `GUILD_MEMBER_ADD` handler calls `Guild/RegisterMember` from the Discord identity alone (guild id, Discord id, username, roles) — no OAuth login and no Sideline invite code are involved. This already creates a full team membership with the default Player role, exactly as in the Main Flow; the only difference is the member's profile (name, birth date, gender) is not yet filled in, and — because there is no matched Sideline invite context — the member typically receives no welcome embed. `/complete` (UC-34) is how this member later finishes their profile from within Discord. |
+| **Alternate Flow C** | The user instead joins the team's linked Discord guild directly (e.g. via a plain, captain-made Discord invite with no Sideline invite code attached), skipping the web flow entirely. The bot's `GUILD_MEMBER_ADD` handler calls `Guild/RegisterMember` from the Discord identity alone (guild id, Discord id, username, roles) — no OAuth login and no Sideline invite code are involved. This already creates a full team membership with the team's default role, exactly as in the Main Flow; the only difference is the member's profile (name, birth date, gender) is not yet filled in, and — because there is no matched Sideline invite context — the member typically receives no welcome embed. `/complete` (UC-34) is how this member later finishes their profile from within Discord. |
 
 ---
 

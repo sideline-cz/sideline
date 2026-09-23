@@ -21,6 +21,8 @@ A subdivision within a team's roster — "first team", "reserves", "under-17s", 
 
 Permissions attached to a person within a team. Built-in roles are `player`, `captain`, `admin`, and `treasurer`. Roles control what actions are allowed (creating events, editing roster, changing team settings, managing fees). A role can also be attached directly to a member, or granted to a whole [group](#group) — every member of that group (and any of its sub-groups) then holds the role too, shown on their profile as "inherited". Archiving a group revokes the roles it granted.
 
+One role per team is the **default role**: whichever role a new member gets when they join, whether through an [invite](#invite) or by joining the linked Discord server directly. Every team starts out with `player` as the default; an admin can point it at a different role from **Team → Roles**. See [Invite members](/guides/invite-members/).
+
 ## Event
 
 A single happening at a specific date and time — a training, a game, a team dinner. Events have a location, a group (audience), an RSVP deadline, and an [event type](#event-type).

@@ -548,7 +548,8 @@ sequenceDiagram
     DB-->>Server: InviteAcceptance {id: acceptance_id}
     Server->>DB: INSERT group_members {group_id: "first-team-id", team_member_id}<br/>ON CONFLICT DO NOTHING
     DB-->>Server: OK
-    Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: false,<br/>acceptanceId: some(acceptance_id)}
+    Note over Server: Resolves and assigns the team's default role<br/>(roles.is_default, falls back to Player) — see Diagram 10
+    Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:[defaultRole.name],<br/>isProfileComplete, requiresReauth: false,<br/>acceptanceId: some(acceptance_id)}
 
     loop Poll every ~1 s until discord_code appears
         NewUser->>Server: GET /invite/acceptances/{acceptance_id}
@@ -620,7 +621,7 @@ sequenceDiagram
 
 ## 10. Invite and Join Team (web flow)
 
-An admin generates an invite link (or regenerates one) from the team settings page. The server creates a 12-character alphanumeric code, stores it in `team_invites`, and deactivates any previous codes for that team. A new user visits the invite URL in the browser, which first calls `GET /invite/{code}` to display the team name without authentication. When the user clicks "Accept", the front end redirects through the OAuth login flow (diagram 1), after which the app calls `POST /invite/{code}/join` with the session token. The server validates the code, checks the user is not already a member, resolves the "Player" role ID, inserts the membership, assigns the Player role, creates an `invite_acceptances` row, and returns a `JoinResult` containing the acceptance ID. The web app polls `GET /invite/acceptances/:acceptanceId` until the bot writes the single-use Discord invite code (typically within 1 second), then redirects to `https://discord.gg/{discord_code}`.
+An admin generates an invite link (or regenerates one) from the team settings page. The server creates a 12-character alphanumeric code, stores it in `team_invites`, and deactivates any previous codes for that team. A new user visits the invite URL in the browser, which first calls `GET /invite/{code}` to display the team name without authentication. When the user clicks "Accept", the front end redirects through the OAuth login flow (diagram 1), after which the app calls `POST /invite/{code}/join` with the session token. The server validates the code, checks the user is not already a member, resolves the team's **default role** (`roles.is_default`, falling back to the built-in `Player` role if the team hasn't configured one — see UC-3.3), inserts the membership, assigns that role, creates an `invite_acceptances` row, and returns a `JoinResult` containing the acceptance ID and the role actually assigned. The web app polls `GET /invite/acceptances/:acceptanceId` until the bot writes the single-use Discord invite code (typically within 1 second), then redirects to `https://discord.gg/{discord_code}`.
 
 If the user's OAuth token is missing the `guilds.join` scope (a legacy user who authenticated before the scope was added), `joinViaInvite` skips the pending-guild-join enqueue and returns `requiresReauth: true`. The web app then shows a re-authorisation prompt. When the user re-authenticates via Discord (diagram 1), the auth callback detects the newly-granted scope and re-enqueues any failed pending-guild-joins automatically; no further action is required from the user.
 
@@ -670,40 +671,44 @@ sequenceDiagram
     alt Already a member
         Server-->>NewUser: 409 AlreadyMember
     else Not yet a member
-        Server->>DB: SELECT role_id FROM roles<br/>WHERE team_id=? AND name='Player'
-        DB-->>Server: Player role ID
+        Server->>DB: SELECT id, name FROM roles<br/>WHERE team_id=? AND is_archived=false<br/>AND (is_default OR name='Player')<br/>ORDER BY is_default DESC LIMIT 1
+        DB-->>Server: Default role {id, name} (or none)
 
-        Server->>DB: INSERT team_members {team_id, user_id, active=true}
-        DB-->>Server: TeamMember {id}
+        alt No default role resolved
+            Server-->>NewUser: 404 InviteNotFound
+        else Default role resolved
+            Server->>DB: INSERT team_members {team_id, user_id, active=true}
+            DB-->>Server: TeamMember {id}
 
-        Server->>DB: INSERT team_member_roles {member_id, role_id=Player.id}
-        DB-->>Server: OK
-
-        Server->>DB: SELECT granted_scopes FROM oauth_connections<br/>WHERE user_id=? AND provider='discord'
-        DB-->>Server: granted_scopes (string)
-
-        Server->>DB: INSERT invite_acceptances {team_invite_id, user_id}
-        DB-->>Server: InviteAcceptance {id: acceptance_id}
-
-        alt guilds.join present in granted_scopes
-            Server->>DB: INSERT pending_guild_joins {user_id, guild_id, team_id}
+            Server->>DB: INSERT team_member_roles {member_id, role_id=defaultRole.id}
             DB-->>Server: OK
-            Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: false,<br/>acceptanceId: some(acceptance_id)}
-        else guilds.join missing (legacy token)
-            Note over Server: Skip enqueue — bot cannot add user to guild
-            Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: true,<br/>acceptanceId: some(acceptance_id)}
-            NewUser->>NewUser: Web app shows re-auth CTA<br/>"Re-connect Discord to finish joining"
-            Note over NewUser: User clicks CTA → OAuth re-auth (Diagram 1)<br/>Callback re-enqueues pending_guild_joins automatically
-        end
 
-        loop Poll ~1 s until discordInviteUrl is set
-            NewUser->>Server: GET /invite/acceptances/{acceptance_id}
-            Server->>DB: SELECT * FROM invite_acceptances WHERE id=?
-            DB-->>Server: InviteAcceptance row
-            Server-->>NewUser: 200 OK — JoinStatus {acceptanceId, discordInviteUrl, errorCode}
-        end
+            Server->>DB: SELECT granted_scopes FROM oauth_connections<br/>WHERE user_id=? AND provider='discord'
+            DB-->>Server: granted_scopes (string)
 
-        Note over NewUser: discordInviteUrl set → browser redirects to https://discord.gg/{code}<br/>(Bot generated a 1-use, 24-hour Discord invite via Invite/PendingAcceptances loop)
+            Server->>DB: INSERT invite_acceptances {team_invite_id, user_id}
+            DB-->>Server: InviteAcceptance {id: acceptance_id}
+
+            alt guilds.join present in granted_scopes
+                Server->>DB: INSERT pending_guild_joins {user_id, guild_id, team_id}
+                DB-->>Server: OK
+                Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:[defaultRole.name],<br/>isProfileComplete, requiresReauth: false,<br/>acceptanceId: some(acceptance_id)}
+            else guilds.join missing (legacy token)
+                Note over Server: Skip enqueue — bot cannot add user to guild
+                Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:[defaultRole.name],<br/>isProfileComplete, requiresReauth: true,<br/>acceptanceId: some(acceptance_id)}
+                NewUser->>NewUser: Web app shows re-auth CTA<br/>"Re-connect Discord to finish joining"
+                Note over NewUser: User clicks CTA → OAuth re-auth (Diagram 1)<br/>Callback re-enqueues pending_guild_joins automatically
+            end
+
+            loop Poll ~1 s until discordInviteUrl is set
+                NewUser->>Server: GET /invite/acceptances/{acceptance_id}
+                Server->>DB: SELECT * FROM invite_acceptances WHERE id=?
+                DB-->>Server: InviteAcceptance row
+                Server-->>NewUser: 200 OK — JoinStatus {acceptanceId, discordInviteUrl, errorCode}
+            end
+
+            Note over NewUser: discordInviteUrl set → browser redirects to https://discord.gg/{code}<br/>(Bot generated a 1-use, 24-hour Discord invite via Invite/PendingAcceptances loop)
+        end
     end
 ```
 

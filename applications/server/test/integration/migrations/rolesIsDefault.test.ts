@@ -1,5 +1,5 @@
 // T-M1 (`.work-plans/configurable-default-roles.md`) — migration
-// `1792500000_add_roles_is_default.ts`.
+// `1792500001_add_roles_is_default.ts`.
 //
 // Harness follows `addTeamSettingsRequireCompleteProfile.test.ts` (static default-import of the
 // migration module from `dist`, `TestPgClient`, `beforeEach(cleanDatabase)`).
@@ -13,7 +13,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import type { Team } from '@sideline/domain';
 import { SqlErrors } from '@sideline/effect-lib';
-import migrateAddRolesIsDefault from '@sideline/migrations/before/1792500000_add_roles_is_default';
+import migrateAddRolesIsDefault from '@sideline/migrations/before/1792500001_add_roles_is_default';
 import { Effect, Layer } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
