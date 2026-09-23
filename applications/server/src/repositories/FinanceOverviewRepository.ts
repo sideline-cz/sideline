@@ -56,8 +56,11 @@ const make = Effect.gen(function* () {
       fee_id: Schema.String,
       fee_name: Schema.String,
       currency: Fee.CurrencyCode,
-      due_minor: Schema.Number,
-      paid_minor: Schema.Number,
+      // BIGINT columns, and the pg driver hands int8 back as a string — `Fee.AmountMinor`
+      // accepts both, plain `Schema.Number` does not. `overviewByTeamQuery` gets away with
+      // `Schema.Number` only because every money column there is cast `::int` in SQL.
+      due_minor: Fee.AmountMinor,
+      paid_minor: Fee.AmountMinor,
       status: Schema.String,
       effective_due_at: Schema.OptionFromNullOr(Schema.Date),
       waived_reason: Schema.OptionFromNullOr(Schema.String),
