@@ -39,3 +39,6 @@ review-state.json
 
 # Session handover notes — a working document, never part of repo history
 HANDOVER.md
+
+# Agent work plans — working documents, never part of repo history
+.work-plans/
