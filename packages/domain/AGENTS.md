@@ -47,11 +47,21 @@ export class User extends Model.Class<User>('User')({
 
 ### Field Helpers
 
-- **`Model.Generated(schema)`** — DB-generated fields (excluded from `insert` variant)
+- **`Model.Generated(schema)`** — fields excluded from the `insert` variant (present on `select`, `update` and `json`)
 - **`Model.Sensitive(schema)`** — fields excluded from `json` variants (tokens, secrets)
 - **`Model.DateTimeInsertFromDate`** — auto-managed insert timestamp (`Date` → `DateTime.Utc`)
 - **`Model.DateTimeUpdateFromDate`** — auto-managed timestamp for both insert and update
 - **`Schema.OptionFromNullOr(schema)`** — nullable DB columns (decodes `T | null` → `Option<T>`, encodes back to `T | null`)
+
+#### `Model.Generated` Also Means "Never Set At Insert Time"
+
+Its name says DB-generated, but the only thing `Model.Generated` does is drop the field from the `insert` variant. Use it for **any** nullable column that no insert path ever writes — the DB `NULL` default is the only value a new row can get. Reference: `teams.verify_intro_template` in `src/models/Team.ts`, a plain `TEXT` column with no `DEFAULT` and no `INSERT` writer, declared `Model.Generated(Schema.OptionFromNullOr(Schema.String))`.
+
+Rules:
+
+1. **Apply it when, and only when, no code path names the column in an `INSERT`.** A plain (non-`Generated`) field makes the column REQUIRED on `typeof <Model>.insert.Type`, which forces every fixture literal in the repo that spells out the full insert shape to add `Option.none()` — for `teams` that is ~106 test files and ~125 `repo.insert({…})` literals, for zero behavioural difference from the DB's `NULL` default.
+2. **Always leave a `//` comment on the field stating why it is `Generated`** when the column is not actually DB-generated, so the next reader does not "fix" the apparent misnomer. Use `//`, never a JSDoc `/** */` block — the domain barrel codegen hoists field-level JSDoc onto the module's `export * as` line.
+3. **Never use it for a column an insert path DOES write.** The field disappears from the insert variant, so the write stops type-checking at that call site — the error is immediate and local, but reaching for `Generated` to silence a fixture churn on a column that IS written is how a real insert loses a value.
 
 ### Conventions
 

@@ -17,6 +17,7 @@ const TeamUpdateInput = Schema.Struct({
   onboarding_rules_role_id: Schema.OptionFromNullOr(Schema.String),
   onboarding_locale: Onboarding.OnboardingLocale,
   achievement_channel_id: Schema.OptionFromNullOr(Schema.String),
+  verify_intro_template: Schema.OptionFromNullOr(Schema.String),
 });
 
 class PendingOnboardingSyncRow extends Schema.Class<PendingOnboardingSyncRow>(
@@ -30,6 +31,7 @@ class PendingOnboardingSyncRow extends Schema.Class<PendingOnboardingSyncRow>(
   welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   onboarding_rules_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   onboarding_rules_prompt_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  verify_intro_template: Schema.OptionFromNullOr(Schema.String),
   is_community_enabled: Schema.Boolean,
 }) {}
 
@@ -118,6 +120,7 @@ const make = Effect.gen(function* () {
         onboarding_rules_role_id = ${input.onboarding_rules_role_id},
         onboarding_locale = ${input.onboarding_locale},
         achievement_channel_id = ${input.achievement_channel_id},
+        verify_intro_template = ${input.verify_intro_template},
         updated_at = now()
       WHERE id = ${input.id}
       RETURNING *
@@ -137,6 +140,7 @@ const make = Effect.gen(function* () {
     readonly onboarding_rules_role_id: Option.Option<string>;
     readonly onboarding_locale: Onboarding.OnboardingLocale;
     readonly achievement_channel_id: Option.Option<string>;
+    readonly verify_intro_template: Option.Option<string>;
   }) =>
     updateTeamQuery(input).pipe(
       catchSqlErrors,
@@ -158,7 +162,8 @@ const make = Effect.gen(function* () {
         )
         RETURNING id, guild_id, name, onboarding_locale,
                   rules_channel_id, welcome_channel_id,
-                  onboarding_rules_role_id, onboarding_rules_prompt_id
+                  onboarding_rules_role_id, onboarding_rules_prompt_id,
+                  verify_intro_template
       )
       SELECT
         c.id AS team_id,
@@ -169,6 +174,7 @@ const make = Effect.gen(function* () {
         c.welcome_channel_id,
         c.onboarding_rules_role_id,
         c.onboarding_rules_prompt_id,
+        c.verify_intro_template,
         COALESCE(bg.is_community_enabled, false) AS is_community_enabled
       FROM claimed c
       LEFT JOIN bot_guilds bg ON bg.guild_id = c.guild_id

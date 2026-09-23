@@ -106,6 +106,7 @@ const testTeam = {
   onboarding_synced_at: Option.none<DateTime.Utc>(),
   onboarding_sync_status: 'pending' as const,
   onboarding_sync_error: Option.none<string>(),
+  verify_intro_template: Option.none<string>(),
 };
 
 const memberMembership: MembershipWithRole = {

@@ -27,6 +27,9 @@ export const PendingOnboardingSyncEntry = Schema.Struct({
   onboarding_rules_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   onboarding_rules_prompt_id: Schema.OptionFromNullOr(Discord.Snowflake),
   is_community_enabled: Schema.Boolean,
+  // Drives the verify-channel intro reconcile in the bot's onboarding processor. Absent key
+  // = an old server; None means "use the built-in copy", which is also the reconcile target.
+  verify_intro_template: Schema.OptionFromOptionalKey(Schema.String),
 });
 
 export const GuildRpcGroup = RpcGroup.make(
@@ -149,6 +152,10 @@ export const GuildRpcGroup = RpcGroup.make(
         // `teams.onboarding_locale`. `GuildMemberAdd` has no `guild_locale` to read, so the locale
         // for every string the bot posts at join time rides on the DTO.
         verify_locale: OnboardingLocale.pipe(Schema.withDecodingDefaultKey(() => 'en')),
+        // `teams.verify_intro_template` — the create path for the verify channel needs it at
+        // join time. Absent key = an old server (rolling deploy is bot -> server -> web), so
+        // OptionFromOptionalKey rather than OptionFromNullOr: None falls back to the built-in copy.
+        verify_intro_template: Schema.OptionFromOptionalKey(Schema.String),
       }),
     ),
   }),

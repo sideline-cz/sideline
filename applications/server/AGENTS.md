@@ -373,10 +373,10 @@ The RPC payload includes `invite_code: Option<Snowflake-like string>` — this i
 
 The server is the only renderer of welcome templates. The bot receives a fully-substituted, sanitized string and embeds it as-is.
 
-`WelcomeMeta` also carries three **top-level** verification fields — `profile_complete`, `profile_gate_enabled`, `verify_locale` — and they must stay top-level, never nested inside `welcome`:
+`WelcomeMeta` also carries four **top-level** verification fields — `profile_complete`, `profile_gate_enabled`, `verify_locale`, `verify_intro_template` — and they must stay top-level, never nested inside `welcome`:
 
 1. **`welcome` is `Option.none()` for exactly the cohort the profile gate must reach.** `buildWelcomeMeta` only produces a `welcome` when `resolveInviteContext` resolves a Sideline-minted per-acceptance code or a recent `invite_acceptances` row; a member who walked in through a plain captain-made Discord invite gets `welcome: None` and no welcome embed at all. Nesting these three fields under `welcome` would hide them from that cohort and silently disable the join-time unverified role/channel for it — the main path this feature exists for.
-2. **`profile_gate_enabled` is the only field here that costs a query** (`deps.teamSettings.findByTeamId`). It is skipped — hardcoded `false` — when `payload.source` is `Some('reconcile')`, because `Guild/ReconcileMembers` runs `registerMemberWithReconcile` for every member of a guild at `concurrency: 5` and **discards** `welcomeMeta`. Never remove that `isReconcile` short-circuit, and never add a second per-member query to this builder without the same guard. `profile_complete` and `verify_locale` are free (already-loaded `users` / `teams` rows) and stay populated on the reconcile path.
+2. **`profile_gate_enabled` is the only field here that costs a query** (`deps.teamSettings.findByTeamId`). It is skipped — hardcoded `false` — when `payload.source` is `Some('reconcile')`, because `Guild/ReconcileMembers` runs `registerMemberWithReconcile` for every member of a guild at `concurrency: 5` and **discards** `welcomeMeta`. Never remove that `isReconcile` short-circuit, and never add a second per-member query to this builder without the same guard. `profile_complete`, `verify_locale` and `verify_intro_template` are free (already-loaded `users` / `teams` rows) and stay populated on the reconcile path.
 3. **`buildWelcomeMeta` takes the `user` row as its own parameter** so `profile_complete` reads the row the handler already bound. Do not re-read the user inside the builder.
 
 Rules that keep a group binding from silently never reaching Discord again:
@@ -1176,6 +1176,27 @@ A configurable per-team setting (e.g. `team_settings.max_missed_rsvps`, followin
 | 6 | Web settings UI | `applications/web/src/components/organisms/team-settings/settingsForm.ts` + the one card that renders the field | the camelCase field on `SettingsFormValues` (as `string` for a number input), its line in `settingsFormFrom`, its bounds row in `findInvalidSettingsField` (mirroring the domain `isBetween`), its `Option.some(parsed)` in `settingsRequestFrom`, and the `Input` in the owning card (`GeneralLimitsCard` / `RemindersCard` / `CoachAssignmentCard` / `DiscordDefaultsCard`) — plus `BASE`/`EDITED` values in `settingsForm.test.ts` and i18n keys in `packages/i18n/messages/{en,cs}.json`. No dirty flag and no save handler: both come from the shared `useTeamSettingsForm.ts` (see `applications/web/AGENTS.md` → "Pages With Several Independent Save Buttons — `useCardForm`") |
 
 The default value MUST be identical in places 1, 4, and 5 (and in the read mapper's `onNone` branch), and the bounds MUST be identical in places 3 and 6. Reference end-to-end implementation: `max_missed_rsvps` (default `4`, bounds `1`–`50`).
+
+## Adding a `teams` Column End-to-End
+
+A column on `teams` itself (not `team_settings` — that is the section above, and the two paths share nothing) is a **different, longer** mirror list, because `teams` feeds the `TeamInfo` response, the onboarding sync claim query, AND the `Guild/RegisterMember` welcome DTO. Reference end-to-end implementation: `teams.verify_intro_template` (`packages/migrations/src/before/1792500000_add_teams_verify_intro_template.ts`).
+
+| # | Place | File | What to add |
+|---|-------|------|-------------|
+| 1 | DB column | new migration in `packages/migrations/src/before/` | `ALTER TABLE teams ADD COLUMN IF NOT EXISTS <col> <type>` |
+| 2 | Domain model | `packages/domain/src/models/Team.ts` | the snake_case field. If no insert path writes it, wrap in `Model.Generated(...)` — see `packages/domain/AGENTS.md` → "`Model.Generated` Also Means 'Never Set At Insert Time'" |
+| 3 | Domain API contract | `packages/domain/src/api/TeamApi.ts` | the camelCase field on `TeamInfo` AND on `UpdateTeamRequest` as `Schema.OptionFromOptional(Schema.OptionFromNullOr(...))`; all length/range checks live here |
+| 4 | Server repository | `src/repositories/TeamsRepository.ts` | the column on `TeamUpdateInput`, in the `UPDATE ... SET` list, and on the **hand-written `update(input: {...})` parameter type** — that type is not derived from `TeamUpdateInput`, so omitting it there compiles until the call site passes the field |
+| 5 | Server API handler | `src/api/team.ts` | the field in `teamToInfo`, in `nextFields` (`Option.getOrElse(payload.<field>, () => existing.<col>)`), in the `teams.update({...})` argument, and — only if the value must reach Discord — on BOTH parameter types of `hasOnboardingFieldChange`, its comparison chain, and the `existing` literal passed to it |
+| 6 | Web form + card | `applications/web/src/components/organisms/team-settings/teamInfoForm.ts` + the owning card | the key on `untouchedTeamInfo`, on `WelcomeFormValues`, in `welcomeFormFrom`, in `welcomeRequestFrom`, and the input in the card. See `applications/web/AGENTS.md` → "Pages With Several Independent Save Buttons — `useCardForm`" |
+| 7 | i18n | `packages/i18n/messages/en.json` + `cs.json` | the label and help keys, in BOTH locales |
+
+Rules:
+
+1. **A column the bot reads on the onboarding sync loop must be added in BOTH halves of `claimPendingOnboardingSyncs`** (`src/repositories/TeamsRepository.ts`): the `claimed` CTE's `UPDATE ... RETURNING` list AND the outer `SELECT c.<col>`, plus the field on `PendingOnboardingSyncRow` and on `PendingOnboardingSyncEntry` (`packages/domain/src/rpc/guild/GuildRpcGroup.ts`). Adding it to only one of the two SQL lists is **not** a type error — it fails at row decode, at runtime, on the first poll tick.
+2. **A column the bot reads at join time must also be added to `WelcomeMeta`** — the `type WelcomeMeta` in `src/rpc/guild/index.ts`, EVERY literal that constructs one (there is more than one branch in `buildWelcomeMeta`), the `team` parameter type of `buildWelcomeMeta`, and the DTO in `packages/domain/src/rpc/guild/GuildRpcGroup.ts`. Declare the DTO field `Schema.OptionFromOptionalKey(...)`, never `Schema.OptionFromNullOr(...)`: the rolling deploy order is bot → server → web, so the new bot decodes an old server's payload where the key is absent (see root `AGENTS.md` → "Releases").
+3. **Every test that constructs a full `TeamApi.TeamInfo` breaks, and a mock repository does not.** Adding a field to `TeamInfo` is a type error at each `new TeamInfo({…})`, which is the cheap failure. A mock `TeamsRepository` that returns a plain object literal instead of a `Team.Team` still type-checks structurally and then fails at **response encode — a 500, not a 400 and not a compile error**. See "An RPC Handler Must Map Rows Into The Domain Class — `Schema.Class` Is Nominal".
+4. **Record the column in `docs/database.md` and `docs/thesis/er-diagram.md`** in the same PR (root `AGENTS.md` → "Thesis Documentation").
 
 ## Event Types (`event_types`, `EventTypesRepository`, `api/event-type.ts`)
 

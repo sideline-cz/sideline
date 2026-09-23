@@ -22,6 +22,7 @@ export const untouchedTeamInfo: TeamApi.UpdateTeamRequest = {
   rulesChannelId: Option.none(),
   onboardingRulesRoleId: Option.none(),
   onboardingLocale: Option.none(),
+  verifyIntroTemplate: Option.none(),
 };
 
 /** `''` means "clear it" for the nullable text fields. */
@@ -70,6 +71,7 @@ export type WelcomeFormValues = {
   systemLogChannel: string;
   achievementChannel: string;
   welcomeTemplate: string;
+  verifyIntroTemplate: string;
 };
 
 export const welcomeFormFrom = (info: TeamApi.TeamInfo): WelcomeFormValues => ({
@@ -77,6 +79,7 @@ export const welcomeFormFrom = (info: TeamApi.TeamInfo): WelcomeFormValues => ({
   systemLogChannel: selectValue(info.systemLogChannelId),
   achievementChannel: selectValue(info.achievementChannelId),
   welcomeTemplate: Option.getOrElse(info.welcomeMessageTemplate, () => ''),
+  verifyIntroTemplate: Option.getOrElse(info.verifyIntroTemplate, () => ''),
 });
 
 export const welcomeRequestFrom = (values: WelcomeFormValues): TeamApi.UpdateTeamRequest => ({
@@ -85,6 +88,7 @@ export const welcomeRequestFrom = (values: WelcomeFormValues): TeamApi.UpdateTea
   systemLogChannelId: Option.some(channelToOption(values.systemLogChannel)),
   achievementChannelId: Option.some(channelToOption(values.achievementChannel)),
   welcomeMessageTemplate: optionalText(values.welcomeTemplate),
+  verifyIntroTemplate: optionalText(values.verifyIntroTemplate),
 });
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,8 @@
+import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Effect, Layer, Option } from 'effect';
 import { describe, expect, it } from 'vitest';
+import { VERIFY_BUTTON_ID } from '~/interactions/profile-verify.js';
 import { ProcessorService } from '~/rcp/onboarding/ProcessorService.js';
 import { OnboardingRoleCache } from '~/services/OnboardingRoleCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
@@ -15,6 +17,7 @@ const ROLE_ID = '555555555555555555';
 const NEW_PROMPT_ID = '888888888888888888';
 const RULES_CHANNEL_ID = '222222222222222222';
 const WELCOME_CHANNEL_ID = '333333333333333333';
+const VERIFY_CHANNEL_ID = '777777777777777777';
 
 const makePendingSync = (overrides: Record<string, unknown> = {}) => ({
   team_id: TEAM_ID,
@@ -27,7 +30,57 @@ const makePendingSync = (overrides: Record<string, unknown> = {}) => ({
   onboarding_rules_role_id: Option.some(ROLE_ID),
   onboarding_rules_prompt_id: Option.none(),
   is_community_enabled: true,
+  verify_intro_template: Option.none(),
   ...overrides,
+});
+
+// ---------------------------------------------------------------------------
+// reconcileVerifyIntro fixtures
+// ---------------------------------------------------------------------------
+
+const EN_VERIFY_CHANNEL_NAME = m.bot_verify_channel_name({}, { locale: 'en' });
+
+const builtInEmbed = (locale: 'en' | 'cs' = 'en') => ({
+  title: m.bot_verify_intro_title({}, { locale }),
+  description: m.bot_verify_intro_description({}, { locale }),
+  fields: [
+    {
+      name: m.bot_verify_intro_unlocks_name({}, { locale }),
+      value: m.bot_verify_intro_unlocks_value({}, { locale }),
+    },
+    {
+      name: m.bot_verify_intro_why_name({}, { locale }),
+      value: m.bot_verify_intro_why_value({}, { locale }),
+    },
+  ],
+  footer: { text: m.bot_verify_intro_footer({}, { locale }) },
+});
+
+const makeGuildTextChannel = (overrides: Record<string, unknown> = {}) => ({
+  id: VERIFY_CHANNEL_ID,
+  name: EN_VERIFY_CHANNEL_NAME,
+  type: 0, // GUILD_TEXT
+  ...overrides,
+});
+
+const makeVerifyButtonRow = (customId = VERIFY_BUTTON_ID) => ({
+  type: 1, // ACTION_ROW
+  components: [{ type: 2, custom_id: customId }], // BUTTON
+});
+
+const makePin = (
+  overrides: {
+    id?: string;
+    embed?: { title?: string; description?: string; footer?: { text: string } };
+    customId?: string;
+  } = {},
+) => ({
+  pinned_at: '2024-01-01T00:00:00Z',
+  message: {
+    id: overrides.id ?? 'existing-pin-msg-1',
+    embeds: [overrides.embed ?? builtInEmbed()],
+    components: [makeVerifyButtonRow(overrides.customId)],
+  },
 });
 
 const makeOnboardingResponse = (prompts: unknown[] = [], promptId?: string) => ({
@@ -125,6 +178,12 @@ type RestCalls = {
   getGuildsOnboarding: unknown[];
   putGuildsOnboarding: unknown[];
   updateGuildWelcomeScreen: unknown[];
+  listGuildChannels: unknown[];
+  listPins: unknown[];
+  updateMessage: unknown[];
+  createMessage: unknown[];
+  createPin: unknown[];
+  deleteMessage: unknown[];
 };
 
 const makeRest = (
@@ -134,6 +193,12 @@ const makeRest = (
     getGuildsOnboarding: [],
     putGuildsOnboarding: [],
     updateGuildWelcomeScreen: [],
+    listGuildChannels: [],
+    listPins: [],
+    updateMessage: [],
+    createMessage: [],
+    createPin: [],
+    deleteMessage: [],
   };
 
   const defaults: Record<string, (...args: any[]) => Effect.Effect<any, any, any>> = {
@@ -148,6 +213,33 @@ const makeRest = (
     updateGuildWelcomeScreen: (guildId: any, payload: any) => {
       calls.updateGuildWelcomeScreen.push({ guildId, payload });
       return Effect.succeed({});
+    },
+    // Defaults for reconcileVerifyIntro: no channel found by default, so the
+    // pre-existing tests above (none of which set up a verify channel) don't
+    // trip the reconcile into calling listPins/updateMessage/createMessage.
+    listGuildChannels: (guildId: any) => {
+      calls.listGuildChannels.push(guildId);
+      return Effect.succeed([]);
+    },
+    listPins: (...args: any[]) => {
+      calls.listPins.push(args);
+      return Effect.succeed({ items: [], has_more: false });
+    },
+    updateMessage: (...args: any[]) => {
+      calls.updateMessage.push(args);
+      return Effect.succeed({ id: 'updated-msg' });
+    },
+    createMessage: (...args: any[]) => {
+      calls.createMessage.push(args);
+      return Effect.succeed({ id: 'created-msg' });
+    },
+    createPin: (...args: any[]) => {
+      calls.createPin.push(args);
+      return Effect.succeed(undefined);
+    },
+    deleteMessage: (...args: any[]) => {
+      calls.deleteMessage.push(args);
+      return Effect.succeed(undefined);
     },
   };
 
@@ -419,5 +511,273 @@ describe('OnboardingProcessorService', () => {
     await expect(runProcessTick(rpcLayer, restLayer, cacheLayer)).resolves.not.toThrow();
     // TODO: once OnboardingMetrics is injectable, assert:
     //   expect(metricCalls.failed).toHaveLength(1)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reconcileVerifyIntro (A12) — keeps the pinned intro message in the verify
+// channel in step with `teams.verify_intro_template`.
+// ---------------------------------------------------------------------------
+
+describe('OnboardingProcessorService — reconcileVerifyIntro', () => {
+  it('channel found + pin drifted → exactly one updateMessage with the new description, no components key in the patch', async () => {
+    const { layer: rpcLayer } = makeRpc([
+      makePendingSync({ verify_intro_template: Option.some('New custom body.') }),
+    ]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () =>
+        Effect.succeed({
+          items: [makePin({ embed: builtInEmbed() })], // stale: still the built-in copy
+          has_more: false,
+        }),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    expect(restCalls.updateMessage).toHaveLength(1);
+    const [, , patch] = restCalls.updateMessage[0] as [
+      string,
+      string,
+      { embeds: any[]; components?: unknown },
+    ];
+    expect(patch.embeds[0].description).toBe('New custom body.');
+    expect('components' in patch).toBe(false);
+    expect(restCalls.createMessage).toHaveLength(0);
+    expect(restCalls.createPin).toHaveLength(0);
+  });
+
+  it('pin already matches the current copy → no updateMessage', async () => {
+    const { layer: rpcLayer } = makeRpc([
+      makePendingSync({ verify_intro_template: Option.none() }),
+    ]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () =>
+        Effect.succeed({ items: [makePin({ embed: builtInEmbed() })], has_more: false }),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    expect(restCalls.updateMessage).toHaveLength(0);
+    expect(restCalls.createMessage).toHaveLength(0);
+  });
+
+  it('no pin of ours (empty pins) → createMessage + createPin', async () => {
+    const { layer: rpcLayer } = makeRpc([makePendingSync()]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () => Effect.succeed({ items: [], has_more: false }),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    expect(restCalls.createPin).toHaveLength(1);
+    expect(restCalls.updateMessage).toHaveLength(0);
+  });
+
+  it('a pin exists but its only button has a different custom_id → treated as "not ours", createMessage + createPin', async () => {
+    const { layer: rpcLayer } = makeRpc([makePendingSync()]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () =>
+        Effect.succeed({
+          items: [makePin({ customId: 'some-other-button' })],
+          has_more: false,
+        }),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    expect(restCalls.createPin).toHaveLength(1);
+    expect(restCalls.updateMessage).toHaveLength(0);
+  });
+
+  it('channel not found → no pin calls at all, sync still succeeds', async () => {
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([makePendingSync()]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([]),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    expect(restCalls.listPins).toHaveLength(0);
+    expect(restCalls.updateMessage).toHaveLength(0);
+    expect(restCalls.createMessage).toHaveLength(0);
+    expect(rpcCalls.MarkOnboardingSyncDone).toHaveLength(1);
+    expect(rpcCalls.MarkOnboardingSyncFailed).toHaveLength(0);
+  });
+
+  it('a category (not GUILD_TEXT) named start-here is present → not matched, treated as channel-not-found', async () => {
+    const { layer: rpcLayer } = makeRpc([makePendingSync()]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () =>
+        Effect.succeed([makeGuildTextChannel({ type: 4 /* GUILD_CATEGORY */ })]),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    expect(restCalls.listPins).toHaveLength(0);
+    expect(restCalls.createMessage).toHaveLength(0);
+  });
+
+  it('listGuildChannels fails → MarkOnboardingSyncDone still called, MarkOnboardingSyncFailed NOT called', async () => {
+    const permanentError = { _tag: 'ErrorResponse', response: { status: 400 }, data: { code: 1 } };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([makePendingSync()]);
+    const { layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.fail(permanentError),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await expect(runProcessTick(rpcLayer, restLayer, cacheLayer)).resolves.not.toThrow();
+
+    expect(rpcCalls.MarkOnboardingSyncDone).toHaveLength(1);
+    expect(rpcCalls.MarkOnboardingSyncFailed).toHaveLength(0);
+  });
+
+  it('listPins fails → MarkOnboardingSyncDone still called, MarkOnboardingSyncFailed NOT called', async () => {
+    const permanentError = { _tag: 'ErrorResponse', response: { status: 400 }, data: { code: 1 } };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([makePendingSync()]);
+    const { layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () => Effect.fail(permanentError),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await expect(runProcessTick(rpcLayer, restLayer, cacheLayer)).resolves.not.toThrow();
+
+    expect(rpcCalls.MarkOnboardingSyncDone).toHaveLength(1);
+    expect(rpcCalls.MarkOnboardingSyncFailed).toHaveLength(0);
+  });
+
+  it('updateMessage fails → MarkOnboardingSyncDone still called, MarkOnboardingSyncFailed NOT called', async () => {
+    const permanentError = { _tag: 'ErrorResponse', response: { status: 400 }, data: { code: 1 } };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([
+      makePendingSync({ verify_intro_template: Option.some('Drifted body.') }),
+    ]);
+    const { layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () =>
+        Effect.succeed({ items: [makePin({ embed: builtInEmbed() })], has_more: false }),
+      updateMessage: () => Effect.fail(permanentError),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await expect(runProcessTick(rpcLayer, restLayer, cacheLayer)).resolves.not.toThrow();
+
+    expect(rpcCalls.MarkOnboardingSyncDone).toHaveLength(1);
+    expect(rpcCalls.MarkOnboardingSyncFailed).toHaveLength(0);
+  });
+
+  // The verify channel is not a Community feature — it is created from the join path and
+  // gated only on `profile_gate_enabled`. `is_community_enabled` defaults to false for any
+  // guild not yet in `bot_guilds`, so if the reconcile sat behind that short-circuit the
+  // setting would silently never reach most teams. It must run BEFORE the skip branch.
+  it('is_community_enabled: false → the reconcile still runs, then MarkOnboardingSyncSkipped', async () => {
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([
+      makePendingSync({
+        is_community_enabled: false,
+        verify_intro_template: Option.some('Non-community body.'),
+      }),
+    ]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () =>
+        Effect.succeed({ items: [makePin({ embed: builtInEmbed() })], has_more: false }),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    // NB: `makeRest` overrides REPLACE the recording default, so an overridden method never
+    // lands in `calls` — assert on the reconcile's effect, not on listGuildChannels.
+    expect(restCalls.updateMessage).toHaveLength(1);
+    const [, , patch] = restCalls.updateMessage[0] as [string, string, { embeds: any[] }];
+    expect(patch.embeds[0].description).toBe('Non-community body.');
+
+    // ...and the Community short-circuit still does its own job unchanged.
+    expect(rpcCalls.MarkOnboardingSyncSkipped).toHaveLength(1);
+    expect(restCalls.putGuildsOnboarding).toHaveLength(0);
+    expect(restCalls.updateGuildWelcomeScreen).toHaveLength(0);
+  });
+
+  // A failing welcome-screen patch marks the row 'failed', and only 'pending' rows are
+  // re-claimed — so a reconcile sequenced after it would be lost forever for that team.
+  it('welcome-screen patch failure → the reconcile already ran before it', async () => {
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([
+      makePendingSync({ verify_intro_template: Option.some('Body that must still land.') }),
+    ]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () =>
+        Effect.succeed({ items: [makePin({ embed: builtInEmbed() })], has_more: false }),
+      updateGuildWelcomeScreen: () =>
+        Effect.fail({
+          _tag: 'ErrorResponse',
+          response: { status: 400 },
+          data: { code: 50035 },
+        } as any),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    expect(restCalls.updateMessage).toHaveLength(1);
+    const [, , patch] = restCalls.updateMessage[0] as [string, string, { embeds: any[] }];
+    expect(patch.embeds[0].description).toBe('Body that must still land.');
+    // The welcome-screen failure is still reported, exactly as before this change.
+    expect(rpcCalls.MarkOnboardingSyncFailed).toHaveLength(1);
+  });
+
+  it('createPin fails permanently after a successful post → the message is rolled back, sync still done', async () => {
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([makePendingSync()]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () => Effect.succeed({ items: [], has_more: false }),
+      createMessage: () => Effect.succeed({ id: 'freshly-posted-msg' }),
+      createPin: () =>
+        Effect.fail({
+          _tag: 'ErrorResponse',
+          response: { status: 403 },
+          data: { code: 50013 },
+        } as any),
+    });
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    // Without the rollback the message would linger unpinned, invisible to the next
+    // listPins, and get reposted on every subsequent template edit.
+    expect(restCalls.deleteMessage).toHaveLength(1);
+    expect((restCalls.deleteMessage[0] as any[])[1]).toBe('freshly-posted-msg');
+    expect(rpcCalls.MarkOnboardingSyncDone).toHaveLength(1);
+    expect(rpcCalls.MarkOnboardingSyncFailed).toHaveLength(0);
+  });
+
+  it('updateGuildWelcomeScreen still receives exactly the payload it always did — Deliverable B was dropped', async () => {
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildChannels: () => Effect.succeed([makeGuildTextChannel()]),
+      listPins: () => Effect.succeed({ items: [], has_more: false }),
+    });
+    const { layer: rpcLayer } = makeRpc([makePendingSync()]);
+    const { layer: cacheLayer } = makeLiveCache();
+
+    await runProcessTick(rpcLayer, restLayer, cacheLayer);
+
+    expect(restCalls.updateGuildWelcomeScreen).toHaveLength(1);
+    const { payload } = restCalls.updateGuildWelcomeScreen[0] as { payload: any };
+    // Exactly the welcome_channel entry — no verify-channel entry was added.
+    expect(payload.welcome_channels).toHaveLength(1);
+    expect(payload.welcome_channels.every((c: any) => c.channel_id === WELCOME_CHANNEL_ID)).toBe(
+      true,
+    );
   });
 });

@@ -368,6 +368,7 @@ Returns the team's public profile information.
 | `achievementChannelId` | `Snowflake \| null` | Yes | Discord channel where the bot posts achievement congratulatory embeds; null means notifications are disabled |
 | `systemLogChannelId` | `Snowflake \| null` | Yes | Private Discord channel where the bot logs every member join |
 | `welcomeMessageTemplate` | `string \| null` | Yes | Template string for the welcome embed description (max 500 characters; supports `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, `{teamName}`) |
+| `verifyIntroTemplate` | `string \| null` | Yes | Body text override for the pinned intro embed in the bot-created verify channel (`nez-zacnes`/`start-here`); no placeholders; null uses the built-in copy |
 
 **Errors:**
 
@@ -402,6 +403,7 @@ Updates the team's profile information. All fields are optional.
 | `achievementChannelId` | `Snowflake \| null` | No | null disables achievement notifications | Discord channel for achievement congratulatory embeds |
 | `systemLogChannelId` | `Snowflake \| null` | No | null clears the field | Private Discord channel for join logs |
 | `welcomeMessageTemplate` | `string \| null` | No | Max 500 characters; null clears the field | Template for welcome embed description |
+| `verifyIntroTemplate` | `string \| null` | No | 1–2000 characters; null clears the field (falls back to the built-in copy) | Body text for the verify channel's pinned intro embed |
 
 **Response:** `200 OK` — `TeamInfo` (see `GET /teams/:teamId` for field descriptions)
 

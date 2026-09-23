@@ -28,6 +28,7 @@ const mockTeamInfoWithOnboarding = (onboardingOverrides: Record<string, unknown>
   achievementChannelId: null,
   systemLogChannelId: null,
   welcomeMessageTemplate: null,
+  verifyIntroTemplate: null,
   // New onboarding fields
   rulesChannelId: '222222222222222222',
   onboardingRulesRoleId: '333333333333333333',

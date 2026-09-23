@@ -18,10 +18,14 @@
  * None, never throws").
  */
 
+import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Effect, Layer, Option } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
-import { ensureVerificationChannel } from '~/rest/channels/ensureVerificationChannel.js';
+import {
+  buildIntroEmbed,
+  ensureVerificationChannel,
+} from '~/rest/channels/ensureVerificationChannel.js';
 import { CHANNEL_ACCESS_VIEW, HIDDEN } from '~/rest/permissions.js';
 import { allow, deny } from '~/rest/utils.js';
 
@@ -78,7 +82,7 @@ describe('ensureVerificationChannel — channel already exists', () => {
     });
 
     const result = await run(
-      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'en'),
+      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'en', Option.none()),
       stub.layer,
     );
 
@@ -87,6 +91,47 @@ describe('ensureVerificationChannel — channel already exists', () => {
     expect(stub.calls.createMessage).not.toHaveBeenCalled();
     expect(stub.calls.createPin).not.toHaveBeenCalled();
   });
+
+  it('does NOT reconcile the existing pinned message — no listPins/updateMessage/createMessage at all', async () => {
+    // Deviation #4 in the plan: the update path lives in the onboarding sync loop
+    // (ProcessorService.reconcileVerifyIntro), never here. Guard against a future
+    // regression that wires a reconcile into this early return.
+    const EXISTING_CHANNEL_ID = '900000000000000010';
+    const listPins = vi.fn(() => Effect.succeed({ items: [], has_more: false }));
+    const updateMessage = vi.fn(() => Effect.succeed({ id: 'msg' }));
+    const stub = makeRestLayer({
+      listGuildChannels: vi.fn(() =>
+        Effect.succeed([{ id: EXISTING_CHANNEL_ID, name: EN_CHANNEL_NAME, type: 0 }]),
+      ),
+    });
+    // Extend the proxy with the two methods the plan explicitly forbids calling here.
+    const rest = new Proxy({} as any, {
+      get: (_target: unknown, prop: string) => {
+        if (prop === 'listGuildChannels') return stub.calls.listGuildChannels;
+        if (prop === 'createGuildChannel') return stub.calls.createGuildChannel;
+        if (prop === 'createMessage') return stub.calls.createMessage;
+        if (prop === 'createPin') return stub.calls.createPin;
+        if (prop === 'listPins') return listPins;
+        if (prop === 'updateMessage') return updateMessage;
+        return () => Effect.succeed(undefined);
+      },
+    });
+    const layer = Layer.succeed(DiscordREST, rest);
+
+    await run(
+      ensureVerificationChannel(
+        GUILD_ID as any,
+        UNVERIFIED_ROLE_ID as any,
+        'en',
+        Option.some('Custom body.'),
+      ),
+      layer,
+    );
+
+    expect(listPins).not.toHaveBeenCalled();
+    expect(updateMessage).not.toHaveBeenCalled();
+    expect(stub.calls.createMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe('ensureVerificationChannel — channel absent, creates it', () => {
@@ -94,7 +139,7 @@ describe('ensureVerificationChannel — channel absent, creates it', () => {
     const stub = makeRestLayer();
 
     await run(
-      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'en'),
+      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'en', Option.none()),
       stub.layer,
     );
 
@@ -120,7 +165,7 @@ describe('ensureVerificationChannel — channel absent, creates it', () => {
     const stub = makeRestLayer();
 
     await run(
-      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'en'),
+      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'en', Option.none()),
       stub.layer,
     );
 
@@ -128,7 +173,11 @@ describe('ensureVerificationChannel — channel absent, creates it', () => {
     const [, body] = stub.calls.createMessage.mock.calls[0] as [
       string,
       {
-        embeds?: unknown[];
+        embeds?: ReadonlyArray<{
+          title?: string;
+          description?: string;
+          fields?: ReadonlyArray<{ name: string; value: string }>;
+        }>;
         components?: ReadonlyArray<{ components: ReadonlyArray<{ custom_id: string }> }>;
       },
     ];
@@ -137,6 +186,94 @@ describe('ensureVerificationChannel — channel absent, creates it', () => {
     expect(buttons).toContainEqual(expect.objectContaining({ custom_id: 'profile-verify' }));
 
     expect(stub.calls.createPin).toHaveBeenCalledTimes(1);
+  });
+
+  it('no template → description uses the built-in m.bot_verify_intro_description copy', async () => {
+    const stub = makeRestLayer();
+
+    await run(
+      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'en', Option.none()),
+      stub.layer,
+    );
+
+    const [, body] = stub.calls.createMessage.mock.calls[0] as [
+      string,
+      { embeds: ReadonlyArray<{ title: string; description: string }> },
+    ];
+    expect(body.embeds[0].description).toBe(m.bot_verify_intro_description({}, { locale: 'en' }));
+    expect(body.embeds[0].title).toBe(m.bot_verify_intro_title({}, { locale: 'en' }));
+  });
+
+  it('Option.some(custom template) → description uses it; title and both fields stay hardcoded', async () => {
+    const stub = makeRestLayer();
+
+    await run(
+      ensureVerificationChannel(
+        GUILD_ID as any,
+        UNVERIFIED_ROLE_ID as any,
+        'en',
+        Option.some('Custom body.'),
+      ),
+      stub.layer,
+    );
+
+    const [, body] = stub.calls.createMessage.mock.calls[0] as [
+      string,
+      {
+        embeds: ReadonlyArray<{
+          title: string;
+          description: string;
+          fields: ReadonlyArray<{ name: string; value: string }>;
+        }>;
+      },
+    ];
+    expect(body.embeds[0].description).toBe('Custom body.');
+    expect(body.embeds[0].title).toBe(m.bot_verify_intro_title({}, { locale: 'en' }));
+    expect(body.embeds[0].fields).toHaveLength(2);
+    expect(body.embeds[0].fields[0].name).toBe(
+      m.bot_verify_intro_unlocks_name({}, { locale: 'en' }),
+    );
+    expect(body.embeds[0].fields[1].name).toBe(m.bot_verify_intro_why_name({}, { locale: 'en' }));
+  });
+
+  it('whitespace-only template → falls back to the built-in copy', async () => {
+    const stub = makeRestLayer();
+
+    await run(
+      ensureVerificationChannel(
+        GUILD_ID as any,
+        UNVERIFIED_ROLE_ID as any,
+        'en',
+        Option.some('   \n\t  '),
+      ),
+      stub.layer,
+    );
+
+    const [, body] = stub.calls.createMessage.mock.calls[0] as [
+      string,
+      { embeds: ReadonlyArray<{ description: string }> },
+    ];
+    expect(body.embeds[0].description).toBe(m.bot_verify_intro_description({}, { locale: 'en' }));
+  });
+
+  it("locale 'cs' → uses the cs description when no template is set", async () => {
+    const stub = makeRestLayer({
+      createGuildChannel: vi.fn(() =>
+        Effect.succeed({ id: '900000000000000099', name: 'nez-zacnes', type: 0 }),
+      ),
+    });
+
+    await run(
+      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'cs', Option.none()),
+      stub.layer,
+    );
+
+    const [, body] = stub.calls.createMessage.mock.calls[0] as [
+      string,
+      { embeds: ReadonlyArray<{ title: string; description: string }> },
+    ];
+    expect(body.embeds[0].description).toBe(m.bot_verify_intro_description({}, { locale: 'cs' }));
+    expect(body.embeds[0].title).toBe(m.bot_verify_intro_title({}, { locale: 'cs' }));
   });
 });
 
@@ -152,10 +289,27 @@ describe('ensureVerificationChannel — permanent Discord error', () => {
     });
 
     const result = await run(
-      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'en'),
+      ensureVerificationChannel(GUILD_ID as any, UNVERIFIED_ROLE_ID as any, 'en', Option.none()),
       stub.layer,
     );
 
     expect(Option.isNone(result)).toBe(true);
+  });
+});
+
+describe('buildIntroEmbed', () => {
+  it('Option.none() → description falls back to the built-in copy', () => {
+    const embed = buildIntroEmbed('en', Option.none());
+    expect(embed.description).toBe(m.bot_verify_intro_description({}, { locale: 'en' }));
+  });
+
+  it('blank string → falls back to the built-in copy, same as Option.none()', () => {
+    const embed = buildIntroEmbed('en', Option.some('   '));
+    expect(embed.description).toBe(m.bot_verify_intro_description({}, { locale: 'en' }));
+  });
+
+  it('non-blank template → used verbatim as description', () => {
+    const embed = buildIntroEmbed('en', Option.some('  Custom body.  '));
+    expect(embed.description).toBe('  Custom body.  ');
   });
 });

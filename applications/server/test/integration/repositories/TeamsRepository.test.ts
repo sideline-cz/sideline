@@ -178,6 +178,7 @@ describe('TeamsRepository', () => {
               rules_channel_id: Option.none(),
               onboarding_rules_role_id: Option.none(),
               onboarding_locale: 'en',
+              verify_intro_template: Option.none(),
             }),
           ),
         ),
@@ -228,6 +229,7 @@ describe('TeamsRepository', () => {
                 rules_channel_id: Option.none(),
                 onboarding_rules_role_id: Option.none(),
                 onboarding_locale: 'en',
+                verify_intro_template: Option.none(),
               }),
             ),
           ),
@@ -454,5 +456,188 @@ describe('TeamsRepository', () => {
       ),
       Effect.provide(TestLayer),
     ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // verify_intro_template — Model.Generated (select + update, NOT insert; see
+  // .work-plans/configurable-verify-intro.md deviation #2).
+  // ---------------------------------------------------------------------------
+
+  it.effect('a freshly inserted team reads back verify_intro_template as Option.none()', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createTestUser),
+      Effect.bind('inserted', ({ userId }) =>
+        TeamsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insert(
+              makeInsert({
+                name: 'Verify Intro Default Team',
+                guild_id: '700000000000000001' as Discord.Snowflake,
+                created_by: userId,
+              }),
+            ),
+          ),
+        ),
+      ),
+      Effect.tap(({ inserted }) =>
+        Effect.sync(() => {
+          expect(Option.isNone(inserted.verify_intro_template)).toBe(true);
+        }),
+      ),
+      Effect.bind('found', ({ inserted }) =>
+        TeamsRepository.asEffect().pipe(Effect.andThen((repo) => repo.findById(inserted.id))),
+      ),
+      Effect.tap(({ found }) =>
+        Effect.sync(() => {
+          const team = Option.getOrThrow(found);
+          expect(Option.isNone(team.verify_intro_template)).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'update round-trips verify_intro_template — Some(...) persists through update and findById',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createTestUser),
+        Effect.bind('inserted', ({ userId }) =>
+          TeamsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert(
+                makeInsert({
+                  name: 'Verify Intro Team',
+                  guild_id: '700000000000000002' as Discord.Snowflake,
+                  created_by: userId,
+                }),
+              ),
+            ),
+          ),
+        ),
+        Effect.bind('updated', ({ inserted }) =>
+          TeamsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.update({
+                id: inserted.id,
+                name: 'Verify Intro Team',
+                description: Option.none(),
+                sport: Option.none(),
+                logo_url: Option.none(),
+                welcome_channel_id: Option.none(),
+                achievement_channel_id: Option.none(),
+                system_log_channel_id: Option.none(),
+                welcome_message_template: Option.none(),
+                rules_channel_id: Option.none(),
+                onboarding_rules_role_id: Option.none(),
+                onboarding_locale: 'en',
+                verify_intro_template: Option.some('hi'),
+              }),
+            ),
+          ),
+        ),
+        Effect.tap(({ updated }) =>
+          Effect.sync(() => {
+            expect(Option.getOrThrow(updated.verify_intro_template)).toBe('hi');
+          }),
+        ),
+        Effect.bind('found', ({ inserted }) =>
+          TeamsRepository.asEffect().pipe(Effect.andThen((repo) => repo.findById(inserted.id))),
+        ),
+        Effect.tap(({ found }) =>
+          Effect.sync(() => {
+            const team = Option.getOrThrow(found);
+            expect(Option.getOrThrow(team.verify_intro_template)).toBe('hi');
+          }),
+        ),
+        // Now clear it back to None() and confirm the round-trip the other way too.
+        Effect.bind('cleared', ({ inserted }) =>
+          TeamsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.update({
+                id: inserted.id,
+                name: 'Verify Intro Team',
+                description: Option.none(),
+                sport: Option.none(),
+                logo_url: Option.none(),
+                welcome_channel_id: Option.none(),
+                achievement_channel_id: Option.none(),
+                system_log_channel_id: Option.none(),
+                welcome_message_template: Option.none(),
+                rules_channel_id: Option.none(),
+                onboarding_rules_role_id: Option.none(),
+                onboarding_locale: 'en',
+                verify_intro_template: Option.none(),
+              }),
+            ),
+          ),
+        ),
+        Effect.tap(({ cleared }) =>
+          Effect.sync(() => {
+            expect(Option.isNone(cleared.verify_intro_template)).toBe(true);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'claimPendingOnboardingSyncs projects verify_intro_template (both the CTE RETURNING and the outer SELECT)',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createTestUser),
+        Effect.bind('inserted', ({ userId }) =>
+          TeamsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              // Default onboarding_sync_status is 'pending' (makeInsert), which is
+              // exactly what claimPendingOnboardingSyncs' WHERE clause selects on.
+              repo.insert(
+                makeInsert({
+                  name: 'Claimable Team',
+                  guild_id: '700000000000000003' as Discord.Snowflake,
+                  created_by: userId,
+                }),
+              ),
+            ),
+          ),
+        ),
+        Effect.tap(({ inserted }) =>
+          TeamsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.update({
+                id: inserted.id,
+                name: 'Claimable Team',
+                description: Option.none(),
+                sport: Option.none(),
+                logo_url: Option.none(),
+                welcome_channel_id: Option.none(),
+                achievement_channel_id: Option.none(),
+                system_log_channel_id: Option.none(),
+                welcome_message_template: Option.none(),
+                rules_channel_id: Option.none(),
+                onboarding_rules_role_id: Option.none(),
+                onboarding_locale: 'en',
+                verify_intro_template: Option.some('claimed body'),
+              }),
+            ),
+          ),
+        ),
+        Effect.bind('claimed', ({ inserted }) =>
+          TeamsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.claimPendingOnboardingSyncs(50)),
+            Effect.map((rows) => rows.find((row) => row.team_id === inserted.id)),
+          ),
+        ),
+        Effect.tap(({ claimed }) =>
+          Effect.sync(() => {
+            // Explicit narrowing, not `claimed!` — Biome strips non-null assertions on
+            // format and `pnpm check` then fails on the now-unguarded read (AGENTS.md).
+            if (claimed === undefined)
+              throw new Error('claimPendingOnboardingSyncs did not return the team');
+            expect(Option.getOrThrow(claimed.verify_intro_template)).toBe('claimed body');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
   );
 });

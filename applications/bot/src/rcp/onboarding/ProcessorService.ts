@@ -1,9 +1,15 @@
 import { type Discord, Team } from '@sideline/domain';
 import { Bind } from '@sideline/effect-lib';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST } from 'dfx/DiscordREST';
 import type { UpdateGuildOnboardingRequest as DfxUpdateGuildOnboardingRequest } from 'dfx/DiscordREST/Generated';
+import { ChannelTypes, MessageComponentTypes, type MessageEmbedResponse } from 'dfx/types';
 import { Array, Effect, Metric, Option, Schema, type ServiceMap } from 'effect';
+import { buildVerifyButton, VERIFY_BUTTON_ID } from '~/interactions/profile-verify.js';
+import { buildIntroEmbed } from '~/rest/channels/ensureVerificationChannel.js';
+import { isPermanentError } from '~/rest/discordErrors.js';
+import { retryPolicy } from '~/rest/utils.js';
 import { OnboardingRoleCache } from '../../services/OnboardingRoleCache.js';
 import { SyncRpc, type SyncRpcClient } from '../../services/SyncRpc.js';
 import { classifyOnboardingError } from './errorClassifier.js';
@@ -29,6 +35,146 @@ const resolveStrings = (
   };
 };
 
+/**
+ * Keeps the pinned intro message in the verify channel in step with
+ * `teams.verify_intro_template`. Runs on the onboarding sync loop — saving the field
+ * flips the team to `pending` (server `hasOnboardingFieldChange`), so a captain's edit
+ * lands within one poll tick. Deliberately NOT on the join path: `ensureVerificationChannel`
+ * returns early for an existing channel, and hanging a listPins/updateMessage off a
+ * `guildMemberAdd` would add join latency and a 429 storm on a cold-cache join burst.
+ *
+ * Requires the bot to hold Administrator to read and write inside its own
+ * `@everyone`-hidden channel — the install link grants it (`permissions=8`).
+ *
+ * Best-effort throughout: any failure logs a warning and resolves. It must never fail the
+ * onboarding sync, never reach `classifyOnboardingError`, and never block
+ * `MarkOnboardingSyncDone`.
+ */
+const reconcileVerifyIntro = (
+  discord: ServiceMap.Service.Shape<typeof DiscordREST>,
+  team: OnboardingTeamView,
+): Effect.Effect<void> => {
+  const locale = team.onboarding_locale;
+  const embed = buildIntroEmbed(locale, team.verify_intro_template);
+  const sameCopy = (e: MessageEmbedResponse) =>
+    e.title === embed.title &&
+    e.description === embed.description &&
+    e.footer?.text === embed.footer.text &&
+    JSON.stringify(e.fields?.map((f) => [f.name, f.value])) ===
+      JSON.stringify(embed.fields.map((f) => [f.name, f.value]));
+
+  return Effect.Do.pipe(
+    Effect.bind('channels', () =>
+      discord
+        .listGuildChannels(team.guild_id)
+        .pipe(Effect.retry({ schedule: retryPolicy, while: (e) => !isPermanentError(e) })),
+    ),
+    Effect.flatMap(({ channels }) => {
+      const name = m.bot_verify_channel_name({}, { locale });
+      // Type check first, then read `.name`: `name` doesn't exist on every member of
+      // the `listGuildChannels` response union (e.g. `PrivateChannelResponse`), so TS
+      // only lets us read it once narrowed to `GUILD_TEXT`. That narrowing doubles as
+      // the fix for the real hazard: a *category* named `start-here` would otherwise
+      // match and every message call against it would 400.
+      const channel = channels.find((c) => c.type === ChannelTypes.GUILD_TEXT && c.name === name);
+      if (channel === undefined) return Effect.void; // no join yet, or the captain renamed it
+      const channelId = channel.id;
+
+      return discord.listPins(channelId, { limit: 50 }).pipe(
+        Effect.retry({ schedule: retryPolicy, while: (e) => !isPermanentError(e) }),
+        Effect.flatMap((pins) => {
+          // Our own message. `custom_id: VERIFY_BUTTON_ID` is NOT globally unique —
+          // the bot stamps it on ten other messages (rsvp, upcoming-rsvp, carpool,
+          // claim, the welcome embed). The invariant that holds is narrower and
+          // sufficient: the only *pinnable* profile-verify message in *this* channel
+          // is the one this code posts. The channel is bot-owned and write-locked to
+          // members.
+          const own = pins.items.find((p) =>
+            (p.message.components ?? []).some(
+              (row) =>
+                row.type === MessageComponentTypes.ACTION_ROW &&
+                row.components.some(
+                  (c) =>
+                    c.type === MessageComponentTypes.BUTTON && c.custom_id === VERIFY_BUTTON_ID,
+                ),
+            ),
+          );
+
+          // No pin of ours: the captain deleted or merely unpinned it (they hold
+          // Administrator). Post a fresh one. "No own pin" IS the idempotency guard —
+          // do not replace this with an unconditional early return.
+          if (own === undefined) {
+            return discord
+              .createMessage(channelId, {
+                embeds: [embed],
+                components: [UI.row([buildVerifyButton(locale)])],
+              })
+              .pipe(
+                Effect.retry({ schedule: retryPolicy, while: (e) => !isPermanentError(e) }),
+                Effect.flatMap((message) =>
+                  discord.createPin(channelId, message.id).pipe(
+                    Effect.retry({ schedule: retryPolicy, while: (e) => !isPermanentError(e) }),
+                    // An unpinned message is invisible to the next `listPins`, so leaving one
+                    // behind would repost on every subsequent template edit and stack up
+                    // duplicates in the first channel a new member sees. Roll it back instead.
+                    Effect.catchIf(isPermanentError, (error) =>
+                      discord
+                        .deleteMessage(channelId, message.id)
+                        .pipe(
+                          Effect.retry(retryPolicy),
+                          Effect.andThen(
+                            Effect.logWarning(
+                              `Could not pin the verify intro message in guild ${team.guild_id}; rolled it back`,
+                              error,
+                            ),
+                          ),
+                        ),
+                    ),
+                  ),
+                ),
+                Effect.tap(() =>
+                  Effect.logInfo(`Reposted the verify intro message in guild ${team.guild_id}`),
+                ),
+                Effect.asVoid,
+              );
+          }
+
+          // Compare every copy-bearing part (title, description, fields, footer), not
+          // description alone, so a future i18n edit to the HARDCODED parts propagates to
+          // existing channels too — `fields` carries bot_verify_intro_unlocks_* / _why_*.
+          const current = own.message.embeds[0];
+          if (current !== undefined && sameCopy(current)) return Effect.void;
+
+          // Partial edit: `components` (the verify button) is left untouched.
+          return discord.updateMessage(channelId, own.message.id, { embeds: [embed] }).pipe(
+            Effect.retry({ schedule: retryPolicy, while: (e) => !isPermanentError(e) }),
+            Effect.tap(() =>
+              Effect.logInfo(`Refreshed the verify intro message in guild ${team.guild_id}`),
+            ),
+            Effect.asVoid,
+          );
+        }),
+      );
+    }),
+    // ponytail: first page of pins only (limit 50). A channel with >50 pins whose intro
+    // is not in the first page silently skips the refresh — paginate with `before` if a
+    // real guild ever hits that.
+    Effect.asVoid,
+    // `Effect.Effect<void>` above is a real guarantee for TYPED failures only: nothing in
+    // here can reach `classifyOnboardingError` and mark the team's sync failed. Interruption
+    // is not covered — it travels the same failure channel and is caught here too — so a
+    // SIGTERM mid-`listPins` is logged as a reconcile failure. That is benign: the
+    // surrounding fiber is still interrupted at the next yield point, so the sync does not
+    // get marked done behind it. Matches the same pattern in `~/events/index.ts`.
+    Effect.catchCause((cause) =>
+      Effect.logWarning(
+        `Verify intro reconcile failed for guild ${team.guild_id}; continuing the onboarding sync`,
+        cause,
+      ),
+    ),
+  );
+};
+
 const makeProcessTeam =
   (
     rpc: SyncRpcClient,
@@ -37,8 +183,16 @@ const makeProcessTeam =
   ) =>
   (team: OnboardingTeamView): Effect.Effect<void> => {
     const teamId = Schema.decodeSync(Team.TeamId)(team.team_id);
+
+    // The verify channel is NOT a Community feature — it is created from the join path
+    // (`grantUnverified` -> `ensureVerificationChannel`), gated only on
+    // `profile_gate_enabled`. So its reconcile has to run BEFORE the Community
+    // short-circuit below, or every non-Community guild (the default: the claim query
+    // COALESCEs `is_community_enabled` to false for any guild not yet in `bot_guilds`)
+    // would silently never pick up an edited `verify_intro_template`.
     if (!team.is_community_enabled) {
-      return rpc['Guild/MarkOnboardingSyncSkipped']({ team_id: teamId }).pipe(
+      return reconcileVerifyIntro(discord, team).pipe(
+        Effect.flatMap(() => rpc['Guild/MarkOnboardingSyncSkipped']({ team_id: teamId })),
         Effect.tap(() => cache.invalidate(team.guild_id)),
         Effect.tap(() =>
           Metric.update(
@@ -78,7 +232,13 @@ const makeProcessTeam =
       ? Effect.void
       : discord.updateGuildWelcomeScreen(team.guild_id, welcomePayload.value).pipe(Effect.asVoid);
 
+    // Reconcile BEFORE the welcome-screen patch. `patchWelcomeScreen` has no catch, and a
+    // rejection (50035 WELCOME_CHANNEL_PERMISSIONS_REQUIRED is a real, recurring one —
+    // see errorClassifier.ts) marks the row 'failed'. `claimPendingOnboardingSyncs` only
+    // re-claims 'pending' rows, so anything sequenced after the patch is lost forever for
+    // that team. The reconcile is the one leg that cannot fail, so it goes first.
     const syncDiscord = disableOnboarding.pipe(
+      Effect.flatMap(() => reconcileVerifyIntro(discord, team)),
       Effect.flatMap(() => patchWelcomeScreen),
       Effect.as(Option.none<Discord.Snowflake>()),
     );

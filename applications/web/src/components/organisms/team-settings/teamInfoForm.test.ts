@@ -44,6 +44,7 @@ const WELCOME = welcomeRequestFrom({
   systemLogChannel: NONE_VALUE,
   achievementChannel: NONE_VALUE,
   welcomeTemplate: '',
+  verifyIntroTemplate: '',
 });
 
 const ONBOARDING = onboardingRequestFrom({
@@ -67,6 +68,7 @@ describe('each card writes only the fields it owns', () => {
     expect(sorted(touched(WELCOME))).toEqual([
       'achievementChannelId',
       'systemLogChannelId',
+      'verifyIntroTemplate',
       'welcomeChannelId',
       'welcomeMessageTemplate',
     ]);
@@ -99,5 +101,33 @@ describe('profileRequestFrom', () => {
     expect(request.description).toStrictEqual(Option.some(Option.none()));
     expect(request.sport).toStrictEqual(Option.some(Option.some('ultimate')));
     expect(request.logoUrl).toStrictEqual(Option.some(Option.none()));
+  });
+});
+
+describe('welcomeRequestFrom — verifyIntroTemplate', () => {
+  it('clears a whitespace-only template rather than sending blanks', () => {
+    // Discord 400s on an empty embed description, so the web boundary must send an
+    // explicit clear, not a blank string.
+    const request = welcomeRequestFrom({
+      welcomeChannel: NONE_VALUE,
+      systemLogChannel: NONE_VALUE,
+      achievementChannel: NONE_VALUE,
+      welcomeTemplate: '',
+      verifyIntroTemplate: '   ',
+    });
+    expect(request.verifyIntroTemplate).toStrictEqual(Option.some(Option.none()));
+  });
+
+  it('trims and forwards a real template', () => {
+    const request = welcomeRequestFrom({
+      welcomeChannel: NONE_VALUE,
+      systemLogChannel: NONE_VALUE,
+      achievementChannel: NONE_VALUE,
+      welcomeTemplate: '',
+      verifyIntroTemplate: '  Finish your profile first.  ',
+    });
+    expect(request.verifyIntroTemplate).toStrictEqual(
+      Option.some(Option.some('Finish your profile first.')),
+    );
   });
 });

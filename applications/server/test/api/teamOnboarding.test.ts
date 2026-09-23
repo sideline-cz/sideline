@@ -116,6 +116,7 @@ let teamState: {
   onboarding_synced_at: Option.Option<DateTime.Utc>;
   onboarding_sync_status: 'pending' | 'syncing' | 'done' | 'failed';
   onboarding_sync_error: Option.Option<string>;
+  verify_intro_template: Option.Option<string>;
 };
 
 const resetTeamState = () => {
@@ -140,6 +141,7 @@ const resetTeamState = () => {
     onboarding_synced_at: Option.some(DateTime.makeUnsafe('2024-06-01T00:00:00Z')),
     onboarding_sync_status: 'done',
     onboarding_sync_error: Option.none(),
+    verify_intro_template: Option.none(),
   };
 };
 
@@ -251,6 +253,7 @@ const MockTeamsRepositoryLayer = Layer.succeed(TeamsRepository, {
     const prevRoleId = Option.getOrNull(teamState.onboarding_rules_role_id);
     const prevLocale = teamState.onboarding_locale;
     const prevWelcome = Option.getOrNull(teamState.welcome_channel_id);
+    const prevVerifyIntro = Option.getOrNull(teamState.verify_intro_template);
 
     // Apply updates
     if ('rules_channel_id' in input) teamState.rules_channel_id = input.rules_channel_id;
@@ -261,18 +264,22 @@ const MockTeamsRepositoryLayer = Layer.succeed(TeamsRepository, {
     if ('achievement_channel_id' in input)
       teamState.achievement_channel_id = input.achievement_channel_id;
     if ('name' in input) teamState.name = input.name;
+    if ('verify_intro_template' in input)
+      teamState.verify_intro_template = input.verify_intro_template;
 
     // Simulate the no-op detection + auto-flip
     const nextRulesChannel = Option.getOrNull(teamState.rules_channel_id);
     const nextRoleId = Option.getOrNull(teamState.onboarding_rules_role_id);
     const nextLocale = teamState.onboarding_locale;
     const nextWelcome = Option.getOrNull(teamState.welcome_channel_id);
+    const nextVerifyIntro = Option.getOrNull(teamState.verify_intro_template);
 
     const changed =
       prevRulesChannel !== nextRulesChannel ||
       prevRoleId !== nextRoleId ||
       prevLocale !== nextLocale ||
-      prevWelcome !== nextWelcome;
+      prevWelcome !== nextWelcome ||
+      prevVerifyIntro !== nextVerifyIntro;
 
     if (changed) {
       teamState.onboarding_sync_status = 'pending';
@@ -604,6 +611,76 @@ describe('PATCH /teams/:id — onboarding field change detection', () => {
     expect(response.status).toBe(200);
     expect(teamState.onboarding_sync_status).toBe('done');
     expect(syncPendingCalls).toHaveLength(0);
+  });
+});
+
+describe('PATCH /teams/:id — verifyIntroTemplate', () => {
+  it('setting verifyIntroTemplate → 200, value readable back, onboarding_sync_status flips to pending', async () => {
+    currentMembership = managerMembership;
+    teamState.onboarding_sync_status = 'done';
+    teamState.verify_intro_template = Option.none();
+
+    const response = await patchTeam({ verifyIntroTemplate: 'Read this before you join.' });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.verifyIntroTemplate).toBe('Read this before you join.');
+    expect(teamState.onboarding_sync_status).toBe('pending');
+    expect(syncPendingCalls).toHaveLength(1);
+  });
+
+  it('saving the same verifyIntroTemplate value does NOT flip status (idempotent save)', async () => {
+    currentMembership = managerMembership;
+    teamState.verify_intro_template = Option.some('Already set.');
+    teamState.onboarding_sync_status = 'done';
+
+    const response = await patchTeam({ verifyIntroTemplate: 'Already set.' });
+
+    expect(response.status).toBe(200);
+    expect(teamState.onboarding_sync_status).toBe('done');
+    expect(syncPendingCalls).toHaveLength(0);
+  });
+
+  it('PATCH omitting verifyIntroTemplate while changing name preserves the stored template', async () => {
+    currentMembership = managerMembership;
+    teamState.verify_intro_template = Option.some('Preserve me.');
+    teamState.onboarding_sync_status = 'done';
+
+    const response = await patchTeam({ name: 'A Different Name' });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.name).toBe('A Different Name');
+    expect(body.verifyIntroTemplate).toBe('Preserve me.');
+    expect(Option.getOrNull(teamState.verify_intro_template)).toBe('Preserve me.');
+  });
+
+  it('PATCH with an explicit null clears the template AND flips status to pending', async () => {
+    currentMembership = managerMembership;
+    teamState.verify_intro_template = Option.some('Clear me.');
+    teamState.onboarding_sync_status = 'done';
+
+    const response = await patchTeam({ verifyIntroTemplate: null });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.verifyIntroTemplate).toBeNull();
+    expect(Option.isNone(teamState.verify_intro_template)).toBe(true);
+    // Clearing has to reach Discord too — the pinned card must go back to the built-in
+    // copy, which only happens if the sync is flipped to pending like any other edit.
+    expect(teamState.onboarding_sync_status).toBe('pending');
+    expect(syncPendingCalls).toHaveLength(1);
+  });
+
+  it('PATCH with an empty string is rejected by isMinLength(1)', async () => {
+    currentMembership = managerMembership;
+    teamState.verify_intro_template = Option.some('Untouched.');
+
+    const response = await patchTeam({ verifyIntroTemplate: '' });
+
+    expect(response.status).toBe(400);
+    // The rejected payload never reached the repository.
+    expect(Option.getOrNull(teamState.verify_intro_template)).toBe('Untouched.');
   });
 });
 

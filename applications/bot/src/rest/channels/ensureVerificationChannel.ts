@@ -14,10 +14,51 @@ const decodeSnowflake = Schema.decodeUnknownSync(DiscordSchemas.Snowflake);
 
 const DEFAULT_WELCOME_COLOR = 0x5865f2;
 
+// Type-narrow before matching the name: a *category* named `nez-zacnes` would otherwise
+// match, and the early return below would then cache the category as the verify channel —
+// no real channel ever created, no intro message ever posted. The reconcile in
+// `~/rcp/onboarding/ProcessorService.ts` narrows the same way, so both agree on what "the
+// verify channel" is.
 const findByName = (
-  channels: ReadonlyArray<{ readonly id: string; readonly name?: string | null }>,
+  channels: ReadonlyArray<{
+    readonly id: string;
+    readonly type: number;
+    readonly name?: string | null;
+  }>,
   name: string,
-) => channels.find((c) => c.name === name);
+) => channels.find((c) => c.type === Discord.ChannelTypes.GUILD_TEXT && c.name === name);
+
+/**
+ * The intro embed, shared by the create path below and by the sync-loop reconcile in
+ * `~/rcp/onboarding/ProcessorService.ts`. Only `description` is team-configurable.
+ *
+ * No `sanitizeRendered` here, unlike the sibling `welcome_message_template`: this text
+ * lands in an embed `description`, and embeds never resolve mentions into pings. The
+ * 2000-char cap is enforced at the API boundary (`TeamApi.UpdateTeamRequest`).
+ *
+ * `Option.filter` on blank: `isMinLength(1)` guards the API, this guards everything
+ * else (a row written before that check shipped, a direct DB edit). Discord 400s on
+ * `description: ""`, and on the create path that 400 is unretryable-but-unguarded.
+ */
+export const buildIntroEmbed = (locale: Locale, introTemplate: Option.Option<string>) => ({
+  color: DEFAULT_WELCOME_COLOR,
+  title: m.bot_verify_intro_title({}, { locale }),
+  description: introTemplate.pipe(
+    Option.filter((t) => t.trim() !== ''),
+    Option.getOrElse(() => m.bot_verify_intro_description({}, { locale })),
+  ),
+  fields: [
+    {
+      name: m.bot_verify_intro_unlocks_name({}, { locale }),
+      value: m.bot_verify_intro_unlocks_value({}, { locale }),
+    },
+    {
+      name: m.bot_verify_intro_why_name({}, { locale }),
+      value: m.bot_verify_intro_why_value({}, { locale }),
+    },
+  ],
+  footer: { text: m.bot_verify_intro_footer({}, { locale }) },
+});
 
 /**
  * The one bot-owned, permanent, read-only channel that hides itself from everyone
@@ -35,11 +76,22 @@ const findByName = (
  * A permanent Discord error (typically missing `MANAGE_CHANNELS`) logs a warning and
  * resolves `None` — this must never fail the member's join. Transient errors retry
  * with the existing `retryPolicy`, matching `createChannelWithRole.ts`'s discipline.
+ *
+ * The intro body is now per-team configurable (`teams.verify_intro_template`) but
+ * only on the create path here — an existing channel is left untouched by this
+ * function (see the early return below) and is instead kept in sync by the
+ * onboarding sync loop's reconcile in `~/rcp/onboarding/ProcessorService.ts`.
+ *
+ * Known ceiling: name-based resolution means a captain renaming the channel, or a
+ * team flipping `onboarding_locale` (cs `nez-zacnes` ↔ en `start-here`), orphans the
+ * existing channel — a new one is created under the new name and the old one keeps
+ * its pinned card. Pre-existing behaviour, not introduced here.
  */
 export const ensureVerificationChannel = (
   guildId: DiscordSchemas.Snowflake,
   unverifiedRoleId: DiscordSchemas.Snowflake,
   locale: Locale,
+  introTemplate: Option.Option<string>,
 ) =>
   Effect.Do.pipe(
     Effect.bind('rest', () => DiscordREST.asEffect()),
@@ -77,24 +129,7 @@ export const ensureVerificationChannel = (
           const channelId = decodeSnowflake(channel.id);
           return rest
             .createMessage(channelId, {
-              embeds: [
-                {
-                  color: DEFAULT_WELCOME_COLOR,
-                  title: m.bot_verify_intro_title({}, { locale }),
-                  description: m.bot_verify_intro_description({}, { locale }),
-                  fields: [
-                    {
-                      name: m.bot_verify_intro_unlocks_name({}, { locale }),
-                      value: m.bot_verify_intro_unlocks_value({}, { locale }),
-                    },
-                    {
-                      name: m.bot_verify_intro_why_name({}, { locale }),
-                      value: m.bot_verify_intro_why_value({}, { locale }),
-                    },
-                  ],
-                  footer: { text: m.bot_verify_intro_footer({}, { locale }) },
-                },
-              ],
+              embeds: [buildIntroEmbed(locale, introTemplate)],
               components: [UI.row([buildVerifyButton(locale)])],
             })
             .pipe(

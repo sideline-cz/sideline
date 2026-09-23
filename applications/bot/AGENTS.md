@@ -302,9 +302,9 @@ When `Guild/RegisterMember`'s response says the team's profile gate is on and th
 | File | Purpose |
 |------|---------|
 | `src/rest/roles/ensureUnverifiedRole.ts` | `UNVERIFIED_ROLE_NAME = 'Sideline Unverified'`; `ensureUnverifiedRole` (find-or-create, `permissions: 0`) and `findUnverifiedRole` (resolve-only, never creates). |
-| `src/rest/channels/ensureVerificationChannel.ts` | Find-or-create the read-only channel by NAME (`m.bot_verify_channel_name`) — there is no `teams.verify_channel_id` column. Creates two permission overwrites and one pinned intro embed carrying the verify button. |
+| `src/rest/channels/ensureVerificationChannel.ts` | Find-or-create the read-only channel by NAME (`m.bot_verify_channel_name`) — there is no `teams.verify_channel_id` column. Creates two permission overwrites and one pinned intro embed carrying the verify button. Also exports `buildIntroEmbed(locale, introTemplate)`, the ONE builder of that embed, shared with the sync-loop reconcile. |
 | `src/services/VerificationChannelCache.ts` | Per-guild `{ roleId, channelId }` cache, 60s TTL. Same shape as `OnboardingRoleCache`. |
-| `src/interactions/profile-verify.ts` | `buildVerifyButton(locale)` (the only place the `'profile-verify'` id is written) and the stateless `ProfileVerifyButton` handler, which answers `MODAL` with `buildProfileCompleteModal(locale)`. |
+| `src/interactions/profile-verify.ts` | `VERIFY_BUTTON_ID` (the only place the `'profile-verify'` literal is written), `buildVerifyButton(locale)`, and the stateless `ProfileVerifyButton` handler, which answers `MODAL` with `buildProfileCompleteModal(locale)`. |
 | `src/commands/complete/modal.ts` | `buildProfileCompleteModal(locale)` — the ONE modal shared by `/complete`, the verify button, and the pinned embed. |
 
 Rules:
@@ -314,9 +314,10 @@ Rules:
 3. **Every role/channel step here is best-effort and must never fail the join.** Wrap in `Effect.catchCause(... logWarning)`; a missing `MANAGE_ROLES` / `MANAGE_CHANNELS` permission logs a warning and the member still joins. There is no reconciler and no sweep for a stuck role — the member's next join or next `/dokoncit` is the heal.
 4. **The revoke path uses `findUnverifiedRole`, never `ensureUnverifiedRole`.** Creating the role you are about to remove is a Discord write per join for every already-complete member.
 5. **Only the cohort that gets a welcome embed gets the verify field + button on it.** `sendWelcome` appends one embed field and one button row to the SAME welcome message (`verifyLocale: Option<Locale>`, `None` = pre-gate behaviour unchanged). Never send a second bot message chasing a member who just walked in, and never post a per-member message into the verify channel — the pinned card is that cohort's surface.
-6. **Locale at join time comes from the DTO's `verify_locale`, never from the interaction.** `GuildMemberAdd` is a gateway event with no `guild_locale` / user locale to read; `buildWelcomeEmbed`'s `locale` parameter defaults to `'en'` only so pre-gate callers keep compiling.
-7. **`buildVerifyButton` is the only place that writes the literal `'profile-verify'`.** Every surface (blocked-action ephemeral, welcome field, pinned card) calls it. The id is stateless on purpose: it carries no member or event data, so the same button can appear on any number of public messages without tripping Discord's duplicate-`custom_id` `50035` rejection (see "Building Message Components" rule 8).
-8. **Every Discord surface that can receive a gated RPC's profile error must catch it.** `Event/SubmitRsvp` has six bot call sites — `RsvpButton`, `RsvpClearMessageButton`, `RsvpModal` (`src/interactions/rsvp.ts`) and `UpcomingRsvpButton`, `UpcomingClearMessageButton`, `UpcomingRsvpModal` (`src/interactions/upcoming-rsvp.ts`) — and all six carry the `Effect.catchTag('RsvpProfileIncomplete', ...)` arm; `ClaimButton` carries `'ClaimProfileIncomplete'`; `CarpoolAddModal` and `CarpoolReserveButton` carry `'CarpoolProfileIncomplete'`. Every arm replies with the matching `bot_verify_blocked_*` copy PLUS `UI.row([buildVerifyButton(locale)])`. There is no resume: the copy tells the member to press the original button again. Adding a new error tag to a gated RPC means adding the arm to every one of these surfaces.
+6. **Everything the join path needs about the team rides on the `Guild/RegisterMember` DTO, never on the interaction.** `GuildMemberAdd` is a gateway event with no `guild_locale` / user locale to read, so both `verify_locale` and `verify_intro_template` are top-level `WelcomeMeta` fields threaded down through `grantUnverified` into `ensureVerificationChannel`. `buildWelcomeEmbed`'s `locale` parameter defaults to `'en'` only so pre-gate callers keep compiling.
+7. **`VERIFY_BUTTON_ID` in `src/interactions/profile-verify.ts` is the only place the literal `'profile-verify'` is written.** `buildVerifyButton` and `Ix.id(...)` both read it, and so does `reconcileVerifyIntro` (`src/rcp/onboarding/ProcessorService.ts`), which uses it to recognise the bot's own pinned message. The id is stateless on purpose: it carries no member or event data, so the same button can appear on any number of public messages without tripping Discord's duplicate-`custom_id` `50035` rejection (see "Building Message Components" rule 8). That also means the id is **not** a globally unique marker — matching on it is only valid when scoped to a bot-owned, member-write-locked channel, as the reconcile does.
+8. **The intro embed is created on the join path and kept in sync on the onboarding sync loop — two call sites, one builder.** `ensureVerificationChannel` returns early for an existing channel and never touches its pinned message; `reconcileVerifyIntro` owns every later edit (see "Onboarding Sync"). Never hang a `listPins`/`updateMessage` off `guildMemberAdd` to close that gap: it adds join latency and a `429` storm on a cold-cache join burst. `verify_intro_template` feeds ONLY the embed `description`; it gets no `sanitizeRendered` (unlike `welcome_message_template`) because embeds never resolve mentions into pings, and its 2000-char cap is enforced at the API boundary in `packages/domain/src/api/TeamApi.ts`.
+9. **Every Discord surface that can receive a gated RPC's profile error must catch it.** `Event/SubmitRsvp` has six bot call sites — `RsvpButton`, `RsvpClearMessageButton`, `RsvpModal` (`src/interactions/rsvp.ts`) and `UpcomingRsvpButton`, `UpcomingClearMessageButton`, `UpcomingRsvpModal` (`src/interactions/upcoming-rsvp.ts`) — and all six carry the `Effect.catchTag('RsvpProfileIncomplete', ...)` arm; `ClaimButton` carries `'ClaimProfileIncomplete'`; `CarpoolAddModal` and `CarpoolReserveButton` carry `'CarpoolProfileIncomplete'`. Every arm replies with the matching `bot_verify_blocked_*` copy PLUS `UI.row([buildVerifyButton(locale)])`. There is no resume: the copy tells the member to press the original button again. Adding a new error tag to a gated RPC means adding the arm to every one of these surfaces.
 
 ### `guildMemberRemove` — Leave Counterpart of `RegisterMember`
 
@@ -813,6 +814,22 @@ Rules:
 4. **Never demote `inviteGenerator` back to `pollLoop`** — the user-visible latency on `InvitePage` depends on this cadence.
 5. **`slowPollLoop` is reserved for self-healing reconcile sweeps, not real-time sync.** It runs `channelBackfill.processTick`, which calls `Channel/BackfillMissingGroupRoles` (the server enqueues provisioning events for groups that never got a Discord role). Real-time provisioning still happens on the `channels` `pollLoop`; the backfill is the safety net for groups created before the guild was linked. Keep new reconcile/self-heal sweeps on `slowPollLoop` — never put one on `pollLoop`.
 
+### Onboarding Sync (`src/rcp/onboarding/ProcessorService.ts`)
+
+The onboarding sync loop is the **deterministic** way to push a team-settings change to Discord. The server's `hasOnboardingFieldChange` (`applications/server/src/api/team.ts`) flips the team to `onboarding_sync_status = 'pending'` on save, `Guild/ClaimPendingOnboardingSyncs` claims it on the next 5s `pollLoop` tick, and `makeProcessTeam` acts on it. Prefer it over the `guildMemberAdd` join path for anything a captain edits: the join path fires only when someone actually joins, and then only after `VerificationChannelCache`'s 60s TTL expires.
+
+`makeProcessTeam` is a fixed pipeline with two ordering constraints that are load-bearing. Both are one-way failures — neither produces a type error, and neither is visible in a test that only exercises a Community-enabled guild on the happy path.
+
+1. **Anything NOT gated on Discord Community must run BEFORE the `if (!team.is_community_enabled)` short-circuit.** That flag comes from `COALESCE(bg.is_community_enabled, false)` in the server's `claimPendingOnboardingSyncs` — it is `false` for every guild not yet in `bot_guilds`, which is the DEFAULT, not an edge case. Work sequenced after the short-circuit silently never runs for those guilds. Only Guild Onboarding (`putGuildsOnboarding`) and the Welcome Screen are genuinely Community features; the verify channel is not (it is created from `grantUnverified` → `ensureVerificationChannel`, gated only on `profile_gate_enabled`), which is why `reconcileVerifyIntro` is called on BOTH sides of the short-circuit.
+2. **Anything that must not be lost must run BEFORE `patchWelcomeScreen`.** `patchWelcomeScreen` has no catch; a rejection propagates to `classifyOnboardingError` and marks the row `'failed'`, and `claimPendingOnboardingSyncs` re-claims **only** `'pending'` rows. Everything sequenced after it is therefore lost forever for that team, not deferred to the next tick. `updateGuildWelcomeScreen` rejects routinely (see rule 4), so treat that failure as the normal case when ordering a new leg.
+
+Rules:
+
+3. **A new leg must be `Effect.Effect<void>` and end in `Effect.catchCause(... logWarning)`.** It must never reach `classifyOnboardingError` and never block `Guild/MarkOnboardingSyncDone`. Note the limit of that guarantee: `catchCause` also swallows interruption, so a SIGTERM mid-call logs as a reconcile failure — benign, because the surrounding fiber still interrupts at the next yield point. Same pattern as the join-path legs in `src/events/index.ts`.
+4. **A Discord Welcome Screen channel MUST be viewable by `@everyone`, so a role-gated channel can never be listed there.** The Welcome Screen renders to users who have **not yet joined** the guild, so Discord has no member to evaluate a role against. Putting the verify channel (visible only to `Sideline Unverified`) into `welcome_channels` is rejected with `50035` / `WELCOME_CHANNEL_PERMISSIONS_REQUIRED`, already classified in `src/rcp/onboarding/errorClassifier.ts`. Do not attempt it again — the sync-loop reconcile of the channel's pinned message exists precisely because the Welcome Screen cannot carry it.
+5. **Resolve a channel by name only after narrowing on `type === ChannelTypes.GUILD_TEXT`.** `listGuildChannels` returns a union in which `name` is not present on every member, and a *category* named `nez-zacnes` / `start-here` would otherwise match — every subsequent message call against it 400s. `reconcileVerifyIntro` and `ensureVerificationChannel`'s `findByName` narrow identically on purpose; change one, change both, or the two disagree about what "the verify channel" is.
+6. **"We have no pinned message of ours" IS the idempotency guard for a reposting reconcile** — do not replace it with an unconditional early return, and do not leave an unpinned message behind on a failed `createPin`. An unpinned message is invisible to the next `listPins`, so the next tick reposts and the duplicates stack up in the first channel a new member sees; `reconcileVerifyIntro` deletes the message instead when `createPin` fails permanently.
+
 ### Invite Generator (`src/rcp/inviteGenerator/ProcessorService.ts`)
 
 The invite generator mints one single-use Discord invite per **acceptance** (not per `team_invites` row). Each tick:
@@ -1178,3 +1195,30 @@ Rules:
 2. **TDD-scaffolding dynamic imports must be hoisted the moment the module under test exists.** A comment like `// TDD mode — these tests will FAIL until Phase N implements X` plus a dynamic `await import` is a transitional state, not a permanent pattern; remove both the comment and the dynamic import in the same commit that lands the implementation.
 3. **The only legitimate `await import('~/...')` inside a test body is when the test asserts on side effects of module loading itself** (e.g. registration order). Such cases must include a comment explaining why the static import is insufficient.
 4. **Known offenders to hoist** (left over from earlier TDD phases): `test/events/ready.test.ts`, `test/events/guildRoleEvents.test.ts`, `test/events/guildMemberUpdate.test.ts`, `test/rcp/channel/handleMemberAdded.test.ts`. Hoist each one's dynamic imports when next touching the file.
+
+## `makeRest` Proxy Doubles — Record In The Proxy, Not In The Default
+
+Almost every bot test builds its `DiscordREST` double as a `new Proxy` whose `get` resolves `overrides[prop] ?? defaults[prop]`. Two shapes of that helper exist in `applications/bot/test/`, and only one survives an override:
+
+```ts
+// CORRECT — the proxy records, so an override still appears in `calls`
+get: (_t, prop: string) => {
+  const fn = overrides[prop] ?? defaults[prop];
+  return (...args: any[]) => {
+    (calls[prop] ??= []).push(args);
+    return fn ? fn(...args) : Effect.void;
+  };
+}
+```
+
+```ts
+// WRONG — recording lives inside each default, so `overrides.listPins` records nothing
+const defaults = { listPins: (...a: any[]) => { calls.listPins.push(a); return Effect.succeed(...); } };
+get: (_t, prop: string) => overrides[prop] ?? defaults[prop];
+```
+
+Rules:
+
+1. **Every new `makeRest`-style double MUST push into `calls` from the proxy's `get` wrapper, never from inside a default implementation.** With the wrong shape, a test that overrides a method to force an error and then asserts `calls.<method>.length === 4` (the retry-count assertion "Discord REST Retry Pattern" rule 4 requires) silently reads `0` and passes for the wrong reason.
+2. **When editing an existing double that has the wrong shape, move the recording into the proxy rather than duplicating a `push` into the new override.** Reference correct implementations: `test/rcp/finance/ProcessorService.test.ts`, `test/rcp/event/handleReconcile.test.ts`. Known wrong-shape files (both take an `overrides` map and record inside `defaults`): `test/rcp/onboarding/ProcessorService.test.ts`, `test/rcp/inviteGenerator/ProcessorService.test.ts`.
+3. **Keep the `if (!fn) throw new Error(...)` fallback** (the `Unmocked REST method: <prop>` throw) where a double has one — it turns a typo'd production method name into a loud test failure instead of a silent `Effect.void`.

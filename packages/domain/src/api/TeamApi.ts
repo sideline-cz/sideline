@@ -17,6 +17,7 @@ export class TeamInfo extends Schema.Class<TeamInfo>('TeamInfo')({
   welcomeChannelId: Schema.OptionFromNullOr(Snowflake),
   systemLogChannelId: Schema.OptionFromNullOr(Snowflake),
   welcomeMessageTemplate: Schema.OptionFromNullOr(Schema.String),
+  verifyIntroTemplate: Schema.OptionFromNullOr(Schema.String),
   rulesChannelId: Schema.OptionFromNullOr(Snowflake),
   achievementChannelId: Schema.OptionFromNullOr(Snowflake),
   onboardingRulesRoleId: Schema.OptionFromNullOr(Snowflake),
@@ -45,6 +46,17 @@ export const UpdateTeamRequest = Schema.Struct({
   systemLogChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
   welcomeMessageTemplate: Schema.OptionFromOptional(
     Schema.OptionFromNullOr(Schema.String.pipe(Schema.check(Schema.isMaxLength(500)))),
+  ),
+  // Becomes an embed `description`, whose Discord cap is 4096 (6000 across the whole
+  // embed, and the hardcoded title/fields/footer eat ~600). isMinLength(1) because
+  // Discord rejects an empty description outright.
+  verifyIntroTemplate: Schema.OptionFromOptional(
+    Schema.OptionFromNullOr(
+      Schema.String.pipe(
+        Schema.check(Schema.isMinLength(1)),
+        Schema.check(Schema.isMaxLength(2000)),
+      ),
+    ),
   ),
   rulesChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
   onboardingRulesRoleId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),

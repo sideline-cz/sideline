@@ -21,6 +21,11 @@ export class Team extends Model.Class<Team>('Team')({
   welcome_channel_id: Schema.OptionFromNullOr(Snowflake),
   system_log_channel_id: Schema.OptionFromNullOr(Snowflake),
   welcome_message_template: Schema.OptionFromNullOr(Schema.String),
+  // Body text of the pinned intro embed in the verify channel. None = built-in copy.
+  // Model.Generated = select + update + json, NOT insert: the column defaults to NULL and
+  // nothing sets it at insert time, so keeping it off the insert variant spares 100+ test
+  // fixture literals a field they would all pass Option.none() to.
+  verify_intro_template: Model.Generated(Schema.OptionFromNullOr(Schema.String)),
   rules_channel_id: Schema.OptionFromNullOr(Snowflake),
   achievement_channel_id: Schema.OptionFromNullOr(Snowflake),
   onboarding_rules_role_id: Schema.OptionFromNullOr(Snowflake),

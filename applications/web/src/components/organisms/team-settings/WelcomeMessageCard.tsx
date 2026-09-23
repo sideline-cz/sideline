@@ -156,6 +156,19 @@ export function WelcomeMessageCard({
               placeholder='Welcome {memberMention} to {teamName}!'
             />
           </div>
+          <div>
+            <Label htmlFor='verify-intro-template'>{tr('teamSettings_verifyIntro')}</Label>
+            <p className='text-xs text-muted-foreground mt-1 mb-2'>
+              {tr('teamSettings_verifyIntroHelp')}
+            </p>
+            <Textarea
+              id='verify-intro-template'
+              rows={4}
+              maxLength={2000}
+              value={values.verifyIntroTemplate}
+              onChange={(e) => setField('verifyIntroTemplate', e.target.value)}
+            />
+          </div>
           {welcomePreview && (
             <div>
               <p className='text-xs font-medium text-muted-foreground mb-2'>
