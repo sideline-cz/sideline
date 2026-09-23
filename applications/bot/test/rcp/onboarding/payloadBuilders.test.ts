@@ -26,6 +26,7 @@ interface OnboardingTeamView {
   onboarding_rules_role_id: Option.Option<string>;
   onboarding_rules_prompt_id: Option.Option<string>;
   is_community_enabled: boolean;
+  verify_intro_template: Option.Option<string>;
 }
 
 interface WelcomeScreenStrings {
@@ -62,6 +63,7 @@ const makeTeam = (overrides: Partial<OnboardingTeamView> = {}): OnboardingTeamVi
   onboarding_rules_role_id: Option.some(ROLE_ID),
   onboarding_rules_prompt_id: Option.none(),
   is_community_enabled: true,
+  verify_intro_template: Option.none(),
   ...overrides,
 });
 

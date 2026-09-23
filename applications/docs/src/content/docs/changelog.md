@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-23 — New: customize the verify-channel intro message
+
+If you have **Require a complete profile** turned on, new members with an unfinished profile land in a read-only **#start-here** channel with a pinned card. You can now write your own text for that card from **Team settings → Onboarding**, under **Intro message for new members** — plain text, up to 2000 characters, no placeholders. Leave it empty to keep the default wording. Editing it updates the pinned card automatically within a few minutes; you don't need to repost or re-pin anything yourself.
+
 ## 2026-09-22 — Team settings redesigned into tabs
 
 **Team settings** is no longer one long scrolling page. It's now six tabs: **General**, **Discord**, **Onboarding**, **Email**, **Finance**, and **Automation** — the last two only show up if you have the right permission. The tab is part of the URL, so you can bookmark or share a link straight to, say, **Team settings → Finance**, and the back button moves between tabs correctly.

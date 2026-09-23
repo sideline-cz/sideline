@@ -250,6 +250,7 @@ erDiagram
         TEXT welcome_channel_id
         TEXT system_log_channel_id
         TEXT welcome_message_template
+        TEXT verify_intro_template
         TEXT achievement_channel_id
     }
 

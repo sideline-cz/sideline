@@ -20,6 +20,7 @@
  *     `eventHandlers` (Task 10).
  */
 
+import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { DiscordGateway } from 'dfx/gateway';
 import * as DiscordTypes from 'dfx/types';
@@ -64,6 +65,7 @@ type WelcomeMeta = {
   profile_complete: boolean;
   profile_gate_enabled: boolean;
   verify_locale: 'en' | 'cs';
+  verify_intro_template: Option.Option<string>;
 };
 
 const withWelcome = (overrides: Partial<WelcomeMeta> = {}): Option.Option<WelcomeMeta> =>
@@ -80,6 +82,7 @@ const withWelcome = (overrides: Partial<WelcomeMeta> = {}): Option.Option<Welcom
     profile_complete: true,
     profile_gate_enabled: false,
     verify_locale: 'en',
+    verify_intro_template: Option.none(),
     ...overrides,
   });
 
@@ -91,6 +94,7 @@ const withoutWelcome = (overrides: Partial<WelcomeMeta> = {}): Option.Option<Wel
     profile_complete: false,
     profile_gate_enabled: true,
     verify_locale: 'en',
+    verify_intro_template: Option.none(),
     ...overrides,
   });
 
@@ -447,5 +451,74 @@ describe('GuildMemberAdd — Task 10 unverified role self-heal', () => {
     await expect(runMemberAdd(gateway.getHandler, testLayer)).resolves.toBeUndefined();
 
     expect(messages.some((m) => m.toLowerCase().includes('role'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// verify_intro_template — plain-invite cohort's fresh verify channel carries
+// the per-team override (or falls back to the built-in copy).
+// ---------------------------------------------------------------------------
+
+describe('GuildMemberAdd — verify_intro_template on the fresh verify channel', () => {
+  const EN_VERIFY_CHANNEL_NAME = m.bot_verify_channel_name({}, { locale: 'en' });
+
+  it("welcome: None (plain-invite), gate on, incomplete profile, Some('Team body') → the created channel's intro embed carries it", async () => {
+    const createMessageCalls: Array<{ embeds?: ReadonlyArray<{ description?: string }> }> = [];
+    const restLayer = makeRestLayer({
+      listGuildRoles: () =>
+        Effect.succeed([{ id: UNVERIFIED_ROLE_ID, name: 'Sideline Unverified' }]),
+      listGuildChannels: () => Effect.succeed([]),
+      createGuildChannel: () =>
+        Effect.succeed({ id: VERIFY_CHANNEL_ID, name: EN_VERIFY_CHANNEL_NAME, type: 0 }),
+      createMessage: (_c: string, body: (typeof createMessageCalls)[number]) => {
+        createMessageCalls.push(body);
+        return Effect.succeed({ id: 'verify-msg-1' });
+      },
+    });
+    const rpcLayer = makeRpcLayer(
+      withoutWelcome({
+        profile_complete: false,
+        profile_gate_enabled: true,
+        verify_intro_template: Option.some('Team body'),
+      }),
+    );
+    const gateway = makeGatewayLayer();
+    const testLayer = makeTestLayer(gateway.layer, restLayer, rpcLayer);
+
+    await runMemberAdd(gateway.getHandler, testLayer);
+
+    expect(createMessageCalls).toHaveLength(1);
+    expect(createMessageCalls[0]?.embeds?.[0]?.description).toBe('Team body');
+  });
+
+  it('welcome: None (plain-invite), gate on, incomplete profile, None → falls back to the built-in copy', async () => {
+    const createMessageCalls: Array<{ embeds?: ReadonlyArray<{ description?: string }> }> = [];
+    const restLayer = makeRestLayer({
+      listGuildRoles: () =>
+        Effect.succeed([{ id: UNVERIFIED_ROLE_ID, name: 'Sideline Unverified' }]),
+      listGuildChannels: () => Effect.succeed([]),
+      createGuildChannel: () =>
+        Effect.succeed({ id: VERIFY_CHANNEL_ID, name: EN_VERIFY_CHANNEL_NAME, type: 0 }),
+      createMessage: (_c: string, body: (typeof createMessageCalls)[number]) => {
+        createMessageCalls.push(body);
+        return Effect.succeed({ id: 'verify-msg-1' });
+      },
+    });
+    const rpcLayer = makeRpcLayer(
+      withoutWelcome({
+        profile_complete: false,
+        profile_gate_enabled: true,
+        verify_intro_template: Option.none(),
+      }),
+    );
+    const gateway = makeGatewayLayer();
+    const testLayer = makeTestLayer(gateway.layer, restLayer, rpcLayer);
+
+    await runMemberAdd(gateway.getHandler, testLayer);
+
+    expect(createMessageCalls).toHaveLength(1);
+    expect(createMessageCalls[0]?.embeds?.[0]?.description).toBe(
+      m.bot_verify_intro_description({}, { locale: 'en' }),
+    );
   });
 });

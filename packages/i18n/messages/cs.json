@@ -2796,6 +2796,8 @@
   "teamSettings_timezone": "Časové pásmo",
   "teamSettings_timezoneHelp": "Časové pásmo, ve kterém se interpretuje čas připomínky. Výchozí: Europe/Prague.",
   "teamSettings_unsavedChanges": "Máte neuložené změny.",
+  "teamSettings_verifyIntro": "Úvodní zpráva pro nové členy",
+  "teamSettings_verifyIntroHelp": "Text připnuté zprávy v kanálu „nez-zacnes“, kde noví členové dokončují svůj profil. Necháte-li prázdné, použije se výchozí text. Bez zástupných symbolů. Kanál vzniká jen tehdy, když je zapnuté „Vyžadovat dokončený profil“.",
   "teamSettings_welcomeChannel": "Uvítací kanál",
   "teamSettings_welcomeChannelHelp": "Discord kanál, kde noví členové dostanou uvítací zprávu.",
   "teamSettings_welcomeDescription": "Nastavte, co noví členové uvidí, když se připojí přes pozvánkový odkaz.",

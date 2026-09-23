@@ -129,6 +129,7 @@ const baseTeamInfo = {
   welcomeChannelId: Option.none(),
   systemLogChannelId: Option.none(),
   welcomeMessageTemplate: Option.none(),
+  verifyIntroTemplate: Option.none(),
   rulesChannelId: Option.none(),
   achievementChannelId: Option.none(),
   onboardingRulesRoleId: Option.none(),

@@ -10,6 +10,7 @@ export interface OnboardingTeamView {
   readonly onboarding_rules_role_id: Option.Option<string>;
   readonly onboarding_rules_prompt_id: Option.Option<string>;
   readonly is_community_enabled: boolean;
+  readonly verify_intro_template: Option.Option<string>;
 }
 
 export interface WelcomeScreenStrings {

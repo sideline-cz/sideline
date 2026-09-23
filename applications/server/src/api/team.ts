@@ -17,6 +17,7 @@ const hasOnboardingFieldChange = (
     readonly onboarding_rules_role_id: Option.Option<string>;
     readonly onboarding_locale: string;
     readonly welcome_channel_id: Option.Option<string>;
+    readonly verify_intro_template: Option.Option<string>;
   },
   next: {
     readonly name: string;
@@ -24,6 +25,7 @@ const hasOnboardingFieldChange = (
     readonly onboarding_rules_role_id: Option.Option<string>;
     readonly onboarding_locale: string;
     readonly welcome_channel_id: Option.Option<string>;
+    readonly verify_intro_template: Option.Option<string>;
   },
 ): boolean =>
   existing.name !== next.name ||
@@ -31,7 +33,8 @@ const hasOnboardingFieldChange = (
   Option.getOrNull(existing.onboarding_rules_role_id) !==
     Option.getOrNull(next.onboarding_rules_role_id) ||
   existing.onboarding_locale !== next.onboarding_locale ||
-  Option.getOrNull(existing.welcome_channel_id) !== Option.getOrNull(next.welcome_channel_id);
+  Option.getOrNull(existing.welcome_channel_id) !== Option.getOrNull(next.welcome_channel_id) ||
+  Option.getOrNull(existing.verify_intro_template) !== Option.getOrNull(next.verify_intro_template);
 
 const parseOnboardingSyncError = (raw: Option.Option<string>): Option.Option<string> => {
   if (Option.isNone(raw)) return Option.none();
@@ -58,6 +61,7 @@ const teamToInfo = (team: Team.Team, isCommunityEnabled: boolean) =>
     achievementChannelId: team.achievement_channel_id,
     systemLogChannelId: team.system_log_channel_id,
     welcomeMessageTemplate: team.welcome_message_template,
+    verifyIntroTemplate: team.verify_intro_template,
     rulesChannelId: team.rules_channel_id,
     onboardingRulesRoleId: team.onboarding_rules_role_id,
     onboardingLocale: team.onboarding_locale,
@@ -139,6 +143,10 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
                 payload.achievementChannelId,
                 () => existing.achievement_channel_id,
               ),
+              verify_intro_template: Option.getOrElse(
+                payload.verifyIntroTemplate,
+                () => existing.verify_intro_template,
+              ),
             })),
             Effect.bind('updated', ({ existing, nextFields }) =>
               teams.update({
@@ -160,6 +168,7 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
                 rules_channel_id: nextFields.rules_channel_id,
                 onboarding_rules_role_id: nextFields.onboarding_rules_role_id,
                 onboarding_locale: nextFields.onboarding_locale,
+                verify_intro_template: nextFields.verify_intro_template,
               }),
             ),
             Effect.tap(({ existing, nextFields }) => {
@@ -171,6 +180,7 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
                     onboarding_rules_role_id: existing.onboarding_rules_role_id,
                     onboarding_locale: existing.onboarding_locale,
                     welcome_channel_id: existing.welcome_channel_id,
+                    verify_intro_template: existing.verify_intro_template,
                   },
                   nextFields,
                 )

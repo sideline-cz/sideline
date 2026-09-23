@@ -2796,6 +2796,8 @@
   "teamSettings_timezone": "Timezone",
   "teamSettings_timezoneHelp": "Timezone used to interpret the reminder time. Default: Europe/Prague.",
   "teamSettings_unsavedChanges": "You have unsaved changes.",
+  "teamSettings_verifyIntro": "Intro message for new members",
+  "teamSettings_verifyIntroHelp": "Body text of the pinned message in the start-here channel, where new members finish their profile. Leave empty to use the default. No placeholders. The channel only exists while \"Require a complete profile\" is on.",
   "teamSettings_welcomeChannel": "Welcome channel",
   "teamSettings_welcomeChannelHelp": "Discord channel where new members receive a welcome message.",
   "teamSettings_welcomeDescription": "Configure what new members see when they join via an invite link.",

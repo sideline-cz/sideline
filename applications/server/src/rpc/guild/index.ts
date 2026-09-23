@@ -107,6 +107,7 @@ type WelcomeMeta = {
   readonly profile_complete: boolean;
   readonly profile_gate_enabled: boolean;
   readonly verify_locale: Onboarding.OnboardingLocale;
+  readonly verify_intro_template: Option.Option<string>;
 };
 
 /**
@@ -345,6 +346,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
         readonly system_log_channel_id: Option.Option<Discord.Snowflake>;
         readonly welcome_message_template: Option.Option<string>;
         readonly onboarding_locale: Onboarding.OnboardingLocale;
+        readonly verify_intro_template: Option.Option<string>;
       },
       user: { readonly is_profile_complete: boolean },
       payload: RegisterMemberPayload,
@@ -379,6 +381,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
             profile_complete: user.is_profile_complete,
             profile_gate_enabled: profileGateEnabled,
             verify_locale: team.onboarding_locale,
+            verify_intro_template: team.verify_intro_template,
           };
           return Option.match(inviteContext, {
             onNone: () => Effect.succeed(noWelcome),
@@ -420,6 +423,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     profile_complete: user.is_profile_complete,
                     profile_gate_enabled: profileGateEnabled,
                     verify_locale: team.onboarding_locale,
+                    verify_intro_template: team.verify_intro_template,
                     welcome: Option.some<WelcomeDetail>({
                       welcome_channel_id: team.welcome_channel_id,
                       welcome_message_rendered: renderedMessage,

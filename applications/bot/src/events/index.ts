@@ -256,6 +256,7 @@ export const eventHandlers = Effect.Do.pipe(
         guildId: Discord.Snowflake,
         discordUserId: Discord.Snowflake,
         verifyLocale: Locale,
+        introTemplate: Option.Option<string>,
       ) =>
         VerificationChannelCache.asEffect().pipe(
           Effect.flatMap((verificationChannelCache) =>
@@ -269,7 +270,12 @@ export const eventHandlers = Effect.Do.pipe(
                   Effect.tap((roleId) =>
                     Option.isSome(cached)
                       ? Effect.void
-                      : ensureVerificationChannel(guildId, roleId, verifyLocale).pipe(
+                      : ensureVerificationChannel(
+                          guildId,
+                          roleId,
+                          verifyLocale,
+                          introTemplate,
+                        ).pipe(
                           Effect.flatMap((channelIdOption) =>
                             Option.match(channelIdOption, {
                               onNone: () => Effect.void,
@@ -322,6 +328,7 @@ export const eventHandlers = Effect.Do.pipe(
         readonly profile_complete: boolean;
         readonly profile_gate_enabled: boolean;
         readonly verify_locale: Locale;
+        readonly verify_intro_template: Option.Option<string>;
       }) => {
         const systemLog = Option.match(meta.system_log_channel_id, {
           onNone: () => Effect.void,
@@ -359,7 +366,12 @@ export const eventHandlers = Effect.Do.pipe(
           ? Effect.void
           : meta.profile_complete
             ? revokeUnverified(decodeSnowflake(member.guild_id), user.id)
-            : grantUnverified(decodeSnowflake(member.guild_id), user.id, meta.verify_locale);
+            : grantUnverified(
+                decodeSnowflake(member.guild_id),
+                user.id,
+                meta.verify_locale,
+                meta.verify_intro_template,
+              );
 
         return Effect.all([systemLog, welcomeMessage, verificationState], {
           concurrency: 'unbounded',

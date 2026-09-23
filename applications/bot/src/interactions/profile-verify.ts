@@ -8,13 +8,16 @@ import { type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 
 /**
- * Mints the single entry `custom_id` used everywhere a "finish your profile" button
- * appears: the blocked-action ephemeral (Task 8), the welcome-embed field (Task 9)
- * and the read-only channel's pinned embed (Task 10). One function, one id — the
- * whole point is that no caller ever writes the literal `'profile-verify'` string
- * itself, so a future rename only touches this file.
- *
- * Built as a literal rather than through `UI.button()`: that helper's declared
+ * The one entry `custom_id` used everywhere a "finish your profile" button appears:
+ * the blocked-action ephemeral (Task 8), the welcome-embed field (Task 9) and the
+ * read-only channel's pinned embed (Task 10). Exported so no caller ever retypes the
+ * literal — the sync-loop reconcile in `~/rcp/onboarding/ProcessorService.ts` needs
+ * it to recognise our own pinned message.
+ */
+export const VERIFY_BUTTON_ID = 'profile-verify';
+
+/**
+ * Builds that button. Built as a literal rather than through `UI.button()`: that helper's declared
  * return type widens `custom_id` back to `string | null | undefined` (a button can
  * be a URL button with no `custom_id` at all) even though this call always supplies
  * one — the literal keeps `custom_id` known-`string` for every caller.
@@ -25,7 +28,7 @@ export const buildVerifyButton = (
   type: Discord.MessageComponentTypes.BUTTON,
   style: Discord.ButtonStyleTypes.PRIMARY,
   label: m.bot_verify_button({}, { locale }),
-  custom_id: 'profile-verify',
+  custom_id: VERIFY_BUTTON_ID,
 });
 
 /**
@@ -38,7 +41,7 @@ export const buildVerifyButton = (
  * non-member or an already-complete member re-submitting, exactly as `/dokoncit` does.
  */
 export const ProfileVerifyButton = Ix.messageComponent(
-  Ix.id('profile-verify'),
+  Ix.id(VERIFY_BUTTON_ID),
   Effect.Do.pipe(
     Effect.tap(() =>
       Metric.update(

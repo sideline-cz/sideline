@@ -75,6 +75,7 @@ export const mockTeamInfo = {
   achievementChannelId: null,
   systemLogChannelId: null,
   welcomeMessageTemplate: null,
+  verifyIntroTemplate: null,
   rulesChannelId: null,
   onboardingRulesRoleId: null,
   onboardingLocale: 'en',
