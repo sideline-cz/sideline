@@ -1185,6 +1185,8 @@ Four roles are automatically created for every new team and cannot be deleted or
 | **Player** | `roster:view`, `member:view` |
 | **Treasurer** | `finance:view`, `finance:manage_fees`, `finance:record_payments` |
 
+Built-in roles are never mirrored into Discord as guild roles — assigning or unassigning one never writes a `role_sync_events` row (see `docs/database.md`). Only custom roles created via `POST /teams/:teamId/roles` sync to Discord.
+
 ---
 
 #### `GET /teams/:teamId/roles`

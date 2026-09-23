@@ -755,7 +755,7 @@ Outbox table driving role-assignment changes in Discord. Polled by the bot's Rol
 
 **Indexes**: `idx_role_sync_events_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`
 
-**Notes**: `role_id` and `team_member_id` are stored as plain UUID (no FK constraint) so that rows are retained even after the referenced entities are deleted, providing a complete audit trail.
+**Notes**: `role_id` and `team_member_id` are stored as plain UUID (no FK constraint) so that rows are retained even after the referenced entities are deleted, providing a complete audit trail. A team's four built-in roles (`roles.is_built_in = true` — Admin, Captain, Player, Treasurer) never get a row here: `RoleSyncEventsRepository`'s `findSyncableRoleIds` filters `is_built_in = false` inside both statements that write this table, so only a team's custom roles are ever mirrored into Discord.
 
 ---
 

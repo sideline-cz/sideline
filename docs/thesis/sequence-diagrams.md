@@ -299,7 +299,7 @@ sequenceDiagram
 
 ## 5. Discord Role Sync (Outbound)
 
-When an admin assigns a Sideline role to a team member via the web app, the server writes a `role_assigned` event row to the `role_sync_events` table. The bot runs a polling loop every 5 seconds that calls `Role/GetUnprocessedEvents` over RPC. For each event the bot ensures a Discord role mapping exists (creating the Discord role if necessary), calls the Discord API to assign the role to the member in the guild, then marks the event as processed. Failed events are marked with an error string for later inspection.
+When an admin assigns a **custom** Sideline role to a team member via the web app, the server writes a `role_assigned` event row to the `role_sync_events` table. A team's four built-in roles (Admin, Captain, Player, Treasurer) are never mirrored into Discord — assigning one writes no row at all, so the flow below only applies to roles the team created itself. The bot runs a polling loop every 5 seconds that calls `Role/GetUnprocessedEvents` over RPC. For each event the bot ensures a Discord role mapping exists (creating the Discord role if necessary), calls the Discord API to assign the role to the member in the guild, then marks the event as processed. Failed events are marked with an error string for later inspection.
 
 ```mermaid
 sequenceDiagram

@@ -1756,6 +1756,8 @@ The outbox workers implement the bot's side of the outbox pattern: the server in
 - `Role/MarkEventProcessed` — called after each successful event.
 - `Role/MarkEventFailed` — called when processing throws; records the error string for diagnostics.
 
+A team's four built-in roles (Admin / Captain / Player / Treasurer) never appear in this queue at all — the server refuses to write `role_sync_events` for them (see `docs/database.md`'s `role_sync_events` notes). Only a team's custom roles (e.g. "Coach") are mirrored into Discord guild roles.
+
 ---
 
 ### Channel Sync Worker

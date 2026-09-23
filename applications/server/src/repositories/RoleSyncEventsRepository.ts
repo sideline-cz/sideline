@@ -86,6 +86,38 @@ const make = Effect.gen(function* () {
     execute: (teamId) => sql`SELECT guild_id FROM teams WHERE id = ${teamId}`,
   });
 
+  const SyncableRoleRow = Schema.Struct({ id: Role.RoleId });
+
+  // A team's four built-in roles (Admin / Captain / Player / Treasurer, seeded by
+  // `RolesRepository.initTeamRoles`) describe Sideline permissions, not Discord membership, and
+  // must NEVER be mirrored into a guild: the bot's `handleAssigned` calls `ensureMapping`
+  // (adopt-or-create), so a single `role_assigned` for a built-in role is enough to mint a guild
+  // role named "Player" in every linked team.
+  //
+  // The check lives HERE, at the only two statements that write `role_sync_events`, rather than
+  // at the seven places that emit (`api/role.ts`'s createRole / deleteRole / assignRole /
+  // unassignRole, plus the three diff utils listed in `applications/server/AGENTS.md` ->
+  // "Role-sync diffs"). Those callers each have their own reason to emit and an eighth will be
+  // added eventually; making the exclusion an invariant of the table's writer is what stops it
+  // from being re-introduced one call site at a time.
+  //
+  // Only four of those seven can actually carry a built-in role today — `createRole` emits for a
+  // row `insertRole` wrote with `is_built_in: false`, and `deleteRole` fails
+  // `RoleApi.CannotModifyBuiltIn` before its emit. That is a property of today's call sites, not
+  // an invariant, which is exactly why the guard is not scoped to the four.
+  //
+  // Archived roles still qualify: `deleteRole` soft-deletes (`UPDATE roles SET is_archived =
+  // true`) and emits `role_deleted` afterwards, so the row — and its `is_built_in` — is still
+  // readable. Matching on `is_built_in` rather than on the four names also keeps a team's own
+  // custom role safe if it ever shares a name with a built-in one.
+  const findSyncableRoleIds = SqlSchema.findAll({
+    Request: Schema.Array(Role.RoleId),
+    Result: SyncableRoleRow,
+    execute: (roleIds) => sql`
+      SELECT id FROM roles WHERE id IN ${sql.in(roleIds)} AND is_built_in = false
+    `,
+  });
+
   const findUnprocessedEvents = SqlSchema.findAll({
     Request: Schema.Number,
     Result: EventRow,
@@ -157,21 +189,21 @@ const make = Effect.gen(function* () {
     teamMemberId: Option.Option<TeamMember.TeamMemberId> = Option.none(),
     discordUserId: Option.Option<Discord.Snowflake> = Option.none(),
   ) =>
-    lookupGuildId(teamId).pipe(
-      Effect.flatMap(
-        Option.match({
-          onNone: () => Effect.void,
-          onSome: ({ guild_id }) =>
-            insertEvent({
+    Effect.zip(lookupGuildId(teamId), findSyncableRoleIds([roleId])).pipe(
+      Effect.flatMap(([guild, syncable]) =>
+        // A built-in role drops out exactly the way an unlinked team already does: nothing is
+        // written and no error is raised, so every emit call site keeps its best-effort shape.
+        Option.isNone(guild) || syncable.length === 0
+          ? Effect.void
+          : insertEvent({
               team_id: teamId,
-              guild_id,
+              guild_id: guild.value.guild_id,
               event_type: eventType,
               role_id: roleId,
               role_name: Option.some(roleName),
               team_member_id: teamMemberId,
               discord_user_id: discordUserId,
             }),
-        }),
       ),
       catchSqlErrors,
     );
@@ -231,25 +263,30 @@ const make = Effect.gen(function* () {
     }>;
   }) => {
     if (input.entries.length === 0) return Effect.void;
-    return lookupGuildId(input.teamId).pipe(
-      Effect.flatMap(
-        Option.match({
-          onNone: () => Effect.void,
-          onSome: ({ guild_id }) =>
-            sql`
-              INSERT INTO role_sync_events (team_id, guild_id, event_type, role_id, role_name, team_member_id, discord_user_id)
-              VALUES ${sql.join(
-                ',',
-                false,
-              )(
-                input.entries.map(
-                  (e) =>
-                    sql`(${input.teamId}, ${guild_id}, ${e.eventType}, ${e.roleId}, ${e.roleName}, ${e.teamMemberId}, ${e.discordUserId})`,
-                ),
-              )}
-            `.pipe(Effect.asVoid),
-        }),
-      ),
+    return Effect.zip(
+      lookupGuildId(input.teamId),
+      // One lookup for the whole batch, over the DISTINCT role ids — a group operation emits many
+      // entries per role. Same exclusion as the single-event path above; see `findSyncableRoleIds`.
+      findSyncableRoleIds([...new Set(input.entries.map((e) => e.roleId))]),
+    ).pipe(
+      Effect.flatMap(([guild, syncable]) => {
+        const syncableRoleIds = new Set(syncable.map((r) => r.id));
+        const entries = input.entries.filter((e) => syncableRoleIds.has(e.roleId));
+        if (Option.isNone(guild) || entries.length === 0) return Effect.void;
+        const guild_id = guild.value.guild_id;
+        return sql`
+          INSERT INTO role_sync_events (team_id, guild_id, event_type, role_id, role_name, team_member_id, discord_user_id)
+          VALUES ${sql.join(
+            ',',
+            false,
+          )(
+            entries.map(
+              (e) =>
+                sql`(${input.teamId}, ${guild_id}, ${e.eventType}, ${e.roleId}, ${e.roleName}, ${e.teamMemberId}, ${e.discordUserId})`,
+            ),
+          )}
+        `.pipe(Effect.asVoid);
+      }),
       catchSqlErrors,
     );
   };

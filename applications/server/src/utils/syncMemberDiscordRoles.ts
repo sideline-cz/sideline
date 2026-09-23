@@ -202,7 +202,15 @@ const syncLinkedMemberDiff = (
   }>,
 ) =>
   Effect.Do.pipe(
-    Effect.bind('desired', () => params.members.findEffectiveRoleIdsForMember(params.teamMemberId)),
+    // Built-in roles are dropped at the source, not left to `RoleSyncEventsRepository` to reject:
+    // they would otherwise consume `MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER` slots and inflate the
+    // `addedCount` this endpoint reports, so a member whose only effective role is `Player` would
+    // be told "queued 1" forever while nothing was ever written or processed.
+    Effect.bind('desired', () =>
+      params.members
+        .findEffectiveRoleIdsForMember(params.teamMemberId)
+        .pipe(Effect.map(Array.filter((r) => !r.is_built_in))),
+    ),
     Effect.bind('managed', () => params.mappings.findAllByTeam(params.teamId)),
     // Blocker (whole-series review of commit 46806427): per-member provenance for the removal
     // decision below — see this file's top-of-file doc comment and `member_role_grants`'s
@@ -223,12 +231,27 @@ const syncLinkedMemberDiff = (
     ),
     // Resolve names for the roles being removed. A mapping whose role can no longer be found
     // (e.g. archived) is skipped rather than emitted with a fabricated name.
+    //
+    // Built-in roles are dropped here as well as from `desired` above, and the second filter is
+    // not redundant: removal candidates are built from `discord_role_mappings` ∩
+    // `member_role_grants`, NOT from `desired`, so a built-in role that was mapped BEFORE this
+    // exclusion existed is now permanently "mapped, granted, and not desired" — i.e. a removal
+    // candidate on every single pass. `RoleSyncEventsRepository` would refuse the write, but the
+    // candidate would still consume a `MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER` slot and inflate the
+    // `removedCount` this endpoint reports. The role is resolved here anyway, so this costs
+    // nothing. Bookkeeping only — the writer's guard, not this filter, is what prevents the strip.
     Effect.bind('removed', ({ removedCandidates }) =>
       Effect.forEach(removedCandidates, (mapping) =>
         params.roles
           .findRoleById(mapping.role_id)
           .pipe(
-            Effect.map(Option.map((role) => ({ roleId: mapping.role_id, roleName: role.name }))),
+            Effect.map(
+              Option.flatMap((role) =>
+                role.is_built_in
+                  ? Option.none()
+                  : Option.some({ roleId: mapping.role_id, roleName: role.name }),
+              ),
+            ),
           ),
       ).pipe(Effect.map(Array.getSomes)),
     ),

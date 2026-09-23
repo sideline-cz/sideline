@@ -531,3 +531,176 @@ describe('RoleSyncEventsRepository — emitRoleEventsBatch', () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 });
+
+// Regression coverage for `fix/discord-roles-sync`: a team's built-in roles (Admin / Captain /
+// Player / Treasurer) describe Sideline permissions, not Discord membership, and must never reach
+// `role_sync_events` — the bot's `handleAssigned` calls `ensureMapping` (adopt-or-create), so one
+// leaked `role_assigned` is enough to mint a guild role named "Player".
+//
+// The guard lives on the two statements that write the table rather than on the five call sites
+// that emit, so these tests drive the repository directly: that is the boundary the invariant is
+// actually defended at.
+describe('RoleSyncEventsRepository — built-in roles never reach role_sync_events', () => {
+  const builtInRole = (teamId: Team.TeamId, name: string) =>
+    Effect.gen(function* () {
+      const roles = yield* RolesRepository.asEffect();
+      yield* roles.initializeTeamRoles(teamId);
+      const role = yield* roles.findRoleByTeamAndName(teamId, name);
+      return yield* Option.match(role, {
+        onNone: () => Effect.die(new Error(`expected seeded built-in role ${name}`)),
+        onSome: Effect.succeed,
+      });
+    });
+
+  it.effect('emitRoleAssigned writes nothing for a built-in role', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000040', 'builtin-assign');
+      const team = yield* createTeam('900500000000000040' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const player = yield* builtInRole(team.id, 'Player');
+      expect(player.is_built_in).toBe(true);
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleAssigned(
+        team.id,
+        player.id,
+        player.name,
+        member.id,
+        '444444444444444444' as Discord.Snowflake,
+      );
+
+      expect(yield* roleSyncEvents.findUnprocessed(10)).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The removal direction matters as much as the assign direction: were `role_unassigned` still
+  // emitted, the bot would resolve a mapping for the built-in role to strip it from — creating the
+  // very Discord role this fix exists to prevent.
+  it.effect('emitRoleUnassigned writes nothing for a built-in role', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000041', 'builtin-unassign');
+      const team = yield* createTeam('900500000000000041' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const admin = yield* builtInRole(team.id, 'Admin');
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleUnassigned(
+        team.id,
+        admin.id,
+        admin.name,
+        member.id,
+        '444444444444444444' as Discord.Snowflake,
+      );
+
+      expect(yield* roleSyncEvents.findUnprocessed(10)).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a custom role on the same team still emits — the guard is not a blanket block', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000042', 'builtin-custom');
+      const team = yield* createTeam('900500000000000042' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      yield* builtInRole(team.id, 'Player');
+      const roles = yield* RolesRepository.asEffect();
+      const coach = yield* roles.insertRole(team.id, 'Coach');
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleAssigned(
+        team.id,
+        coach.id,
+        coach.name,
+        member.id,
+        '444444444444444444' as Discord.Snowflake,
+      );
+
+      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
+      expect(unprocessed).toHaveLength(1);
+      expect(unprocessed[0]?.role_id).toBe(coach.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // A group operation is the highest-volume producer here: `role_groups` can attach a built-in
+  // role to a group, fanning it out across every member of that group and its subgroups.
+  it.effect('emitRoleEventsBatch drops built-in entries and keeps the custom ones', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000043', 'builtin-batch');
+      const team = yield* createTeam('900500000000000043' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const player = yield* builtInRole(team.id, 'Player');
+      const roles = yield* RolesRepository.asEffect();
+      const coach = yield* roles.insertRole(team.id, 'Coach');
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleEventsBatch({
+        teamId: team.id,
+        entries: [
+          {
+            eventType: 'role_assigned',
+            roleId: player.id,
+            roleName: player.name,
+            teamMemberId: member.id,
+            discordUserId: '555555555555555555' as Discord.Snowflake,
+          },
+          {
+            eventType: 'role_assigned',
+            roleId: coach.id,
+            roleName: coach.name,
+            teamMemberId: member.id,
+            discordUserId: '555555555555555555' as Discord.Snowflake,
+          },
+        ],
+      });
+
+      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
+      expect(unprocessed).toHaveLength(1);
+      expect(unprocessed[0]?.role_id).toBe(coach.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // A batch consisting only of built-in roles must not fall through to an `INSERT ... VALUES`
+  // with an empty VALUES list, which is a syntax error rather than a no-op.
+  it.effect('emitRoleEventsBatch writes nothing when every entry is built-in', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000044', 'builtin-batch-all');
+      const team = yield* createTeam('900500000000000044' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const player = yield* builtInRole(team.id, 'Player');
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleEventsBatch({
+        teamId: team.id,
+        entries: [
+          {
+            eventType: 'role_assigned',
+            roleId: player.id,
+            roleName: player.name,
+            teamMemberId: member.id,
+            discordUserId: '555555555555555555' as Discord.Snowflake,
+          },
+        ],
+      });
+
+      expect(yield* roleSyncEvents.findUnprocessed(10)).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // `deleteRole` soft-deletes (`UPDATE roles SET is_archived = true`) and emits `role_deleted`
+  // afterwards, so the guard must still find the row and let a custom role's deletion through.
+  it.effect('emitRoleDeleted still emits for an archived custom role', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000045', 'builtin-archived');
+      const team = yield* createTeam('900500000000000045' as Discord.Snowflake, userId);
+      const roles = yield* RolesRepository.asEffect();
+      const coach = yield* roles.insertRole(team.id, 'Coach');
+      yield* roles.archiveRoleById(coach.id);
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleDeleted(team.id, coach.id, coach.name);
+
+      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
+      expect(unprocessed).toHaveLength(1);
+      expect(unprocessed[0]?.event_type).toBe('role_deleted');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});

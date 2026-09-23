@@ -348,7 +348,7 @@ All competitors evaluated in this analysis are proprietary, closed-source platfo
 
 ### 5.3 Role-Based Permissions with Discord Role Sync
 
-Sideline implements a granular, sports-specific role model that synchronises bidirectionally with Discord roles. Permissions such as event creation, roster access, member management, and settings administration are controlled through a structured RBAC system. Role changes in Discord propagate to Sideline automatically, ensuring that access control remains consistent without manual duplication of effort.
+Sideline implements a granular, sports-specific role model that synchronises with Discord roles. Permissions such as event creation, roster access, member management, and settings administration are controlled through a structured RBAC system built on four built-in roles (Admin, Captain, Player, Treasurer) plus any custom roles a team defines. Role changes in Discord propagate to Sideline automatically, ensuring that access control remains consistent without manual duplication of effort. The four built-in roles are the deliberate exception: they are a Sideline-only permission construct and are never mirrored into Discord guild roles, so only a team's own custom roles (e.g. "Coach") appear in the guild.
 
 ### 5.4 Group Hierarchy with Discord Channel Sync
 

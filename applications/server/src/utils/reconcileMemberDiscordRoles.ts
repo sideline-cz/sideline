@@ -108,7 +108,15 @@ const computeRoleDiff = (
     Effect.bind('mappings', () => DiscordRoleMappingRepository.asEffect()),
     Effect.bind('roles', () => RolesRepository.asEffect()),
     Effect.bind('roleSyncEvents', () => RoleSyncEventsRepository.asEffect()),
-    Effect.bind('desired', ({ members }) => members.findEffectiveRoleIdsForMember(teamMember.id)),
+    // Built-in roles are dropped at the source rather than rejected later by
+    // `RoleSyncEventsRepository`: they never gain a `discord_role_mappings` row, so `toAssign`
+    // below would re-select them on EVERY reconcile and permanently burn the per-guild budget
+    // (`reserveFromBudget`) on emissions the writer discards.
+    Effect.bind('desired', ({ members }) =>
+      members
+        .findEffectiveRoleIdsForMember(teamMember.id)
+        .pipe(Effect.map(Array.filter((r) => !r.is_built_in))),
+    ),
     Effect.bind('managed', ({ mappings }) => mappings.findAllByTeam(team.id)),
     // Blocker (whole-series review of commit 46806427): per-member provenance for the removal
     // decision below — see `member_role_grants`'s migration and this file's top-of-file doc
@@ -161,12 +169,24 @@ const computeRoleDiff = (
         .map((r) => ({ roleId: r.role_id, roleName: r.role_name })),
     ),
     // Resolve role names; a mapping whose role can no longer be found (e.g. archived) is skipped
-    // rather than emitted with a fabricated name — mirrors syncMemberDiscordRoles.ts.
+    // rather than emitted with a fabricated name — mirrors syncMemberDiscordRoles.ts, including
+    // its built-in filter: `unassignCandidates` come from `discord_role_mappings`, not from
+    // `desired`, so a built-in role mapped before that exclusion existed would otherwise be an
+    // unassign candidate on every reconcile and would spend the per-guild budget the writer is
+    // only going to discard. See `syncMemberDiscordRoles.ts`'s `removed` bind for the full note.
     Effect.bind('toUnassign', ({ roles, unassignCandidates }) =>
       Effect.forEach(unassignCandidates, (m) =>
         roles
           .findRoleById(m.role_id)
-          .pipe(Effect.map(Option.map((role) => ({ roleId: m.role_id, roleName: role.name })))),
+          .pipe(
+            Effect.map(
+              Option.flatMap((role) =>
+                role.is_built_in
+                  ? Option.none()
+                  : Option.some({ roleId: m.role_id, roleName: role.name }),
+              ),
+            ),
+          ),
       ).pipe(Effect.map(Array.getSomes)),
     ),
   );
