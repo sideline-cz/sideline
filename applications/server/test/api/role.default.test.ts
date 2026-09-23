@@ -10,8 +10,8 @@
 //
 // A lean "SmallApi" (only `RoleApiGroup`), not the full `ApiLive` + its ~40-layer mock block from
 // `role.emit.test.ts` — `setDefaultRole`/`listRoles`/`getRole` touch only
-// `TeamMembersRepository` + `RolesRepository`; `NotificationsRepository`, `RoleSyncEventsRepository`
-// and `DiscordRoleMappingRepository` are wired only because `RoleApiLive`'s top-level `Effect.Do`
+// `TeamMembersRepository` + `RolesRepository`; `NotificationsRepository` is wired only because
+// `RoleApiLive`'s top-level `Effect.Do`
 // binds them unconditionally (and `syncMemberDiscordRoles` needs the last one) — noop stubs.
 //
 // EXPECTED TO FAIL against `main`: `RolesRepository.setDefaultRole` does not exist, the
@@ -26,9 +26,7 @@ import { HttpApi, HttpApiBuilder } from 'effect/unstable/httpapi';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoleApiLive } from '~/api/role.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -165,8 +163,6 @@ const TestLayer = HttpApiBuilder.layer(SmallApi).pipe(
   Layer.provide(makeTeamMembersRepositoryLayer()),
   Layer.provide(makeRolesRepositoryLayer()),
   Layer.provide(noopMockLayer(NotificationsRepository)),
-  Layer.provide(noopMockLayer(RoleSyncEventsRepository)),
-  Layer.provide(noopMockLayer(DiscordRoleMappingRepository)),
 );
 
 let handler: (...args: any) => Promise<Response>;

@@ -50,7 +50,6 @@ import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -506,9 +505,7 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   getDescendantMemberIds: () => Effect.succeed([]),
   // `fix/group-role-discord-sync`: `api/group.ts`'s `deleteGroup` (and the other group-shaped
   // handlers) now resolve role-sync targets via this method. This file only asserts on
-  // `channel_sync_events`, so an empty target list is a safe, correct stub — it makes
-  // `withGroupRoleSync`'s snapshot/emit phases no-ops without needing a `TeamMembersRepository` /
-  // `RoleSyncEventsRepository` mock in this layer.
+  // `channel_sync_events`, so an empty target list is a safe, correct stub.
   findDescendantMembersWithDiscordIdByGroupId: () => Effect.succeed([]),
 } as any);
 
@@ -725,16 +722,6 @@ const MockNotificationsRepositoryLayer = Layer.succeed(NotificationsRepository, 
 const MockAgeCheckServiceLayer = Layer.succeed(AgeCheckService, {
   evaluateTeam: () => Effect.succeed([]),
   evaluate: () => Effect.succeed([]),
-} as any);
-
-const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository, {
-  emitRoleCreated: () => Effect.void,
-  emitRoleDeleted: () => Effect.void,
-  emitRoleAssigned: () => Effect.void,
-  emitRoleUnassigned: () => Effect.void,
-  findUnprocessed: () => Effect.succeed([]),
-  markProcessed: () => Effect.void,
-  markFailed: () => Effect.void,
 } as any);
 
 const MockEventSyncEventsRepositoryLayer = Layer.succeed(EventSyncEventsRepository, {
@@ -962,7 +949,7 @@ const buildTestLayer = (
     Layer.provide(MockHttpClientLayer),
     Layer.provide(MockAgeCheckServiceLayer),
     Layer.provide(MockAgeThresholdRepositoryLayer),
-    Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+    Layer.provide(MockNotificationsRepositoryLayer),
     Layer.provide(
       Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
     ),
@@ -1207,9 +1194,7 @@ describe('B2 — createGroup emits channel_created regardless of create_discord_
       Layer.provide(MockHttpClientLayer),
       Layer.provide(MockAgeCheckServiceLayer),
       Layer.provide(MockAgeThresholdRepositoryLayer),
-      Layer.provide(
-        Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer),
-      ),
+      Layer.provide(MockNotificationsRepositoryLayer),
       Layer.provide(Layer.merge(orderRecordingLayer, MockEventSyncEventsRepositoryLayer)),
       Layer.provide(Layer.merge(orderRecordingMappingLayer, MockICalTokensRepositoryLayer)),
       Layer.provide(

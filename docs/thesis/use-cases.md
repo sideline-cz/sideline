@@ -97,7 +97,6 @@ flowchart LR
         UC_BOT_LOG["Log Activity via Bot"]
         UC_BOT_LEADERBOARD["View Leaderboard via Bot"]
         UC_BOT_RSVP["Submit RSVP via Button"]
-        UC_BOT_SYNC_ROLES["Sync Discord Roles"]
         UC_BOT_POST_EMBED["Post Event Embed"]
         UC_BOT_FINANCE_STATUS["View Finance Status via Bot"]
         UC_BOT_INFO["View Version Info via Bot"]
@@ -296,7 +295,6 @@ flowchart LR
     BOT --> UC_BOT_LOG
     BOT --> UC_BOT_LEADERBOARD
     BOT --> UC_BOT_RSVP
-    BOT --> UC_BOT_SYNC_ROLES
     BOT --> UC_BOT_POST_EMBED
     BOT --> UC_BOT_FINANCE_STATUS
     BOT --> UC_BOT_INFO
@@ -645,7 +643,7 @@ The Discord bot exposes slash commands within a Discord guild. Commands that req
 flowchart LR
     DU(["Discord User"])
     BOT(["Discord Bot"])
-    SYS(["System (Event/Role Sync Worker)"])
+    SYS(["System (Event Sync Worker)"])
 
     subgraph SLASH["Slash Commands"]
         UC_EVT_LIST["\/event list\nShows per-user upcoming events\none event per page · ephemeral · own RSVP visible\n(Event/GetUpcomingEventsForUser)"]
@@ -669,7 +667,6 @@ flowchart LR
     end
 
     subgraph SYNC["Background Sync (RPC)"]
-        UC_SYNC_ROLES["Sync Discord Roles (RETIRED)\nSideline roles are permissions only and are\nno longer mirrored into Discord guild roles;\ngroups and rosters provision them instead"]
         UC_SYNC_CHANNELS["Sync Discord Channels\nCreates / updates channel permissions\nwhen group channel mappings change\n(Channel RPC group)"]
         UC_POST_EMBED["Post Event Embed\nPosts or updates an event embed message\nin the configured Discord channel\nwhen an event is created or updated\n(Event/GetUnprocessedEvents → Event/MarkEventProcessed)"]
         UC_CLAIM_THREAD["Post Training Claim Embed\nPosts claim embed into persistent owners-group thread\n(Event/GetOwnerClaimThread → Event/SaveOwnerClaimThread\n→ Event/SaveClaimDiscordMessageId)\nThread is reused across all trainings for the same owner group"]
@@ -708,14 +705,12 @@ flowchart LR
     BOT --> UC_BTN_PAGE
     BOT --> UC_BTN_OVERVIEW_SHOW
     BOT --> UC_BTN_SUDO_LEAVE
-    BOT --> UC_SYNC_ROLES
     BOT --> UC_SYNC_CHANNELS
     BOT --> UC_POST_EMBED
     BOT --> UC_CLAIM_THREAD
     BOT --> UC_START_ANNOUNCE
     BOT --> UC_LEAVE_DEACTIVATE
 
-    SYS --> UC_SYNC_ROLES
     SYS --> UC_SYNC_CHANNELS
     SYS --> UC_POST_EMBED
     SYS --> UC_START_ANNOUNCE

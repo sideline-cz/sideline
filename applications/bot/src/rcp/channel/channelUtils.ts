@@ -51,10 +51,9 @@ export const deleteChannelAndRole = (
 
 /** Clears the stale `discord_channel_mappings.discord_role_id` on Unknown Role (10011) — e.g. a
  * captain deleted the group's mapped Discord role directly in Discord. Best-effort: never fails
- * the caller, so it is safe to run per member in a backfill loop. Mirrors the role-axis precedent
- * `clearStaleMappingOnUnknownRole` (`~/rcp/role/handleAssigned.ts:93-95`/`:80-89`) — clear, don't
- * delete, handing the group back to `findGroupsMissingRole`'s next sweep instead of retrying the
- * same dead role id forever. */
+ * the caller, so it is safe to run per member in a backfill loop. Clear, don't delete, handing
+ * the group back to `findGroupsMissingRole`'s next sweep instead of retrying the same dead role
+ * id forever. */
 export const clearStaleRoleOnUnknownRole = (
   event: {
     readonly team_id: Team.TeamId;

@@ -7,18 +7,10 @@ import { retryPolicy } from '../utils.js';
  * Name of the bot-owned Discord role granted to a member with an incomplete profile
  * while `team_settings.require_complete_profile` is on (Deliverable D / Task 10).
  *
- * Deliberately has **no `discord_role_mappings` row and no Sideline `roles` row** —
- * that absence, not this file, is what keeps `reconcileMemberDiscordRoles` inert with
- * respect to this role. Post-#689 (`4224178e`) the two omissions do different jobs and
- * both matter:
- *   - the missing **`roles` row** keeps this role out of `desired`
- *     (`findEffectiveRoleIdsForMember`), so it can never be auto-assigned by reconcile;
- *   - the missing **mapping** keeps it out of `managed`, so `unassignCandidates` can
- *     never see it — it is never stripped (the CC-8 anti-stripping guard).
- * Before #689 the mapping alone was enough to keep the role out of both candidate
- * lists; after #689, `role_assigned` is built from `desired`, not `managed`, so the
- * mapping alone no longer prevents assignment — the `roles`-row omission is now load
- * bearing on its own. Do not add either row for this role.
+ * Deliberately has **no Sideline `roles` row** — that absence is what keeps this role
+ * from ever being auto-assigned or auto-stripped by anything else in the app; nothing
+ * treats it as a permissions construct, so nothing manages it but the join/leave and
+ * verify flows in this module. Do not add a `roles` row for this role.
  */
 export const UNVERIFIED_ROLE_NAME = 'Sideline Unverified';
 

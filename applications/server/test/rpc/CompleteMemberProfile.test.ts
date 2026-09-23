@@ -20,7 +20,6 @@ import { afterEach, beforeEach, describe, expect } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -212,7 +211,6 @@ const TestLayer = GuildsRpcLive.pipe(
       Layer.succeed(BotGuildsRepository, voidProxy()),
       Layer.succeed(DiscordChannelsRepository, voidProxy()),
       Layer.succeed(DiscordRolesRepository, voidProxy()),
-      Layer.succeed(DiscordRoleMappingRepository, voidProxy()),
       Layer.succeed(DiscordChannelMappingRepository, voidProxy()),
       Layer.succeed(GroupsRepository, voidProxy()),
       Layer.succeed(InviteAcceptancesRepository, voidProxy()),

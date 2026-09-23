@@ -687,9 +687,7 @@ describe('handleCreated — Task 2: member backfill after role resolution', () =
 // ---------------------------------------------------------------------------
 // Tests — §3.4 / §5.5 (BT1-BT3, BT5, BT6): Discord-10011 stale-role healing
 //
-// Mirrors the role-axis precedent in
-// `applications/bot/test/rcp/role/handleAssigned.test.ts` ("dangling mapping
-// cleanup on Discord's Unknown Role 10011"). Without these, the `tapError` in
+// Without these, the `tapError` in
 // `handleCreated.ts`'s per-member pipe ships as code that can never fire — every
 // server-side (§5.1-5.4) test would still pass, because `isUnknownRoleError` reads
 // the RAW error, not the `Cause` that `Exit.match`'s `onFailure` receives.

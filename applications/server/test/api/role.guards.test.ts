@@ -1,11 +1,6 @@
-// TDD — root cause D's regression tests.
-//
-// `emitRoleAssigned` / `emitRoleUnassigned` / `emitRoleCreated` / `emitRoleDeleted`
-// (RoleSyncEventsRepository.ts) had zero production callers: `role.ts`'s `assignRole`,
-// `unassignRole`, `createRole` and `deleteRole` wrote their primary state change and a
-// notification, and never touched `role_sync_events`. The bot's role loop has been polling an
-// always-empty table. These tests fail before the four `emit*` calls are added to `role.ts` and
-// pass after.
+// Guard regression pins for `api/role.ts`: cross-tenant role lookups (BLOCKER 2) and the
+// name-only `CannotModifyBuiltIn` guard. The role-sync emission cases that used to live here
+// went with the Sideline-role -> Discord mirroring subsystem.
 
 import type { Auth, Discord, Role, Team, TeamMember } from '@sideline/domain';
 import { OAuth2Tokens } from 'arctic';
@@ -24,7 +19,6 @@ import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRep
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
@@ -41,7 +35,6 @@ import { NotificationsRepository } from '~/repositories/NotificationsRepository.
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -113,68 +106,6 @@ const adminMembership: MembershipWithRole = {
 
 const sessionsStore = new Map<string, Auth.UserId>();
 sessionsStore.set('admin-token', TEST_USER_ID);
-
-// ---------------------------------------------------------------------------
-// Recorder for RoleSyncEventsRepository
-// ---------------------------------------------------------------------------
-
-type RecordedEvent =
-  | {
-      readonly type: 'role_assigned';
-      readonly roleId: string;
-      readonly memberId: string;
-      readonly discordId: string;
-    }
-  | {
-      readonly type: 'role_unassigned';
-      readonly roleId: string;
-      readonly memberId: string;
-      readonly discordId: string;
-    }
-  | { readonly type: 'role_created'; readonly roleId: string; readonly roleName: string }
-  | { readonly type: 'role_deleted'; readonly roleId: string; readonly roleName: string };
-
-let recordedEvents: RecordedEvent[] = [];
-let emitShouldFail = false;
-
-const makeRoleSyncEventsRepositoryLayer = () =>
-  Layer.succeed(RoleSyncEventsRepository, {
-    emitRoleCreated: (_teamId: Team.TeamId, roleId: Role.RoleId, roleName: string) => {
-      if (emitShouldFail) return Effect.die(new Error('boom'));
-      recordedEvents.push({ type: 'role_created', roleId, roleName });
-      return Effect.void;
-    },
-    emitRoleDeleted: (_teamId: Team.TeamId, roleId: Role.RoleId, roleName: string) => {
-      if (emitShouldFail) return Effect.die(new Error('boom'));
-      recordedEvents.push({ type: 'role_deleted', roleId, roleName });
-      return Effect.void;
-    },
-    emitRoleAssigned: (
-      _teamId: Team.TeamId,
-      roleId: Role.RoleId,
-      _roleName: string,
-      memberId: TeamMember.TeamMemberId,
-      discordId: Discord.Snowflake,
-    ) => {
-      if (emitShouldFail) return Effect.die(new Error('boom'));
-      recordedEvents.push({ type: 'role_assigned', roleId, memberId, discordId });
-      return Effect.void;
-    },
-    emitRoleUnassigned: (
-      _teamId: Team.TeamId,
-      roleId: Role.RoleId,
-      _roleName: string,
-      memberId: TeamMember.TeamMemberId,
-      discordId: Discord.Snowflake,
-    ) => {
-      if (emitShouldFail) return Effect.die(new Error('boom'));
-      recordedEvents.push({ type: 'role_unassigned', roleId, memberId, discordId });
-      return Effect.void;
-    },
-    findUnprocessed: () => Effect.succeed([]),
-    markProcessed: () => Effect.void,
-    markFailed: () => Effect.void,
-  } as any);
 
 // ---------------------------------------------------------------------------
 // Roles state
@@ -454,7 +385,6 @@ const MockNoopLayers = Layer.mergeAll(
   noopMockLayer(TrainingTypesRepository),
   noopMockLayer(RostersRepository),
   noopMockLayer(DiscordChannelsRepository),
-  noopMockLayer(DiscordRoleMappingRepository),
   noopMockLayer(DiscordRolesRepository),
   noopMockLayer(DiscordChannelMappingRepository),
   noopMockLayer(EventsRepository),
@@ -492,7 +422,6 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockTeamsRepositoryLayer),
   Layer.provide(makeTeamMembersRepositoryLayer()),
   Layer.provide(makeRolesRepositoryLayer()),
-  Layer.provide(makeRoleSyncEventsRepositoryLayer()),
   Layer.provide(MockNotificationsRepositoryLayer),
   Layer.provide(MockBotGuildsRepositoryLayer),
   Layer.provide(MockHttpClientLayer),
@@ -537,8 +466,6 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  recordedEvents = [];
-  emitShouldFail = false;
   rolesStore = [
     { id: TEST_ROLE_ID, team_id: TEST_TEAM_ID, name: 'Coach', is_built_in: false },
     { id: BUILT_IN_ROLE_ID, team_id: TEST_TEAM_ID, name: 'Player', is_built_in: true },
@@ -552,163 +479,6 @@ beforeEach(() => {
 });
 
 const authHeaders = { Authorization: 'Bearer admin-token' };
-
-describe('role.ts — root cause D: role sync event emission', () => {
-  it('assignRole emits a role_assigned event with the member discord_id', async () => {
-    const response = await handler(
-      new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/roles`, {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roleId: TEST_ROLE_ID }),
-      }),
-    );
-
-    expect(response.status).toBe(204);
-    expect(recordedEvents).toContainEqual({
-      type: 'role_assigned',
-      roleId: TEST_ROLE_ID,
-      memberId: TEST_MEMBER_ID,
-      discordId: MEMBER_DISCORD_ID,
-    });
-  });
-
-  it('unassignRole emits a role_unassigned event', async () => {
-    const response = await handler(
-      new Request(
-        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/roles/${TEST_ROLE_ID}`,
-        {
-          method: 'DELETE',
-          headers: authHeaders,
-        },
-      ),
-    );
-
-    expect(response.status).toBe(204);
-    expect(recordedEvents).toContainEqual({
-      type: 'role_unassigned',
-      roleId: TEST_ROLE_ID,
-      memberId: TEST_MEMBER_ID,
-      discordId: MEMBER_DISCORD_ID,
-    });
-  });
-
-  // Regression for the group-linking fix (confirmed defect: `unassignRole` in
-  // `api/role.ts` emits `role_unassigned` + a `role_removed` notification
-  // unconditionally, even when the member still effectively holds the role through a
-  // group after the direct `member_roles` row is deleted).
-  it('unassignRole does NOT emit role_unassigned or notify when the member still holds the role via a group', async () => {
-    effectiveRolesAfterUnassign.set(TEST_MEMBER_GROUP_ROLE_ID, [
-      { role_id: TEST_ROLE_ID, role_name: 'Coach' },
-    ]);
-
-    const response = await handler(
-      new Request(
-        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_GROUP_ROLE_ID}/roles/${TEST_ROLE_ID}`,
-        {
-          method: 'DELETE',
-          headers: authHeaders,
-        },
-      ),
-    );
-
-    expect(response.status).toBe(204);
-    // Today, `unassignRole` never consults the effective-roles-after-write state at
-    // all, so this unconditionally emits — this assertion fails until the fix lands.
-    expect(recordedEvents.filter((e) => e.type === 'role_unassigned')).toHaveLength(0);
-    expect(recordedNotifications.filter((n) => n.type === 'role_removed')).toHaveLength(0);
-  });
-
-  // Regression for review blocker 5 (fix/role-linking): a DB blip on the post-delete
-  // "still held effectively?" re-check must degrade to the pre-guard behaviour (treat
-  // as not-still-held → still emit), not 500 the captain — `unassignRole`'s own DELETE
-  // already committed by the time this re-check runs.
-  it('unassignRole still succeeds and emits when the post-delete effective-roles re-check fails', async () => {
-    effectiveRolesLookupShouldDie = true;
-
-    const response = await handler(
-      new Request(
-        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/roles/${TEST_ROLE_ID}`,
-        {
-          method: 'DELETE',
-          headers: authHeaders,
-        },
-      ),
-    );
-
-    expect(response.status).toBe(204);
-    expect(recordedEvents).toContainEqual({
-      type: 'role_unassigned',
-      roleId: TEST_ROLE_ID,
-      memberId: TEST_MEMBER_ID,
-      discordId: MEMBER_DISCORD_ID,
-    });
-  });
-
-  it('createRole emits a role_created event', async () => {
-    const response = await handler(
-      new Request(`http://localhost/teams/${TEST_TEAM_ID}/roles`, {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'New Role', permissions: [] }),
-      }),
-    );
-
-    expect(response.status).toBe(201);
-    const created = recordedEvents.find((e) => e.type === 'role_created');
-    expect(created).toBeDefined();
-    expect(created && 'roleName' in created ? created.roleName : undefined).toBe('New Role');
-  });
-
-  it('deleteRole emits a role_deleted event with the role name captured before archiving', async () => {
-    const response = await handler(
-      new Request(`http://localhost/teams/${TEST_TEAM_ID}/roles/${TEST_ROLE_ID}`, {
-        method: 'DELETE',
-        headers: authHeaders,
-      }),
-    );
-
-    expect(response.status).toBe(204);
-    expect(recordedEvents).toContainEqual({
-      type: 'role_deleted',
-      roleId: TEST_ROLE_ID,
-      roleName: 'Coach',
-    });
-    // The role row itself is gone (archived) by the time the event is emitted, but the emitted
-    // name still reflects the pre-archive name.
-    expect(rolesStore.find((r) => r.id === TEST_ROLE_ID)).toBeUndefined();
-  });
-
-  it('assignRole does not emit when the member has no discord_id', async () => {
-    const response = await handler(
-      new Request(
-        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_NO_DISCORD_ID}/roles`,
-        {
-          method: 'POST',
-          headers: { ...authHeaders, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ roleId: TEST_ROLE_ID }),
-        },
-      ),
-    );
-
-    expect(response.status).toBe(204);
-    expect(recordedEvents).toHaveLength(0);
-  });
-
-  it('assignRole still succeeds when the emit fails (best-effort tap)', async () => {
-    emitShouldFail = true;
-
-    const response = await handler(
-      new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/roles`, {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roleId: TEST_ROLE_ID }),
-      }),
-    );
-
-    expect(response.status).toBe(204);
-    expect(recordedEvents).toHaveLength(0);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // T-S2 (`.work-plans/configurable-default-roles.md`) — BLOCKER 2 (cross-tenant role lookups)

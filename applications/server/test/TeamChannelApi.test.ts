@@ -39,7 +39,6 @@ import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -789,25 +788,14 @@ const buildLayer = (overrides?: {
       } as any),
     ),
     Layer.provide(
-      Layer.merge(
-        Layer.succeed(NotificationsRepository, {
-          findByUser: () => Effect.succeed([]),
-          insert: () => Effect.void,
-          insertBulk: () => Effect.void,
-          markAsRead: () => Effect.void,
-          markAllAsRead: () => Effect.void,
-          findById: () => Effect.succeed(Option.none()),
-        } as any),
-        Layer.succeed(RoleSyncEventsRepository, {
-          emitRoleCreated: () => Effect.void,
-          emitRoleDeleted: () => Effect.void,
-          emitRoleAssigned: () => Effect.void,
-          emitRoleUnassigned: () => Effect.void,
-          findUnprocessed: () => Effect.succeed([]),
-          markProcessed: () => Effect.void,
-          markFailed: () => Effect.void,
-        } as any),
-      ),
+      Layer.succeed(NotificationsRepository, {
+        findByUser: () => Effect.succeed([]),
+        insert: () => Effect.void,
+        insertBulk: () => Effect.void,
+        markAsRead: () => Effect.void,
+        markAllAsRead: () => Effect.void,
+        findById: () => Effect.succeed(Option.none()),
+      } as any),
     ),
     Layer.provide(
       Layer.merge(

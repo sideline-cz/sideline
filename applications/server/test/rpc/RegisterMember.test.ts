@@ -9,7 +9,6 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -17,7 +16,6 @@ import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRep
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
 import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SudoSessionsRepository } from '~/repositories/SudoSessionsRepository.js';
@@ -47,39 +45,24 @@ const EXPIRED_CODE = 'EXPIRED-INVITE';
 const NONEXISTENT_CODE = 'NONEXISTENT';
 const CROSS_TEAM_CODE = 'CROSS-TEAM-CODE';
 
-// PR-8: a role Sideline manages (mapped to a Discord role) plus a second one, so the
-// role_unassigned path has something distinct from the role_assigned path to exercise.
+// A role that still exists on `RolesRepository`'s mock (see `findEffectiveRoleIdsForMember`'s
+// remaining consumer below) even though the Discord-role-sync diff that used to read it is gone.
 const CAPTAIN_ROLE_ID =
   '00000000-0000-0000-0000-000000000050' as import('@sideline/domain').Role.RoleId;
-const CAPTAIN_DISCORD_ROLE_ID = '500000000000000001' as Discord.Snowflake;
 const COACH_ROLE_ID =
   '00000000-0000-0000-0000-000000000051' as import('@sideline/domain').Role.RoleId;
-const COACH_DISCORD_ROLE_ID = '500000000000000002' as Discord.Snowflake;
-// T-S5: a team-configured default role, distinct from the built-in Player and from any
-// Discord-role-mapped role above.
+// T-S5: a team-configured default role, distinct from the built-in Player and from any role
+// above.
 const GUEST_ROLE_ID =
   '00000000-0000-0000-0000-000000000055' as import('@sideline/domain').Role.RoleId;
-// A Discord role with NO `discord_role_mappings` row — Sideline must never touch it.
+// A Discord role Sideline does not manage.
 const UNMANAGED_DISCORD_ROLE_ID = '500000000000000099' as Discord.Snowflake;
-// Blocker A (whole-series review): a mapping Sideline ADOPTED rather than created — a
-// hand-made Discord role held by members Sideline never assigned it to via `member_roles`.
-// The diff must be free to ADD this role, but must never STRIP it.
 const ADOPTED_ROLE_ID =
   '00000000-0000-0000-0000-000000000052' as import('@sideline/domain').Role.RoleId;
-const ADOPTED_DISCORD_ROLE_ID = '500000000000000003' as Discord.Snowflake;
-// bug 3da93506: a Sideline role with NO `discord_role_mappings` row at all — the inverse of
-// `UNMANAGED_DISCORD_ROLE_ID` (a DISCORD role Sideline does not manage). Deliberately absent from
-// `discordRoleMappings` AND from `MockRolesRepository`: the reconcile diff must be able to
-// bootstrap it from `desired` alone (the bot's `ensureMapping` adopts-or-creates the Discord role
-// when it handles the event), without a mapping row and without a `findRoleById` lookup.
-const UNMAPPED_ROLE_ID =
-  '00000000-0000-0000-0000-000000000054' as import('@sideline/domain').Role.RoleId;
-// A role linked to GROUP_ID (`role_groups`), exercised by the group-scoped-invite tests below —
-// U2 seeds `groupRoles` with it so the diff has something to assign once the group bind lands
-// before the role diff runs.
+// A role linked to GROUP_ID (`role_groups`) — `groupRoles` below seeds it so
+// `findEffectiveRoleIdsForMember`'s group lookup has something to return.
 const GROUP_ROLE_ID =
   '00000000-0000-0000-0000-000000000053' as import('@sideline/domain').Role.RoleId;
-const GROUP_DISCORD_ROLE_ID = '500000000000000004' as Discord.Snowflake;
 
 // bug fix-group-channel-discord-join (PR 1) — the group's OWN Discord role, as recorded in
 // `discord_channel_mappings.discord_role_id` (created by `createGroup`'s `emitChannelCreated` /
@@ -129,27 +112,6 @@ let memberships: Map<string, MembershipRow>;
 let discordJoinedAt: Map<string, Date | null | undefined>;
 // Keyed by TeamMemberId (string) -> the member's effective Sideline role ids (PR-8's "desired").
 let effectiveRoles: Map<string, ReadonlyArray<{ role_id: string; role_name: string }>>;
-// Keyed by TeamMemberId (string) -> role ids `member_role_grants` records Sideline itself having
-// granted this member (blocker, whole-series review of commit 46806427). The unassign decision
-// keys on THIS, not on `discordRoleMappings[].adopted` — see `reconcileMemberDiscordRoles.ts`.
-let grantedRoleIds: Map<string, ReadonlyArray<string>>;
-// Configurable `discord_role_mappings` rows for TEAM_ID.
-let discordRoleMappings: Array<{
-  id: string;
-  team_id: string;
-  role_id: string;
-  discord_role_id: string;
-  adopted: boolean;
-}>;
-let roleAssignedEvents: Array<{
-  teamId: string;
-  roleId: string;
-  roleName: string;
-  teamMemberId: string;
-  discordUserId: string;
-}>;
-let roleUnassignedEvents: Array<typeof roleAssignedEvents extends Array<infer T> ? T : never>;
-let markMembersBackfilledCalls: Array<string>;
 let nextMemberId = 1;
 // Ordering probe (bug 3da93506): `addMemberById` pushes 'group-add', `findEffectiveRoleIdsForMember`
 // pushes 'role-diff' before returning — lets tests assert the group bind happened before the diff
@@ -288,40 +250,6 @@ const resetStores = () => {
   memberships = new Map();
   discordJoinedAt = new Map();
   effectiveRoles = new Map();
-  grantedRoleIds = new Map();
-  discordRoleMappings = [
-    {
-      id: 'mapping-captain',
-      team_id: TEAM_ID,
-      role_id: CAPTAIN_ROLE_ID,
-      discord_role_id: CAPTAIN_DISCORD_ROLE_ID,
-      adopted: false,
-    },
-    {
-      id: 'mapping-coach',
-      team_id: TEAM_ID,
-      role_id: COACH_ROLE_ID,
-      discord_role_id: COACH_DISCORD_ROLE_ID,
-      adopted: false,
-    },
-    {
-      id: 'mapping-adopted',
-      team_id: TEAM_ID,
-      role_id: ADOPTED_ROLE_ID,
-      discord_role_id: ADOPTED_DISCORD_ROLE_ID,
-      adopted: true,
-    },
-    {
-      id: 'mapping-group-role',
-      team_id: TEAM_ID,
-      role_id: GROUP_ROLE_ID,
-      discord_role_id: GROUP_DISCORD_ROLE_ID,
-      adopted: false,
-    },
-  ];
-  roleAssignedEvents = [];
-  roleUnassignedEvents = [];
-  markMembersBackfilledCalls = [];
   nextMemberId = 1;
   callLog = [];
   channelSyncCalls = [];
@@ -466,18 +394,6 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
     }
     return Effect.succeed(Array.from(merged.values()));
   },
-  findGrantedRoleIds: (memberId: string) => Effect.succeed(grantedRoleIds.get(memberId) ?? []),
-  recordRoleGrant: (memberId: string, roleId: string) => {
-    grantedRoleIds.set(memberId, [...(grantedRoleIds.get(memberId) ?? []), roleId]);
-    return Effect.void;
-  },
-  clearRoleGrant: (memberId: string, roleId: string) => {
-    grantedRoleIds.set(
-      memberId,
-      (grantedRoleIds.get(memberId) ?? []).filter((id) => id !== roleId),
-    );
-    return Effect.void;
-  },
   markDiscordJoined: (memberId: string) => {
     if (discordJoinedAt.get(memberId) == null) discordJoinedAt.set(memberId, new Date());
     return Effect.void;
@@ -592,10 +508,7 @@ const MockBotGuildsRepository = Layer.succeed(BotGuildsRepository, {
   remove: () => Effect.void,
   exists: () => Effect.succeed(false),
   findAll: () => Effect.succeed([]),
-  markMembersBackfilled: (guildId: string) => {
-    markMembersBackfilledCalls.push(guildId);
-    return Effect.void;
-  },
+  markMembersBackfilled: () => Effect.void,
 } as any);
 
 const MockDiscordChannelsRepository = Layer.succeed(DiscordChannelsRepository, {
@@ -604,11 +517,6 @@ const MockDiscordChannelsRepository = Layer.succeed(DiscordChannelsRepository, {
   upsertChannel: () => Effect.void,
   deleteChannel: () => Effect.void,
   updateChannelName: () => Effect.void,
-} as any);
-
-const MockDiscordRoleMappingRepository = Layer.succeed(DiscordRoleMappingRepository, {
-  findAllByTeam: (teamId: string) =>
-    Effect.succeed(discordRoleMappings.filter((m) => m.team_id === teamId)),
 } as any);
 
 const MockDiscordChannelMappingRepository = Layer.succeed(DiscordChannelMappingRepository, {
@@ -670,36 +578,6 @@ const MockRolesRepository = Layer.succeed(RolesRepository, {
   },
 } as any);
 
-const MockRoleSyncEventsRepository = Layer.succeed(RoleSyncEventsRepository, {
-  emitRoleAssigned: (
-    teamId: string,
-    roleId: string,
-    roleName: string,
-    teamMemberId: string,
-    discordUserId: string,
-  ) => {
-    roleAssignedEvents.push({ teamId, roleId, roleName, teamMemberId, discordUserId });
-    return Effect.void;
-  },
-  emitRoleUnassigned: (
-    teamId: string,
-    roleId: string,
-    roleName: string,
-    teamMemberId: string,
-    discordUserId: string,
-  ) => {
-    roleUnassignedEvents.push({ teamId, roleId, roleName, teamMemberId, discordUserId });
-    return Effect.void;
-  },
-  emitRoleCreated: () => Effect.void,
-  emitRoleDeleted: () => Effect.void,
-  findUnprocessed: () => Effect.succeed([]),
-  markProcessed: () => Effect.void,
-  // Purely illustrative for test 10 — the level-based diff never reads this state, so marking an
-  // event failed has no bearing on whether the next pass re-emits it.
-  markFailed: () => Effect.void,
-} as any);
-
 const MockSqlClientLayer = Layer.succeed(
   SqlClient.SqlClient,
   Object.assign(
@@ -739,13 +617,11 @@ const TestLayer = GuildsRpcLive.pipe(
       MockInviteAcceptancesRepository,
       MockBotGuildsRepository,
       MockDiscordChannelsRepository,
-      MockDiscordRoleMappingRepository,
       MockDiscordChannelMappingRepository,
       MockTeamSettingsRepository,
       MockPersonalEventChannelsRepository,
       MockPersonalEventOverflowCategoriesRepository,
       MockRolesRepository,
-      MockRoleSyncEventsRepository,
       MockSqlClientLayer,
       Layer.succeed(EventsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(DiscordRolesRepository, new Proxy({} as any, { get: () => () => Effect.void })),
@@ -1103,7 +979,6 @@ describe('Guild/RegisterMember — PR-8 discord_joined_at (CC-0 / CC-10)', () =>
     const discordId = '300000000000000004';
     const memberId = 'member-discord-joined-4' as TeamMember.TeamMemberId;
     seedActiveMember(discordId, memberId);
-    // Member is missing the Captain role — if the diff ran, this would emit role_assigned.
     return callRegisterMember({
       discord_id: discordId,
       username: 'member-4',
@@ -1114,183 +989,16 @@ describe('Guild/RegisterMember — PR-8 discord_joined_at (CC-0 / CC-10)', () =>
       Effect.tap(() =>
         Effect.sync(() => {
           expect(discordJoinedAt.has(memberId)).toBe(false);
-          expect(roleAssignedEvents.length).toBe(0);
-          expect(roleUnassignedEvents.length).toBe(0);
         }),
       ),
     );
   });
 });
 
-describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
-  itEffect.effect(
-    'emits role_assigned for each missing mapped role when an already-active member joins the guild',
-    () => {
-      const discordId = '400000000000000001';
-      const memberId = 'member-diff-1' as TeamMember.TeamMemberId;
-      seedActiveMember(discordId, memberId);
-      effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
-      // The reporter's exact case: registered on Sideline already, joins Discord with NO roles.
-      return callRegisterMember({
-        discord_id: discordId,
-        username: 'diff-member-1',
-        invite_code: Option.none(),
-        roles: [],
-        source: Option.some('member_add'),
-      }).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(roleAssignedEvents).toHaveLength(1);
-            expect(roleAssignedEvents[0]?.roleId).toBe(CAPTAIN_ROLE_ID);
-            expect(roleAssignedEvents[0]?.teamMemberId).toBe(memberId);
-            expect(roleAssignedEvents[0]?.discordUserId).toBe(discordId);
-            expect(roleUnassignedEvents).toHaveLength(0);
-          }),
-        ),
-      );
-    },
-  );
-
-  itEffect.effect(
-    "emits nothing when the member's Discord roles already match their Sideline roles",
-    () => {
-      const discordId = '400000000000000002';
-      const memberId = 'member-diff-2' as TeamMember.TeamMemberId;
-      seedActiveMember(discordId, memberId);
-      effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
-      return callRegisterMember({
-        discord_id: discordId,
-        username: 'diff-member-2',
-        invite_code: Option.none(),
-        roles: [CAPTAIN_DISCORD_ROLE_ID],
-        source: Option.some('member_add'),
-      }).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(roleAssignedEvents).toHaveLength(0);
-            expect(roleUnassignedEvents).toHaveLength(0);
-          }),
-        ),
-      );
-    },
-  );
-
-  itEffect.effect(
-    'emits role_unassigned for a mapped Discord role the member should not have',
-    () => {
-      const discordId = '400000000000000003';
-      const memberId = 'member-diff-3' as TeamMember.TeamMemberId;
-      seedActiveMember(discordId, memberId);
-      // Desires nothing, but Discord shows them holding the Coach role.
-      effectiveRoles.set(memberId, []);
-      // Blocker (whole-series review of commit 46806427): the unassign candidate list keys on
-      // `member_role_grants`, not merely on the mapping being present — Sideline must have
-      // granted THIS member the Coach role for it to be stripped.
-      grantedRoleIds.set(memberId, [COACH_ROLE_ID]);
-      return callRegisterMember({
-        discord_id: discordId,
-        username: 'diff-member-3',
-        invite_code: Option.none(),
-        roles: [COACH_DISCORD_ROLE_ID],
-        source: Option.some('member_add'),
-      }).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(roleAssignedEvents).toHaveLength(0);
-            expect(roleUnassignedEvents).toHaveLength(1);
-            expect(roleUnassignedEvents[0]?.roleId).toBe(COACH_ROLE_ID);
-            expect(roleUnassignedEvents[0]?.teamMemberId).toBe(memberId);
-          }),
-        ),
-      );
-    },
-  );
-
-  itEffect.effect('never emits for a Discord role with no mapping', () => {
-    const discordId = '400000000000000004';
-    const memberId = 'member-diff-4' as TeamMember.TeamMemberId;
-    seedActiveMember(discordId, memberId);
-    effectiveRoles.set(memberId, []);
-    // Member holds a Discord role Sideline has no mapping for — a captain granted it by hand.
-    return callRegisterMember({
-      discord_id: discordId,
-      username: 'diff-member-4',
-      invite_code: Option.none(),
-      roles: [UNMANAGED_DISCORD_ROLE_ID],
-      source: Option.some('member_add'),
-    }).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          expect(roleAssignedEvents).toHaveLength(0);
-          expect(roleUnassignedEvents).toHaveLength(0);
-        }),
-      ),
-    );
-  });
-
-  itEffect.effect('a second identical member_add for the same member emits nothing', () => {
-    const discordId = '400000000000000005';
-    const memberId = 'member-diff-5' as TeamMember.TeamMemberId;
-    seedActiveMember(discordId, memberId);
-    effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
-    const payload = {
-      discord_id: discordId,
-      username: 'diff-member-5',
-      invite_code: Option.none(),
-      roles: [CAPTAIN_DISCORD_ROLE_ID],
-      source: Option.some<'member_add' | 'reconcile'>('member_add'),
-    };
-    return callRegisterMember(payload).pipe(
-      Effect.flatMap(() => callRegisterMember(payload)),
-      Effect.tap(() =>
-        Effect.sync(() => {
-          expect(roleAssignedEvents).toHaveLength(0);
-          expect(roleUnassignedEvents).toHaveLength(0);
-        }),
-      ),
-    );
-  });
-
-  itEffect.effect(
-    're-running the same reconcile after a simulated MarkEventFailed re-emits the event',
-    () => {
-      const discordId = '400000000000000006';
-      const memberId = 'member-diff-6' as TeamMember.TeamMemberId;
-      seedActiveMember(discordId, memberId);
-      effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
-      const payload = {
-        discord_id: discordId,
-        username: 'diff-member-6',
-        invite_code: Option.none(),
-        roles: [],
-        source: Option.some<'member_add' | 'reconcile'>('reconcile'),
-      };
-      return callRegisterMember(payload).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(roleAssignedEvents).toHaveLength(1);
-          }),
-        ),
-        // Simulate `Role/MarkEventFailed` consuming the just-emitted event — under the old
-        // design this permanently stranded the member (blocker 8). The level-based diff has no
-        // memory of it: nothing here should suppress the next pass.
-        Effect.flatMap(() => Effect.void),
-        Effect.flatMap(() => callRegisterMember(payload)),
-        Effect.tap(() =>
-          Effect.sync(() => {
-            // Same missing role, still missing — re-derived, not gated by prior emission or by
-            // the queue-consumption event above.
-            expect(roleAssignedEvents).toHaveLength(2);
-          }),
-        ),
-      );
-    },
-  );
-
+describe('Guild/RegisterMember — configurable default role (T-S5)', () => {
   // T-S5 case 2 (`.work-plans/configurable-default-roles.md`): `getDefaultRoleId` → `None` (the
   // existing default here — see `resetStores`) must not fail or skip the rest of `setupNewMember`
-  // — it logs and continues, and the Discord-role-mapping assignment (Captain, via
-  // `discordRoleMappings`) must still run.
+  // — it logs and continues.
   itEffect.effect('still runs setupNewMember for a genuinely new member', () => {
     const discordId = '400000000000000007';
     // No seeded membership — this is a brand-new member.
@@ -1298,7 +1006,7 @@ describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
       discord_id: discordId,
       username: 'brand-new-member',
       invite_code: Option.none(),
-      roles: [CAPTAIN_DISCORD_ROLE_ID],
+      roles: [],
       source: Option.some('member_add'),
     }).pipe(
       Effect.tap(() =>
@@ -1308,89 +1016,35 @@ describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
           );
           // `getDefaultRoleId` returned `None` (T-S5/2) — no default-role assignRole call.
           expect(assignRoleCalls.some((c) => c.roleId === GUEST_ROLE_ID)).toBe(false);
-          // But the role-mapping assignment (unrelated to the default) still ran.
-          const memberId = memberships.get(userIdForDiscordId(discordId))?.id;
-          expect(assignRoleCalls).toContainEqual({ memberId, roleId: CAPTAIN_ROLE_ID });
         }),
       ),
     );
   });
 
   // T-S5 case 1 (AC 2): the team has configured a default role (Guest) — `setupNewMember` must
-  // assign it, and the Discord-role-mapping assignment (Captain) must still run afterwards.
-  // FAILS on `main`: `rpc/guild/index.ts`'s log line and mock wiring predate `getDefaultRoleId`
-  // ever resolving a non-Player default — this pins that BOTH assignments land, not just one.
-  itEffect.effect(
-    'assigns the configured default (Guest), and the Discord role-mapping assignments still run afterwards',
-    () => {
-      const discordId = '400000000000000008';
-      defaultRoleIdResult = Option.some({ id: GUEST_ROLE_ID, name: 'Guest' });
-      // No seeded membership — this is a brand-new member.
-      return callRegisterMember({
-        discord_id: discordId,
-        username: 'guest-default-member',
-        invite_code: Option.none(),
-        roles: [CAPTAIN_DISCORD_ROLE_ID],
-        source: Option.some('member_add'),
-      }).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            const memberId = memberships.get(userIdForDiscordId(discordId))?.id;
-            expect(assignRoleCalls).toContainEqual({ memberId, roleId: GUEST_ROLE_ID });
-            expect(assignRoleCalls).toContainEqual({ memberId, roleId: CAPTAIN_ROLE_ID });
-          }),
-        ),
-      );
-    },
-  );
+  // assign it to a genuinely new member.
+  itEffect.effect('assigns the configured default (Guest) to a genuinely new member', () => {
+    const discordId = '400000000000000008';
+    defaultRoleIdResult = Option.some({ id: GUEST_ROLE_ID, name: 'Guest' });
+    // No seeded membership — this is a brand-new member.
+    return callRegisterMember({
+      discord_id: discordId,
+      username: 'guest-default-member',
+      invite_code: Option.none(),
+      roles: [],
+      source: Option.some('member_add'),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          const memberId = memberships.get(userIdForDiscordId(discordId))?.id;
+          expect(assignRoleCalls).toContainEqual({ memberId, roleId: GUEST_ROLE_ID });
+        }),
+      ),
+    );
+  });
 });
 
 describe('Guild/RegisterMember — group-scoped invite binds the group before the role diff (bug 3da93506)', () => {
-  itEffect.effect("binds the invite's group before running the role diff", () => {
-    const discordId = '700000000000000001';
-    return callRegisterMember({
-      discord_id: discordId,
-      username: 'group-invite-member-1',
-      invite_code: Option.some(VALID_CODE_WITH_GROUP),
-      roles: [],
-      source: Option.some('member_add'),
-    }).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          expect(callLog).toContain('group-add');
-          expect(callLog).toContain('role-diff');
-          // `lastIndexOf` vs `indexOf`, deliberately: the property is that EVERY group bind
-          // precedes the FIRST diff, not merely that some one did. This payload passes
-          // `roles: []` so `setupNewMember`'s channel-mapping-derived `addMemberById` never
-          // fires today — but give this test a non-empty `roles` array later and `indexOf`
-          // would silently weaken to "some group-add came first" while still passing.
-          expect(callLog.lastIndexOf('group-add')).toBeLessThan(callLog.indexOf('role-diff'));
-        }),
-      ),
-    );
-  });
-
-  itEffect.effect("emits role_assigned for a Sideline role linked to the invite's group", () => {
-    const discordId = '700000000000000002';
-    return callRegisterMember({
-      discord_id: discordId,
-      username: 'group-invite-member-2',
-      invite_code: Option.some(VALID_CODE_WITH_GROUP),
-      roles: [],
-      source: Option.some('member_add'),
-    }).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          expect(roleAssignedEvents).toHaveLength(1);
-          expect(roleAssignedEvents[0]?.roleId).toBe(GROUP_ROLE_ID);
-          expect(roleAssignedEvents[0]?.roleName).toBe('Strikers Player');
-          expect(roleAssignedEvents[0]?.discordUserId).toBe(discordId);
-          expect(roleUnassignedEvents).toHaveLength(0);
-        }),
-      ),
-    );
-  });
-
   itEffect.effect(
     "emits channel-sync member_added for the invite's group and its ancestors",
     () => {
@@ -1452,7 +1106,6 @@ describe('Guild/RegisterMember — group-scoped invite binds the group before th
           expect(channelSyncCalls.some((call) => call.method === 'emitMembersAddedBatch')).toBe(
             false,
           );
-          expect(roleAssignedEvents).toHaveLength(0);
         }),
       ),
     );
@@ -1818,25 +1471,7 @@ describe('Guild/RegisterMember — group channel role sync on Discord join (bug 
   );
 });
 
-describe('Guild/ReconcileMembers — PR-8 level-based reconcile (CC-10)', () => {
-  itEffect.effect('does not emit role_assigned events in steady state', () => {
-    const discordId = '500000000000000001';
-    const memberId = 'member-reconcile-steady' as TeamMember.TeamMemberId;
-    seedActiveMember(discordId, memberId);
-    effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
-    return callReconcileMembers(
-      [{ discord_id: discordId, username: 'steady-member', roles: [CAPTAIN_DISCORD_ROLE_ID] }],
-      true,
-    ).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          expect(roleAssignedEvents).toHaveLength(0);
-          expect(roleUnassignedEvents).toHaveLength(0);
-        }),
-      ),
-    );
-  });
-
+describe('Guild/ReconcileMembers — group channel role sync regression guard', () => {
   // bug fix-group-channel-discord-join (PR 1) — U10, a regression guard: `emitMemberGroupChannelRoles`
   // must run ONLY when `payload.source` is `Some('member_add')`. `Guild/ReconcileMembers` always
   // supplies `Some('reconcile')` (see the server-side comment at the RPC handler), so it must emit
@@ -1886,220 +1521,6 @@ describe('Guild/ReconcileMembers — PR-8 level-based reconcile (CC-10)', () => 
           Effect.sync(() => {
             expect(emittedBatchEntries()).toHaveLength(0);
             expect(discordJoinedAt.has(memberId)).toBe(false);
-          }),
-        ),
-      );
-    },
-  );
-
-  itEffect.effect('with complete: false runs the diff but sets no discord_joined_at', () => {
-    const discordId = '500000000000000002';
-    const memberId = 'member-reconcile-partial' as TeamMember.TeamMemberId;
-    seedActiveMember(discordId, memberId);
-    effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
-    return callReconcileMembers(
-      [{ discord_id: discordId, username: 'partial-member', roles: [] }],
-      false,
-    ).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          expect(roleAssignedEvents).toHaveLength(1);
-          expect(discordJoinedAt.has(memberId)).toBe(false);
-          expect(markMembersBackfilledCalls).toHaveLength(0);
-        }),
-      ),
-    );
-  });
-
-  itEffect.effect(
-    'with complete: true sets discord_joined_at and bot_guilds.members_backfilled_at',
-    () => {
-      const discordId = '500000000000000003';
-      const memberId = 'member-reconcile-complete' as TeamMember.TeamMemberId;
-      seedActiveMember(discordId, memberId);
-      effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
-      return callReconcileMembers(
-        [{ discord_id: discordId, username: 'complete-member', roles: [] }],
-        true,
-      ).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(roleAssignedEvents).toHaveLength(1);
-            expect(discordJoinedAt.get(memberId)).toBeInstanceOf(Date);
-            expect(markMembersBackfilledCalls).toEqual([GUILD_ID]);
-          }),
-        ),
-      );
-    },
-  );
-
-  itEffect.effect(
-    'stops emitting at the per-guild cap and logs how many members were skipped',
-    () => {
-      // MAX_ROLE_SYNC_EMISSIONS_PER_GUILD_RECONCILE is 200 — 201 members each missing exactly
-      // one mapped role guarantees exactly 1 is deferred to the next pass.
-      const CAP = 200;
-      const members = Array.from({ length: CAP + 1 }, (_, i) => {
-        const discordId = `60000000000000${String(i).padStart(4, '0')}`;
-        const memberId = `member-cap-${i}` as TeamMember.TeamMemberId;
-        seedActiveMember(discordId, memberId);
-        effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
-        return { discord_id: discordId, username: `cap-member-${i}`, roles: [] };
-      });
-      return callReconcileMembers(members, true).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(roleAssignedEvents).toHaveLength(CAP);
-          }),
-        ),
-      );
-    },
-  );
-
-  // Blocker (whole-series review of commit 46806427): PR-8's level-based diff computes
-  // `unassignCandidates` from EVERY managed mapping present in `actual` and absent from
-  // `desired` AND recorded as granted to this member in `member_role_grants` — NOT merely from
-  // "not `adopted`" (`46806427`'s original, overshooting fix). A member holding a hand-made,
-  // adopted Discord role Sideline never granted THEM (no `member_role_grants` row for this
-  // member+role) must never get `role_unassigned` -> `deleteGuildMemberRole` — that is the
-  // destruction of human-managed state `handleDeleted.ts` and the `adopted` column exist to
-  // prevent.
-  itEffect.effect(
-    'never emits role_unassigned for an adopted mapping the member holds but Sideline never granted THEM',
-    () => {
-      const discordId = '500000000000000004';
-      const memberId = 'member-reconcile-adopted' as TeamMember.TeamMemberId;
-      seedActiveMember(discordId, memberId);
-      // Desires nothing — no `member_roles` row for the adopted role — but Discord shows them
-      // holding it (a captain granted it by hand before Sideline adopted the mapping). No
-      // `member_role_grants` row either — Sideline never gave THIS member the role.
-      effectiveRoles.set(memberId, []);
-      return callReconcileMembers(
-        [{ discord_id: discordId, username: 'adopted-member', roles: [ADOPTED_DISCORD_ROLE_ID] }],
-        true,
-      ).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(roleUnassignedEvents).toHaveLength(0);
-            expect(roleAssignedEvents).toHaveLength(0);
-          }),
-        ),
-      );
-    },
-  );
-
-  // The other half of the blocker fix: an adopted mapping Sideline itself GRANTED to this member
-  // (a `member_role_grants` row exists) is no longer protected just because the mapping is
-  // `adopted: true` — provenance is per-member, not per-mapping. This is what lets a member
-  // demoted out of an adopted role (e.g. a group-detach) actually lose Discord access, instead
-  // of keeping it forever the way `46806427`'s blanket `!adopted` exclusion left them.
-  itEffect.effect(
-    'emits role_unassigned for an adopted mapping Sideline itself granted to this member',
-    () => {
-      const discordId = '500000000000000006';
-      const memberId = 'member-reconcile-adopted-granted' as TeamMember.TeamMemberId;
-      seedActiveMember(discordId, memberId);
-      effectiveRoles.set(memberId, []);
-      grantedRoleIds.set(memberId, [ADOPTED_ROLE_ID]);
-      return callReconcileMembers(
-        [
-          {
-            discord_id: discordId,
-            username: 'adopted-member-granted',
-            roles: [ADOPTED_DISCORD_ROLE_ID],
-          },
-        ],
-        true,
-      ).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(roleUnassignedEvents).toHaveLength(1);
-            expect(roleUnassignedEvents[0]?.roleId).toBe(ADOPTED_ROLE_ID);
-            expect(roleUnassignedEvents[0]?.teamMemberId).toBe(memberId);
-          }),
-        ),
-      );
-    },
-  );
-
-  // bug 3da93506: `assignCandidates` used to be filtered from `managed` (existing
-  // `discord_role_mappings` rows), so a Sideline role that had never been mapped could never be
-  // provisioned by this automatic path at all — only by the manual "sync roles" button, which
-  // emits from `desired` directly. The bot's `handleMemberAdded` calls `ensureMapping`
-  // (adopt-or-create) before assigning, so an unmapped role is provisionable, not unknown.
-  itEffect.effect('emits role_assigned for a desired role that has no mapping yet', () => {
-    const discordId = '500000000000000007';
-    const memberId = 'member-reconcile-unmapped' as TeamMember.TeamMemberId;
-    seedActiveMember(discordId, memberId);
-    effectiveRoles.set(memberId, [{ role_id: UNMAPPED_ROLE_ID, role_name: 'Brand New' }]);
-    return callReconcileMembers(
-      [{ discord_id: discordId, username: 'unmapped-role-member', roles: [] }],
-      true,
-    ).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          expect(roleAssignedEvents).toHaveLength(1);
-          expect(roleAssignedEvents[0]?.roleId).toBe(UNMAPPED_ROLE_ID);
-          // The name rides along from `desired` (`effectiveRolesFrom`), not from a
-          // `findRoleById` lookup — `UNMAPPED_ROLE_ID` is not in `MockRolesRepository` at all.
-          expect(roleAssignedEvents[0]?.roleName).toBe('Brand New');
-          // The anti-stripping guard (CC-8) is untouched: it lives on `unassignCandidates`,
-          // which is still filtered from `managed`.
-          expect(roleUnassignedEvents).toHaveLength(0);
-        }),
-      ),
-    );
-  });
-
-  // The other side of the same change: widening assignment to `desired` must not re-emit for a
-  // role the member already holds, or steady state would flood the queue every pass.
-  itEffect.effect('still emits nothing for a mapped role the member already holds', () => {
-    const discordId = '500000000000000008';
-    const memberId = 'member-reconcile-unmapped-steady' as TeamMember.TeamMemberId;
-    seedActiveMember(discordId, memberId);
-    effectiveRoles.set(memberId, [
-      { role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' },
-      { role_id: UNMAPPED_ROLE_ID, role_name: 'Brand New' },
-    ]);
-    return callReconcileMembers(
-      [
-        {
-          discord_id: discordId,
-          username: 'unmapped-steady-member',
-          roles: [CAPTAIN_DISCORD_ROLE_ID],
-        },
-      ],
-      true,
-    ).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          // Only the still-unmapped role — the mapped-and-held Captain role is not re-emitted.
-          expect(roleAssignedEvents).toHaveLength(1);
-          expect(roleAssignedEvents[0]?.roleId).toBe(UNMAPPED_ROLE_ID);
-          expect(roleUnassignedEvents).toHaveLength(0);
-        }),
-      ),
-    );
-  });
-
-  // Symmetric with the above: an adopted mapping is still eligible to be ADDED — only stripping
-  // is forbidden.
-  itEffect.effect(
-    'still emits role_assigned for an adopted mapping the member newly desires',
-    () => {
-      const discordId = '500000000000000005';
-      const memberId = 'member-reconcile-adopted-add' as TeamMember.TeamMemberId;
-      seedActiveMember(discordId, memberId);
-      effectiveRoles.set(memberId, [{ role_id: ADOPTED_ROLE_ID, role_name: 'Adopted' }]);
-      return callReconcileMembers(
-        [{ discord_id: discordId, username: 'adopted-member-add', roles: [] }],
-        true,
-      ).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(roleAssignedEvents).toHaveLength(1);
-            expect(roleAssignedEvents[0]?.roleId).toBe(ADOPTED_ROLE_ID);
-            expect(roleUnassignedEvents).toHaveLength(0);
           }),
         ),
       );

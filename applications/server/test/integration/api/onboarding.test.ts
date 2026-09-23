@@ -42,7 +42,6 @@ import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepos
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -512,10 +511,6 @@ const StubRepositoriesLayer = Layer.mergeAll(
     markAllAsRead: () => Effect.void,
     findById: () => Effect.succeed(Option.none()),
   } as any),
-  Layer.succeed(
-    RoleSyncEventsRepository,
-    new Proxy({} as any, { get: () => () => Effect.void }) as any,
-  ),
   Layer.succeed(
     ChannelSyncEventsRepository,
     new Proxy({} as any, { get: () => () => Effect.void }) as any,

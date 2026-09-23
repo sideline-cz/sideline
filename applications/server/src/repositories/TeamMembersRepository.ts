@@ -1,4 +1,4 @@
-import { Discord, Role, RoleApi, Team, TeamMember, User } from '@sideline/domain';
+import { Discord, Role, Team, TeamMember, User } from '@sideline/domain';
 import { LogicError, Schemas, SqlErrors } from '@sideline/effect-lib';
 import { Data, Effect, Layer, Option, pipe, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -142,19 +142,6 @@ export class RosterEntry extends Schema.Class<RosterEntry>('RosterEntry')({
   active: Schema.Boolean,
 }) {}
 
-// Raw row shape of `team_members.last_role_sync_*` (see `RoleSyncEventsRepository.recordLastRoleSync`,
-// the only writer). `last_role_sync_at` is a `TIMESTAMPTZ` column read back through node-pg as a JS
-// `Date`, so it MUST use `Schema.DateTimeUtcFromDate` — NOT `Schema.DateTimeUtc` (that codec expects
-// an ISO string / epoch and silently short-circuits `Schema.OptionFromNullOr` on every row where the
-// column is NULL, only throwing once a real, non-null timestamp reaches the inner decoder). Mirrors
-// `discord_joined_at` in `findDiscordJoinedAtQuery` above, the established shape for this exact
-// TIMESTAMPTZ-via-node-pg situation.
-const LastRoleSyncRow = Schema.Struct({
-  last_role_sync_at: Schema.OptionFromNullOr(Schema.DateTimeUtcFromDate),
-  last_role_sync_state: Schema.OptionFromNullOr(Schema.Literals(['ok', 'failed'])),
-  last_role_sync_error: Schema.OptionFromNullOr(RoleApi.DiscordSyncErrorCode),
-});
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -266,8 +253,7 @@ const make = Effect.gen(function* () {
   // `is_archived` / `team_id` / depth-guard filters — that divergence is exactly what let
   // an archived group keep granting a role here after the roster and the "still held?"
   // guard in `api/role.ts`'s `unassignRole` (both on the fragment) had already revoked
-  // it. Used by `syncMemberDiscordRoles.ts` / `reconcileMemberDiscordRoles.ts` to compute
-  // the "desired" role set and by `unassignRole`'s post-delete re-check.
+  // it. Used by `unassignRole`'s post-delete re-check.
   const findEffectiveRoleIdsForMemberQuery = SqlSchema.findAll({
     Request: Schema.String,
     Result: EffectiveRoleRow,
@@ -281,62 +267,6 @@ const make = Effect.gen(function* () {
 
   const findEffectiveRoleIdsForMember = (teamMemberId: TeamMember.TeamMemberId) =>
     findEffectiveRoleIdsForMemberQuery(teamMemberId).pipe(catchSqlErrors);
-
-  const BatchEffectiveRoleRow = Schema.Struct({
-    team_member_id: TeamMember.TeamMemberId,
-    role_id: Role.RoleId,
-    role_name: Schema.String,
-  });
-
-  // Batched form of `findEffectiveRoleIdsForMemberQuery` above, for `utils/syncGroupRoleMembers.ts`
-  // (the group-shaped role-sync diff — `fix/group-role-discord-sync`): ONE query over MANY members
-  // instead of one `findEffectiveRoleIdsForMember` call per member, so a group operation's cost
-  // stays constant regardless of how many members it touches. Built on the SAME
-  // `effectiveRolesFrom` fragment (see "Effective Roles Are Derived In Exactly One Place" in
-  // `applications/server/AGENTS.md`) — never a second hand-rolled ancestor walk.
-  //
-  // This used to bolt on its own `JOIN roles r ON r.id = er.role_id AND r.is_archived = false`,
-  // because `effectiveRolesFrom` did not filter archived roles and so disagreed with
-  // `RolesRepository.findRoleById`. The filter now lives in the fragment itself (decision 2 of
-  // `effectiveRoles.ts`'s header), so this query agrees with `findEffectiveRoleIdsForMemberQuery`
-  // above — and with every other splice site — for free. Do NOT re-add a per-caller archived-role
-  // join: that divergence is what made `syncGroupRoleMembers.ts`'s before/after diff disagree with
-  // itself for an archived-but-still-held role.
-  const findEffectiveRolesForMembersQuery = SqlSchema.findAll({
-    Request: Schema.Array(TeamMember.TeamMemberId),
-    Result: BatchEffectiveRoleRow,
-    execute: (memberIds) => sql`
-      SELECT tm.id AS team_member_id, er.role_id AS role_id, er.name AS role_name
-      FROM team_members tm
-      JOIN LATERAL ${sql.unsafe(effectiveRolesFrom('tm'))} er ON true
-      WHERE tm.id IN ${sql.in(memberIds)}
-    `,
-  });
-
-  const findEffectiveRolesForMembers = (memberIds: ReadonlyArray<TeamMember.TeamMemberId>) => {
-    if (memberIds.length === 0) return Effect.succeed<Array<typeof BatchEffectiveRoleRow.Type>>([]);
-    return findEffectiveRolesForMembersQuery([...memberIds]).pipe(catchSqlErrors);
-  };
-
-  const GrantedRolePairRow = Schema.Struct({
-    team_member_id: TeamMember.TeamMemberId,
-    role_id: Role.RoleId,
-  });
-
-  // Batched form of `findGrantedRoleIds` below, for `utils/syncGroupRoleMembers.ts`'s anti-stripping
-  // gate over many members at once.
-  const findGrantedRolePairsForMembersQuery = SqlSchema.findAll({
-    Request: Schema.Array(TeamMember.TeamMemberId),
-    Result: GrantedRolePairRow,
-    execute: (memberIds) => sql`
-      SELECT team_member_id, role_id FROM member_role_grants WHERE team_member_id IN ${sql.in(memberIds)}
-    `,
-  });
-
-  const findGrantedRolePairsForMembers = (memberIds: ReadonlyArray<TeamMember.TeamMemberId>) => {
-    if (memberIds.length === 0) return Effect.succeed<Array<typeof GrantedRolePairRow.Type>>([]);
-    return findGrantedRolePairsForMembersQuery([...memberIds]).pipe(catchSqlErrors);
-  };
 
   const findByUserQuery = SqlSchema.findAll({
     Request: Schema.String,
@@ -539,56 +469,6 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
-  // Blocker (whole-series review of `fix/discord-onboarding-webapp`, commit 46806427):
-  // per-member Discord-role provenance. `member_role_grants` records "Sideline's own
-  // `handleAssigned.ts` successfully added this Discord role to this member" — a MEMBER-level
-  // fact, unlike `discord_role_mappings.adopted` which is a MAPPING-level fact and cannot answer
-  // "did THIS member get the role from Sideline or by hand". `recordRoleGrant` /
-  // `clearRoleGrant` are called from `rpc/role/index.ts`'s `Role/MarkEventProcessed` handler,
-  // keyed off the very `role_assigned` / `role_unassigned` event that was just marked processed —
-  // i.e. only after the bot's REST call to Discord actually succeeded. See the migration
-  // (`1791100000_create_member_role_grants.ts`) for the full rationale and why no backfill exists.
-  const recordRoleGrantQuery = SqlSchema.void({
-    Request: MemberRoleInput,
-    execute: (input) => sql`
-      INSERT INTO member_role_grants (team_member_id, role_id)
-      VALUES (${input.team_member_id}, ${input.role_id})
-      ON CONFLICT (team_member_id, role_id) DO UPDATE SET granted_at = now()
-    `,
-  });
-
-  const clearRoleGrantQuery = SqlSchema.void({
-    Request: MemberRoleInput,
-    execute: (input) => sql`
-      DELETE FROM member_role_grants
-      WHERE team_member_id = ${input.team_member_id} AND role_id = ${input.role_id}
-    `,
-  });
-
-  const findGrantedRoleIdsQuery = SqlSchema.findAll({
-    Request: Schema.String,
-    Result: Schema.Struct({ role_id: Role.RoleId }),
-    execute: (teamMemberId) => sql`
-      SELECT role_id FROM member_role_grants WHERE team_member_id = ${teamMemberId}
-    `,
-  });
-
-  const recordRoleGrant = (teamMemberId: TeamMember.TeamMemberId, roleId: Role.RoleId) =>
-    recordRoleGrantQuery({ team_member_id: teamMemberId, role_id: roleId }).pipe(catchSqlErrors);
-
-  const clearRoleGrant = (teamMemberId: TeamMember.TeamMemberId, roleId: Role.RoleId) =>
-    clearRoleGrantQuery({ team_member_id: teamMemberId, role_id: roleId }).pipe(catchSqlErrors);
-
-  // Consumed by `reconcileMemberDiscordRoles.ts` / `syncMemberDiscordRoles.ts` to restrict their
-  // unassign candidates to roles THIS member actually received via Sideline — never from
-  // `adopted` alone. A member with no rows here has no recorded Sideline provenance for any role;
-  // both diff functions treat that as "don't strip" (see their doc comments).
-  const findGrantedRoleIds = (teamMemberId: TeamMember.TeamMemberId) =>
-    findGrantedRoleIdsQuery(teamMemberId).pipe(
-      Effect.map((rows) => rows.map((row) => row.role_id)),
-      catchSqlErrors,
-    );
-
   // PR-8 (CC-10): idempotent by construction — a repeated `member_add`/`reconcile` observation
   // never overwrites an earlier timestamp, which is what makes this safe to call unconditionally
   // and structurally impossible to "consume" (see blocker 7 in the plan).
@@ -632,40 +512,6 @@ const make = Effect.gen(function* () {
   const findDiscordJoinedAt = (teamId: Team.TeamId, userId: User.UserId) =>
     findDiscordJoinedAtQuery({ team_id: teamId, user_id: userId }).pipe(
       Effect.map(Option.flatMap((row) => row.discord_joined_at)),
-      catchSqlErrors,
-    );
-
-  // Closes the read side of PR-9/9b: `RoleSyncEventsRepository.recordLastRoleSync` (called from
-  // `markProcessed`/`markFailed`) is the only writer of these three columns; this is what
-  // `syncMemberDiscordRoles.ts` reads to populate `roleSyncState` / `lastRoleSyncAt` /
-  // `lastRoleSyncError` on `RoleApi.SyncMemberRolesResult` with the member's PREVIOUS completed
-  // attempt (as opposed to the freshly-enqueued counts from the current click).
-  //
-  // `Option.none()` covers BOTH "no such member row" and "member row exists but has never
-  // completed a role sync" (`last_role_sync_state IS NULL`) — the caller only needs to distinguish
-  // "there is a prior attempt on record" from "there is not", not which of those two produced it.
-  const findLastRoleSyncQuery = SqlSchema.findOneOption({
-    Request: Schema.Struct({ member_id: TeamMember.TeamMemberId }),
-    Result: LastRoleSyncRow,
-    execute: (input) => sql`
-      SELECT last_role_sync_at, last_role_sync_state, last_role_sync_error
-      FROM team_members WHERE id = ${input.member_id}
-    `,
-  });
-
-  const findLastRoleSync = (memberId: TeamMember.TeamMemberId) =>
-    findLastRoleSyncQuery({ member_id: memberId }).pipe(
-      Effect.map(
-        Option.flatMap((row) =>
-          // Both columns are always written together by `recordLastRoleSync` — `zipWith` is a
-          // defensive pairing (never actually `None` on one side alone), not a real partiality.
-          Option.zipWith(row.last_role_sync_state, row.last_role_sync_at, (state, at) => ({
-            state,
-            at,
-            errorCode: row.last_role_sync_error,
-          })),
-        ),
-      ),
       catchSqlErrors,
     );
 
@@ -855,8 +701,6 @@ const make = Effect.gen(function* () {
     findRosterByTeam,
     findTeamMembersWithNames,
     findEffectiveRoleIdsForMember,
-    findEffectiveRolesForMembers,
-    findGrantedRolePairsForMembers,
     findMembershipByIds,
     findMembershipByDiscordAndTeam,
     findRosterMemberByIds,
@@ -865,13 +709,9 @@ const make = Effect.gen(function* () {
     getDefaultRoleId,
     assignRole,
     unassignRole,
-    recordRoleGrant,
-    clearRoleGrant,
-    findGrantedRoleIds,
     markDiscordJoined,
     clearDiscordJoined,
     findDiscordJoinedAt,
-    findLastRoleSync,
     setJerseyNumber,
     setVariableSymbol,
     findByTeamAndVariableSymbol,

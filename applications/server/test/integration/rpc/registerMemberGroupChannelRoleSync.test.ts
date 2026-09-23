@@ -34,7 +34,6 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -42,7 +41,6 @@ import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRep
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
 import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SudoSessionsRepository } from '~/repositories/SudoSessionsRepository.js';
@@ -63,7 +61,6 @@ const PlainRepositories = Layer.mergeAll(
   TeamsRepository.Default,
   UsersRepository.Default,
   TeamMembersRepository.Default,
-  DiscordRoleMappingRepository.Default,
   DiscordChannelMappingRepository.Default,
   GroupsRepository.Default,
   InviteAcceptancesRepository.Default,
@@ -74,7 +71,6 @@ const PlainRepositories = Layer.mergeAll(
   EventsRepository.Default,
   SudoSessionsRepository.Default,
   RolesRepository.Default,
-  RoleSyncEventsRepository.Default,
   RostersRepository.Default,
   ChannelSyncEventsRepository.Default,
   TeamInvitesRepository.Default,

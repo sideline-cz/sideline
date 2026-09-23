@@ -697,22 +697,6 @@ Cached channel list fetched from Discord for each registered guild.
 
 ---
 
-#### `discord_role_mappings`
-
-Links an application role to its corresponding Discord role in a guild.
-
-| Column | Type | Constraints | Default |
-|---|---|---|---|
-| `id` | UUID | PK | `gen_random_uuid()` |
-| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
-| `role_id` | UUID | NOT NULL, FK → `roles(id)` ON DELETE CASCADE | — |
-| `discord_role_id` | TEXT | NOT NULL | — |
-| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
-
-**Unique**: `(team_id, role_id)`, `(team_id, discord_role_id)`
-
----
-
 #### `discord_channel_mappings`
 
 Links a group or roster to its corresponding Discord channel and/or role for permission syncing.
@@ -734,32 +718,6 @@ Links a group or roster to its corresponding Discord channel and/or role for per
 **Check constraint**: `discord_channel_mappings_at_least_one` — `discord_channel_id IS NOT NULL OR discord_role_id IS NOT NULL`
 
 **Notes**: `entity_type` is `'group'` or `'roster'`. Exactly one of `group_id` or `roster_id` is set. `discord_channel_id` is nullable — a mapping may represent a role-only provisioning (no channel) when `create_discord_channel_on_group` is `false` or before a channel is explicitly created. At least one of `discord_channel_id` or `discord_role_id` must be non-null. `claim_thread_id` is the Discord snowflake of the persistent "Training claims" thread created in the owner group's channel; set by `handleTrainingClaimRequest` the first time a training claim-request is processed for this owner group and retained across subsequent trainings so all claim embeds land in the same thread. Can be cleared by the bot if the thread is deleted (Discord error 10003), after which it is recreated on the next claim-request. Added in migration `1747600000_decouple_channel_role`. `claim_thread_id` column added in migration `1789400005_add_claim_thread_id_to_channel_mappings`.
-
----
-
-#### `role_sync_events`
-
-Outbox table driving role-assignment changes in Discord. Polled by the bot's Role Sync worker.
-
-| Column | Type | Constraints | Default |
-|---|---|---|---|
-| `id` | UUID | PK | `gen_random_uuid()` |
-| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
-| `guild_id` | TEXT | NOT NULL | — |
-| `event_type` | TEXT | NOT NULL, CHECK (`'role_assigned'`, `'role_unassigned'`, `'role_created'`, `'role_deleted'`) | — |
-| `role_id` | UUID | NOT NULL | — |
-| `role_name` | TEXT | — | — |
-| `team_member_id` | UUID | — | — |
-| `discord_user_id` | TEXT | — | — |
-| `processed_at` | TIMESTAMPTZ | — | — |
-| `error` | TEXT | — | — |
-| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
-
-**Indexes**: `idx_role_sync_events_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`
-
-**Notes**: `role_id` and `team_member_id` are stored as plain UUID (no FK constraint) so that rows are retained even after the referenced entities are deleted, providing a complete audit trail.
-
-**No longer written or read.** A Sideline role is a permissions construct and is never mirrored into a Discord guild role, so `RoleSyncEventsRepository`'s emit functions are no-ops and `findUnprocessed` returns nothing — rows enqueued before that change are left unprocessed rather than drained, because draining them would create exactly the Discord roles the change removes. Discord roles come from groups and rosters (`channel_sync_events` → `discord_channel_mappings`) and from achievements (`role_provision_events`). This table is dropped in a follow-up migration.
 
 ---
 
@@ -2266,6 +2224,7 @@ All 109 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1792400000 | `create_event_types` | Creates `event_types` (see [6. Events](#6-events) above), seeds all pre-existing teams with the six default rows (`NULL` name, colours matching the previous hardcoded web palette), and creates `seed_default_event_types()` — an `AFTER INSERT ON teams` trigger seeding the same six rows for every future team. Adds `events.event_type_id UUID REFERENCES event_types(id) ON DELETE SET NULL`, index `idx_events_event_type_id`, and backfills it from `event_type`. Creates `events_sync_event_type()` and its `BEFORE INSERT OR UPDATE OF event_type, event_type_id, team_id ON events` trigger — see the ownership notes under `events` above and the root `AGENTS.md` "Event Types" section. |
 | 1792500000 | `add_teams_verify_intro_template` | Adds `verify_intro_template TEXT` (nullable) to teams — per-team override for the body of the pinned intro embed in the verify channel; NULL uses the built-in copy |
 | 1792500001 | `add_roles_is_default` | Adds `is_default BOOLEAN NOT NULL DEFAULT false` (`IF NOT EXISTS`) to `roles`. Backfills `is_default = true` onto every existing team's built-in `Player` role (behaviour-preserving — existing teams keep handing new members `Player`). Creates the partial unique index `idx_roles_team_default` on `roles(team_id) WHERE is_default AND NOT is_archived` *after* the backfill, enforcing at most one default role per team. |
+| 1792600000 | `drop_role_sync` | Drops `role_sync_events`, `discord_role_mappings`, and `member_role_grants` tables; drops `team_members.last_role_sync_at`, `last_role_sync_state`, `last_role_sync_error` columns. Completes the removal of Sideline-role → Discord-role mirroring (Release B of the expand/contract); `teams.guild_id` and `idx_teams_guild_id` are unaffected — Discord roles still come from groups/rosters (`channel_sync_events`) and achievements (`discord_role_provision_events`) |
 
 ### After Migrations (seed data)
 
@@ -2279,11 +2238,10 @@ All 109 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 
 ### Outbox Pattern
 
-Three tables act as outbox queues for bot-server communication:
+Several tables act as outbox queues for bot-server communication:
 
 | Table | Bot worker | Event types |
 |---|---|---|
-| `role_sync_events` | Role Sync | `role_created`, `role_deleted`, `role_assigned`, `role_unassigned` |
 | `channel_sync_events` | Channel Sync | `channel_created`, `channel_updated`, `channel_deleted`, `channel_archived`, `channel_restored`, `channel_detached`, `member_added`, `member_removed`, `roster_role_reconcile` |
 | `event_sync_events` | Event Sync | `event_created`, `event_updated`, `event_cancelled`, `rsvp_reminder`, `event_started`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder`, `coaching_status`, `event_roster_approval_request`, `event_roster_approval_cancel`, `event_roster_thread_delete`, `teams_generated`, `event_channel_moved` |
 | `achievement_sync_events` | Achievement Sync | `achievement_earned` |
@@ -2300,9 +2258,9 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses, email_forwarding_config, email_messages, email_post_sync_events, player_ratings, player_rating_history, training_games, team_generation_config, personal_event_channels, personal_event_overflow_categories, sudo_sessions, bank_sync_config, bank_statement_periods, bank_transactions, bank_token_expiry_events, bank_token_expiry_sent). Deletion of a `training_games` row cascades to its `training_game_participants` rows. Deletion of an `email_messages` row cascades to its `email_attachments` and `email_post_sync_events` rows. Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, achievement_sync_events, and training_game_participants. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`). A `bank_transactions` row is protected (`ON DELETE RESTRICT`) while any `payments` row still references it via `bank_transaction_id`. `fio_token_throttle` has no FK to any table — it is keyed on a token fingerprint hash and is not cleaned up by team or config deletion (an orphaned row is harmless).
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_channel_mappings, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses, email_forwarding_config, email_messages, email_post_sync_events, player_ratings, player_rating_history, training_games, team_generation_config, personal_event_channels, personal_event_overflow_categories, sudo_sessions, bank_sync_config, bank_statement_periods, bank_transactions, bank_token_expiry_events, bank_token_expiry_sent). Deletion of a `training_games` row cascades to its `training_game_participants` rows. Deletion of an `email_messages` row cascades to its `email_attachments` and `email_post_sync_events` rows. Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, achievement_sync_events, and training_game_participants. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`). A `bank_transactions` row is protected (`ON DELETE RESTRICT`) while any `payments` row still references it via `bank_transaction_id`. `fio_token_throttle` has no FK to any table — it is keyed on a token fingerprint hash and is not cleaned up by team or config deletion (an orphaned row is harmless).
 
-Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
+Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 
 ### Built-in Seeding
 

@@ -254,9 +254,9 @@ const make = Effect.gen(function* () {
    * sit in the RECURSIVE TERM — so an archived ancestor SEVERS the chain and nothing above it is
    * ever reached — AND on the final join, so the archived node's own row is excluded too. The
    * SEVERING SEMANTICS here must match the ancestor walk in `repositories/effectiveRoles.ts`
-   * (see its header, decision 1): `reconcileMemberDiscordRoles` and the `member_added`
-   * channel-sync emit must agree about which ancestors still grant, or role sync and channel
-   * sync contradict each other on the same tree.
+   * (see its header, decision 1): the effective-roles walk and the `member_added` channel-sync
+   * emit must agree about which ancestors still grant, or the two contradict each other on the
+   * same tree.
    *
    * The recursive term is textually identical to that walk. Two differences are deliberate and
    * do NOT affect severing — do not "fix" them into a literal match:
@@ -335,8 +335,8 @@ const make = Effect.gen(function* () {
    * `ORDER BY min(depth), name, id` — deterministic and NEAREST-FIRST. Without an `ORDER BY`,
    * Postgres returns `reachable` in arbitrary order; `emitMemberGroupChannelRoles.ts`'s
    * `MAX_GROUP_CHANNEL_EMISSIONS_PER_MEMBER` cap then truncates whatever `slice(0, …)` happens to
-   * land on — and unlike `reconcileMemberDiscordRoles`'s role diff, that truncation on this path
-   * is PERMANENT (this query only ever runs once, on the member's join), so an arbitrary order
+   * land on — and that truncation on this path is PERMANENT (this query only ever runs once, on
+   * the member's join, with no later re-derive to catch it), so an arbitrary order
    * would nondeterministically and permanently lose groups for a member in >25 mapped, unheld
    * groups. Ordering nearest-first means the member's own groups (depth 0) and closest ancestors
    * are the ones kept when the cap bites, which is the more defensible loss. A group can be

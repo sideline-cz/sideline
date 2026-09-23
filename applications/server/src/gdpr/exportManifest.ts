@@ -233,7 +233,6 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
   own('events', 'team_members', ['created_by', 'claimed_by'], authorship),
   own('fee_assignments', 'team_members', ['team_member_id'], financial),
   own('group_members', 'team_members', ['team_member_id'], pseudonymised),
-  own('member_role_grants', 'team_members', ['team_member_id'], pseudonymised),
   own('member_roles', 'team_members', ['team_member_id'], pseudonymised),
   own('payments', 'team_members', ['team_member_id'], financial),
   skip(
@@ -293,13 +292,6 @@ export const SUBJECT_ERASURE: ReadonlyArray<{
     placeholderColumns: ['discord_id', 'username'],
     reason:
       'Every identifying field on the account. Scrubbing here is what turns the id in all 49 referencing tables into a pseudonym.',
-  },
-  {
-    table: 'team_members',
-    nullColumns: ['last_role_sync_error'],
-    placeholderColumns: [],
-    reason:
-      "Holds no identity of its own — it borrows the account's. Only the sync error is cleared, because Discord error text can quote a username.",
   },
 ];
 

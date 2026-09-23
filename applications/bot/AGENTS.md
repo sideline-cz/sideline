@@ -15,7 +15,7 @@ src/
 ├── commands/        — Slash command registry (event/create, event/list, event/refresh, training/*, carpool/*, makanicko/*, finance/*, poll, info, summon, summarize, report)
 ├── interactions/    — Component interaction registry (buttons/selects/modals)
 ├── events/          — Gateway event handler registry (guild, member, invite, channel lifecycle)
-├── services/        — Caches (GuildRolesCache, OnboardingRoleCache, VerificationChannelCache), sync RPC client (SyncRpc), welcome helpers (InviteCache, inviteDiff, welcomeRenderer), and outbound non-Discord HTTP clients (githubIssue)
+├── services/        — Caches (OnboardingRoleCache, VerificationChannelCache), sync RPC client (SyncRpc), welcome helpers (InviteCache, inviteDiff, welcomeRenderer), and outbound non-Discord HTTP clients (githubIssue)
 ├── rcp/channel/     — Channel sync event handlers
 │   ├── ProcessorService.ts    — Match.tag dispatcher for channel events; classifies failures as transient vs permanent
 │   ├── channelUtils.ts        — Shared Discord helpers (deleteRole, deleteChannelAndRole)
@@ -178,7 +178,7 @@ Two idioms, by the error channel:
 
 The underlying boolean predicates (`isDiscordPermissionError`, `isDiscordNotFoundError`, `isPermanentError`) remain exported for the cases where a tagged failure does NOT fit: retry `while` / `catchIf` predicates (channel-sync, above; `isDiscordNotFoundError` at `src/rcp/channel/channelUtils.ts:19` and `:42`, `src/rcp/channel/handleArchived.ts:22`) and handlers whose layered error propagation would ripple (`src/commands/sudo/handler.ts`, `src/interactions/sudo.ts:257`). **Reach for `isDiscordNotFoundError` for ANY idempotent Discord DELETE/revoke** — it is the one predicate whose docblock contract is "treat as success rather than an error", and it already covers the three code-only forms a bare `status === 404` check misses. All shape probing (`isRecord` / `asRecord` / `numberProp`) lives in `~/rest/recordProbe.ts` — never hand-roll a `value as Record<string, unknown>` cast to read an error's fields.
 
-**A predicate whose branch REPLACES a stored id must match the Discord JSON code only, never the HTTP status.** `isUnknownRoleError` (10011, drops the stale `discord_role_mappings` row) and `isUnknownMessageError` (10008, recreates the personal event message) both exist for that reason: a bare `status === 404` on those routes also fires for Unknown Channel (10003) and for any other 404 the route can return, and would discard a perfectly good row. Pick by the reaction, not by the HTTP code — "treat as already-done" → `isDiscordNotFoundError`; "throw away the id I stored and get a new one" → the code-only predicate. Reference call sites: `src/rcp/channel/channelUtils.ts` (`clearStaleRoleOnUnknownRole`), `src/rcp/personalEvents/handleReconcile.ts`.
+**A predicate whose branch REPLACES a stored id must match the Discord JSON code only, never the HTTP status.** `isUnknownRoleError` (10011, clears the stale `discord_channel_mappings.discord_role_id`) and `isUnknownMessageError` (10008, recreates the personal event message) both exist for that reason: a bare `status === 404` on those routes also fires for Unknown Channel (10003) and for any other 404 the route can return, and would discard a perfectly good row. Pick by the reaction, not by the HTTP code — "treat as already-done" → `isDiscordNotFoundError`; "throw away the id I stored and get a new one" → the code-only predicate. Reference call sites: `src/rcp/channel/channelUtils.ts` (`clearStaleRoleOnUnknownRole`), `src/rcp/personalEvents/handleReconcile.ts`.
 
 **Never re-inline the classifier or re-declare the probing primitives.** There are no remaining inline copies; keep it that way.
 
@@ -309,7 +309,7 @@ When `Guild/RegisterMember`'s response says the team's profile gate is on and th
 
 Rules:
 
-1. **`'Sideline Unverified'` must have NO `discord_role_mappings` row and NO Sideline `roles` row, and the two omissions are not redundant.** Since #689 (`4224178e`) they guard different halves of `reconcileMemberDiscordRoles`: the missing **`roles` row** keeps the role out of `desired` (`findEffectiveRoleIdsForMember`), so it is never auto-**assigned**; the missing **mapping row** keeps it out of `managed`, so it is never **stripped** (the CC-8 anti-stripping guard). Before #689 the mapping alone covered both, because assignment candidates were intersected with `discord_role_mappings`; they no longer are (see `applications/server/AGENTS.md` → "Role-sync diffs: assignment is unfiltered, removal is gated"). Adding EITHER row breaks the role. Never map it, never model it as a Sideline role.
+1. **`'Sideline Unverified'` must have NO Sideline `roles` row.** That absence is what keeps it from ever being auto-assigned or auto-stripped by anything else in the app — nothing treats it as a permissions construct, so nothing manages it but the join/leave and verify flows in this module. Never give it a `roles` row, never model it as a Sideline role.
 2. **Grant and revoke are evaluated on EVERY `guildMemberAdd`, not only on modal success.** Gate on → profile incomplete → `grantUnverified`; gate on → profile complete → `revokeUnverified`; gate off → do nothing at all (no role lookup, no channel lookup). This is what self-heals a member who finished their profile on the web, where the bot never saw a modal submit.
 3. **Every role/channel step here is best-effort and must never fail the join.** Wrap in `Effect.catchCause(... logWarning)`; a missing `MANAGE_ROLES` / `MANAGE_CHANNELS` permission logs a warning and the member still joins. There is no reconciler and no sweep for a stuck role — the member's next join or next `/dokoncit` is the heal.
 4. **The revoke path uses `findUnverifiedRole`, never `ensureUnverifiedRole`.** Creating the role you are about to remove is a Discord write per join for every already-complete member.
@@ -337,21 +337,7 @@ When a gateway handler needs to schema-validate its raw payload AND perform Effe
 
 The bot and server communicate via an **event-driven polling pattern** for syncing Discord resources.
 
-### Role Sync (roles ↔ Discord roles)
-
-Syncs team roles to Discord guild roles. When roles are created/deleted/assigned/unassigned, the server emits events to `role_sync_events`.
-
-| Component | File |
-|-----------|------|
-| Domain model | `packages/domain/src/models/RoleSyncEvent.ts` |
-| Bot service | `src/services/RoleSyncService.ts` |
-| Mapping table | `discord_role_mappings` (team_id + role_id → discord_role_id) |
-
-Event types: `role_created`, `role_deleted`, `role_assigned`, `role_unassigned`
-
-> **The queue is never fed as of `fix/discord-roles-sync`.** The server's `RoleSyncEventsRepository` emits nothing and hands `Role/GetUnprocessedEvents` an empty list, so every handler below is unreachable in production. A Sideline role is a permissions construct, not guild membership; mirroring it produced a guild role for every permission bucket a team defined ("Player", "Admin", "Treasurer") because `handleAssigned` calls `ensureMapping` (adopt-or-create) on whatever it is handed. Discord roles now come exclusively from **groups** and **rosters** (`rcp/channel/*`) and **achievements** (`rcp/roleProvision/*`). Guild roles created by the old behaviour are left in place — nothing assigns or strips them any more, and no cleanup sweep exists or should be added without an explicit decision. This worker is deleted in a follow-up ticket; until then do not extend it.
-
-**Every bot-created Discord role MUST pass `permissions: 0` to `rest.createGuildRole`.** Access is granted exclusively through channel permission overwrites (see "Access tiers and Discord permission overwrites" below), never through global guild-role permissions. dfx types `createGuildRole`'s `permissions` field as a `number`, so pass the numeric literal `0` (not a `string`, not a bitset). This applies to all six call sites — `src/rest/roles/createGuildRole.ts`, `src/rest/channels/createRoleOnly.ts`, `src/rest/channels/createRoleForChannel.ts`, `src/rest/channels/createChannelWithRole.ts`, `src/rcp/roleProvision/handleProvisionRole.ts`, and `src/rest/roles/ensureUnverifiedRole.ts` — and to any new one. `src/rest/roles/ensureSudoRole.ts` is the single deliberate exception (it creates `Sideline Sudo` with `Permissions.Administrator`); do not treat it as precedent. Every `createGuildRole` handler test MUST assert `restCalls.createGuildRole[0]?.[1]` `toMatchObject({ permissions: 0 })`.
+**Every bot-created Discord role MUST pass `permissions: 0` to `rest.createGuildRole`.** Access is granted exclusively through channel permission overwrites (see "Access tiers and Discord permission overwrites" below), never through global guild-role permissions. dfx types `createGuildRole`'s `permissions` field as a `number`, so pass the numeric literal `0` (not a `string`, not a bitset). This applies to all five call sites — `src/rest/channels/createRoleOnly.ts`, `src/rest/channels/createRoleForChannel.ts`, `src/rest/channels/createChannelWithRole.ts`, `src/rcp/roleProvision/handleProvisionRole.ts`, and `src/rest/roles/ensureUnverifiedRole.ts` — and to any new one. `src/rest/roles/ensureSudoRole.ts` is the single deliberate exception (it creates `Sideline Sudo` with `Permissions.Administrator`); do not treat it as precedent. Every `createGuildRole` handler test MUST assert `restCalls.createGuildRole[0]?.[1]` `toMatchObject({ permissions: 0 })`.
 
 ### Channel Sync (groups ↔ Discord channels)
 
@@ -430,7 +416,7 @@ Rules:
    Rules: (a) use the shared `isPermanentError` (`src/rcp/channel/ProcessorService.ts`) as the negated `while` predicate — never re-classify inline; (b) wrap each iteration in `Effect.exit` + `Exit.match` so a single member's permanent failure is logged-and-skipped, not propagated (one bad member must not fail the whole event and trigger a re-process that re-grants the others); (c) keep `concurrency: 1`. Do NOT use `Effect.catchIf` here — the `Effect.exit` isolation is required because the loop must continue past a permanent failure.
 
    **`handleCreated`'s loop has since diverged from this shared shape** (`handleRosterChannelCreated` still matches it exactly as written above); the two additions are group-specific and were not backported to the roster loop:
-   - **10011 (Unknown Role) short-circuit.** A `Ref<boolean>` (`roleGone`) is checked before every iteration; the first member to hit `isUnknownRoleError` sets it via `Ref.set` and calls `clearStaleRoleOnUnknownRole` (`channelUtils.ts`) to clear the group's stale `discord_role_id` through the new `Channel/ClearMappingRole` RPC, then every remaining member is skipped as a guaranteed-failure no-op. Because the loop is `concurrency: 1`, only the first failing member can ever flip the `Ref`, so `Channel/ClearMappingRole` is called at most once per event — no extra guard is needed around the clear itself. Same self-healing remedy as the role-axis precedent `clearStaleMappingOnUnknownRole` (`~/rcp/role/handleAssigned.ts:93-95`) — stop retrying a dead Discord id and let the next sweep re-resolve it — but adapted to `discord_channel_mappings` being a shared channel+role row: the role axis's `discord_role_mappings` row holds nothing but the role, so it `Role/DeleteMapping`s the whole row; here `Channel/ClearMappingRole` clears only the `discord_role_id` column (never the row, and never `discord_channel_id`), so a still-valid channel link survives. See `applications/server/AGENTS.md` → "Group-role member backfill" for why the row itself must never be deleted here. `handleMemberAdded` (rule 2) reuses the same `clearStaleRoleOnUnknownRole` helper on its single `addGuildMemberRole` call, but has no `Ref`/short-circuit of its own — it grants to exactly one member per event, so there is no "remaining members" to skip.
+   - **10011 (Unknown Role) short-circuit.** A `Ref<boolean>` (`roleGone`) is checked before every iteration; the first member to hit `isUnknownRoleError` sets it via `Ref.set` and calls `clearStaleRoleOnUnknownRole` (`channelUtils.ts`) to clear the group's stale `discord_role_id` through the new `Channel/ClearMappingRole` RPC, then every remaining member is skipped as a guaranteed-failure no-op. Because the loop is `concurrency: 1`, only the first failing member can ever flip the `Ref`, so `Channel/ClearMappingRole` is called at most once per event — no extra guard is needed around the clear itself. `discord_channel_mappings` is a shared channel+role row, so `Channel/ClearMappingRole` clears only the `discord_role_id` column (never the row, and never `discord_channel_id`), so a still-valid channel link survives — stop retrying a dead Discord id and let the next sweep re-resolve it. See `applications/server/AGENTS.md` → "Group-role member backfill" for why the row itself must never be deleted here. `handleMemberAdded` (rule 2) reuses the same `clearStaleRoleOnUnknownRole` helper on its single `addGuildMemberRole` call, but has no `Ref`/short-circuit of its own — it grants to exactly one member per event, so there is no "remaining members" to skip.
    - **All-permanent-failures `logError`.** A second `Ref<number>` counts members whose grant failed with a permanent error (e.g. 50013/403 — missing `Manage Roles` or role-hierarchy mis-ordering). If every attempted member failed permanently AND the loop was not short-circuited by the 10011 case above (which already logs its own distinct warning), one `Effect.logError` fires for the whole event instead of N scattered `logWarning`s — guarded on `members.length > 0` so an empty group never misfires on vacuous truth. `handleMemberAdded` and `handleRosterChannelCreated` have no equivalent — this is `handleCreated`-only.
 
 #### Channel Backfill (self-healing role provisioning)
@@ -849,13 +835,13 @@ Rules:
 
 1. Create migration with `*_sync_events` and `discord_*_mappings` tables
 2. Add domain models in `packages/domain/src/models/`
-3. Add RPC schemas and endpoints to `RoleSyncRpc.ts` (same group)
+3. Add RPC schemas and endpoints under `packages/domain/src/rpc/<name>/`, then merge the group into `SyncRpcs.ts`
 4. Rebuild domain: `pnpm build` in `packages/domain`
-5. Create server repositories following `RoleSyncEventsRepository` pattern
-6. Add RPC handlers to `RoleSyncRpcLive.ts`
+5. Create server repositories following `ChannelSyncEventsRepository` pattern
+6. Add RPC handlers in `applications/server/src/rpc/<name>/`
 7. Wire repositories in `applications/server/src/AppLive.ts`
 8. Emit events from the relevant API handler
-9. Create bot service following `RoleSyncService` pattern
+9. Create bot service following `ChannelSyncService` pattern
 10. Wire bot service in `AppLive.ts`, `Bot.ts`, `index.ts`
 11. Add mock repository to all server test files
 

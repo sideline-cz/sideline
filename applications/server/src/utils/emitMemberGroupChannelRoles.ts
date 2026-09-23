@@ -17,9 +17,7 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
  * `group_members` groups plus every active ancestor, severing identically to
  * `effectiveRoles.ts`/`getActiveAncestors`) against `payload.roles` (the Discord roles the
  * member ACTUALLY holds right now, sent by the bot on this same dispatch) and enqueues
- * `member_added` only for the delta — the same level-based shape as
- * `utils/reconcileMemberDiscordRoles.ts`, applied to the group's OWN Discord role instead of a
- * Sideline `Role` linked via `role_groups`.
+ * `member_added` only for the delta, applied to the group's OWN Discord role.
  *
  * **Only groups whose `discord_channel_mappings` row has `discord_role_id IS NOT NULL` are ever
  * considered.** A group with a channel but no role yet (or no mapping row at all) must NOT be
@@ -55,10 +53,9 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
  * owners (`api/group.ts`'s `syncRoleMembers`, `deactivateMemberAndCascade`), and this file only
  * ever fires on a join. Mirrors the add-only scope of `applyInviteGroup`.
  *
- * **The `MAX_GROUP_CHANNEL_EMISSIONS_PER_MEMBER` cap is PERMANENTLY LOSSY on this path** — unlike
- * `reconcileMemberDiscordRoles`'s level-based diff, which is re-derived on every reconcile (so a
- * truncated member is merely deferred to the next pass), this function only ever fires once, on
- * the member's join. Whatever `pending` entries fall past the cap here are never revisited. The
+ * **The `MAX_GROUP_CHANNEL_EMISSIONS_PER_MEMBER` cap is PERMANENTLY LOSSY on this path** — this
+ * function only ever fires once, on the member's join, with no later re-derive to catch what the
+ * cap dropped. Whatever `pending` entries fall past the cap here are never revisited. The
  * ordering `findActiveGroupsWithAncestorsForMember` returns therefore matters — see that query's
  * `ORDER BY` in `GroupsRepository.ts` for which groups are kept nearest-first.
  */

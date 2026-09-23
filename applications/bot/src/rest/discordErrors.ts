@@ -44,8 +44,8 @@ export const isDiscordNotFoundError = (error: unknown): boolean => {
  * {@link isDiscordNotFoundError}, which also matches Unknown Member (10007) / Unknown User
  * (10013). Those mean a *different* thing for `addGuildMemberRole` (the target member left the
  * guild) than 10011 does (the mapped `discord_role_id` itself no longer exists in the guild —
- * e.g. a captain deleted the role directly in Discord). Only the latter should delete the stale
- * `discord_role_mappings` row so the next event re-resolves via `ensureMapping` instead of
+ * e.g. a captain deleted the role directly in Discord). Only the latter should clear the stale
+ * `discord_channel_mappings.discord_role_id` so the next sweep re-resolves it instead of
  * retrying the same dead id forever. */
 export const isUnknownRoleError = (error: unknown): boolean => {
   if (!isRecord(error)) return false;

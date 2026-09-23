@@ -1,6 +1,6 @@
 # Sideline — Core System Sequence Diagrams
 
-This document provides sequence diagrams for the twelve core flows in the Sideline platform. Each diagram is accompanied by a brief description of the flow and its key design decisions. The diagrams use Mermaid `sequenceDiagram` syntax and are intended for inclusion in a bachelor's thesis.
+This document provides sequence diagrams for the eleven core flows in the Sideline platform. Each diagram is accompanied by a brief description of the flow and its key design decisions. The diagrams use Mermaid `sequenceDiagram` syntax and are intended for inclusion in a bachelor's thesis.
 
 ---
 
@@ -297,64 +297,7 @@ sequenceDiagram
 
 ---
 
-## 5. Discord Role Sync (Outbound)
-
-> **Historical.** This flow is retained to document the outbox pattern, but Sideline roles are no longer mirrored into Discord: the server writes no `role_sync_events` rows and the bot's role worker receives nothing. Discord guild roles are provisioned from groups and rosters (§ Discord Channel Sync) and from achievements. The equivalent live flow is the channel-sync one.
-
-When an admin assigned a Sideline role to a team member via the web app, the server wrote a `role_assigned` event row to the `role_sync_events` table. The bot runs a polling loop every 5 seconds that calls `Role/GetUnprocessedEvents` over RPC. For each event the bot ensures a Discord role mapping exists (creating the Discord role if necessary), calls the Discord API to assign the role to the member in the guild, then marks the event as processed. Failed events are marked with an error string for later inspection.
-
-```mermaid
-sequenceDiagram
-    participant Admin as Admin (Browser)
-    participant Server as API Server
-    participant DB as PostgreSQL
-    participant Bot as Bot Process (poll loop)
-    participant Discord as Discord API
-
-    Admin->>Server: POST /teams/{teamId}/members/{memberId}/roles<br/>(assign role)
-    Server->>DB: INSERT team_member_roles {member_id, role_id}
-    DB-->>Server: OK
-    Server->>DB: INSERT role_sync_events {type='role_assigned', team_id, guild_id,<br/>role_id, role_name, team_member_id, discord_user_id}
-    DB-->>Server: sync event row {id, ...}
-    Server-->>Admin: 200 OK
-
-    Note over Bot: Poll loop — every 5 seconds
-    Bot->>Server: RPC Role/GetUnprocessedEvents {limit: BATCH_SIZE}
-    Server->>DB: SELECT * FROM role_sync_events WHERE processed_at IS NULL LIMIT ?
-    DB-->>Server: [role_assigned event, ...]
-    Server-->>Bot: [UnprocessedRoleEvent, ...]
-
-    loop For each event
-        Bot->>Server: RPC Role/GetMapping {team_id, role_id}
-        Server->>DB: SELECT discord_role_id FROM role_mappings WHERE team_id=? AND role_id=?
-        DB-->>Server: Option<RoleMapping>
-
-        alt No mapping yet
-            Bot->>Discord: POST /guilds/{guild_id}/roles {name: role_name}
-            Discord-->>Bot: Discord role {id}
-            Bot->>Server: RPC Role/UpsertMapping {team_id, role_id, discord_role_id}
-            Server->>DB: UPSERT role_mappings
-            DB-->>Server: OK
-        end
-
-        Bot->>Discord: PUT /guilds/{guild_id}/members/{discord_user_id}/roles/{discord_role_id}
-        Discord-->>Bot: 204 No Content
-
-        alt Success
-            Bot->>Server: RPC Role/MarkEventProcessed {id}
-            Server->>DB: UPDATE role_sync_events SET processed_at=now() WHERE id=?
-            DB-->>Server: OK
-        else Discord API error
-            Bot->>Server: RPC Role/MarkEventFailed {id, error}
-            Server->>DB: UPDATE role_sync_events SET failed_at=now(), error=? WHERE id=?
-            DB-->>Server: OK
-        end
-    end
-```
-
----
-
-## 6. Recurring Event Generation (Cron)
+## 5. Recurring Event Generation (Cron)
 
 The `EventHorizonCron` runs on a daily schedule (`0 3 * * *` UTC). On each tick it fetches all active event series from the database, computes the generation horizon end date (the lesser of the series end date and `now + horizonDays`), calls `generateOccurrenceDates` to enumerate matching weekdays, and inserts one event row per date (sequentially, concurrency 1). As of the remove-global-events-board release, event generation has no Discord side effect — there is no shared channel to resolve or post an embed to; a generated occurrence reaches members' personal event channels the same way any other event does. Finally the cron updates the series' `last_generated_date` to the horizon end. The cron only generates dates from where it left off (`last_generated_date + 1 day`) so it is safe to run repeatedly.
 
@@ -403,7 +346,7 @@ sequenceDiagram
 
 ---
 
-## 7. Event Started (Cron)
+## 6. Event Started (Cron)
 
 The `EventStartCron` runs every minute (`* * * * *`). On each tick it first runs a best-effort, once-per-cycle self-healing sweep (`markStalePersonalMessagesDirty`) that re-marks any event which is no longer `active`/upcoming but still holds `personal_event_messages` rows and isn't already dirty — a backstop for events missed by a prior cycle's per-event mark below. It then queries for `active` events whose `start_at` timestamp is in the past, atomically transitions each to `started` status, marks the event's `personal_messages_dirty_at` (so the personal-events reconcile worker removes the finished event from members' personal channels), and emits an `event_started` row in the `event_sync_events` outbox. The bot's Event Sync worker picks up the event; nothing is posted for the event starting — the "Starting now" announcement (embed, attendee list, coach/role mention and its "nobody claimed this training" warning) was removed. The handler's only remaining action is, for training events, a best-effort deletion of the training's claim-board message. As of the remove-global-events-board release there is no shared-board embed to edit in place and no channel reorder or `recoverDeletedMessages` recovery step; those were removed along with the shared events board.
 
@@ -466,7 +409,7 @@ sequenceDiagram
 
 ---
 
-## 8. Team Creation and Guild Linking
+## 7. Team Creation and Guild Linking
 
 Before creating a team the user must select a Discord guild in which they hold Administrator or Manage Guild permission and where the Sideline bot is already installed. The web app calls `GET /auth/my-guilds`, which uses the stored OAuth access token to list the user's guilds, filters to those with sufficient permissions, and annotates each with a `botPresent` flag. The user selects a guild and submits the team creation form. The server inserts the team, seeds default roles with their permission sets (Admin, Coach, Player), creates a team membership for the creator, and assigns the Admin role.
 
@@ -515,7 +458,7 @@ sequenceDiagram
 
 ---
 
-## 9. Member Onboarding via Group-Targeted Invite
+## 8. Member Onboarding via Group-Targeted Invite
 
 A captain creates a group-targeted invite (e.g. for the "First Team" group) from the web app. The captain shares only the `/invite/{code}` web link. A new player clicks it, completes the Discord OAuth login, and clicks "Accept" — `POST /invite/{code}/join` writes the `group_members` row immediately (the invite's `group_id` is authoritative here), before the user has even reached Discord. The server also creates an `invite_acceptances` row and returns an `acceptanceId`. The bot's invite generator picks up the pending row (~1 s), creates a single-use Discord invite for the welcome channel, and writes the code back. The web app polls `GET /invite/acceptances/:acceptanceId` and redirects the user to `https://discord.gg/{discord_code}` as soon as the URL is available. The user joins the Discord server; the bot detects `GUILD_MEMBER_ADD`, identifies the code via the invite diff, calls `Guild/RegisterMember` — which resolves via `invite_acceptances.discord_code`, re-binds the group (`ON CONFLICT DO NOTHING`, since the join step above already wrote it) and, unlike before, emits `member_added` channel-sync events for the group and every active ancestor, so the bot's Channel Sync Worker grants the group's own Discord role — then renders the welcome message, and posts the welcome embed and system log.
 
@@ -619,7 +562,7 @@ sequenceDiagram
 
 ---
 
-## 10. Invite and Join Team (web flow)
+## 9. Invite and Join Team (web flow)
 
 An admin generates an invite link (or regenerates one) from the team settings page. The server creates a 12-character alphanumeric code, stores it in `team_invites`, and deactivates any previous codes for that team. A new user visits the invite URL in the browser, which first calls `GET /invite/{code}` to display the team name without authentication. When the user clicks "Accept", the front end redirects through the OAuth login flow (diagram 1), after which the app calls `POST /invite/{code}/join` with the session token. The server validates the code, checks the user is not already a member, resolves the team's **default role** (`roles.is_default`, falling back to the built-in `Player` role if the team hasn't configured one — see UC-3.3), inserts the membership, assigns that role, creates an `invite_acceptances` row, and returns a `JoinResult` containing the acceptance ID and the role actually assigned. The web app polls `GET /invite/acceptances/:acceptanceId` until the bot writes the single-use Discord invite code (typically within 1 second), then redirects to `https://discord.gg/{discord_code}`.
 
@@ -714,7 +657,7 @@ sequenceDiagram
 
 ---
 
-## 11. Team Onboarding — Global Admin Mints Token, Captain Completes Wizard
+## 10. Team Onboarding — Global Admin Mints Token, Captain Completes Wizard
 
 A global admin mints a single-use onboarding token and sends the URL to the designated captain. The captain opens the URL in the browser, is shown the team identity form after authenticating via Discord OAuth, fills in team identity (step 1) and Discord setup (step 2), and submits. The server validates that the token is active, the authenticated user's Discord ID matches `bound_discord_id`, and the selected guild is not already claimed; it then creates the team, seeds built-in roles and the captain's membership, atomically marks the token consumed, and returns a `UserTeam` object. The captain is redirected to the team dashboard.
 
@@ -767,7 +710,7 @@ sequenceDiagram
 
 ---
 
-## 12. Email Forwarding — Inbound Email, AI Summarization, and Coach Approval
+## 11. Email Forwarding — Inbound Email, AI Summarization, and Coach Approval
 
 An external email provider delivers a message to the Sideline inbound webhook. The server validates the HMAC signature and per-team token, stores the email, and queues it for AI summarization. The AI summarizer calls the LLM and receives a JSON object with two fields: `short` (a brief summary for the Discord team-post embed) and `detailed` (a fuller summary for the approval review). Both are stored in `email_messages`. The server enqueues an `approval_request` outbox event. The bot drains the outbox and posts two embeds to the coach channel: an amber short-summary embed and a blurple detailed-summary embed. The coach clicks **Approve** in Discord; the bot calls the `Email/RecordApproval` RPC. The server transitions the email to `approved` and enqueues a `post_summary` event. The bot drains the new event and posts the short summary to the team channel with **Detailed summary** and **Original email** ephemeral pagination buttons.
 

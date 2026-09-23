@@ -1187,7 +1187,7 @@ Four roles are automatically created for every new team and cannot be deleted or
 | **Player** | `roster:view`, `member:view` |
 | **Treasurer** | `finance:view`, `finance:manage_fees`, `finance:record_payments` |
 
-Roles are a permissions construct only — assigning or unassigning one, built-in or custom, never creates or changes a Discord guild role. Discord roles are granted through **groups** and **rosters** (and achievements). The `syncMemberDiscordRoles` endpoint still responds but enqueues nothing; it is removed in a follow-up.
+Roles are a permissions construct only — assigning or unassigning one, built-in or custom, never creates or changes a Discord guild role. Discord roles are granted through **groups** and **rosters** (and achievements). There is no endpoint to sync a member's Sideline roles into Discord; the `sync-discord-roles` endpoint and the outbox tables/RPC group behind it have been removed.
 
 `Player` is also the built-in fallback: every new team starts with `Player` as the default role assigned to newly-joining members (invite accept, `autoJoinTeams`, Discord guild registration), but a team with `role:manage` can point the default at any of its roles via `PUT /teams/:teamId/default-role` — see that endpoint below.
 
@@ -7677,19 +7677,6 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/GetLoggableTrainingEvents` | `guild_id` → `GuildEventListEntry[]` | Returns training events for the guild whose status is `active` or `started` and whose `start_at` is within the past 2 days. Used by the `/training result` autocomplete and command handler. Errors: `GuildNotFound` |
 | `Event/RepointChannelEvents` | `team_id`, `old_channel_id`, `new_channel_id` → `MovedEventRow[]` | Atomic CTE UPDATE that reassigns `discord_channel_id` and NULLs `discord_message_id` for all upcoming active events whose current channel matches `old_channel_id` (or `IS NULL` when `old_channel_id` is `None`). Returns one `MovedEventRow` per affected event with the event's previous `discord_message_id` so the caller can delete the old Discord message. Was called by the bot's `handleChannelMoved`, which was deleted in the remove-global-events-board Release A along with the "Global events channel" team setting it repointed. |
 | `Event/GetUnpostedUpcomingByChannel` | `discord_channel_id` → `EventId[]` | Returns IDs of all active upcoming events that have `discord_channel_id = $channel` and `discord_message_id IS NULL`, ordered by `start_at` ascending. Was used by `handleChannelMoved` (removed, see above) to enumerate events that needed to be posted to the new channel after a repoint. |
-
-#### Role
-
-Manages Discord role mappings and role sync outbox processing.
-
-| Method | Payload / Returns | Description |
-|---|---|---|
-| `Role/GetUnprocessedEvents` | `limit` → `UnprocessedRoleEvent[]` | Polls for role sync outbox events |
-| `Role/MarkEventProcessed` | `id` | Marks a role sync event as processed |
-| `Role/MarkEventFailed` | `id`, `error` | Marks a role sync event as failed |
-| `Role/GetMapping` | `team_id`, `role_id` → `RoleMapping \| null` | Gets the Discord role ID for an app role |
-| `Role/UpsertMapping` | `team_id`, `role_id`, `discord_role_id` | Creates or updates a role mapping |
-| `Role/DeleteMapping` | `team_id`, `role_id` | Removes a role mapping |
 
 #### Channel
 

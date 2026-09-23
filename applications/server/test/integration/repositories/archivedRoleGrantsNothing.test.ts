@@ -217,21 +217,12 @@ describe('an archived role grants nothing', () => {
           Effect.andThen((repo) => repo.findEffectiveRoleIdsForMember(memberId)),
         ),
       ),
-      Effect.bind('batched', ({ memberId }) =>
-        TeamMembersRepository.asEffect().pipe(
-          Effect.andThen((repo) => repo.findEffectiveRolesForMembers([memberId])),
-        ),
-      ),
-      Effect.tap(({ membership, entry, effectiveIds, batched, roleId }) =>
+      Effect.tap(({ membership, entry, effectiveIds, roleId }) =>
         Effect.sync(() => {
           expect([...membership.permissions]).toEqual([]);
           expect([...membership.role_names]).toEqual([]);
           expect(entry.effective_roles).toEqual([]);
-          // The per-member and batched role queries used to disagree here: the batched one bolted
-          // on its own `is_archived` join, the per-member one had none. Both now inherit the
-          // fragment's filter, so they agree without either carrying a local join.
           expect(effectiveIds.filter((r) => r.role_id === roleId)).toEqual([]);
-          expect(batched.filter((r) => r.role_id === roleId)).toEqual([]);
         }),
       ),
       Effect.provide(TestLayer),

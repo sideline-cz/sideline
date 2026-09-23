@@ -10,10 +10,8 @@ import {
   requireReadAccess,
 } from '~/api/permissions.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
-import { syncMemberDiscordRoles } from '~/utils/syncMemberDiscordRoles.js';
 
 const forbidden = new RoleApi.Forbidden();
 
@@ -36,8 +34,7 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('roles', () => RolesRepository.asEffect()),
     Effect.bind('notifications', () => NotificationsRepository.asEffect()),
-    Effect.bind('roleSyncEvents', () => RoleSyncEventsRepository.asEffect()),
-    Effect.map(({ members, roles, notifications, roleSyncEvents }) =>
+    Effect.map(({ members, roles, notifications }) =>
       handlers
         .handle('listRoles', ({ params: { teamId } }) =>
           Effect.Do.pipe(
@@ -87,17 +84,6 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
             Effect.tap(({ membership }) => requirePermission(membership, 'role:manage', forbidden)),
             Effect.bind('role', () => roles.insertRole(teamId, payload.name)),
             Effect.tap(({ role }) => roles.setRolePermissions(role.id, payload.permissions)),
-            // Root cause D: enqueue the Discord sync event. Best-effort tap — a sync-queue write
-            // must never fail the captain's actual role creation (AGENTS.md error-handling rule 6).
-            Effect.tap(({ role }) =>
-              roleSyncEvents
-                .emitRoleCreated(teamId, role.id, role.name)
-                .pipe(
-                  Effect.catchCause((cause) =>
-                    Effect.logWarning('Failed to emit role_created sync event', cause),
-                  ),
-                ),
-            ),
             Effect.map(
               ({ role }) =>
                 new RoleApi.RoleDetail({
@@ -264,17 +250,6 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
               memberCount > 0 ? Effect.fail(new RoleApi.RoleInUse()) : Effect.void,
             ),
             Effect.tap(() => roles.archiveRoleById(roleId)),
-            // Root cause D: enqueue the Discord sync event, using the name captured in `existing`
-            // BEFORE archiving. Best-effort tap — never fails the captain's delete.
-            Effect.tap(({ existing }) =>
-              roleSyncEvents
-                .emitRoleDeleted(teamId, roleId, existing.name)
-                .pipe(
-                  Effect.catchCause((cause) =>
-                    Effect.logWarning('Failed to emit role_deleted sync event', cause),
-                  ),
-                ),
-            ),
             Effect.asVoid,
             Effect.catchTag(
               'NoSuchElementError',
@@ -313,26 +288,6 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
               role.team_id !== teamId ? Effect.fail(new RoleApi.RoleNotFound()) : Effect.void,
             ),
             Effect.tap(() => members.assignRole(memberId, payload.roleId)),
-            // Root cause D: enqueue the Discord sync event. Best-effort tap — a sync-queue write
-            // must never fail the captain's actual role assignment (AGENTS.md error-handling rule 6).
-            // Skipped when the member has no discord_id — nothing to propagate to Discord.
-            Effect.tap(({ targetMember, role }) =>
-              targetMember.discord_id
-                ? roleSyncEvents
-                    .emitRoleAssigned(
-                      teamId,
-                      role.id,
-                      role.name,
-                      targetMember.member_id,
-                      targetMember.discord_id,
-                    )
-                    .pipe(
-                      Effect.catchCause((cause) =>
-                        Effect.logWarning('Failed to emit role_assigned sync event', cause),
-                      ),
-                    )
-                : Effect.void,
-            ),
             Effect.tap(({ targetMember, role }) =>
               notifications
                 .insert(
@@ -387,20 +342,18 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
             // `member_roles` row. A member who ALSO holds this role through a group
             // (`group_members` → group ancestry → `role_groups`) still effectively holds
             // it afterwards — deleting the direct grant alone did not revoke anything,
-            // so neither the Discord sync event nor the "role removed" notification
-            // should fire. Re-check the effective set AFTER the delete and skip both
-            // when the role is still held. A member holding it directly only (the
-            // common case) has nothing left after the delete, so this still emits.
+            // so the "role removed" notification should not fire. Re-check the
+            // effective set AFTER the delete and skip it when the role is still held.
+            // A member holding it directly only (the common case) has nothing left
+            // after the delete, so this still emits.
             //
             // `findEffectiveRoleIdsForMember` pipes `catchSqlErrors`, which turns a
             // `SqlError` into a `LogicError` DEFECT, not a typed failure — a plain
             // `Effect.bind` here would let a DB blip on this read-only re-check 500 the
-            // whole request even though `unassignRole` above already committed. That
-            // violates the exact rule the comment below cites (a sync-queue write must
-            // never fail the captain's actual role removal) one step earlier: this
-            // re-check must never fail it either. Degrade to the pre-guard behaviour —
-            // treat the role as no-longer-held (so the emit/notification still fire) —
-            // on any defect from the re-check, logging it for visibility.
+            // whole request even though `unassignRole` above already committed.
+            // Degrade to the pre-guard behaviour — treat the role as no-longer-held
+            // (so the notification still fires) — on any defect from the re-check,
+            // logging it for visibility.
             Effect.bind('stillHeldEffectively', ({ targetMember }) =>
               members.findEffectiveRoleIdsForMember(targetMember.member_id).pipe(
                 Effect.map((rows) => rows.some((row) => row.role_id === roleId)),
@@ -411,26 +364,6 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                   ).pipe(Effect.as(false)),
                 ),
               ),
-            ),
-            // Root cause D: enqueue the Discord sync event. Best-effort tap — a sync-queue write
-            // must never fail the captain's actual role removal (AGENTS.md error-handling rule 6).
-            // Skipped when the member has no discord_id — nothing to propagate to Discord.
-            Effect.tap(({ targetMember, role, stillHeldEffectively }) =>
-              targetMember.discord_id && !stillHeldEffectively
-                ? roleSyncEvents
-                    .emitRoleUnassigned(
-                      teamId,
-                      role.id,
-                      role.name,
-                      targetMember.member_id,
-                      targetMember.discord_id,
-                    )
-                    .pipe(
-                      Effect.catchCause((cause) =>
-                        Effect.logWarning('Failed to emit role_unassigned sync event', cause),
-                      ),
-                    )
-                : Effect.void,
             ),
             Effect.tap(({ targetMember, role, stillHeldEffectively }) =>
               stillHeldEffectively
@@ -450,34 +383,6 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                     ),
             ),
             Effect.asVoid,
-          ),
-        )
-        .handle('syncMemberDiscordRoles', ({ params: { teamId, memberId } }) =>
-          Effect.Do.pipe(
-            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
-            Effect.bind('membership', ({ currentUser }) =>
-              requireMembership(members, teamId, currentUser.id, forbidden),
-            ),
-            // Blocker C (whole-series review): `role:manage` is Admin-only (not even Captain
-            // holds it), but the web renders the sync button to every member. Self-serve
-            // carve-out — a member re-syncing THEIR OWN roles is always allowed; syncing anyone
-            // else still requires `role:manage`.
-            Effect.tap(({ membership }) =>
-              membership.id === memberId
-                ? Effect.void
-                : requirePermission(membership, 'role:manage', forbidden),
-            ),
-            Effect.bind('targetMember', () =>
-              members.findRosterMemberByIds(teamId, memberId).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(new RoleApi.MemberNotFound()),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
-            ),
-            Effect.flatMap(() => syncMemberDiscordRoles(teamId, memberId)),
           ),
         )
         .handle('setDefaultRole', ({ params: { teamId }, payload }) =>

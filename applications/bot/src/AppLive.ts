@@ -14,7 +14,6 @@ import {
   OnboardingSyncService,
   PersonalEventsSyncService,
   RoleProvisionSyncService,
-  RoleSyncService,
   RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,
@@ -26,7 +25,6 @@ import { VerificationChannelCache } from '~/services/VerificationChannelCache.js
 
 const SyncLive = Layer.mergeAll(
   AchievementSyncService.Default,
-  RoleSyncService.Default,
   RulesQuizSyncService.Default,
   RoleProvisionSyncService.Default,
   ChannelSyncService.Default,

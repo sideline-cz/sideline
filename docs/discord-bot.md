@@ -750,7 +750,7 @@ For `Event/SubmitRsvp`, the member bind (and this check) now happens **before** 
 
 When the gate is on for a team, a fresh Discord join with an incomplete profile additionally gets a bot-managed **"Sideline Unverified"** Discord role and, if not already created, a permanent, read-only **`#start-here`** channel (Czech: `#nez-zacnes`) with a pinned intro embed carrying the same **Finish my profile** button.
 
-- **Role** (`ensureUnverifiedRole` / `findUnverifiedRole`, `applications/bot/src/rest/roles/ensureUnverifiedRole.ts`): find-or-create by name, `permissions: 0` (never `Administrator` — it exists purely to gate channel visibility via a permission overwrite, not to grant any guild-level capability). Deliberately has **no `discord_role_mappings` row and no Sideline `roles` row** — that absence is what keeps `reconcileMemberDiscordRoles` from ever auto-assigning or stripping it. A create-race that produces two same-named roles resolves deterministically to the oldest (lowest snowflake) everywhere, and logs a warning for manual cleanup.
+- **Role** (`ensureUnverifiedRole` / `findUnverifiedRole`, `applications/bot/src/rest/roles/ensureUnverifiedRole.ts`): find-or-create by name, `permissions: 0` (never `Administrator` — it exists purely to gate channel visibility via a permission overwrite, not to grant any guild-level capability). Deliberately has **no Sideline `roles` row** — Sideline roles are a permissions construct and are never mirrored into Discord guild roles (that mirroring subsystem was removed entirely), so there is nothing that could ever auto-assign or strip it. A create-race that produces two same-named roles resolves deterministically to the oldest (lowest snowflake) everywhere, and logs a warning for manual cleanup.
 - **Channel** (`ensureVerificationChannel`, `applications/bot/src/rest/channels/ensureVerificationChannel.ts`): resolved by name, not by a stored ID — there is no `teams.verify_channel_id` column, so a captain renaming or deleting the channel never desyncs a stored ID. Created once per guild with `@everyone` fully hidden and the unverified role granted view + read-history only (no send/react/threads); the intro embed is pinned.
 - **Intro embed body** (`teams.verify_intro_template`, migration `1792500000`): a captain can override the embed `description` from team settings (max 2000 characters, plain text, no placeholders — unlike `welcome_message_template`); title, fields, and footer stay hardcoded. `None`/empty falls back to the built-in `bot_verify_intro_description` copy. On the join path this only affects a channel created fresh by that join (`ensureVerificationChannel` never touches an existing channel); for a channel that already exists, saving the field flips `onboarding_sync_status` to `pending` and the bot's onboarding sync loop (`reconcileVerifyIntro`, `applications/bot/src/rcp/onboarding/ProcessorService.ts`) edits the already-pinned message on its next poll tick — matching by `custom_id: profile-verify` among the channel's first 50 pins. If a captain deleted or unpinned that message, the reconcile reposts and re-pins it instead of editing.
 - **Caching** (`VerificationChannelCache`, `applications/bot/src/services/VerificationChannelCache.ts`): a 60-second per-guild TTL cache of `{ roleId, channelId }` so a `GUILD_MEMBER_ADD` burst doesn't re-list guild roles and channels on every single join.
@@ -1730,34 +1730,11 @@ Calls `Guild/UpsertChannel` RPC to update the channel's name and metadata in the
 
 ## RPC Sync Workers
 
-Twelve background worker loops run continuously inside the bot process. Eight of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Weekly Challenge Sync, Email Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those eight loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`). Several outbox workers pass a client-side `POLL_BATCH_SIZE = 50` limit to the server query (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Email Sync); the Weekly Challenge and Weekly Summary workers do not — their server-side queries are currently unbounded, which is acceptable because the per-team-per-week invariant naturally bounds the backlog. The ninth worker (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation. The tenth worker (Channel Backfill) uses a **5-minute polling interval** (`Schedule.spaced('5 minutes')`) for low-cadence healing of groups that were never provisioned with a Discord role. The eleventh worker (Personal Events Provisioning) and the twelfth worker (Personal Events Reconcile) run on a **10-second polling interval** (`Schedule.spaced('10 seconds')`) and manage per-member private event channels.
+Eleven background worker loops run continuously inside the bot process. Seven of them (Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Weekly Challenge Sync, Email Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those seven loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`). Several outbox workers pass a client-side `POLL_BATCH_SIZE = 50` limit to the server query (Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Email Sync); the Weekly Challenge and Weekly Summary workers do not — their server-side queries are currently unbounded, which is acceptable because the per-team-per-week invariant naturally bounds the backlog. The eighth worker (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation. The ninth worker (Channel Backfill) uses a **5-minute polling interval** (`Schedule.spaced('5 minutes')`) for low-cadence healing of groups that were never provisioned with a Discord role. The tenth worker (Personal Events Provisioning) and the eleventh worker (Personal Events Reconcile) run on a **10-second polling interval** (`Schedule.spaced('10 seconds')`) and manage per-member private event channels.
 
-The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, `discord_role_provision_events`, `payment_reminder_sync_events`, `weekly_challenge_sync_events`, and `email_post_sync_events`; the bot drains those queues.
+The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, `discord_role_provision_events`, `payment_reminder_sync_events`, `weekly_challenge_sync_events`, and `email_post_sync_events`; the bot drains those queues.
 
-> **Note on directory name:** The source files for these workers live under `applications/bot/src/rcp/`. This is a typo in the codebase; the intended name is `rpc`. The import paths and class names (`RoleSyncService`, `ChannelSyncService`, `EventSyncService`) all reflect the intended `rpc` meaning.
-
----
-
-### Role Sync Worker
-
-**Service class:** `RoleSyncService` (`applications/bot/src/rcp/role/index.ts`)
-
-**Polling RPC:** `Role/GetUnprocessedEvents`
-
-**Events processed:**
-
-| Event tag | Handler file | Discord action |
-|-----------|-------------|----------------|
-| `role_created` | `handleCreated.ts` | Ensures a Discord guild role exists for the Sideline role; calls `ensureMapping` which creates the Discord role if absent and upserts the mapping via `Role/UpsertMapping` |
-| `role_deleted` | `handleDeleted.ts` | Looks up the Discord role ID via `Role/GetMapping`, deletes it in Discord via REST, then removes the mapping via `Role/DeleteMapping` |
-| `role_assigned` | `handleAssigned.ts` | Ensures the Discord role exists (`ensureMapping`), then adds it to the Discord guild member via REST |
-| `role_unassigned` | `handleUnassigned.ts` | Looks up the Discord role ID via `Role/GetMapping`, then removes it from the Discord guild member via REST |
-
-**Lifecycle RPCs:**
-- `Role/MarkEventProcessed` — called after each successful event.
-- `Role/MarkEventFailed` — called when processing throws; records the error string for diagnostics.
-
-**This worker is dormant.** The server emits no `role_sync_events` and returns an empty list from `Role/GetUnprocessedEvents`, so none of the handlers above run. Sideline roles are a permissions construct and are not mirrored into Discord; guild roles come from groups and rosters (Channel Sync Worker) and from achievements (Role Provision Worker). The worker is removed in a follow-up ticket.
+> **Note on directory name:** The source files for these workers live under `applications/bot/src/rcp/`. This is a typo in the codebase; the intended name is `rpc`. The import paths and class names (`ChannelSyncService`, `EventSyncService`) all reflect the intended `rpc` meaning.
 
 ---
 
@@ -2205,17 +2182,6 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Guild/ListPersonalOverflowCategories` | `team_id` → `{ sequence, discord_category_id }[]` | Lists provisioned overflow categories in order |
 | `Guild/GetAllUpcomingEventsForUser` | `guild_id`, `discord_user_id` → `UpcomingEventsForUserResult` | Returns all upcoming active events with the user's RSVP (unpaginated — no cap, unlike `Event/GetUpcomingEventsForUser`'s `limit`); used by the personal-channel reconcile worker and by `UpcomingRsvpButton`/`UpcomingClearMessageButton`/`UpcomingRsvpModal` to rebuild the per-user embed after an inline RSVP action, since the personal channel holds one card per upcoming event with no 10-event cap. Result also carries the caller's `show_attendee_list` preference (decoding default `true` for rollout compatibility) |
 | `Guild/CompleteMemberProfile` | `guild_id`, `discord_user_id`, `name`, `birth_date`, `gender`, `jersey_number: Option<number>` → `{ name, birth_date, gender, jersey_number }` | Called by the `/complete` slash command. Re-validates `name`, `birth_date`, and `jersey_number` server-side with `Auth.BirthDateString` / `TeamMember.JerseyNumber`, then in one transaction completes the user's global profile via `UsersRepository.completeProfile` (`users.name`/`birth_date`/`gender`, `is_profile_complete = true`) and (if `jersey_number` is set) the caller's `team_members.jersey_number`. Errors: `CompleteProfileGuildNotFound`, `CompleteProfileNotMember`, `CompleteProfileInvalidInput`. |
-
-### Role group (`Role/`)
-
-| Method | Purpose |
-|--------|---------|
-| `Role/GetUnprocessedEvents` | Poll for pending role outbox events |
-| `Role/MarkEventProcessed` | Acknowledge successful processing |
-| `Role/MarkEventFailed` | Record a processing failure |
-| `Role/GetMapping` | Look up the Discord role ID for a Sideline role |
-| `Role/UpsertMapping` | Save or update the Discord role ID mapping |
-| `Role/DeleteMapping` | Remove the mapping when a role is deleted |
 
 ### Channel group (`Channel/`)
 

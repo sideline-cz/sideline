@@ -37,7 +37,6 @@ import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepos
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
-import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -729,12 +728,6 @@ const TestLayer = ApiLive.pipe(
           findOneById: () => Effect.succeed(Option.none()),
           findByUser: () => Effect.succeed([]),
           findById: () => Effect.succeed(Option.none()),
-        }),
-      ),
-      Layer.succeed(
-        RoleSyncEventsRepository,
-        buildNoop('api/RoleSyncEventsRepository', {
-          findUnprocessed: () => Effect.succeed([]),
         }),
       ),
     ),
