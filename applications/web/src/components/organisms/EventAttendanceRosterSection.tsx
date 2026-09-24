@@ -65,6 +65,10 @@ export function EventAttendanceRosterSection({
 
   const [submitting, setSubmitting] = React.useState(false);
 
+  // Linking an event to an archived roster is never the intent; the linked roster itself is
+  // rendered from `link`, so hiding inactive ones here cannot hide an existing link.
+  const activeRosters = React.useMemo(() => rosters.filter((r) => r.active), [rosters]);
+
   // Sync link state back from prop when the parent reloads
   React.useEffect(() => {
     setLink(Option.getOrNull(initialEventRosterLink));
@@ -287,7 +291,7 @@ export function EventAttendanceRosterSection({
                     value={selectedRosterId}
                     onValueChange={setSelectedRosterId}
                     placeholder={tr('eventRoster_linkRosterPlaceholder')}
-                    options={rosters.map((r) => ({
+                    options={activeRosters.map((r) => ({
                       value: r.rosterId,
                       label: Option.isSome(r.emoji) ? `${r.emoji.value} ${r.name}` : r.name,
                     }))}

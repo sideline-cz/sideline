@@ -19,6 +19,8 @@ import {
   FormMessage,
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
+import { Label } from '~/components/ui/label';
+import { Switch } from '~/components/ui/switch';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
@@ -42,6 +44,12 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
   const [createEmoji, setCreateEmoji] = React.useState('');
   const [createColor, setCreateColor] = React.useState<string | undefined>(undefined);
   const [backfillingRoles, setBackfillingRoles] = React.useState(false);
+  const [showInactive, setShowInactive] = React.useState(false);
+
+  const visibleRosters = React.useMemo(
+    () => (showInactive ? rosters : rosters.filter((r) => r.active)),
+    [rosters, showInactive],
+  );
 
   const handleBackfillRoles = React.useCallback(async () => {
     setBackfillingRoles(true);
@@ -178,13 +186,24 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
         </>
       )}
 
-      {rosters.length === 0 ? (
+      {rosters.length > 0 && (
+        <div className='flex items-center gap-2 mb-4'>
+          <Switch
+            id='rosters-show-inactive'
+            checked={showInactive}
+            onCheckedChange={setShowInactive}
+          />
+          <Label htmlFor='rosters-show-inactive'>{tr('roster_showInactive')}</Label>
+        </div>
+      )}
+
+      {visibleRosters.length === 0 ? (
         <p className='text-muted-foreground'>{tr('roster_noRosters')}</p>
       ) : (
         <div className='overflow-x-auto'>
           <table className='w-full'>
             <tbody>
-              {rosters.map((roster) => (
+              {visibleRosters.map((roster) => (
                 <tr key={roster.rosterId} className='border-b'>
                   <td className='py-2 px-4'>
                     <div className='flex items-center gap-2'>
