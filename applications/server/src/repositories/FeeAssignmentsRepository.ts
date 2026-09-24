@@ -322,6 +322,10 @@ const make = Effect.gen(function* () {
         WHERE v.status IN ('pending', 'partial', 'overdue')
           AND v.effective_due_at IS NOT NULL
           AND fa.stored_status != 'waived'
+          -- Archiving is the treasurer saying stop collecting this. Every other money path
+          -- already honours it (recordPayment 409s, the bank matcher skips it, settle-all
+          -- excludes it); reminders were the last path that did not.
+          AND f.archived_at IS NULL
           AND (
             (${now}::timestamptz AT TIME ZONE COALESCE(ts.timezone, 'UTC'))::time
               BETWEEN ts.rsvp_reminder_time
@@ -340,6 +344,9 @@ const make = Effect.gen(function* () {
           --
           -- Only FULL coverage suppresses: 300 of credit against 1700 outstanding is still a
           -- real debt and is still reminded.
+          --
+          -- The f2 join keeps archived fees out of that total: they are not collectable debt,
+          -- and counting them would keep a fully-covered active fee noisy forever.
           -- NOTE: never use backticks in this comment - the whole query is a template literal.
           AND NOT EXISTS (
             SELECT 1 FROM member_credit_accounts mca
@@ -348,6 +355,7 @@ const make = Effect.gen(function* () {
                AND mca.balance_minor >= (
                  SELECT COALESCE(SUM(v2.due_minor - v2.paid_minor), 0)
                    FROM fee_assignment_status_v v2
+                   JOIN fees f2 ON f2.id = v2.fee_id AND f2.archived_at IS NULL
                   WHERE v2.team_member_id = fa.team_member_id
                     AND v2.currency       = f.currency
                     AND v2.status IN ('pending', 'partial', 'overdue')
@@ -381,6 +389,10 @@ const make = Effect.gen(function* () {
         JOIN teams t ON t.id = tm.team_id
         WHERE v.status IN ('pending', 'partial', 'overdue')
           AND fa.stored_status != 'waived'
+          -- Archiving is the treasurer saying stop collecting this. Every other money path
+          -- already honours it (recordPayment 409s, the bank matcher skips it, settle-all
+          -- excludes it); reminders were the last path that did not.
+          AND f.archived_at IS NULL
           AND EXISTS (
             SELECT 1 FROM bank_sync_config bsc
             WHERE bsc.team_id = tm.team_id AND bsc.enabled = true
@@ -398,6 +410,9 @@ const make = Effect.gen(function* () {
           --
           -- Only FULL coverage suppresses: 300 of credit against 1700 outstanding is still a
           -- real debt and is still reminded.
+          --
+          -- The f2 join keeps archived fees out of that total: they are not collectable debt,
+          -- and counting them would keep a fully-covered active fee noisy forever.
           -- NOTE: never use backticks in this comment - the whole query is a template literal.
           AND NOT EXISTS (
             SELECT 1 FROM member_credit_accounts mca
@@ -406,6 +421,7 @@ const make = Effect.gen(function* () {
                AND mca.balance_minor >= (
                  SELECT COALESCE(SUM(v2.due_minor - v2.paid_minor), 0)
                    FROM fee_assignment_status_v v2
+                   JOIN fees f2 ON f2.id = v2.fee_id AND f2.archived_at IS NULL
                   WHERE v2.team_member_id = fa.team_member_id
                     AND v2.currency       = f.currency
                     AND v2.status IN ('pending', 'partial', 'overdue')

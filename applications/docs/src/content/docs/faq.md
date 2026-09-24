@@ -34,7 +34,7 @@ If the app just shows a blank page with no recovery screen, reload your browser 
 
 ### Why did I get a payment reminder DM from the bot?
 
-Sideline sends a direct message on your Discord account as soon as a fee is assigned to you, and again when it's approaching or past its due date. The reminder points after assignment are: 3 days before due, on the due date itself, then at 3, 10, and 21 days overdue. Each reminder is sent once per threshold and stops automatically once the fee is paid or waived.
+Sideline sends a direct message on your Discord account as soon as a fee is assigned to you, and again when it's approaching or past its due date. The reminder points after assignment are: 3 days before due, on the due date itself, then at 3, 10, and 21 days overdue. Each reminder is sent once per threshold and stops automatically once the fee is paid or waived, or if your club archives the fee.
 
 ### Why does the QR code / payment message in my reminder look weird — no accents, all uppercase?
 

@@ -14,6 +14,10 @@ Treasurers can now settle everything a member owes with one action instead of re
 - Credit top-ups can be voided (with a reason) from the balance badge's popover, as long as the credit hasn't already been applied to a fee.
 - API integrators: new `POST /teams/:teamId/members/:memberId/settlements`, `GET .../credits/deposits`, and `DELETE .../credits/deposits/:depositId` endpoints. `PaymentView.method` and `FinanceOverviewMemberRow`/`MyFinanceStatus` gain fields — see the [Finances guide](/guides/finances/#settling-a-members-balance-and-paying-in-advance) and the internal API reference.
 
+## 2026-09-24 — Fixed: archived fees kept sending payment reminder DMs
+
+Archiving a fee is supposed to mean "stop collecting this" — recording a payment against it and the bank-matcher already refused to touch an archived fee, but its assignments could still trigger reminder DMs. Archived fees are now excluded from payment reminders entirely, and no longer count toward the outstanding balance used to decide whether a member's credit already covers what they owe.
+
 ## 2026-09-24 — Fixed: archived rosters cluttered roster pickers
 
 Linking a roster to an event and adding a member to an extra roster from their profile used to list every roster, including archived ones. Both pickers now only offer active rosters. The **rosters list page** also hides archived rosters by default — flip the new **Show inactive rosters** switch to see them again.
