@@ -23,6 +23,7 @@ import {
   ICalApi,
   Invite,
   LeaderboardApi,
+  MembershipPlanApi,
   NotificationApi,
   OnboardingApi,
   PlayerRatingApi,
@@ -76,6 +77,7 @@ class ClientApi extends HttpApi.make('api')
   .add(FinanceApi.FinanceApiGroup)
   .add(GroupApi.GroupApiGroup)
   .add(ICalApi.ICalApiGroup)
+  .add(MembershipPlanApi.MembershipPlanApiGroup)
   .add(TeamApi.TeamApiGroup)
   .add(TeamSettingsApi.TeamSettingsApiGroup)
   .add(TrainingTypeApi.TrainingTypeApiGroup)

@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-25 — New: membership plans
+
+Admins and Treasurers can now define membership plans from **Team → Finances → Membership plans** — named pricing tiers such as "Adult membership" or "Junior membership". Every team starts with one free, unnamed default plan.
+
+- Create, edit, promote a plan to be the team's default, or archive one that's no longer offered. A plan can't be archived while it's the team's default.
+- This release covers pricing and lifecycle only — nothing yet assigns a plan to a member, and the per-training price and expiry date fields are stored for reference only (no charging or expiry enforcement happens today).
+- See the [Finances guide](/guides/finances/#membership-plans) for details.
+- API integrators: new `/teams/:teamId/membership-plans` resource (list/create/update/set-default/archive) — see the API reference.
+
 ## 2026-09-24 — New: settle a member's whole balance in one action, and pay in advance
 
 Treasurers can now settle everything a member owes with one action instead of recording each fee's payment separately — click **Settle** on a member's row in **Team → Finances → Overview**. The dialog shows every outstanding fee, applies any existing credit automatically, and pays off fees oldest-due-first with the amount you enter.

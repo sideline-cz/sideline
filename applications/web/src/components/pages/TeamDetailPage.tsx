@@ -7,6 +7,7 @@ import {
   CalendarCog,
   ChevronRight,
   Clock,
+  CreditCard,
   Flame,
   MapPin,
   Settings,
@@ -474,6 +475,11 @@ function TeamManagementCard({ teamId }: { teamId: string }) {
       to: '/teams/$teamId/event-types' as const,
       label: tr('eventType_title'),
       icon: CalendarCog,
+    },
+    {
+      to: '/teams/$teamId/membership-plans' as const,
+      label: tr('membershipPlan_title'),
+      icon: CreditCard,
     },
     {
       to: '/teams/$teamId/age-thresholds' as const,

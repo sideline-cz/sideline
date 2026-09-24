@@ -15,6 +15,7 @@ Sideline's Finance module lets admins and members with the Treasurer role define
 - **Credit** — money a member has paid that isn't (yet) owed against any fee. Built up either by settling more than is currently outstanding ("pay in advance") or as leftover from a settle-all payment. Credit is automatically applied the next time that member is settled, in the same currency it was paid in. See [Settling a member's balance and paying in advance](#settling-a-members-balance-and-paying-in-advance) below.
 - **Variable symbol** — a short number (1–10 digits) attached to a member, printed on their payment QR codes and matched against incoming bank transfers. See [Setting up variable symbols](#setting-up-variable-symbols) below.
 - **Bank movement** — one transaction read from the club's connected bank account. See [Connecting a bank account](#connecting-a-bank-account-fio) below.
+- **Membership plan** — a named pricing tier a team offers (e.g. "Adult membership", "Junior membership"). Every team starts with one free, unnamed default plan. See [Membership plans](#membership-plans) below.
 - **Status** — computed automatically from the assignment's amounts and due date:
 
   | Status | Meaning |
@@ -35,6 +36,7 @@ Finance permissions follow a treasurer-style split across four built-in roles. B
 | View finance overview (all members) | Yes | Yes | Yes | No |
 | View balance summary (Income / Expenses / Net) | Yes | Yes | Yes | No |
 | Create, edit, or archive fees | Yes | No | Yes | No |
+| View, create, edit, set default, or archive membership plans | Yes | No | Yes | No |
 | Assign fees to members | Yes | No | Yes | No |
 | Record or void payments | Yes | No | Yes | No |
 | Settle a member's balance / add credit | Yes | No | Yes | No |
@@ -54,6 +56,7 @@ Several Finance features are planned for follow-up releases:
 - **Monthly recurrence** — auto-generating monthly charges from a fee definition.
 - **Self-report "I've paid"** — a Discord interaction for members to notify captains of unrecorded payments.
 - **Expense receipts** — attaching an image or document URL to an expense record.
+- **Membership plan assignment** — letting a player choose or be assigned one of the team's membership plans, and enforcing a plan's per-training price and expiry date. Today, membership plans are pricing and lifecycle only — see [Membership plans](#membership-plans) below.
 </Aside>
 
 ## Finance overview page
@@ -103,6 +106,83 @@ From this page you can:
 - Edit a fee's details or archive it when it is no longer needed.
 - Waive an individual assignment (e.g. hardship exemption).
 - Record a payment directly from the assignment list.
+
+## Membership plans
+
+Go to **Team → Finances → Membership plans** (`/teams/:teamId/membership-plans`) to manage the pricing tiers your team offers, such as "Adult membership" or "Junior membership". This page requires the `finance:manage_fees` permission (Admin or Treasurer by default).
+
+Every team starts with one free, unnamed default plan — it's shown with a **Default** badge and displays a built-in "Standard" label until you give it a name. From this page you can:
+
+- **Add a plan** — set a name, a price, a currency, an optional per-training price, and an optional expiry date.
+- **Edit a plan** — update any of its fields. Leaving the name blank restores the built-in label; the price fields default to free (0) if left blank.
+- **Make a plan the default** — promotes it and automatically demotes the team's current default. A team always has exactly one default plan.
+- **Archive a plan** — hides it from the list. A plan can't be archived while it's the team's default; make another plan the default first.
+
+<Aside type="caution" title="Pricing and lifecycle only, for now">
+  This release only lets you define and price membership plans. Nothing yet assigns a plan to a member, and the per-training price and expiry date fields are stored for reference only — no player selection, charging, or expiry enforcement happens today.
+</Aside>
+
+### Membership plan API (for automation)
+
+Admins and Treasurers can also manage membership plans via the REST API.
+
+#### List membership plans
+
+```http
+GET /api/teams/{teamId}/membership-plans
+```
+
+Any team member can call this — the response includes a `canManage` flag telling you whether the caller may create, edit, set default, or archive.
+
+#### Create a membership plan
+
+```http
+POST /api/teams/{teamId}/membership-plans
+Content-Type: application/json
+
+{
+  "name": "Adult membership",
+  "priceMinor": 50000,
+  "currency": "CZK",
+  "pricePerTrainingMinor": 0,
+  "expiresAt": null
+}
+```
+
+`name` can be `null` to render the built-in translated label instead of a custom name. The request returns `201 Created` with the full plan on success; `409 MembershipPlanNameAlreadyTaken` if another active plan in the team already uses that name (case-insensitive).
+
+#### Update a membership plan
+
+```http
+PATCH /api/teams/{teamId}/membership-plans/{membershipPlanId}
+Content-Type: application/json
+
+{
+  "name": "Adult membership",
+  "priceMinor": 55000,
+  "currency": "CZK",
+  "pricePerTrainingMinor": 0,
+  "expiresAt": null
+}
+```
+
+This is a full replacement, not a partial patch — resend every field, including ones you aren't changing. Sending `name: null` clears a plan's stored name back to the built-in label.
+
+#### Set a plan as the default
+
+```http
+PUT /api/teams/{teamId}/membership-plans/{membershipPlanId}/default
+```
+
+Promotes this plan to be the team's default and demotes the previous one. Returns `204 No Content`.
+
+#### Archive a membership plan
+
+```http
+DELETE /api/teams/{teamId}/membership-plans/{membershipPlanId}
+```
+
+Archives (never hard-deletes) the plan. Returns `409 MembershipPlanIsDefault` if this is the team's current default plan — promote another plan first.
 
 ## Connecting a bank account (Fio)
 

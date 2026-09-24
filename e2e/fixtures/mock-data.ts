@@ -183,6 +183,24 @@ export const mockEventTypeList = {
   ],
 };
 
+// `name: null` on the seeded plan mirrors mockEventTypeList's seeded row — it means
+// "render the built-in translated default-plan label", not a missing value.
+export const mockMembershipPlanList = {
+  canManage: true,
+  plans: [
+    {
+      membershipPlanId: 'test-membership-plan-00000001',
+      teamId: TEAM_ID,
+      name: null,
+      priceMinor: 0,
+      currency: 'CZK',
+      pricePerTrainingMinor: 0,
+      expiresAt: null,
+      isDefault: true,
+    },
+  ],
+};
+
 export const mockEventList = {
   canCreate: true,
   canViewAll: false,

@@ -25,6 +25,7 @@ import { GroupApiLive } from '~/api/group.js';
 import { ICalApiLive } from '~/api/ical.js';
 import { InviteApiLive } from '~/api/invite.js';
 import { LeaderboardApiLive } from '~/api/leaderboard.js';
+import { MembershipPlanApiLive } from '~/api/membership-plan.js';
 import { NotificationApiLive } from '~/api/notification.js';
 import { OnboardingApiLive } from '~/api/onboarding.js';
 import { PlayerRatingApiLive } from '~/api/player-rating.js';
@@ -84,6 +85,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(EmailForwardingApiLive),
     Layer.provide(BankSyncApiLive),
     Layer.provide(EventTypeApiLive),
+    Layer.provide(MembershipPlanApiLive),
   );
 
 export { Redirect } from '~/api/redirect.js';

@@ -47,6 +47,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [AI Assistant](#36-ai-assistant)
    - [Bank Sync](#37-bank-sync)
    - [Event Type](#38-event-type)
+   - [Membership Plan](#39-membership-plan)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -7713,6 +7714,173 @@ Reorders a team's active event types. Requires `team:manage`.
 | `EventTypeReorderInvalid` | 400 | The list contains a duplicate id, a foreign/unknown id, or a length that doesn't match the team's current active-type count |
 
 `position` is presentation only — reordering never changes which row a bare `kind` resolves to on event create/update (see `events_sync_event_type()` in `docs/database.md`).
+
+---
+
+### 39. Membership Plan
+
+**Source:** `packages/domain/src/api/MembershipPlanApi.ts`
+
+Slice 1 of "Setup memberships" — the per-team catalogue of membership tiers (pricing and lifecycle only; nothing here assigns a plan to a member, that is a later slice). Every team is seeded with one default plan (`name: null`, renders the built-in translated label, zero price, `'CZK'`). A captain can add more plans, edit any plan's pricing, promote a different plan to be the team's default, and archive a plan that is no longer offered.
+
+Permissions deliberately follow the **finance**, not the **team**, boundary: listing is membership-gated only (`canManage` in the response tells the caller whether they may mutate), while create/update/setDefault/delete all require `finance:manage_fees` — the same permission `fees` uses. This is not `team:manage`: pricing is a finance decision, and gating it on `team:manage` would lock out the Treasurer, the role that exists specifically to own money. By default Admin and Treasurer hold `finance:manage_fees`; a team that wants its Captain to manage plans grants the permission through the existing per-team role editor — no migration needed.
+
+#### Schemas
+
+`MembershipPlanInfo`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `membershipPlanId` | `MembershipPlanId` | No | Plan ID |
+| `teamId` | `TeamId` | No | Owning team |
+| `name` | `string \| null` | Yes | Plan's display name; `null` means "render the built-in translated label" (only ever true for the seeded default plan) |
+| `priceMinor` | `number` | No | Price in minor units (e.g. cents) |
+| `currency` | `string` | No | ISO 4217 code |
+| `pricePerTrainingMinor` | `number` | No | Per-training price in minor units, for pay-per-training plans |
+| `expiresAt` | `string \| null` (ISO datetime) | Yes | `null` means the plan never expires |
+| `isDefault` | `boolean` | No | Whether this is the team's current default plan |
+
+`MembershipPlanRequest` — the shared create/update payload, full-replace semantics (a `PATCH` re-sends every field, including `currency` — a partial update omitting it would silently rewrite an EUR plan to whatever the server defaults to):
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `MembershipPlanName \| null` | Yes | 1–50 characters when set; unique within the team, case-insensitive, among active plans. `null` means "keep rendering the built-in translated label" — the only way to leave (or restore) a plan's stored `name` as `NULL`. A `PATCH` that omits a name the plan already had therefore CLEARS it back to the built-in label, not an error; the caller must resend the existing name to keep it |
+| `priceMinor` | `number` | Yes | Price in minor units |
+| `currency` | `string` | Yes | ISO 4217 code |
+| `pricePerTrainingMinor` | `number` | Yes | Per-training price in minor units |
+| `expiresAt` | `string \| null` (ISO datetime) | Yes | `null` for a plan that never expires |
+
+---
+
+#### `GET /teams/:teamId/membership-plans`
+
+Lists a team's active (non-archived) plans, the team's default plan first, then by creation order. Membership-only (no `finance:manage_fees` requirement) so any member can see the catalogue — a later slice needs a player to browse plans to choose one.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `MembershipPlanListResponse`
+
+| Field | Type | Description |
+|---|---|---|
+| `canManage` | `boolean` | Whether the caller holds `finance:manage_fees` and may create/update/archive/set-default |
+| `plans` | `MembershipPlanInfo[]` | Active plans only, default plan first |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Not a member of this team |
+
+---
+
+#### `POST /teams/:teamId/membership-plans`
+
+Creates a new membership plan. Requires `finance:manage_fees`. Self-healing default: if the team has no active default plan at all (never expected in normal operation), the newly created plan becomes the default automatically.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `MembershipPlanRequest`
+
+**Response:** `201 Created` — `MembershipPlanInfo`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `MembershipPlanNameAlreadyTaken` | 409 | Name already used by another active plan in this team (case-insensitive) |
+
+---
+
+#### `PATCH /teams/:teamId/membership-plans/:membershipPlanId`
+
+Full-replace update of a plan's name and pricing. Requires `finance:manage_fees`.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `membershipPlanId` | `MembershipPlanId` (string) | Plan ID |
+
+**Request Body:** `MembershipPlanRequest`
+
+**Response:** `200 OK` — `MembershipPlanInfo`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `MembershipPlanNotFound` | 404 | Plan does not exist, or does not belong to `teamId` |
+| `MembershipPlanNameAlreadyTaken` | 409 | Name already used by another active plan in this team (case-insensitive) |
+
+---
+
+#### `PUT /teams/:teamId/membership-plans/:membershipPlanId/default`
+
+Promotes a plan to be the team's default, demoting the previous default. Requires `finance:manage_fees`.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `membershipPlanId` | `MembershipPlanId` (string) | Plan ID |
+
+**Request Body:** None
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `MembershipPlanNotFound` | 404 | Plan does not exist, does not belong to `teamId`, or is archived (an archived plan can never become the default) |
+
+---
+
+#### `DELETE /teams/:teamId/membership-plans/:membershipPlanId`
+
+Archives (never hard-deletes) a membership plan. Requires `finance:manage_fees`. Rejected when the plan is the team's current default — a captain must promote another plan first.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `membershipPlanId` | `MembershipPlanId` (string) | Plan ID |
+
+**Request Body:** None
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `MembershipPlanNotFound` | 404 | Plan does not exist, or does not belong to `teamId` |
+| `MembershipPlanIsDefault` | 409 | This is the team's current default plan |
 
 ---
 
