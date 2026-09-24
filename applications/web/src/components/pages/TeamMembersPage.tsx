@@ -57,7 +57,7 @@ export function TeamMembersPage({
           <AlertTitle>{tr('members_vs_bannerTitle', { count: missingVsCount })}</AlertTitle>
           <AlertDescription className='flex flex-col gap-2'>
             <p>{tr('members_vs_bannerBody')}</p>
-            <div className='flex gap-2'>
+            <div className='flex flex-wrap gap-2'>
               <Button
                 type='button'
                 variant='outline'
@@ -101,37 +101,39 @@ export function TeamMembersPage({
       {filtered.length === 0 ? (
         <p className='text-muted-foreground'>{tr('members_noPlayers')}</p>
       ) : (
-        <table className='w-full'>
-          <thead>
-            <tr className='border-b'>
-              <th className='py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                {tr('members_player')}
-              </th>
-              <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                {tr('members_vs_column')}
-              </th>
-              <th className='hidden md:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                {tr('members_jerseyNumber')}
-              </th>
-              <th className='hidden md:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                {tr('members_role')}
-              </th>
-              <th className='py-2 px-4' />
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((player) => (
-              <PlayerRow
-                key={player.memberId}
-                player={player}
-                teamId={teamId}
-                canEdit={canEdit}
-                canRemove={canRemove}
-                onDeactivate={onDeactivate}
-              />
-            ))}
-          </tbody>
-        </table>
+        <div className='overflow-x-auto'>
+          <table className='w-full'>
+            <thead>
+              <tr className='border-b'>
+                <th className='py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
+                  {tr('members_player')}
+                </th>
+                <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
+                  {tr('members_vs_column')}
+                </th>
+                <th className='hidden md:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
+                  {tr('members_jerseyNumber')}
+                </th>
+                <th className='hidden md:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
+                  {tr('members_role')}
+                </th>
+                <th className='py-2 px-4' />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((player) => (
+                <PlayerRow
+                  key={player.memberId}
+                  player={player}
+                  teamId={teamId}
+                  canEdit={canEdit}
+                  canRemove={canRemove}
+                  onDeactivate={onDeactivate}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <AssignVariableSymbolsDialog

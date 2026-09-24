@@ -461,47 +461,49 @@ export function RosterDetailPage({
       {rosterDetail.members.length === 0 ? (
         <p className='text-muted-foreground'>{tr('members_noPlayers')}</p>
       ) : (
-        <table className='w-full'>
-          <tbody>
-            {rosterDetail.members.map((player) => {
-              const displayName = player.displayName;
-              const jerseyNumber = player.jerseyNumber.pipe(
-                Option.map((v) => `#${v}`),
-                Option.getOrElse(() => '—'),
-              );
-              return (
-                <tr key={player.memberId} className='border-b'>
-                  <td className='py-2 px-4'>
-                    <div className='flex items-center gap-2'>
-                      <Avatar className='size-8'>
-                        {Option.isSome(player.avatar) && (
-                          <AvatarImage
-                            src={`https://cdn.discordapp.com/avatars/${player.discordId}/${player.avatar.value}.png?size=32`}
-                            alt={displayName}
-                          />
-                        )}
-                        <AvatarFallback>{displayName.slice(0, 2).toUpperCase()}</AvatarFallback>
-                      </Avatar>
-                      <span className='truncate'>{displayName}</span>
-                    </div>
-                  </td>
-                  <td className='hidden sm:table-cell py-2 px-4'>{jerseyNumber}</td>
-                  {canManage && (
+        <div className='overflow-x-auto'>
+          <table className='w-full'>
+            <tbody>
+              {rosterDetail.members.map((player) => {
+                const displayName = player.displayName;
+                const jerseyNumber = player.jerseyNumber.pipe(
+                  Option.map((v) => `#${v}`),
+                  Option.getOrElse(() => '—'),
+                );
+                return (
+                  <tr key={player.memberId} className='border-b'>
                     <td className='py-2 px-4'>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={() => handleRemoveMember(player.memberId)}
-                      >
-                        {tr('roster_removeMember')}
-                      </Button>
+                      <div className='flex items-center gap-2'>
+                        <Avatar className='size-8'>
+                          {Option.isSome(player.avatar) && (
+                            <AvatarImage
+                              src={`https://cdn.discordapp.com/avatars/${player.discordId}/${player.avatar.value}.png?size=32`}
+                              alt={displayName}
+                            />
+                          )}
+                          <AvatarFallback>{displayName.slice(0, 2).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <span className='truncate'>{displayName}</span>
+                      </div>
                     </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    <td className='hidden sm:table-cell py-2 px-4'>{jerseyNumber}</td>
+                    {canManage && (
+                      <td className='py-2 px-4'>
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={() => handleRemoveMember(player.memberId)}
+                        >
+                          {tr('roster_removeMember')}
+                        </Button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {canManage && (

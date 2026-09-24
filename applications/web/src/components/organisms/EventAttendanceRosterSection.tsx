@@ -264,7 +264,7 @@ export function EventAttendanceRosterSection({
           ) : (
             // Unlinked state
             <>
-              <div className='flex gap-2'>
+              <div className='flex flex-wrap gap-2'>
                 <Button
                   variant={mode === 'link' ? 'default' : 'outline'}
                   size='sm'

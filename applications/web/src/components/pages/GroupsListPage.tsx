@@ -324,19 +324,21 @@ export function GroupsListPage({ teamId, groups, canManage }: GroupsListPageProp
       {groups.length === 0 ? (
         <p className='text-muted-foreground'>{tr('group_noGroups')}</p>
       ) : (
-        <table className='w-full'>
-          <tbody>
-            {tree.map((node) => (
-              <GroupTreeNode
-                key={node.group.groupId}
-                node={node}
-                teamId={teamId}
-                depth={0}
-                onCreateSubgroup={handleCreateSubgroup}
-              />
-            ))}
-          </tbody>
-        </table>
+        <div className='overflow-x-auto'>
+          <table className='w-full'>
+            <tbody>
+              {tree.map((node) => (
+                <GroupTreeNode
+                  key={node.group.groupId}
+                  node={node}
+                  teamId={teamId}
+                  depth={0}
+                  onCreateSubgroup={handleCreateSubgroup}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

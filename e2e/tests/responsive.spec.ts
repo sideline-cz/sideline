@@ -1,4 +1,5 @@
-import { expect, unauthenticatedTest as test } from '../fixtures/api-mocks.js';
+import { test as authedTest, expect, unauthenticatedTest as test } from '../fixtures/api-mocks.js';
+import { TEAM_ID } from '../fixtures/mock-data.js';
 
 test.describe('Responsive Layout', () => {
   test.setTimeout(60000);
@@ -87,4 +88,37 @@ test.describe('Responsive Layout', () => {
     await expect(page.getByText('Leaderboard').first()).toBeVisible();
     await expect(page.getByText('Awaiting RSVP')).toBeVisible();
   });
+});
+
+// A phone-width page that scrolls sideways is the bug class this guards: a flex/grid row that
+// cannot shrink, or a table without a scroll container, pushes the whole document wider than the
+// viewport and parks the row's actions off-screen where nothing reveals them.
+authedTest.describe('No horizontal overflow on mobile', () => {
+  authedTest.setTimeout(120000);
+
+  const PAGES = [
+    ['event types', `/teams/${TEAM_ID}/event-types`],
+    ['members', `/teams/${TEAM_ID}/members`],
+    ['team settings', `/teams/${TEAM_ID}/settings`],
+    ['roles', `/teams/${TEAM_ID}/roles`],
+    ['groups', `/teams/${TEAM_ID}/groups`],
+  ] as const;
+
+  for (const [name, url] of PAGES) {
+    authedTest(`${name} fits a 360px viewport`, async ({ page }) => {
+      await page.setViewportSize({ width: 360, height: 780 });
+      await page.goto(url);
+      await expect(page.locator('h1').first()).toBeVisible({ timeout: 30000 });
+
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+
+      expect(
+        scrollWidth,
+        `${name} overflows by ${scrollWidth - clientWidth}px`,
+      ).toBeLessThanOrEqual(clientWidth + 1);
+    });
+  }
 });

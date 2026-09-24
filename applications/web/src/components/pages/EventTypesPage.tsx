@@ -422,12 +422,15 @@ export function EventTypesPage({ teamId, canAdmin, eventTypes }: EventTypesPageP
             const name = Option.getOrElse(type.name, () => eventTypeLabels[type.kind]());
             const colorSet = EVENT_COLOR_SETS[type.color];
             return (
-              <div key={type.eventTypeId} className='flex items-center gap-3 rounded-lg border p-3'>
+              <div
+                key={type.eventTypeId}
+                className='flex flex-wrap items-center gap-3 rounded-lg border p-3'
+              >
                 <span
                   data-testid={`event-type-swatch-${type.eventTypeId}`}
                   className={cn('size-4 shrink-0 rounded-full', colorSet.dot)}
                 />
-                <div className='min-w-0 flex-1'>
+                <div className='min-w-0 flex-1 basis-40'>
                   <div className='font-medium truncate'>{name}</div>
                   <div className='text-xs text-muted-foreground'>
                     {eventTypeLabels[type.kind]()} ·{' '}
@@ -435,7 +438,7 @@ export function EventTypesPage({ teamId, canAdmin, eventTypes }: EventTypesPageP
                   </div>
                 </div>
                 {canAdmin && (
-                  <div className='flex items-center gap-1 shrink-0'>
+                  <div className='ml-auto flex flex-wrap items-center gap-1'>
                     <Button
                       type='button'
                       variant='outline'
