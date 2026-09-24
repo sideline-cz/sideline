@@ -151,26 +151,34 @@ export const holdsDefaultRoleWhere = (eff: string): string =>
 /**
  * "Does this member hold a role that has EVER been handed out as this team's default?" — the RSVP
  * reminder / `missed_rsvps` population, spliced by both `EventRsvpsRepository` non-responder
- * queries.
+ * queries. `holdsDefaultRoleWhere` with the STICKY flag in place of the current one, plus the same
+ * built-in `Player` floor.
  *
- * Backed by the sticky `roles.was_default` column (set by `RolesRepository.setDefaultRole`,
- * deliberately never cleared by the statement that clears `is_default` off the outgoing role).
- * Membership here is cumulative by construction, so every cohort a team ever created keeps its
- * reminders when the default changes — including the second and every later change.
+ * `was_default` is set by `RolesRepository.setDefaultRole` alongside `is_default` and deliberately
+ * never cleared by `clearDefaultByRoleTeamQuery`, so the population is cumulative: every cohort a
+ * team ever created keeps its reminders through any number of default changes. Swapping
+ * `is_default` for it is the whole fix. The old predicate covered a team's FIRST default change
+ * for free — every pre-existing member still held `Player` — and stranded the cohort in between on
+ * the SECOND: they hold only the superseded custom role, which is no longer `is_default` and was
+ * never `Player`.
  *
- * This deliberately does NOT reuse `holdsDefaultRoleWhere`. That predicate is
- * `is_default OR built-in Player`, which covers a team's FIRST default change for free (every
- * pre-existing member still holds `Player`) and silently strands the cohort in between on the
- * SECOND: they hold only the superseded custom role, which is no longer `is_default` and was never
- * `Player`. `was_default` is what that hardcoded `Player` half was standing in for.
+ * The `Player` half stays, as a FLOOR rather than as the stand-in for history it used to be. It is
+ * redundant against a correctly populated `was_default` (migration `1792600001` backfills every
+ * built-in `Player`, and `initTeamRoles` seeds it), which is exactly why it is cheap to keep: a
+ * `roles` row created by some other path — a hand-rolled fixture insert, a future seeder that
+ * forgets the column — costs that team its reminder DMs and its `missed_rsvps` accounting with no
+ * error anywhere. That is the failure mode this whole change exists to remove, so it does not get
+ * to reappear one forgotten INSERT later. It also keeps the documented promise that a legacy
+ * member still holding only built-in `Player` never loses reminders.
  *
- * The resolver keeps `holdsDefaultRoleWhere` instead: it PICKS ONE role by priority, and a
- * superseded ex-default must not compete with the `Player` fallback for the slot. Eligibility is a
- * superset of the pick (`setDefaultRole` writes both flags together, and the migration backfills
- * `was_default` from exactly the old union), so the two can never disagree about a CURRENT default
- * — which is the drift the join paths care about.
+ * The join-time resolver keeps `holdsDefaultRoleWhere` and must NOT move here: it PICKS ONE row by
+ * priority, and a superseded ex-default must not compete with the `Player` fallback for that slot.
+ * This predicate is a strict superset of that one (`setDefaultRole` writes both flags in the same
+ * statement), so the two can never disagree about the CURRENT default — the drift the join paths
+ * care about.
  */
-export const holdsRsvpEligibleRoleWhere = (eff: string): string => `${eff}.was_default`;
+export const holdsRsvpEligibleRoleWhere = (eff: string): string =>
+  `(${eff}.was_default OR (${eff}.name = 'Player' AND ${eff}.is_built_in = true))`;
 
 /**
  * The three aggregates below are each defined ONCE, parameterised by the SQL of the row
