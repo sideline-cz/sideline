@@ -16,6 +16,8 @@ class OverviewRow extends Schema.Class<OverviewRow>('OverviewRow')({
   overdueCount: Schema.Number,
   pendingCount: Schema.Number,
   paidCount: Schema.Number,
+  // this row's currency, 0 when none (§6.3)
+  creditMinor: Schema.Number,
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -25,26 +27,47 @@ class OverviewRow extends Schema.Class<OverviewRow>('OverviewRow')({
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  // §6.3 — driven off a UNION of keys (assignment currencies + credit-holding currencies), not
+  // fee_assignment_status_v alone: a member with credit and NO assignments used to produce no
+  // row at all, making a prepayment invisible to the treasurer.
+  //
+  // COUNT(v.assignment_id), never COUNT(*): the LEFT JOIN makes COUNT(*) return 1 for a
+  // credit-only row (the single most likely off-by-one in this change).
   const overviewByTeamQuery = SqlSchema.findAll({
     Request: Team.TeamId,
     Result: OverviewRow,
     execute: (teamId) => sql`
+      WITH keys AS (
+        SELECT fa.team_member_id, v.currency
+          FROM fee_assignment_status_v v
+          JOIN fee_assignments fa ON fa.id = v.assignment_id
+         WHERE v.team_id = ${teamId}
+        UNION
+        SELECT a.team_member_id, a.currency
+          FROM member_credit_accounts a
+          JOIN team_members tm ON tm.id = a.team_member_id
+         WHERE tm.team_id = ${teamId} AND a.balance_minor > 0
+      )
       SELECT
-        fa.team_member_id AS "teamMemberId",
+        k.team_member_id AS "teamMemberId",
         COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS "memberName",
-        v.currency AS currency,
+        k.currency AS currency,
         COALESCE(SUM(v.due_minor) FILTER (WHERE v.status != 'waived'), 0)::int AS "totalDueMinor",
         COALESCE(SUM(v.paid_minor) FILTER (WHERE v.status != 'waived'), 0)::int AS "totalPaidMinor",
-        COUNT(*) FILTER (WHERE v.status = 'overdue')::int AS "overdueCount",
-        COUNT(*) FILTER (WHERE v.status IN ('pending', 'partial'))::int AS "pendingCount",
-        COUNT(*) FILTER (WHERE v.status = 'paid')::int AS "paidCount"
-      FROM fee_assignment_status_v v
-      JOIN fee_assignments fa ON fa.id = v.assignment_id
-      LEFT JOIN team_members tm ON tm.id = fa.team_member_id
+        COUNT(v.assignment_id) FILTER (WHERE v.status = 'overdue')::int AS "overdueCount",
+        COUNT(v.assignment_id) FILTER (WHERE v.status IN ('pending', 'partial'))::int AS "pendingCount",
+        COUNT(v.assignment_id) FILTER (WHERE v.status = 'paid')::int AS "paidCount",
+        COALESCE(MAX(a.balance_minor), 0)::int AS "creditMinor"
+      FROM keys k
+      LEFT JOIN team_members tm ON tm.id = k.team_member_id
       LEFT JOIN users u ON u.id = tm.user_id
-      WHERE v.team_id = ${teamId}
-      GROUP BY fa.team_member_id, v.currency, u.name, u.discord_display_name, u.discord_nickname, u.username
-      ORDER BY 2 ASC, v.currency ASC
+      LEFT JOIN fee_assignments fa ON fa.team_member_id = k.team_member_id
+      LEFT JOIN fee_assignment_status_v v
+             ON v.assignment_id = fa.id AND v.currency = k.currency AND v.team_id = ${teamId}
+      LEFT JOIN member_credit_accounts a
+             ON a.team_member_id = k.team_member_id AND a.currency = k.currency
+      GROUP BY k.team_member_id, k.currency, u.name, u.discord_display_name, u.discord_nickname, u.username
+      ORDER BY 2 ASC, k.currency ASC
     `,
   });
 
@@ -89,6 +112,23 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // §5.3b / §6.2 — plain read, no dependency on MemberCreditsRepository: this query joins
+  // member_credit_accounts through team_members exactly as PaymentsRepository.listByTeam joins
+  // through fees. No FOR UPDATE, no lock.
+  const myCreditQuery = SqlSchema.findAll({
+    Request: Schema.Struct({ team_id: Team.TeamId, user_id: Auth.UserId }),
+    Result: Schema.Struct({
+      currency: Fee.CurrencyCode,
+      balance_minor: Fee.AmountMinor,
+    }),
+    execute: (input) => sql`
+      SELECT a.currency, a.balance_minor
+        FROM member_credit_accounts a
+        JOIN team_members tm ON tm.id = a.team_member_id
+       WHERE tm.team_id = ${input.team_id} AND tm.user_id = ${input.user_id}
+    `,
+  });
+
   // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
@@ -96,8 +136,10 @@ const make = Effect.gen(function* () {
   const overviewByTeam = (teamId: Team.TeamId) => overviewByTeamQuery(teamId).pipe(catchSqlErrors);
 
   const myStatus = (teamId: Team.TeamId, userId: Auth.UserId) =>
-    myStatusQuery({ team_id: teamId, user_id: userId }).pipe(
-      Effect.map((rows) => {
+    Effect.Do.pipe(
+      Effect.bind('rows', () => myStatusQuery({ team_id: teamId, user_id: userId })),
+      Effect.bind('creditRows', () => myCreditQuery({ team_id: teamId, user_id: userId })),
+      Effect.map(({ rows, creditRows }) => {
         // Group by currency
         const byCurrency = new Map<
           string,
@@ -105,6 +147,7 @@ const make = Effect.gen(function* () {
             currency: Fee.CurrencyCode;
             assignments: typeof rows;
             totalOutstandingMinor: number;
+            creditMinor: number;
           }
         >();
 
@@ -123,6 +166,25 @@ const make = Effect.gen(function* () {
                 row.status !== 'waived' && row.status !== 'paid'
                   ? Math.max(0, row.due_minor - row.paid_minor)
                   : 0,
+              creditMinor: 0,
+            });
+          }
+        }
+
+        // Merge in every credit balance AFTER the assignment loop — a currency with balance > 0
+        // but no assignments still gets a group, defaulting `assignments: []` /
+        // `totalOutstandingMinor: 0`, otherwise a member who paid in advance before any fee
+        // exists sees nothing at all.
+        for (const credit of creditRows) {
+          const existing = byCurrency.get(credit.currency);
+          if (existing) {
+            existing.creditMinor = credit.balance_minor;
+          } else {
+            byCurrency.set(credit.currency, {
+              currency: credit.currency,
+              assignments: [],
+              totalOutstandingMinor: 0,
+              creditMinor: credit.balance_minor,
             });
           }
         }

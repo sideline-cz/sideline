@@ -27,7 +27,7 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
       () => sql`
         CREATE TABLE IF NOT EXISTS member_credit_deposits (
           id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          team_member_id      UUID NOT NULL,
+          team_member_id      UUID NOT NULL REFERENCES team_members(id) ON DELETE RESTRICT,
           currency            CHAR(3) NOT NULL,
           amount_minor        BIGINT NOT NULL CHECK (amount_minor > 0),
           method              TEXT NOT NULL CHECK (method IN ('cash','bank_transfer')),

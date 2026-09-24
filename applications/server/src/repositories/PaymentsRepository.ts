@@ -156,6 +156,10 @@ const make = Effect.gen(function* () {
   const findActiveByIdAndTeam = (id: Payment.PaymentId, teamId: Team.TeamId) =>
     findActiveByIdAndTeamQuery({ id, team_id: teamId }).pipe(catchSqlErrors);
 
+  // §6.4 — the one chokepoint both api/finance.ts's voidPayment AND
+  // BankTransactionMatcher.unmatch call, so the credit-restore rule lives here, not in either
+  // caller (root AGENTS.md's reasoning for why auto_match_suppressed is stamped by the trigger:
+  // "there is more than one void path").
   const void_ = (
     id: Payment.PaymentId,
     input: {
@@ -164,12 +168,53 @@ const make = Effect.gen(function* () {
       voidedAt: DateTime.Utc;
     },
   ) =>
-    voidQuery({
-      id,
-      voided_by_user_id: input.voidedByUserId,
-      void_reason: input.voidReason,
-      voided_at: input.voidedAt,
-    }).pipe(catchSqlErrors);
+    sql
+      .withTransaction(
+        Effect.Do.pipe(
+          // LOCK — member_credit_accounts, before the payments row (§3). Matches zero rows
+          // (and takes zero locks) for a member who has never had credit, which is every
+          // payment in production today. Re-entrant when unmatch already hoisted it (§3.2).
+          Effect.tap(
+            () => sql`
+              SELECT 1 FROM member_credit_accounts a
+               WHERE (a.team_member_id, a.currency) IN (
+                 SELECT p.team_member_id, f.currency
+                   FROM payments p
+                   JOIN fee_assignments fa ON fa.id = p.fee_assignment_id
+                   JOIN fees f ON f.id = fa.fee_id
+                  WHERE p.id = ${id})
+               ORDER BY a.team_member_id, a.currency
+               FOR UPDATE
+            `,
+          ),
+          Effect.bind('voided', () =>
+            voidQuery({
+              id,
+              voided_by_user_id: input.voidedByUserId,
+              void_reason: input.voidReason,
+              voided_at: input.voidedAt,
+            }),
+          ),
+          // Return the credit a 'credit'-method payment consumed. voidQuery's
+          // `AND voided_at IS NULL` makes this exactly-once: a second void returns None and
+          // this statement never runs.
+          Effect.tap(({ voided }) =>
+            Option.isNone(voided) || voided.value.method !== 'credit'
+              ? Effect.void
+              : sql`
+                  UPDATE member_credit_accounts a
+                     SET balance_minor = a.balance_minor + p.amount_minor, updated_at = now()
+                    FROM payments p
+                    JOIN fee_assignments fa ON fa.id = p.fee_assignment_id
+                    JOIN fees f ON f.id = fa.fee_id
+                   WHERE p.id = ${id} AND p.method = 'credit'
+                     AND a.team_member_id = p.team_member_id AND a.currency = f.currency
+                `,
+          ),
+          Effect.map(({ voided }) => voided),
+        ),
+      )
+      .pipe(catchSqlErrors);
 
   const listByTeam = (
     teamId: Team.TeamId,

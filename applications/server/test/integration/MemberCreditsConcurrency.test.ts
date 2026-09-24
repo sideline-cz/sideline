@@ -557,9 +557,14 @@ describe('MemberCreditsRepository — concurrency (5.4-5.8)', () => {
 
 describe('BankTransactionMatcher.unmatch — two multi-member transactions do not deadlock (5.9)', () => {
   it.effect(
-    'tx T1 -> (member A, fa-low) + (member B, fa-high); tx T2 -> (member B, fa-low) + ' +
-      '(member A, fa-high) — fee_assignment_id order deliberately interleaved so the per-payment ' +
-      'loop would acquire account locks in opposite orders. FAILS (40P01) without the §3.2 hoist.',
+    'tx T1 -> (member A, fa1) + (member B, fa2); tx T2 -> (member B, fa3) + (member A, fa4), ' +
+      'with EXPLICIT assignment ids so fee_assignment_id ASC order (and hence per-payment ' +
+      'account-lock order) is fully controlled, not left to a random gen_random_uuid(). A THIRD ' +
+      'connection deterministically forces the exact state the §3.2 hoist prevents: it holds ' +
+      "acct(B) while T1's unmatch runs, then tries to lock fa1 — the row T1's per-payment loop " +
+      'would already hold (blocking on acct(B) itself) if the hoist did not exist. ' +
+      'FAILS (40P01) without the §3.2 hoist — see the coordinator note above this test for the ' +
+      'manual before/after verification.',
     () =>
       Effect.scoped(
         TestClock.withLive(
@@ -594,7 +599,20 @@ describe('BankTransactionMatcher.unmatch — two multi-member transactions do no
 
             const fees = yield* FeesRepository.asEffect();
             const sql = yield* SqlClient.SqlClient.asEffect();
-            const makeAssignment = (memberId: string) =>
+
+            // EXPLICIT ids, not gen_random_uuid() — fee_assignments.id is a random UUID by
+            // default, so `ORDER BY fee_assignment_id ASC` (what void_'s per-payment loop uses)
+            // cannot be steered by insert order or by sorting the generated ids afterwards: a
+            // previous revision of this test did exactly that and was VACUOUS — it passed with
+            // the §3.2 hoist removed, because the "opposite order" precondition it relied on
+            // only held by chance (~25% of runs). Pinning the ids pins the order: T1 processes
+            // A(fa1) then B(fa2); T2 processes B(fa3) then A(fa4) — always.
+            const FA1 = '00000000-0000-0000-0000-000000000001'; // T1 first — member A
+            const FA2 = '00000000-0000-0000-0000-000000000002'; // T1 second — member B
+            const FA3 = '00000000-0000-0000-0000-000000000003'; // T2 first — member B
+            const FA4 = '00000000-0000-0000-0000-000000000004'; // T2 second — member A
+
+            const makeAssignment = (id: string, memberId: string) =>
               Effect.gen(function* () {
                 const fee = yield* fees.insert({
                   team_id: team.id,
@@ -604,37 +622,15 @@ describe('BankTransactionMatcher.unmatch — two multi-member transactions do no
                   currency: 'CZK' as never,
                   due_at: Option.none(),
                 });
-                const rows = yield* sql<{ id: string }>`
-                  INSERT INTO fee_assignments (fee_id, team_member_id, amount_minor)
-                  VALUES (${fee.id}, ${memberId}, 1000)
-                  RETURNING id::text AS id
+                yield* sql`
+                  INSERT INTO fee_assignments (id, fee_id, team_member_id, amount_minor)
+                  VALUES (${id}::uuid, ${fee.id}, ${memberId}, 1000)
                 `;
-                const row = rows[0];
-                if (row === undefined) throw new Error('insert did not return an id');
-                return row.id;
               });
-
-            // Create 4 assignments, THEN sort their real (random UUID) ids so the per-tx order
-            // is guaranteed opposite regardless of insert order — see the file-level comment for
-            // why a UUID PK makes "insert order" unusable for controlling `ORDER BY id ASC`.
-            const idA1 = yield* makeAssignment(memberA.id);
-            const idB1 = yield* makeAssignment(memberB.id);
-            const idB2 = yield* makeAssignment(memberB.id);
-            const idA2 = yield* makeAssignment(memberA.id);
-            const [t1First, t1Second] = [idA1, idB1].sort();
-            const [t2First, t2Second] = [idB2, idA2].sort();
-            if (
-              t1First === undefined ||
-              t1Second === undefined ||
-              t2First === undefined ||
-              t2Second === undefined
-            ) {
-              throw new Error('expected four sorted assignment ids');
-            }
-            const t1FirstMember = t1First === idA1 ? memberA.id : memberB.id;
-            const t1SecondMember = t1Second === idA1 ? memberA.id : memberB.id;
-            const t2FirstMember = t2First === idB2 ? memberB.id : memberA.id;
-            const t2SecondMember = t2Second === idB2 ? memberB.id : memberA.id;
+            yield* makeAssignment(FA1, memberA.id);
+            yield* makeAssignment(FA2, memberB.id);
+            yield* makeAssignment(FA3, memberB.id);
+            yield* makeAssignment(FA4, memberA.id);
 
             const tx1 = yield* insertBankTransaction(team.id, {
               fioMovementId: 601,
@@ -651,77 +647,85 @@ describe('BankTransactionMatcher.unmatch — two multi-member transactions do no
             }
 
             const insertLinkedPayment = (assignmentId: string, memberId: string, txId: string) =>
-              sql<{ id: string }>`
+              sql`
                 INSERT INTO payments (fee_assignment_id, team_member_id, amount_minor, method, paid_at, recorded_by_user_id, bank_transaction_id, matched_by)
-                VALUES (${assignmentId}, ${memberId}, 1000, 'bank_transfer', now(), ${recorder.id}, ${txId}, 'auto')
-                RETURNING id::text AS id
-              `.pipe(
-                Effect.map((rows) => {
-                  const row = rows[0];
-                  if (row === undefined) throw new Error('insert did not return an id');
-                  return row.id;
-                }),
-              );
+                VALUES (${assignmentId}::uuid, ${memberId}, 1000, 'bank_transfer', now(), ${recorder.id}, ${txId}, 'auto')
+              `;
+            yield* insertLinkedPayment(FA1, memberA.id, tx1);
+            yield* insertLinkedPayment(FA2, memberB.id, tx1);
+            yield* insertLinkedPayment(FA3, memberB.id, tx2);
+            yield* insertLinkedPayment(FA4, memberA.id, tx2);
 
-            yield* insertLinkedPayment(t1First, t1FirstMember, tx1);
-            yield* insertLinkedPayment(t1Second, t1SecondMember, tx1);
-            yield* insertLinkedPayment(t2First, t2FirstMember, tx2);
-            yield* insertLinkedPayment(t2Second, t2SecondMember, tx2);
+            const matcher = yield* BankTransactionMatcher.asEffect();
 
-            const matcher1 = yield* BankTransactionMatcher.asEffect();
-            const sql2 = yield* secondTestPgClient;
-            const matcher2 = yield* makeMatcher().pipe(
-              Effect.provideService(SqlClient.SqlClient, sql2),
+            // Connection 3 — the deterministic prober. Holds acct(B) for the whole first half of
+            // the race, then (once T1's unmatch is guaranteed to be blocked on the SAME row)
+            // tries to lock fa1 — the row T1's per-payment loop would already hold if the hoist
+            // did not exist.
+            const holdingB = yield* Deferred.make<void>();
+            const goLockFa1 = yield* Deferred.make<void>();
+            const sql3 = yield* secondTestPgClient;
+            const fiber3 = yield* Effect.forkChild(
+              Effect.result(
+                sql3.withTransaction(
+                  Effect.Do.pipe(
+                    Effect.tap(() => sql3`SET LOCAL lock_timeout = '5s'`),
+                    Effect.tap(
+                      () => sql3`
+                        SELECT 1 FROM member_credit_accounts
+                         WHERE team_member_id = ${memberB.id} AND currency = 'CZK'
+                         FOR UPDATE
+                      `,
+                    ),
+                    Effect.tap(() => Deferred.succeed(holdingB, undefined)),
+                    Effect.tap(() => Deferred.await(goLockFa1)),
+                    Effect.tap(
+                      () => sql3`SELECT 1 FROM fee_assignments WHERE id = ${FA1}::uuid FOR UPDATE`,
+                    ),
+                    Effect.asVoid,
+                  ),
+                ),
+              ),
             );
-            const paymentsRepo2Layer = Layer.provide(
-              PaymentsRepository.Default,
-              Layer.succeed(SqlClient.SqlClient, sql2),
-            );
+            yield* Deferred.await(holdingB);
 
-            const reached1 = yield* Deferred.make<void>();
-            const release1 = yield* Deferred.make<void>();
-            const reached2 = yield* Deferred.make<void>();
-            const release2 = yield* Deferred.make<void>();
-
+            // T1's unmatch now genuinely blocks trying to acquire acct(B) — either inside the
+            // single hoisted statement (fixed: holds only acct(A), no fee_assignments lock yet),
+            // or inside void_'s own pre-lock for payment 2 AFTER already voiding payment 1 on fa1
+            // (broken: holds acct(A) AND fa1).
             const fiber1 = yield* Effect.forkChild(
               Effect.result(
-                matcher1.unmatch(tx1 as never, {
-                  reason: 'unmatch race T1',
+                matcher.unmatch(tx1 as never, {
+                  reason: 'unmatch race T1 (5.9)',
                   unmatchedByUserId: recorder.id as never,
-                  beforeVoids: Deferred.succeed(reached1, undefined).pipe(
-                    Effect.asVoid,
-                    Effect.andThen(Deferred.await(release1)),
-                  ),
                 }),
               ),
             );
-            yield* Deferred.await(reached1);
+            yield* Effect.sleep('300 millis'); // let T1 actually reach and start blocking on acct(B)
 
-            const fiber2 = yield* Effect.forkChild(
-              matcher2
-                .unmatch(tx2 as never, {
-                  reason: 'unmatch race T2',
-                  unmatchedByUserId: recorder.id as never,
-                  beforeVoids: Deferred.succeed(reached2, undefined).pipe(
-                    Effect.asVoid,
-                    Effect.andThen(Deferred.await(release2)),
-                  ),
-                })
-                .pipe(Effect.provide(paymentsRepo2Layer), Effect.result),
-            );
-            yield* Deferred.await(reached2);
+            // Release connection 3 to attempt fa1. Fixed: T1 holds no fa lock -> immediate
+            // success, conn 3 commits, T1's hoist then unblocks and finishes cleanly. Broken: T1
+            // holds fa1 while conn 3 holds acct(B) that T1 is waiting on -> a genuine two-way
+            // cycle -> Postgres's own deadlock detector aborts one side with 40P01.
+            yield* Deferred.succeed(goLockFa1, undefined);
 
-            // Both are now parked at the very top of their transactions, before either has
-            // taken a single lock — release together so the account-lock hoist (or, pre-fix,
-            // the per-payment loop) genuinely races.
-            yield* Deferred.succeed(release1, undefined);
-            yield* Deferred.succeed(release2, undefined);
-
+            const result3 = yield* Fiber.join(fiber3);
             const result1 = yield* Fiber.join(fiber1);
-            const result2 = yield* Fiber.join(fiber2);
+            noDeadlock(result3 as never);
             noDeadlock(result1 as never);
-            noDeadlock(result2 as never);
+            expect(result3._tag).toBe('Success');
             expect(result1._tag).toBe('Success');
+
+            // The rest of the original business, run sequentially (not raced — the race above is
+            // the deterministic discriminator; racing a second real unmatch call on top of it
+            // would reintroduce the non-determinism this rewrite removes).
+            const result2 = yield* Effect.result(
+              matcher.unmatch(tx2 as never, {
+                reason: 'unmatch T2 (5.9)',
+                unmatchedByUserId: recorder.id as never,
+              }),
+            );
+            noDeadlock(result2 as never);
             expect(result2._tag).toBe('Success');
 
             const voidedRows = yield* sql<{ voided_at: Date | null }>`

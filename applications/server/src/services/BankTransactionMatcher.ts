@@ -444,11 +444,43 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
                   // invariant that writeAutoMatch and performManualMatch both honour. Two
                   // concurrent /unmatch calls on split transactions touching the same two
                   // assignments could otherwise deadlock (40P01) on a money operation.
+                  //
+                  // Plain SELECT, no FOR UPDATE, no locks taken — safe to run before the account
+                  // hoist below (§3.2).
                   () => sql<{ readonly id: string }>`
                   SELECT id::text AS id FROM payments
                   WHERE bank_transaction_id = ${txId}::uuid AND voided_at IS NULL
                   ORDER BY fee_assignment_id ASC, id ASC
                 `,
+                ),
+                // §3.2 — every member_credit_accounts lock this transaction will need, in ONE
+                // ordered statement, keyed off the EXACT payment set just read. One bank
+                // transaction can be matched across several members (api/bank-sync.ts's manual
+                // match only checks team ownership per allocation), so the per-payment void loop
+                // below would otherwise take account locks interleaved with fee_assignments
+                // locks — two concurrent unmatches of two multi-member transactions then
+                // deadlock (40P01) and surface as an untyped SqlError. void_'s own pre-lock
+                // becomes re-entrant once these are held. Order matters: this hoist runs AFTER
+                // the paymentIds SELECT (keyed off its exact result) — under READ COMMITTED a
+                // hoist-then-select ordering would let a concurrent performManualMatch commit a
+                // new payment, for a member never hoisted, between the two statements.
+                //
+                // ponytail: hoist locks existing rows only; upsert zero-balance rows if a
+                // first-settlement-mid-unmatch 40P01 is ever observed (§3.1's named residual).
+                Effect.tap(({ paymentIds }) =>
+                  paymentIds.length === 0
+                    ? Effect.void
+                    : sql`
+                        SELECT 1 FROM member_credit_accounts a
+                         WHERE (a.team_member_id, a.currency) IN (
+                           SELECT p.team_member_id, f.currency
+                             FROM payments p
+                             JOIN fee_assignments fa ON fa.id = p.fee_assignment_id
+                             JOIN fees f ON f.id = fa.fee_id
+                            WHERE p.id = ANY(${paymentIds.map((row) => row.id)}::uuid[]))
+                         ORDER BY a.team_member_id, a.currency
+                         FOR UPDATE
+                      `,
                 ),
                 // 1. void every active payment first (D10c invariant — payments before
                 //    bank_transactions).

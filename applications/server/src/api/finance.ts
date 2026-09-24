@@ -1,6 +1,6 @@
-import { Auth, FinanceApi } from '@sideline/domain';
+import { Auth, Fee, FinanceApi } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
-import { Array, DateTime, Effect, Option } from 'effect';
+import { Array, DateTime, Effect, Option, Schema } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission, requireReadAccess } from '~/api/permissions.js';
@@ -10,6 +10,11 @@ import {
 } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository, type FeeWithCountsRow } from '~/repositories/FeesRepository.js';
 import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
+import {
+  type MemberCreditDepositRow,
+  MemberCreditsRepository,
+  type SettleResult,
+} from '~/repositories/MemberCreditsRepository.js';
 import { PaymentsRepository, type PaymentViewRow } from '~/repositories/PaymentsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 
@@ -113,6 +118,45 @@ const toPaymentView = (
     voidReason: row.void_reason,
   });
 
+const decodeAmountMinor = Schema.decodeSync(Fee.AmountMinor);
+
+const toSettlementResult = (result: SettleResult): FinanceApi.SettlementResult =>
+  new FinanceApi.SettlementResult({
+    currency: result.currency,
+    creditAppliedMinor: decodeAmountMinor(result.creditAppliedMinor),
+    paidMinor: decodeAmountMinor(result.paidMinor),
+    creditAddedMinor: decodeAmountMinor(result.creditAddedMinor),
+    creditBalanceAfterMinor: decodeAmountMinor(result.creditBalanceAfterMinor),
+    allocations: result.allocations.map(
+      (allocation) =>
+        new FinanceApi.SettlementAllocation({
+          assignmentId: allocation.assignmentId,
+          feeId: allocation.feeId,
+          feeName: allocation.feeName,
+          amountMinor: decodeAmountMinor(allocation.amountMinor),
+          source: allocation.source,
+          statusAfter: allocation.statusAfter,
+          paymentId: allocation.paymentId,
+        }),
+    ),
+  });
+
+const toMemberCreditDepositView = (
+  row: MemberCreditDepositRow,
+): FinanceApi.MemberCreditDepositView =>
+  new FinanceApi.MemberCreditDepositView({
+    depositId: row.id,
+    teamMemberId: row.team_member_id,
+    currency: row.currency,
+    amountMinor: row.amount_minor,
+    method: row.method,
+    paidAt: row.paid_at,
+    note: row.note,
+    recorderName: row.recorder_name,
+    voidedAt: row.voided_at,
+    voidReason: row.void_reason,
+  });
+
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
@@ -124,7 +168,8 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
     Effect.bind('assignments', () => FeeAssignmentsRepository.asEffect()),
     Effect.bind('payments', () => PaymentsRepository.asEffect()),
     Effect.bind('overview', () => FinanceOverviewRepository.asEffect()),
-    Effect.map(({ members, fees, assignments, payments, overview }) =>
+    Effect.bind('credits', () => MemberCreditsRepository.asEffect()),
+    Effect.map(({ members, fees, assignments, payments, overview, credits }) =>
       handlers
         // ------------------------------------------------------------------
         // listFees
@@ -615,6 +660,7 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
                     overdueCount: row.overdueCount,
                     pendingCount: row.pendingCount,
                     paidCount: row.paidCount,
+                    creditMinor: row.creditMinor,
                   }),
               ),
             ),
@@ -632,7 +678,10 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
             Effect.bind('memberAssignments', ({ membership }) =>
               assignments.findByTeamMember(membership.id),
             ),
-            Effect.map(({ memberAssignments }) => {
+            Effect.bind('creditAccounts', ({ membership }) =>
+              credits.listAccountsByMember(membership.id),
+            ),
+            Effect.map(({ memberAssignments, creditAccounts }) => {
               // Group assignments by currency
               const byCurrency = new Map<
                 FinanceApi.MyFinanceStatus['currency'],
@@ -640,6 +689,7 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
                   currency: FinanceApi.MyFinanceStatus['currency'];
                   assignmentViews: FinanceApi.FeeAssignmentView[];
                   outstanding: number;
+                  creditMinor: number;
                 }
               >();
 
@@ -658,6 +708,25 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
                     currency: a.currency,
                     assignmentViews: [view],
                     outstanding,
+                    creditMinor: 0,
+                  });
+                }
+              }
+
+              // Merged in AFTER the assignment loop — a currency the member holds credit in but
+              // has no assignments for still gets a group (`assignments: []`,
+              // `totalOutstandingMinor: 0`), otherwise a member who paid in advance before any
+              // fee exists sees nothing at all.
+              for (const account of creditAccounts) {
+                const existing = byCurrency.get(account.currency);
+                if (existing) {
+                  existing.creditMinor = account.balanceMinor;
+                } else {
+                  byCurrency.set(account.currency, {
+                    currency: account.currency,
+                    assignmentViews: [],
+                    outstanding: 0,
+                    creditMinor: account.balanceMinor,
                   });
                 }
               }
@@ -668,6 +737,7 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
                     currency: entry.currency,
                     assignments: entry.assignmentViews,
                     totalOutstandingMinor: entry.outstanding,
+                    creditMinor: entry.creditMinor,
                   }),
               );
             }),
@@ -692,6 +762,86 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
               }),
             ),
             Effect.map(({ list }) => Array.map(list, toPaymentView)),
+          ),
+        )
+        // ------------------------------------------------------------------
+        // createSettlement
+        // ------------------------------------------------------------------
+        .handle('createSettlement', ({ params: { teamId, memberId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            // 'finance:record_payments' — a settlement creates payments rows; same trust
+            // boundary as recordPayment, so no new permission literal.
+            Effect.tap(({ membership }) =>
+              requirePermission(membership, 'finance:record_payments', forbidden),
+            ),
+            Effect.bind('result', ({ currentUser }) =>
+              credits.settle({
+                teamId,
+                teamMemberId: memberId,
+                currency: payload.currency,
+                amountMinor: payload.amountMinor,
+                method: payload.method,
+                paidAt: payload.paidAt,
+                note: payload.note,
+                expectedOutstandingMinor: payload.expectedOutstandingMinor,
+                recordedByUserId: currentUser.id,
+              }),
+            ),
+            Effect.map(({ result }) => toSettlementResult(result)),
+          ),
+        )
+        // ------------------------------------------------------------------
+        // listMemberCreditDeposits
+        // ------------------------------------------------------------------
+        .handle('listMemberCreditDeposits', ({ params: { teamId, memberId }, query }) =>
+          Effect.Do.pipe(
+            Effect.bind('membership', () => requireReadAccess(members, teamId, forbidden)),
+            Effect.tap(({ membership }) =>
+              requirePermission(membership, 'finance:view', forbidden),
+            ),
+            // Verify the requested member belongs to this team; return empty if not — same
+            // pattern as listMemberAssignments (don't leak existence of a foreign member).
+            Effect.bind('targetMember', () => members.findById(memberId)),
+            Effect.bind('list', ({ targetMember }) => {
+              if (Option.isNone(targetMember) || targetMember.value.team_id !== teamId) {
+                return Effect.succeed([]);
+              }
+              return credits.listDepositsByMember({
+                teamId,
+                teamMemberId: memberId,
+                currency: query.currency,
+                includeVoided: Option.getOrElse(query.includeVoided, () => false),
+              });
+            }),
+            Effect.map(({ list }) => Array.map(list, toMemberCreditDepositView)),
+          ),
+        )
+        // ------------------------------------------------------------------
+        // voidCreditDeposit
+        // ------------------------------------------------------------------
+        .handle('voidCreditDeposit', ({ params: { teamId, memberId, depositId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            Effect.tap(({ membership }) =>
+              requirePermission(membership, 'finance:record_payments', forbidden),
+            ),
+            Effect.tap(({ currentUser }) =>
+              credits.voidDeposit({
+                teamId,
+                memberId,
+                depositId,
+                voidedByUserId: currentUser.id,
+                reason: payload.reason,
+              }),
+            ),
+            Effect.asVoid,
           ),
         ),
     ),

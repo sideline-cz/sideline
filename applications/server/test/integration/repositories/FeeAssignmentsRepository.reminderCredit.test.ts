@@ -158,12 +158,38 @@ const daysFrom = (base: Date, days: number): Date => {
 
 const seedCredit = (memberId: string, currency: string, balanceMinor: number) =>
   SqlClient.SqlClient.asEffect().pipe(
-    Effect.andThen(
-      (sql) => sql`
-        INSERT INTO member_credit_accounts (team_member_id, currency, balance_minor)
-        VALUES (${memberId}, ${currency}, ${balanceMinor})
-        ON CONFLICT (team_member_id, currency) DO UPDATE SET balance_minor = EXCLUDED.balance_minor
-      `,
+    Effect.andThen((sql) =>
+      Effect.Do.pipe(
+        Effect.tap(
+          () => sql`
+            INSERT INTO member_credit_accounts (team_member_id, currency, balance_minor)
+            VALUES (${memberId}, ${currency}, ${balanceMinor})
+            ON CONFLICT (team_member_id, currency) DO UPDATE SET balance_minor = EXCLUDED.balance_minor
+          `,
+        ),
+        // Keeps the §2.4 reconciliation identity satisfiable: `balance − deposits +
+        // credit_payments == 0` can never hold for a balance with no backing deposit row, and
+        // that is not a state `settle`/`voidDeposit` can ever produce. Give this fixture the
+        // same shape: a real, non-voided `member_credit_deposits` row for the same amount.
+        // Reuses the member's own user as the recorder — this fixture only needs a valid
+        // `users(id)` FK, not a realistic treasurer.
+        Effect.bind(
+          'recorder',
+          () => sql<{ user_id: string }>`
+            SELECT user_id::text AS user_id FROM team_members WHERE id = ${memberId}
+          `,
+        ),
+        Effect.tap(
+          ({ recorder }) => sql`
+            INSERT INTO member_credit_deposits
+              (team_member_id, currency, amount_minor, method, paid_at, recorded_by_user_id)
+            VALUES (
+              ${memberId}, ${currency}, ${balanceMinor}, 'cash', now(), ${recorder[0]?.user_id}
+            )
+          `,
+        ),
+        Effect.asVoid,
+      ),
     ),
   );
 

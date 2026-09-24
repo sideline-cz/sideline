@@ -327,6 +327,32 @@ const make = Effect.gen(function* () {
               BETWEEN ts.rsvp_reminder_time
               AND ts.rsvp_reminder_time::time + INTERVAL '5 minutes'
           )
+          -- The club already holds enough of this member's money, in this fee's currency,
+          -- to cover EVERYTHING they owe in it. Read-only: no FOR UPDATE, no lock.
+          -- Deliberately absent from the lock-order table.
+          --
+          -- Compare against the member's TOTAL outstanding in this currency, never against
+          -- this row's own gap. The predicate is evaluated per candidate row, so a row-local
+          -- comparison silences every fee the credit could individually cover: 1700 of credit
+          -- against two unpaid 1700 fees satisfies it on BOTH, and both go quiet permanently
+          -- even though the credit can only ever pay one. The total is the only comparison
+          -- that never wrongly silences.
+          --
+          -- Only FULL coverage suppresses: 300 of credit against 1700 outstanding is still a
+          -- real debt and is still reminded.
+          -- NOTE: never use backticks in this comment - the whole query is a template literal.
+          AND NOT EXISTS (
+            SELECT 1 FROM member_credit_accounts mca
+             WHERE mca.team_member_id = fa.team_member_id
+               AND mca.currency       = f.currency
+               AND mca.balance_minor >= (
+                 SELECT COALESCE(SUM(v2.due_minor - v2.paid_minor), 0)
+                   FROM fee_assignment_status_v v2
+                  WHERE v2.team_member_id = fa.team_member_id
+                    AND v2.currency       = f.currency
+                    AND v2.status IN ('pending', 'partial', 'overdue')
+               )
+          )
       ),
       -- D15b/T10c — the 'assigned' reminder is a UNION ALL branch OUTSIDE the
       -- 'rsvp_reminder_time' gate above: it fires immediately at assignment creation, not up to
@@ -358,6 +384,37 @@ const make = Effect.gen(function* () {
           AND EXISTS (
             SELECT 1 FROM bank_sync_config bsc
             WHERE bsc.team_id = tm.team_id AND bsc.enabled = true
+          )
+          -- The assigned reminder is about a NEW assignment. Without a day-offset gate this
+          -- branch re-evaluates forever, so a credit-suppressed row would fire months later
+          -- when the balance drops. Two days is the same order as the branch's own
+          -- immediate-on-assignment intent.
+          AND fa.created_at > ${now}::timestamptz - INTERVAL '2 days'
+          -- The club already holds enough of this member's money, in this fee's currency,
+          -- to cover EVERYTHING they owe in it. Read-only: no FOR UPDATE, no lock.
+          -- Deliberately absent from the lock-order table.
+          --
+          -- Compare against the member's TOTAL outstanding in this currency, never against
+          -- this row's own gap. The predicate is evaluated per candidate row, so a row-local
+          -- comparison silences every fee the credit could individually cover: 1700 of credit
+          -- against two unpaid 1700 fees satisfies it on BOTH, and both go quiet permanently
+          -- even though the credit can only ever pay one. The total is the only comparison
+          -- that never wrongly silences.
+          --
+          -- Only FULL coverage suppresses: 300 of credit against 1700 outstanding is still a
+          -- real debt and is still reminded.
+          -- NOTE: never use backticks in this comment - the whole query is a template literal.
+          AND NOT EXISTS (
+            SELECT 1 FROM member_credit_accounts mca
+             WHERE mca.team_member_id = fa.team_member_id
+               AND mca.currency       = f.currency
+               AND mca.balance_minor >= (
+                 SELECT COALESCE(SUM(v2.due_minor - v2.paid_minor), 0)
+                   FROM fee_assignment_status_v v2
+                  WHERE v2.team_member_id = fa.team_member_id
+                    AND v2.currency       = f.currency
+                    AND v2.status IN ('pending', 'partial', 'overdue')
+               )
           )
       ),
       all_candidates AS (

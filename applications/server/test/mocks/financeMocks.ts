@@ -4,6 +4,7 @@ import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
+import { MemberCreditsRepository } from '~/repositories/MemberCreditsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 
 export const MockFeesRepositoryLayer = Layer.succeed(FeesRepository, {
@@ -48,6 +49,14 @@ export const MockFinanceOverviewRepositoryLayer = Layer.succeed(FinanceOverviewR
   myStatus: () => Effect.succeed([]),
 } as never);
 
+export const MockMemberCreditsRepositoryLayer = Layer.succeed(MemberCreditsRepository, {
+  _tag: 'api/MemberCreditsRepository' as const,
+  settle: () => LogicError.die('MockMemberCreditsRepositoryLayer.settle not implemented'),
+  voidDeposit: () => LogicError.die('MockMemberCreditsRepositoryLayer.voidDeposit not implemented'),
+  listAccountsByMember: () => Effect.succeed([]),
+  listDepositsByMember: () => Effect.succeed([]),
+} as never);
+
 export const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
   _tag: 'api/ExpensesRepository' as const,
   insert: () => LogicError.die('MockExpensesRepositoryLayer.insert not implemented'),
@@ -74,4 +83,5 @@ export const MockFinanceLayers = Layer.mergeAll(
   MockPaymentsRepositoryLayer,
   MockFinanceOverviewRepositoryLayer,
   MockExpensesRepositoryLayer,
+  MockMemberCreditsRepositoryLayer,
 );
