@@ -39,7 +39,7 @@ test.describe('Team Dashboard', () => {
     await expect(sidebar).toBeVisible({ timeout: 10000 });
     await expect(sidebar.getByRole('link', { name: /Dashboard/ })).toBeVisible();
     await expect(sidebar.getByRole('link', { name: /Events/ })).toBeVisible();
-    await expect(sidebar.getByRole('link', { name: /Members/ })).toBeVisible();
+    await expect(sidebar.getByRole('link', { name: 'Members', exact: true })).toBeVisible();
   });
 
   test('can navigate to events page from sidebar', async ({ page }) => {
@@ -50,7 +50,7 @@ test.describe('Team Dashboard', () => {
 
   test('can navigate to members page from sidebar', async ({ page }) => {
     const sidebar = page.locator('[data-sidebar="sidebar"]');
-    await sidebar.getByRole('link', { name: /Members/ }).click();
+    await sidebar.getByRole('link', { name: 'Members', exact: true }).click();
     await expect(page).toHaveURL(`/teams/${TEAM_ID}/members`, { timeout: 30000 });
   });
 });
