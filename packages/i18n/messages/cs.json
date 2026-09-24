@@ -2418,6 +2418,7 @@
   "roster_saveChanges": "Uložit změny",
   "roster_saving": "Ukládání...",
   "roster_selectChannel": "Vyberte kanál",
+  "roster_showInactive": "Zobrazit neaktivní soupisky",
   "roster_syncRoleMembers": "Synchronizovat s Discordem",
   "roster_syncRoleMembersFailed": "Synchronizaci Discord role se nepodařilo spustit.",
   "roster_syncRoleMembersHelp": "Přiřadí Discord roli členům této soupisky. Užitečné po reaktivaci, výpadku bota nebo pozdějším připojení členů.",

@@ -2418,6 +2418,7 @@
   "roster_saveChanges": "Save Changes",
   "roster_saving": "Saving...",
   "roster_selectChannel": "Select a channel",
+  "roster_showInactive": "Show inactive rosters",
   "roster_syncRoleMembers": "Sync with Discord",
   "roster_syncRoleMembersFailed": "Failed to start Discord role sync.",
   "roster_syncRoleMembersHelp": "Apply this roster's members to the Discord role. Useful after reactivation, bot downtime, or late joins.",

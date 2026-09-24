@@ -97,8 +97,10 @@ function MemberDetailRoute() {
   const roles = roleListResponse.roles;
 
   const memberRosterIds = new Set(memberRosters.map((r: Roster.RosterInfo) => r.rosterId));
+  // Inactive rosters are archived, not assignable — `memberRosters` still renders the
+  // member's existing memberships in one, so nothing already assigned disappears.
   const assignableRosters = rosterList.rosters.filter(
-    (r: Roster.RosterInfo) => !memberRosterIds.has(r.rosterId),
+    (r: Roster.RosterInfo) => r.active && !memberRosterIds.has(r.rosterId),
   );
   const memberGroupIds = new Set(memberGroups.map((g: GroupApi.GroupInfo) => g.groupId));
   const assignableGroups = groups.filter((g: GroupApi.GroupInfo) => !memberGroupIds.has(g.groupId));

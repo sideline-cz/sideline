@@ -163,6 +163,14 @@ import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 - Use shared helpers from `src/lib/group-options.ts` (`toGroupOptions`) when building options from `GroupApi.GroupInfo[]`.
 - Use shared label maps from `src/lib/event-labels.ts` (`eventTypeLabels`, `dayShortLabels`, `dayFullLabels`, `DAY_ORDER`, `sortDays`) — never duplicate these inline.
 
+### Roster Pickers Offer Active Rosters Only
+
+`Roster.RosterListResponse.rosters` includes archived rosters, flagged by `RosterInfo.active`. The server never filters them out and there is no `active` query param, so every consumer decides for itself.
+
+1. **A control that PICKS a roster to attach filters to `r.active` at the call site.** Current pickers: `components/organisms/EventAttendanceRosterSection.tsx` (event to roster link) and `routes/(authenticated)/teams/$teamId/members.$memberId.tsx` `assignableRosters` (member to roster assignment). A new picker MUST filter the same way.
+2. **Lists of EXISTING attachments stay unfiltered**, so an already-attached archived roster never vanishes from the UI — `link` in `EventAttendanceRosterSection.tsx`, `memberRosters` on `PlayerDetailPage.tsx`.
+3. **`components/pages/RostersListPage.tsx` is the only surface that may show inactive rosters**, behind the `roster_showInactive` Switch (default OFF = active only).
+
 ## Route File Convention
 
 Route files (`routes/**/*.tsx`) contain TanStack Router config (`createFileRoute`, `beforeLoad`, `loader`, `validateSearch`) plus a thin wrapper component that calls `Route.use*()` hooks and passes the results as props to the Page component. The Page component itself has no TanStack Router dependency.

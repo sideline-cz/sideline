@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-24 — Fixed: archived rosters cluttered roster pickers
+
+Linking a roster to an event and adding a member to an extra roster from their profile used to list every roster, including archived ones. Both pickers now only offer active rosters. The **rosters list page** also hides archived rosters by default — flip the new **Show inactive rosters** switch to see them again.
+
 ## 2026-09-24 — Fixed: changing your default role twice stopped reminders for earlier members
 
 If your team changed **"New members receive"** a second time, everyone who joined under the *previous* choice quietly stopped getting RSVP reminder DMs and stopped showing up in the organiser's non-responder list — their missed-RSVP streak stopped counting too. Sideline now remembers every role it has ever handed out as your default, so each group keeps its reminders no matter how many times the setting changes.
