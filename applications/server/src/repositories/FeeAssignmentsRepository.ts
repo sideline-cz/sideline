@@ -124,9 +124,11 @@ const make = Effect.gen(function* () {
         COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS member_name
       FROM fee_assignments fa
       JOIN fee_assignment_status_v v ON v.assignment_id = fa.id
+      JOIN fees f ON f.id = fa.fee_id
       LEFT JOIN team_members tm ON tm.id = fa.team_member_id
       LEFT JOIN users u ON u.id = tm.user_id
       WHERE fa.team_member_id = ${teamMemberId}
+        AND (f.archived_at IS NULL OR fa.paid_minor > 0)
       ORDER BY fa.created_at ASC
     `,
   });
