@@ -271,6 +271,17 @@ async function setupApiMocks(page: Page) {
   );
 
   await page.route(
+    '**/teams/*/membership-plans',
+    apiOnly(async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mock.mockMembershipPlanList),
+      });
+    }),
+  );
+
+  await page.route(
     '**/teams/*/activity-types',
     apiOnly(async (route) => {
       await route.fulfill({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAmount } from './parseAmount.js';
+import { formatMinorToMajor, parseAmount } from './parseAmount.js';
 
 describe('parseAmount', () => {
   it('parses "15.50" with CZK → 1550', () => {
@@ -44,5 +44,33 @@ describe('parseAmount', () => {
 
   it('uses 2 decimal places for unknown currency (default)', () => {
     expect(parseAmount('10', 'XYZ')).toBe(1000);
+  });
+
+  // A free membership plan is priced 0, so the plans form opts in. Negative and
+  // non-numeric must still throw — allowZero widens exactly one value.
+  it('accepts zero when allowZero is set', () => {
+    expect(parseAmount('0', 'CZK', { allowZero: true })).toBe(0);
+  });
+
+  it('still throws for negative when allowZero is set', () => {
+    expect(() => parseAmount('-5', 'CZK', { allowZero: true })).toThrow(
+      'Amount must be greater than 0',
+    );
+  });
+
+  it('still throws for non-numeric when allowZero is set', () => {
+    expect(() => parseAmount('abc', 'CZK', { allowZero: true })).toThrow('Amount must be a number');
+  });
+});
+
+describe('formatMinorToMajor', () => {
+  it('round-trips through parseAmount for CZK', () => {
+    const major = formatMinorToMajor(1550, 'CZK');
+    expect(major).toBe('15.50');
+    expect(parseAmount(major, 'CZK')).toBe(1550);
+  });
+
+  it('uses 2 decimal places for an unknown currency (default)', () => {
+    expect(formatMinorToMajor(1000, 'XYZ')).toBe('10.00');
   });
 });

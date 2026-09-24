@@ -174,6 +174,7 @@ flowchart LR
         UC_ASSIGN_VS["Assign Variable Symbols to Members"]
         UC_RESOLVE_QUEUE["Resolve a Bank Transaction in the Matching Queue"]
         UC_EXPORT_BANK["Export Bank Movements for Grant Audit"]
+        UC_MANAGE_MEMBERSHIP_PLANS["View / Create / Update / Archive Membership Plans\nrequires: finance:manage_fees"]
     end
 
     UA --> UC_LOGIN
@@ -239,6 +240,7 @@ flowchart LR
     TR --> UC_ASSIGN_VS
     TR --> UC_RESOLVE_QUEUE
     TR --> UC_EXPORT_BANK
+    TR --> UC_MANAGE_MEMBERSHIP_PLANS
     CP --> UC_ASSIGN_VS
 
     AD --> UC_VIEW_EVENTS
@@ -259,6 +261,7 @@ flowchart LR
     AD --> UC_ASSIGN_VS
     AD --> UC_RESOLVE_QUEUE
     AD --> UC_EXPORT_BANK
+    AD --> UC_MANAGE_MEMBERSHIP_PLANS
     AD --> UC_CARPOOL_POST
     AD --> UC_CARPOOL_ADD_CAR
     AD --> UC_CARPOOL_ASSIGN_SEAT
@@ -1295,5 +1298,17 @@ The following structured descriptions cover the most significant use cases in th
 | **Alternate Flow A** | Leaving a carpool, removing a car, and unclaiming a training are never gated — an incomplete profile can always back out of a commitment it never should have blocked. `Carpool/AssignSeat` (an owner assigning a passenger) is also never gated. |
 | **Alternate Flow B** | On a fresh Discord join while the gate is on for the team, the member additionally receives a bot-managed "Sideline Unverified" Discord role and gains access to a permanent, read-only `#start-here` (Czech: `#nez-zacnes`) channel with a pinned card carrying the same **Finish my profile** button; both are revoked automatically the moment the profile is completed (UC-34). A member whose profile is already complete never sees either. |
 | **Notes** | This is a per-team opt-in, not a global default: a team that never touches the setting behaves exactly as before this feature shipped. |
+
+---
+
+### UC-42: Manage Membership Plans (Treasurer/Admin)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Treasurer; Admin |
+| **Precondition** | The actor is authenticated and holds `finance:manage_fees` (default: Admin, Treasurer). The underlying `GET` endpoint is membership-gated only (any team member could call it directly), but the web app's sidebar link is hidden from anyone without `finance:manage_fees`, so in practice only Treasurer/Admin reach this page today. |
+| **Main Flow** | 1. A Treasurer or Admin opens **Team → Finances → Membership Plans** (`/teams/:teamId/membership-plans`, hidden from the sidebar for anyone without `finance:manage_fees`) and calls `GET /teams/:teamId/membership-plans`, which returns the team's active plans (default plan first) and a `canManage` flag. 2. The actor clicks **Add plan**, filling in an optional name, price, currency, per-training price, and optional expiry; the web app calls `POST /teams/:teamId/membership-plans`. 3. The server inserts a `membership_plans` row and returns a `MembershipPlanInfo`. 4. The actor edits an existing plan's fields (full-replace `PATCH`), promotes a different plan to be the team's default (`PUT .../default`, demoting the previous one), or archives a plan that is no longer offered (`DELETE`, which is refused with `409 MembershipPlanIsDefault` if the plan is the current default — another plan must be promoted first). |
+| **Postcondition** | The team's plan catalogue reflects the change. Exactly one active plan is always the team's default. |
+| **Notes** | Slice 1 of "Setup memberships": this use case covers pricing and lifecycle only. Every team starts with one free, unnamed default plan (renders the built-in translated label) seeded at team creation. Nothing in this slice assigns a plan to a member, enforces the per-training price, or enforces the expiry date — a player choosing a plan and any charging or expiry behaviour are a later slice. |
 
 ---

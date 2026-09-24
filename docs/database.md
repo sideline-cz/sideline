@@ -1267,6 +1267,36 @@ A fee definition scoped to a team. Fees can be archived (soft-deleted) but never
 
 ---
 
+#### `membership_plans`
+
+A team's catalogue of membership tiers (Slice 1 of "Setup memberships" — pricing and lifecycle only; nothing in this slice assigns a plan to a member). Every team is seeded with one default plan (`name = NULL`, `currency = 'CZK'`, zero price) by migration `1792800000_create_membership_plans`, and every future team gets the same seed via an `AFTER INSERT ON teams` trigger — the same pattern as `event_types`.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `name` | TEXT | — | `NULL` |
+| `price_minor` | BIGINT | NOT NULL, CHECK ≥ 0 | `0` |
+| `currency` | CHAR(3) | NOT NULL | — |
+| `price_per_training_minor` | BIGINT | NOT NULL, CHECK ≥ 0 | `0` |
+| `expires_at` | TIMESTAMPTZ | — | `NULL` |
+| `is_default` | BOOLEAN | NOT NULL | `false` |
+| `archived_at` | TIMESTAMPTZ | — | `NULL` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Indexes**: `idx_membership_plans_team_default` — unique, on `(team_id) WHERE is_default AND archived_at IS NULL`, enforcing at most one active default plan per team; `idx_membership_plans_team_name` — unique, on `(team_id, lower(name)) WHERE archived_at IS NULL AND name IS NOT NULL`, case-insensitive uniqueness among active, named plans only; `idx_membership_plans_team_active` — non-unique, on `(team_id, is_default DESC, created_at) WHERE archived_at IS NULL`, serving the list query's `WHERE team_id = $1 AND archived_at IS NULL ORDER BY is_default DESC, created_at ASC` (neither unique index above covers it, both being partial on other predicates).
+
+**Notes**: `name IS NULL` means "render the built-in translated label", exactly the `event_types.name` rationale (`docs/database.md` § 6, `AGENTS.md` "Event Types") — the seeded default plan is never given a literal English/Czech string because the viewer's locale isn't known at seed time. Only the seeded default carries `NULL`; a captain-created plan always has a name, so the partial index deliberately excludes `name IS NULL` rows rather than trying to make every team's single `NULL` row collide with itself.
+
+`insertMembershipPlan` (`MembershipPlansRepository`) is self-healing: it computes `is_default = NOT EXISTS (... WHERE team_id = $1 AND archived_at IS NULL AND is_default)` in the same `INSERT`, so a team that is ever caught without an active default (a bug, never a deliberate app state) gets one back on its very next plan creation. Two concurrent creates on a defaultless team both compute `is_default = true`; exactly one wins `idx_membership_plans_team_default`, and that 23505 is **deliberately not** mapped onto `idx_membership_plans_team_name`'s error (`MembershipPlanNameAlreadyTaken`) — the two unique violations are told apart by constraint name (`SqlErrors.catchUniqueViolationOn`, never the unscoped `catchUniqueViolation`), because reporting a name conflict for a name nobody used would hide a real bug behind a user-facing 409.
+
+`setDefaultMembershipPlan` follows `roles.setDefaultRole`'s two-UPDATE-inside-one-transaction shape (never a single `SET is_default = (id = $1)`, which transiently holds two `true` rows and trips the partial index) — lock every plan row of the team (`FOR UPDATE`, closes the same concurrent-switch 23505 race under READ COMMITTED as `roles`), clear the old default (**not** filtered on `archived_at` — a stale flag surviving on an archived row must be cleared too), then mark the new one **with an `archived_at IS NULL` guard the equivalent `roles` query does not need to worry about the same way**: without it, `PUT /membership-plans/:archivedPlanId/default` would clear the live default and mark an archived row default instead, and because the partial index never sees an archived row, nothing raises — the team is left with zero active defaults. The mark step reports rows affected so the API layer can 404 that exact case.
+
+`archiveMembershipPlan` is a single `UPDATE ... WHERE id = $1 AND team_id = $2 AND archived_at IS NULL AND NOT is_default`, never a read-then-check. Putting `NOT is_default` inside the `UPDATE`'s own `WHERE` (rather than a preceding `SELECT`) is what makes it race-safe against a concurrent `setDefaultMembershipPlan`: Postgres re-evaluates a row's own `UPDATE` predicate against the latest committed version after any lock it waited on releases, so an archive that blocked behind a default-switch's row lock correctly refuses once that switch has landed, instead of applying against the stale non-default snapshot it originally read.
+
+---
+
 #### `fee_assignments`
 
 Assigns a fee to a specific team member, optionally overriding the amount or due date. The `paid_minor` column is maintained automatically by the `payments_finance_recompute` trigger.
@@ -2143,7 +2173,7 @@ Idempotency guard: each threshold fires at most once per token generation.
 
 ## Migration History
 
-All 109 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 110 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -2270,6 +2300,7 @@ All 109 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1792500001 | `add_roles_is_default` | Adds `is_default BOOLEAN NOT NULL DEFAULT false` (`IF NOT EXISTS`) to `roles`. Backfills `is_default = true` onto every existing team's built-in `Player` role (behaviour-preserving — existing teams keep handing new members `Player`). Creates the partial unique index `idx_roles_team_default` on `roles(team_id) WHERE is_default AND NOT is_archived` *after* the backfill, enforcing at most one default role per team. |
 | 1792600001 | `add_roles_was_default` | Adds `was_default BOOLEAN NOT NULL DEFAULT false` (`IF NOT EXISTS`) to `roles` — the sticky "has ever been this team's default" flag backing RSVP eligibility. Backfills `was_default = true` from exactly the predicate the RSVP queries used before (`is_default = true OR (name = 'Player' AND is_built_in = true)`), so no member gains or loses reminders at deploy time. No index: unlike `is_default`, several rows per team are expected. |
 | 1792600000 | `drop_role_sync` | Drops `role_sync_events`, `discord_role_mappings`, and `member_role_grants` tables; drops `team_members.last_role_sync_at`, `last_role_sync_state`, `last_role_sync_error` columns. Completes the removal of Sideline-role → Discord-role mirroring (Release B of the expand/contract); `teams.guild_id` and `idx_teams_guild_id` are unaffected — Discord roles still come from groups/rosters (`channel_sync_events`) and achievements (`discord_role_provision_events`) |
+| 1792800000 | `create_membership_plans` | Creates `membership_plans` (see [12. Finance](#12-finance) above), seeds every pre-existing team with one default plan (`NULL` name, `'CZK'`, zero price), and creates `seed_default_membership_plan()` — an `AFTER INSERT ON teams` trigger seeding the same default row for every future team. Creates the partial unique indexes `idx_membership_plans_team_default` and `idx_membership_plans_team_name`, and the partial (non-unique) index `idx_membership_plans_team_active`. |
 
 ### After Migrations (seed data)
 

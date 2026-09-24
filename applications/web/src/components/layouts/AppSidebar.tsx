@@ -9,6 +9,7 @@ import {
   Dumbbell,
   Hash,
   Home,
+  IdCard,
   Landmark,
   Languages,
   Link2,
@@ -211,6 +212,13 @@ function getTeamNavGroups(
           to: '/teams/$teamId/finances/fees',
           params: { teamId },
           requiredPermission: 'finance:view' satisfies Role.Permission,
+        },
+        {
+          title: tr('membershipPlan_title'),
+          icon: IdCard,
+          to: '/teams/$teamId/membership-plans',
+          params: { teamId },
+          requiredPermission: 'finance:manage_fees' satisfies Role.Permission,
         },
         {
           title: tr('expenses_navTitle'),

@@ -100,6 +100,8 @@ export * as Invite from './api/Invite.js';
 
 export * as LeaderboardApi from './api/LeaderboardApi.js';
 
+export * as MembershipPlanApi from './api/MembershipPlanApi.js';
+
 export * as NotificationApi from './api/NotificationApi.js';
 
 export * as OnboardingApi from './api/OnboardingApi.js';
@@ -358,6 +360,8 @@ export * as Leaderboard from './models/Leaderboard.js';
 export * as MemberCredit from './models/MemberCredit.js';
 
 export * as MemberRole from './models/MemberRole.js';
+
+export * as MembershipPlan from './models/MembershipPlan.js';
 
 export * as Notification from './models/Notification.js';
 

@@ -136,6 +136,10 @@ No. If someone leaves your Discord server, their Sideline roster entry is archiv
 
 Yes. One Discord account can be in any number of teams. The dashboard aggregates events across all of them.
 
+### I created a membership plan — does it charge members automatically?
+
+Not yet. Membership plans currently only let you define pricing (**Team → Finances → Membership plans**) — a name, price, currency, optional per-training price, and optional expiry date. Nothing assigns a plan to a member, and the per-training price and expiry date are stored for reference only; no charging or expiry enforcement happens. To actually collect money today, use [Fees](/guides/finances/#fee-management-page) instead.
+
 ### My Fio bank connection stopped importing payments — what do I do?
 
 The most common cause is an expired token: Fio tokens last at most 180 days and only renew when someone signs in to Fio Internetbanking or Smartbanking. Open the bank connection card on your team's settings page (**Finance** tab) — it explains exactly what's wrong (an expired/invalid token, a temporary Fio outage Sideline is already retrying, a token still "activating" if you just created it, or the token reading a different account, see below) and what to do next. Click **Test the connection** on the card for an immediate answer instead of waiting for the next hourly check. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio) for the full setup and troubleshooting steps.

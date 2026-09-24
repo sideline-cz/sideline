@@ -67,6 +67,10 @@ A named charge defined at the team level — for example, a membership subscript
 
 The record that ties a specific fee to a specific member. An assignment tracks how much is owed and how much has been paid. The **status** is computed automatically: pending, partial, paid, overdue, or waived.
 
+## Membership plan
+
+A named pricing tier a team offers — for example "Adult membership" or "Junior membership". Every team starts with one free, unnamed default plan. Admins or Treasurers can add more plans, edit pricing, promote a different plan to be the team's default, and archive a plan that's no longer offered. Today this covers pricing and lifecycle only — nothing assigns a plan to a member yet. See [Membership plans](/guides/finances/#membership-plans).
+
 ## Payment
 
 Money received against a fee assignment. Payments are recorded by admins or treasurers (anyone with `finance:record_payments`) and can be voided if entered in error. The voided record is kept for auditing. A payment can be recorded by hand (cash or bank transfer) or created automatically by matching a bank movement. See the [Finances guide](/guides/finances/) for the full workflow.

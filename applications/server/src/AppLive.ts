@@ -49,6 +49,7 @@ import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { MemberCreditsRepository } from '~/repositories/MemberCreditsRepository.js';
+import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentReminderSyncEventsRepository.js';
@@ -169,6 +170,7 @@ export const Repositories = Layer.mergeAll(
   PaymentsRepository.Default,
   FinanceOverviewRepository.Default,
   MemberCreditsRepository.Default,
+  MembershipPlansRepository.Default,
   ExpensesRepository.Default,
   PaymentReminderSyncEventsRepository.Default,
   PaymentRemindersSentRepository.Default,
