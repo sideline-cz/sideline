@@ -175,58 +175,62 @@ export function TrainingTypesListPage({
       {trainingTypes.length === 0 ? (
         <p className='text-muted-foreground'>{tr('trainingType_noTrainingTypes')}</p>
       ) : (
-        <table className='w-full'>
-          <thead>
-            <tr className='border-b'>
-              <th className='py-2 px-4 text-left text-sm font-medium'>{tr('trainingType_name')}</th>
-              <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                {tr('event_ownerGroup')}
-              </th>
-              <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                {tr('event_memberGroup')}
-              </th>
-              <th className='py-2 px-4' />
-            </tr>
-          </thead>
-          <tbody>
-            {trainingTypes.map((tt) => (
-              <tr key={tt.trainingTypeId} className='border-b'>
-                <td className='py-2 px-4'>
-                  <Link
-                    to='/teams/$teamId/training-types/$trainingTypeId'
-                    params={{ teamId, trainingTypeId: tt.trainingTypeId }}
-                    className='font-medium hover:underline'
-                  >
-                    {tt.name}
-                  </Link>
-                  {(Option.isSome(tt.ownerGroupName) || Option.isSome(tt.memberGroupName)) && (
-                    <p className='text-xs text-muted-foreground sm:hidden'>
-                      {Option.getOrElse(tt.ownerGroupName, () => tr('trainingType_noGroup'))}
-                      {' / '}
-                      {Option.getOrElse(tt.memberGroupName, () => tr('trainingType_noGroup'))}
-                    </p>
-                  )}
-                </td>
-                <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                  {Option.getOrElse(tt.ownerGroupName, () => tr('trainingType_noGroup'))}
-                </td>
-                <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                  {Option.getOrElse(tt.memberGroupName, () => tr('trainingType_noGroup'))}
-                </td>
-                <td className='py-2 px-4'>
-                  <Button asChild variant='outline' size='sm'>
+        <div className='overflow-x-auto'>
+          <table className='w-full'>
+            <thead>
+              <tr className='border-b'>
+                <th className='py-2 px-4 text-left text-sm font-medium'>
+                  {tr('trainingType_name')}
+                </th>
+                <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
+                  {tr('event_ownerGroup')}
+                </th>
+                <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
+                  {tr('event_memberGroup')}
+                </th>
+                <th className='py-2 px-4' />
+              </tr>
+            </thead>
+            <tbody>
+              {trainingTypes.map((tt) => (
+                <tr key={tt.trainingTypeId} className='border-b'>
+                  <td className='py-2 px-4'>
                     <Link
                       to='/teams/$teamId/training-types/$trainingTypeId'
                       params={{ teamId, trainingTypeId: tt.trainingTypeId }}
+                      className='font-medium hover:underline'
                     >
-                      View
+                      {tt.name}
                     </Link>
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    {(Option.isSome(tt.ownerGroupName) || Option.isSome(tt.memberGroupName)) && (
+                      <p className='text-xs text-muted-foreground sm:hidden'>
+                        {Option.getOrElse(tt.ownerGroupName, () => tr('trainingType_noGroup'))}
+                        {' / '}
+                        {Option.getOrElse(tt.memberGroupName, () => tr('trainingType_noGroup'))}
+                      </p>
+                    )}
+                  </td>
+                  <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
+                    {Option.getOrElse(tt.ownerGroupName, () => tr('trainingType_noGroup'))}
+                  </td>
+                  <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
+                    {Option.getOrElse(tt.memberGroupName, () => tr('trainingType_noGroup'))}
+                  </td>
+                  <td className='py-2 px-4'>
+                    <Button asChild variant='outline' size='sm'>
+                      <Link
+                        to='/teams/$teamId/training-types/$trainingTypeId'
+                        params={{ teamId, trainingTypeId: tt.trainingTypeId }}
+                      >
+                        View
+                      </Link>
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

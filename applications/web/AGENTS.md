@@ -70,6 +70,17 @@ Rules:
 2. **A disclosure that must work on touch uses `<Popover>`, never `<Tooltip>`.** Radix tooltips open on hover/focus only and never open on a tap, so touch users get nothing. Use `<Tooltip>` only for supplementary text that is ALSO reachable another way (e.g. an `sr-only` label on the same control); use `<Popover>` whenever the disclosed content is the only route to the information or to an action. Reference: `EffectiveRolesList.tsx` (`+n` → `Popover`), `PlayerDetailPage.tsx` `InheritedRoleForwardControl` (one granting group → `Tooltip` beside an `sr-only` label on the link; 2+ groups → `Popover` listing one link per group).
 3. **Encode a state distinction on a badge through at least two non-colour channels plus the accessible name.** Colour alone disappears under forced-colors mode, greyscale and screen readers. `RoleBadge.tsx` marks a group-inherited role with a dashed border (shape), a leading `Users` icon (`aria-hidden`) and an `aria-label` naming the granting group(s).
 
+### A Phone-Width Page Must Not Scroll Sideways
+
+Two shapes push the whole document wider than a 360px viewport, and neither is visible on a desktop review:
+
+1. **A bare `<table>`.** `table-layout: auto` sizes columns from max-content, so `min-w-0` + `truncate` inside a `<td>` does nothing — a long member name widens the table, and the trailing actions column lands off-screen with no affordance that says so. **Every `<table>` is wrapped in `<div className='overflow-x-auto'>`**, without exception; the scroller confines the growth to the table instead of the page. Reference: `components/pages/TeamMembersPage.tsx`.
+2. **A row of text buttons marked `shrink-0`.** The cluster keeps its full width while the neighbouring `flex-1` text collapses toward zero — on `EventTypesPage` the name rendered one character per line under four action buttons. Let the row wrap (`flex-wrap` on the row, a `basis-*` on the text block so the actions drop to their own line) rather than pinning the actions. The same applies to any two-button `flex gap-2` inside a card or an `<Alert>`: an `AlertDescription` is a grid cell with `min-width: auto`, so two `whitespace-nowrap` buttons blow the alert past the viewport.
+
+`@media (pointer: coarse)` inflates every button to a 44px minimum (see the section above), so a row that just fits with a mouse can still overflow on a phone. Verify under device emulation, not by narrowing a desktop window.
+
+`e2e/tests/responsive.spec.ts` → "No horizontal overflow on mobile" asserts `documentElement.scrollWidth <= clientWidth` at 360px for the pages that have broken this way. Add a page to that list when you build a new list or table view.
+
 ### Touch Targets Live in `src/styles.css` — Grow the Hit Area, Never the Box
 
 `applications/web/src/styles.css` holds one `@media (pointer: coarse)` block that enforces the 44x44px minimum touch target app-wide. Radix primitives render as real `<button>` elements, so that block hits every one of them — including the ones that are deliberately tiny. `Switch` (`components/ui/switch.tsx`) is `<button role='switch'>` styled `h-[1.15rem] w-8 rounded-full`; the `min-width: 44px` introduced in `4a471dc4` turned it into a plain circle with the `size-4` thumb centred inside it and the checked/unchecked thumb translation invisible. It reached production as "the toggle on the phone is a circle with a dot in the middle".

@@ -195,27 +195,27 @@ function TeamSettingsPageBody({
         <TabsList
           aria-label={tr('teamSettings_tabsLabel')}
           variant='line'
-          className='w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+          className='w-full flex-wrap justify-start gap-x-1 gap-y-2 group-data-[orientation=horizontal]/tabs:h-auto'
         >
-          <TabsTrigger value='general' className='shrink-0'>
+          <TabsTrigger value='general' className='h-9 flex-none'>
             {tr('teamSettings_tab_general')}
           </TabsTrigger>
-          <TabsTrigger value='discord' className='shrink-0'>
+          <TabsTrigger value='discord' className='h-9 flex-none'>
             {tr('teamSettings_tab_discord')}
           </TabsTrigger>
-          <TabsTrigger value='onboarding' className='shrink-0'>
+          <TabsTrigger value='onboarding' className='h-9 flex-none'>
             {tr('teamSettings_tab_onboarding')}
           </TabsTrigger>
-          <TabsTrigger value='email' className='shrink-0'>
+          <TabsTrigger value='email' className='h-9 flex-none'>
             {tr('teamSettings_tab_email')}
           </TabsTrigger>
           {canManageBankSync && (
-            <TabsTrigger value='finance' className='shrink-0'>
+            <TabsTrigger value='finance' className='h-9 flex-none'>
               {tr('teamSettings_tab_finance')}
             </TabsTrigger>
           )}
           {initialGenerationConfig?.canManage && (
-            <TabsTrigger value='automation' className='shrink-0'>
+            <TabsTrigger value='automation' className='h-9 flex-none'>
               {tr('teamSettings_tab_automation')}
             </TabsTrigger>
           )}

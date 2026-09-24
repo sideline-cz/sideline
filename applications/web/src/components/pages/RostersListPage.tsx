@@ -181,59 +181,63 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
       {rosters.length === 0 ? (
         <p className='text-muted-foreground'>{tr('roster_noRosters')}</p>
       ) : (
-        <table className='w-full'>
-          <tbody>
-            {rosters.map((roster) => (
-              <tr key={roster.rosterId} className='border-b'>
-                <td className='py-2 px-4'>
-                  <div className='flex items-center gap-2'>
-                    <ColorDot color={Option.getOrUndefined(roster.color)} />
-                    <Link
-                      to='/teams/$teamId/rosters/$rosterId'
-                      params={{ teamId, rosterId: roster.rosterId }}
-                      className='font-medium hover:underline'
+        <div className='overflow-x-auto'>
+          <table className='w-full'>
+            <tbody>
+              {rosters.map((roster) => (
+                <tr key={roster.rosterId} className='border-b'>
+                  <td className='py-2 px-4'>
+                    <div className='flex items-center gap-2'>
+                      <ColorDot color={Option.getOrUndefined(roster.color)} />
+                      <Link
+                        to='/teams/$teamId/rosters/$rosterId'
+                        params={{ teamId, rosterId: roster.rosterId }}
+                        className='font-medium hover:underline'
+                      >
+                        {Option.isSome(roster.emoji)
+                          ? `${roster.emoji.value} ${roster.name}`
+                          : roster.name}
+                      </Link>
+                    </div>
+                    <p className='text-xs text-muted-foreground sm:hidden'>
+                      <span
+                        className={roster.active ? 'text-green-700 font-medium' : 'font-medium'}
+                      >
+                        {roster.active ? tr('roster_active') : tr('roster_inactive')}
+                      </span>
+                      {' · '}
+                      {tr('roster_memberCount', { count: roster.memberCount })}
+                    </p>
+                  </td>
+                  <td className='hidden sm:table-cell py-2 px-4'>
+                    <span
+                      className={
+                        roster.active
+                          ? 'text-green-700 font-medium'
+                          : 'text-muted-foreground font-medium'
+                      }
                     >
-                      {Option.isSome(roster.emoji)
-                        ? `${roster.emoji.value} ${roster.name}`
-                        : roster.name}
-                    </Link>
-                  </div>
-                  <p className='text-xs text-muted-foreground sm:hidden'>
-                    <span className={roster.active ? 'text-green-700 font-medium' : 'font-medium'}>
                       {roster.active ? tr('roster_active') : tr('roster_inactive')}
                     </span>
-                    {' · '}
+                  </td>
+                  <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
                     {tr('roster_memberCount', { count: roster.memberCount })}
-                  </p>
-                </td>
-                <td className='hidden sm:table-cell py-2 px-4'>
-                  <span
-                    className={
-                      roster.active
-                        ? 'text-green-700 font-medium'
-                        : 'text-muted-foreground font-medium'
-                    }
-                  >
-                    {roster.active ? tr('roster_active') : tr('roster_inactive')}
-                  </span>
-                </td>
-                <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                  {tr('roster_memberCount', { count: roster.memberCount })}
-                </td>
-                <td className='py-2 px-4'>
-                  <Button asChild variant='outline' size='sm'>
-                    <Link
-                      to='/teams/$teamId/rosters/$rosterId'
-                      params={{ teamId, rosterId: roster.rosterId }}
-                    >
-                      View
-                    </Link>
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  </td>
+                  <td className='py-2 px-4'>
+                    <Button asChild variant='outline' size='sm'>
+                      <Link
+                        to='/teams/$teamId/rosters/$rosterId'
+                        params={{ teamId, rosterId: roster.rosterId }}
+                      >
+                        View
+                      </Link>
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

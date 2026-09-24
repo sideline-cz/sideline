@@ -387,24 +387,26 @@ export function GroupDetailPage({
           {groupDetail.roles.length === 0 ? (
             <p className='text-muted-foreground'>{tr('roles_noRoles')}</p>
           ) : (
-            <table className='w-full'>
-              <tbody>
-                {groupDetail.roles.map((role) => (
-                  <tr key={role.roleId} className='border-b'>
-                    <td className='py-2 px-4'>{role.roleName}</td>
-                    <td className='py-2 px-4'>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={() => handleUnassignRole(role.roleId)}
-                      >
-                        {tr('group_unassignRole')}
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className='overflow-x-auto'>
+              <table className='w-full'>
+                <tbody>
+                  {groupDetail.roles.map((role) => (
+                    <tr key={role.roleId} className='border-b'>
+                      <td className='py-2 px-4'>{role.roleName}</td>
+                      <td className='py-2 px-4'>
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={() => handleUnassignRole(role.roleId)}
+                        >
+                          {tr('group_unassignRole')}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
@@ -527,24 +529,26 @@ export function GroupDetailPage({
           {groupDetail.members.length === 0 ? (
             <p className='text-muted-foreground'>{tr('members_noPlayers')}</p>
           ) : (
-            <table className='w-full'>
-              <tbody>
-                {groupDetail.members.map((member) => (
-                  <tr key={member.memberId} className='border-b'>
-                    <td className='py-2 px-4'>{member.displayName}</td>
-                    <td className='py-2 px-4'>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={() => handleRemoveMember(member.memberId)}
-                      >
-                        {tr('group_removeMember')}
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className='overflow-x-auto'>
+              <table className='w-full'>
+                <tbody>
+                  {groupDetail.members.map((member) => (
+                    <tr key={member.memberId} className='border-b'>
+                      <td className='py-2 px-4'>{member.displayName}</td>
+                      <td className='py-2 px-4'>
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={() => handleRemoveMember(member.memberId)}
+                        >
+                          {tr('group_removeMember')}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 

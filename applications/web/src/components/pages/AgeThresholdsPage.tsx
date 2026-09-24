@@ -445,32 +445,34 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
         {evaluationResults.length > 0 && (
           <div>
             <h2 className='text-lg font-semibold mb-2'>{tr('ageThreshold_results')}</h2>
-            <table className='w-full'>
-              <tbody>
-                {evaluationResults.map((change, i) => (
-                  <tr
-                    key={`${change.memberId}-${change.groupId}-${String(i)}`}
-                    className='border-b'
-                  >
-                    <td className='py-2 px-4'>{change.memberName}</td>
-                    <td className='py-2 px-4'>{change.groupName}</td>
-                    <td className='py-2 px-4'>
-                      <span
-                        className={
-                          change.action === 'added'
-                            ? 'text-green-700 font-medium'
-                            : 'text-red-700 font-medium'
-                        }
-                      >
-                        {change.action === 'added'
-                          ? tr('ageThreshold_added')
-                          : tr('ageThreshold_removed')}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className='overflow-x-auto'>
+              <table className='w-full'>
+                <tbody>
+                  {evaluationResults.map((change, i) => (
+                    <tr
+                      key={`${change.memberId}-${change.groupId}-${String(i)}`}
+                      className='border-b'
+                    >
+                      <td className='py-2 px-4'>{change.memberName}</td>
+                      <td className='py-2 px-4'>{change.groupName}</td>
+                      <td className='py-2 px-4'>
+                        <span
+                          className={
+                            change.action === 'added'
+                              ? 'text-green-700 font-medium'
+                              : 'text-red-700 font-medium'
+                          }
+                        >
+                          {change.action === 'added'
+                            ? tr('ageThreshold_added')
+                            : tr('ageThreshold_removed')}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

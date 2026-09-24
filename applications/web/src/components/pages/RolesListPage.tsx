@@ -177,61 +177,63 @@ export function RolesListPage({
       {roles.length === 0 ? (
         <p className='text-muted-foreground'>{tr('role_noRoles')}</p>
       ) : (
-        <table className='w-full'>
-          <tbody>
-            {roles.map((role) => (
-              <tr key={role.roleId} className='border-b'>
-                <td className='py-2 px-4'>
-                  <Link
-                    to='/teams/$teamId/roles/$roleId'
-                    params={{ teamId, roleId: role.roleId }}
-                    className='font-medium hover:underline'
-                  >
-                    {role.name}
-                  </Link>
-                  {Option.contains(defaultRoleId, role.roleId) && (
-                    <Badge
-                      variant='secondary'
-                      className='ml-2 align-middle'
-                      aria-label={tr('role_defaultForNewMembers')}
-                    >
-                      <UserPlus className='size-3' aria-hidden='true' />
-                      {tr('role_default')}
-                    </Badge>
-                  )}
-                  {/* Show permission count inline on mobile */}
-                  <p className='text-xs text-muted-foreground sm:hidden'>
-                    {tr('role_permissionCount', { count: String(role.permissionCount) })}
-                  </p>
-                </td>
-                <td className='hidden sm:table-cell py-2 px-4'>
-                  <span
-                    className={
-                      role.isBuiltIn
-                        ? 'text-blue-700 font-medium'
-                        : 'text-muted-foreground font-medium'
-                    }
-                  >
-                    {role.isBuiltIn ? tr('role_builtIn') : tr('role_custom')}
-                  </span>
-                </td>
-                <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                  {tr('role_permissionCount', { count: String(role.permissionCount) })}
-                </td>
-                <td className='py-2 px-4'>
-                  <Button asChild variant='outline' size='sm'>
+        <div className='overflow-x-auto'>
+          <table className='w-full'>
+            <tbody>
+              {roles.map((role) => (
+                <tr key={role.roleId} className='border-b'>
+                  <td className='py-2 px-4'>
                     <Link
                       to='/teams/$teamId/roles/$roleId'
                       params={{ teamId, roleId: role.roleId }}
+                      className='font-medium hover:underline'
                     >
-                      View
+                      {role.name}
                     </Link>
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    {Option.contains(defaultRoleId, role.roleId) && (
+                      <Badge
+                        variant='secondary'
+                        className='ml-2 align-middle'
+                        aria-label={tr('role_defaultForNewMembers')}
+                      >
+                        <UserPlus className='size-3' aria-hidden='true' />
+                        {tr('role_default')}
+                      </Badge>
+                    )}
+                    {/* Show permission count inline on mobile */}
+                    <p className='text-xs text-muted-foreground sm:hidden'>
+                      {tr('role_permissionCount', { count: String(role.permissionCount) })}
+                    </p>
+                  </td>
+                  <td className='hidden sm:table-cell py-2 px-4'>
+                    <span
+                      className={
+                        role.isBuiltIn
+                          ? 'text-blue-700 font-medium'
+                          : 'text-muted-foreground font-medium'
+                      }
+                    >
+                      {role.isBuiltIn ? tr('role_builtIn') : tr('role_custom')}
+                    </span>
+                  </td>
+                  <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
+                    {tr('role_permissionCount', { count: String(role.permissionCount) })}
+                  </td>
+                  <td className='py-2 px-4'>
+                    <Button asChild variant='outline' size='sm'>
+                      <Link
+                        to='/teams/$teamId/roles/$roleId'
+                        params={{ teamId, roleId: role.roleId }}
+                      >
+                        View
+                      </Link>
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
