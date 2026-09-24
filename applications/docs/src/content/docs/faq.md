@@ -44,6 +44,10 @@ That's expected, not a bug. The text encoded *inside* a payment QR code follows 
 
 Your club's Sideline instance matches bank payments to your fee using a **variable symbol** — a short number tied to your member profile. If you don't have one yet, paid without entering it, or your bank's app dropped/changed it, Sideline can't match the payment automatically and it sits in the treasurer's manual queue until they resolve it. Ask your treasurer to check your variable symbol is set, or to look for your payment in the bank movements queue.
 
+### Can I pay ahead, before I have any fee assigned to me?
+
+Yes. Open **My Payments** and scan the **"Top up your credit"** QR code near the top of the page — it's a standing code for your own account with no fixed amount, so you can send however much you like, whenever you like. It pays off any fees you already owe first (oldest due date first); anything left over sits as credit and is applied automatically the next time a fee is assigned to you or a treasurer settles your balance. This code only appears once your club has connected a bank account and you have a variable symbol.
+
 ### What happens if I have Discord DMs disabled?
 
 If your Discord privacy settings block DMs from server members, the bot cannot reach you and the reminder is silently skipped. To enable DMs: open **Discord User Settings → Privacy & Safety** and turn on **Allow direct messages from server members**. You can also check your upcoming payment due dates in your [iCal feed](/guides/calendar-subscription/) as an alternative.
@@ -151,3 +155,7 @@ Fio accepted the token, but the account it reads back doesn't match the account 
 The most common cause is **not** a wrong token — it's a missing **account prefix**. Fio's answer to Sideline doesn't include the prefix at all, only the account number and bank code, so if your club's account is e.g. `19-2000145399/0800` and the prefix field on the bank connection card was left blank, the account Sideline computes will never match. Double-check the prefix first. If the prefix is correct and the mismatch persists, the token was most likely generated against the wrong Fio account — generate a fresh one against the correct account and paste it in.
 
 This banner does not clear on its own — even a passing **Test the connection** result — until the next automatic hourly import succeeds against the corrected account.
+
+### What does "Turn leftover transfers into credit" do on the bank connection card?
+
+By default, an incoming transfer that identifies exactly one member but doesn't exactly match one open fee still lands in the **To match** queue for you to resolve by hand — even a transfer that's too big, too small, or arrives before any fee has been assigned. Turning this switch on tells Sideline to go ahead and allocate it automatically instead: it pays that member's oldest open fees first, and anything left over becomes credit on their account. It's off by default, and switching it on only affects transfers that already identify a single member unambiguously — anything with no variable symbol, an unrecognised one, or one shared by several members still waits in the queue either way. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio).

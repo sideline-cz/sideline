@@ -55,6 +55,7 @@ export class BankSyncConfig extends Model.Class<BankSyncConfig>('BankSyncConfig'
   provider: BankSyncProvider,
   enabled: Schema.Boolean,
   auto_match_enabled: Schema.Boolean,
+  auto_credit_enabled: Schema.Boolean,
 
   // Account identity — feeds the pure CZ IBAN builder (CzIban.buildCzIban) -> SPAYD ACC.
   account_prefix: Schema.OptionFromNullOr(Schema.String),

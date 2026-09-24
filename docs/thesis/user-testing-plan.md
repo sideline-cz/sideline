@@ -432,7 +432,7 @@ The teammate's profile now shows a variable symbol. The participant can locate a
 - Variable symbol is saved without error.
 - Participant successfully finds and opens the QR code display.
 
-**Notes for facilitator:** This task deliberately does not involve connecting a real Fio bank account (which would require live banking credentials the participant does not have) — it exercises only the parts of the bank-sync feature that a regular participant can complete in a lab session. Connecting the account itself, the historical-import "10-minute unlock window" flow, and reviewing the matching queue are treasurer-only workflows better suited to expert review or a treasurer-specific follow-up session than to this general usability pass.
+**Notes for facilitator:** This task deliberately does not involve connecting a real Fio bank account (which would require live banking credentials the participant does not have) — it exercises only the parts of the bank-sync feature that a regular participant can complete in a lab session. Connecting the account itself, the historical-import "10-minute unlock window" flow, and reviewing the matching queue are treasurer-only workflows better suited to expert review or a treasurer-specific follow-up session than to this general usability pass. The My Payments page also shows a second, standing "top up your credit" QR card above the fee list (no amount, no due date, scannable any time) — watch that the participant opens the per-fee QR asked for in step 5 and not this one; confusing the two is itself a signal worth noting, not a task failure.
 
 ---
 

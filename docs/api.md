@@ -4231,7 +4231,8 @@ The Finance group exposes fee management and payment tracking. Permissions follo
 | `method` | `'cash' \| 'bank_transfer'` | How the money was received (never `'credit'` — a deposit is always money the club actually received) |
 | `paidAt` | `DateTime` | When the money was received |
 | `note` | `string \| null` | Optional note |
-| `recorderName` | `string \| null` | Name of the user who recorded the deposit |
+| `recorderName` | `string \| null` | Name of the user who recorded the deposit; always `null` when `source` is `'auto'` — nobody recorded it, so stamping the Fio-config owner's name here would credit a treasurer with a deposit they never made |
+| `source` | `'auto' \| 'manual'` | `'manual'` — a treasurer recorded it via the settle endpoint. `'auto'` — `BankTransactionMatcher` wrote it as the leftover remainder of an incoming transfer (only when the team's `autoCreditEnabled` is on); the view does not expose which bank transaction funded an `'auto'` row (that link exists only server-side, for `/unmatch` to find it) |
 | `voidedAt` | `DateTime \| null` | Void timestamp; `null` if active |
 | `voidReason` | `string \| null` | Reason for voiding |
 
@@ -7190,11 +7191,13 @@ Submits the full visible conversation (client-side history, not server-persisted
 
 Fio bank transaction ingestion, auto-matching, variable-symbol management, and grant-audit export. Extends the Finance subsystem ([23. Finance](#23-finance)) rather than replacing it — matched movements become ordinary `payments` rows with `method: 'bank_transfer'`, `bank_transaction_id` set, and `matched_by: 'auto' | 'manual'`.
 
+When `autoCreditEnabled` is on for the team, `matchOne` gains a second automatic path reached only when the VS resolves to exactly one member and the duplicate pre-check is clean: instead of requiring the transfer's amount to exactly match one open assignment (the `autoMatchEnabled`-gated case above), it allocates the transfer across that member's open fees oldest-due-first (`SettlementPlan.planSettlement`, the same allocator `POST /teams/:teamId/members/:memberId/settlements` uses) and turns any remainder into a `member_credit_deposits` row with `source: 'auto'`. A missing, unknown, or ambiguous VS always keeps queuing regardless of the flag. Off (the default), the matcher's decision table is unchanged from before this field existed.
+
 Two permission tiers, following the treasurer pattern:
 - `finance:manage_fees` — connect/edit the Fio account, test the connection, start a historical backfill.
 - `finance:record_payments` — view the bank-sync summary/queue, inspect a transaction, match/unmatch/ignore/unignore, bulk-resolve, trigger a manual rematch, and export. Named "ledger access" internally (`requireLedgerAccess`) because these endpoints expose the name, account number, and payment message of every payer, which is not roster-level information.
 - `member:edit` **or** `finance:manage_fees` — assign variable symbols (`suggestVariableSymbols` / `assignVariableSymbols`).
-- `getAssignmentQrPng` — any team member may fetch their own assignment's QR; a caller who is not the assignment's own member additionally needs `finance:record_payments`.
+- `getAssignmentQrPng` / `getMyTopup` — any team member may fetch their own assignment's QR or their own standing top-up code; a caller who is not the assignment's own member additionally needs `finance:record_payments` for `getAssignmentQrPng` (there is no such override for `getMyTopup` — it has no `memberId` param, so it can only ever return the caller's own code).
 
 **View types (response DTOs):**
 
@@ -7206,6 +7209,7 @@ Two permission tiers, following the treasurer pattern:
 | `provider` | `'fio'` | No | Bank provider (only one supported) |
 | `enabled` | `boolean` | No | Whether polling/matching is active |
 | `autoMatchEnabled` | `boolean` | No | Whether the matcher may auto-create payments (when `false`, every match still lands in the queue for manual resolution) |
+| `autoCreditEnabled` | `boolean` | No | Opt-in, default `false`. Gates the greedy "allocate oldest-due-first, credit the remainder" matching path — see below |
 | `accountPrefix` | `string \| null` | Yes | CZ bank account prefix (0–6 digits) |
 | `accountNumber` | `string \| null` | Yes | CZ bank account number (2–10 digits) |
 | `bankCode` | `string \| null` | Yes | 4-digit bank code (Fio is always `2010`) |
@@ -7255,6 +7259,16 @@ Two permission tiers, following the treasurer pattern:
 
 `BankSyncSummaryView` — the queue's KPI header: `importedCount`, `pendingCount`, `matchedCount`, `ignoredCount`, `otherIncomeCount`, `autoMatchedLast30d`, `manuallyMatchedLast30d`, `membersWithoutVsCount`, `oldestPendingBookedOn`, `periodIncomeMinor`, `periodExpensesMinor`, `periodNetMinor`, `openingBalanceMinor`, `closingBalanceMinor`, `coverageGaps` (`BankSyncCoverageGap[]`), `periodContinuityViolations` (`BankSyncPeriodContinuityViolation[]`).
 
+`MyTopupView` — the caller's own standing top-up code, returned by `GET /teams/:teamId/my-topup`. Every field is `Option`-typed (`string | null` on the wire) because either the club or the member may not have finished setup yet.
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `iban` | `string \| null` | Yes | Computed IBAN; `null` if the club has not configured a bank account |
+| `variableSymbol` | `string \| null` | Yes | The caller's own variable symbol (leading-zero-stripped); `null` if none is assigned yet |
+| `currency` | `string (3 chars)` | No | ISO 4217 currency code; falls back to `'CZK'` if the team has no bank-sync config at all |
+| `recipientName` | `string \| null` | Yes | Printed under the QR |
+| `qrPngDataUrl` | `string \| null` | Yes | A `data:image/png;base64,...` string, `null` when `iban`/`variableSymbol` is missing or QR rendering failed. Inlined rather than served from an authenticated PNG route — an `<img>` tag carries no `Authorization` header, since the app's token lives in `localStorage`, not a cookie |
+
 ---
 
 #### `GET /teams/:teamId/bank-sync`
@@ -7281,6 +7295,7 @@ Creates or updates the team's Fio connection settings.
 |---|---|---|---|
 | `enabled` | `boolean` | Yes | Turn polling/matching on or off |
 | `auto_match_enabled` | `boolean` | Yes | Whether the matcher may auto-create payments |
+| `auto_credit_enabled` | `boolean` | No | Opt-in greedy allocation path (see [37. Bank Sync](#37-bank-sync) above). Absent → the stored value is kept — deliberately `Schema.optionalKey` rather than `Schema.Boolean` so an old web bundle (deploy order is server → web) never 400s a config save it knows nothing about, the same rule `fio_token` already follows |
 | `account_prefix` | `string \| null` | No | CZ account prefix |
 | `account_number` | `string` | Yes | CZ account number |
 | `bank_code` | `string` | Yes | 4-digit bank code |
@@ -7398,7 +7413,7 @@ Manually assigns this transaction's amount to one or more open fee assignments, 
 
 #### `POST /teams/:teamId/bank-transactions/:txId/unmatch`
 
-Voids every payment linked to this transaction and returns it to the queue. The payment history is preserved (voided, not deleted) with the caller's name, timestamp, and reason for the audit trail.
+Voids every payment linked to this transaction and returns it to the queue. The payment history is preserved (voided, not deleted) with the caller's name, timestamp, and reason for the audit trail. Also voids any `member_credit_deposits` row this transaction wrote (an auto-credited remainder, `source: 'auto'`) — taking that credit back off the member's balance the same way `MemberCreditsRepository.voidDeposit` does.
 
 **Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
 
@@ -7406,7 +7421,13 @@ Voids every payment linked to this transaction and returns it to the queue. The 
 
 **Response:** `200 OK` — `BankTransactionDetailView`
 
-**Errors:** `BankSyncForbidden` (403), `BankTransactionNotFound` (404)
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `BankSyncForbidden` | 403 | Missing `finance:record_payments` |
+| `BankTransactionNotFound` | 404 | Transaction does not exist |
+| `UnmatchCreditSpent` | 409 | This transaction's auto-credited remainder has already been spent (the member's balance has dropped below the deposit's amount) — void the payments that spent it first, same rule as `DELETE .../credits/deposits/:depositId` |
 
 **Note:** unmatching sets `auto_match_suppressed = true` on the transaction, so the poller/rematch does not immediately re-credit the same movement to the same member.
 
@@ -7542,6 +7563,20 @@ Renders a SPAYD payment QR code (PNG) for one fee assignment, sized to the assig
 | `BankSyncForbidden` | 403 | Caller is neither the assignment's own member nor holds `finance:record_payments` |
 | `BankSyncNotConfigured` | 404 | The team has no bank-sync configuration to build an IBAN from |
 | `AssignmentNotFound` | 404 | Assignment does not exist, or does not belong to `feeId`/`teamId` |
+
+---
+
+#### `GET /teams/:teamId/my-topup`
+
+Returns the caller's own standing payment code — the club's account plus the caller's variable symbol, with no amount and no due date, so a member can send any amount at any time. Unlike `getAssignmentQrPng` there is no `memberId` param: a caller can only ever fetch their own code.
+
+Every field degrades to `None` independently rather than erroring: a club with no bank account configured, or a member with no variable symbol yet, gets a `MyTopupView` with `iban`/`variableSymbol`/`qrPngDataUrl` all `None` so the page can render "not set up yet" instead of a broken code. A QR render failure is treated the same way (`qrPngDataUrl: None`) rather than a `500` — the account number and variable symbol printed below the code are enough to pay by hand.
+
+**Auth:** Bearer token (AuthMiddleware) · any active team member
+
+**Response:** `200 OK` — `MyTopupView`
+
+**Errors:** `BankSyncForbidden` (403)
 
 ---
 

@@ -41,9 +41,20 @@ type MyFinanceStatus = {
 
 type FilterValue = 'all' | 'outstanding' | 'paid' | 'waived';
 
+/** The caller's standing top-up details. `null` when the request failed outright; individual
+ * fields are `null` when the club has not finished its bank setup or the member has no
+ * variable symbol yet. */
+type TopupDetails = {
+  iban: string | null;
+  variableSymbol: string | null;
+  recipientName: string | null;
+  qrPngDataUrl: string | null;
+};
+
 interface MyPaymentsPageProps {
   teamId: string;
   myStatus: ReadonlyArray<MyFinanceStatus>;
+  topup?: TopupDetails | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +111,59 @@ const FILTER_CHIPS: ReadonlyArray<{ value: FilterValue; labelKey: string }> = [
 // Main component
 // ---------------------------------------------------------------------------
 
-export function MyPaymentsPage({ teamId, myStatus }: MyPaymentsPageProps) {
+/**
+ * The standing top-up code: the club's account plus this member's variable symbol, with no
+ * amount and no due date — scan it any time, send any amount.
+ *
+ * Reuses `QrPaymentCode` unchanged. Unlike the per-fee code there is no `useQrObjectUrl` blob
+ * dance: the PNG rides along as a `data:` URI on the already-authenticated JSON response, and a
+ * `data:` URI issues no request, so the "token lives in localStorage, not a cookie" problem that
+ * hook exists to solve simply does not arise here.
+ */
+function TopupCard({ topup }: { topup: TopupDetails | null }) {
+  if (topup === null) return null;
+
+  const { iban, variableSymbol, recipientName, qrPngDataUrl } = topup;
+  const ready = iban !== null && variableSymbol !== null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className='flex items-center gap-2 text-base'>
+          <QrCode className='size-4' aria-hidden='true' />
+          {tr('my_payments_topup_title')}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {ready ? (
+          <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
+            <QrPaymentCode
+              url={qrPngDataUrl}
+              state={qrPngDataUrl === null ? 'error' : 'ready'}
+              alt={tr('my_payments_topup_qr_alt', { account: iban, vs: variableSymbol })}
+              size={160}
+            />
+            <div className='flex min-w-0 flex-col gap-2 text-sm'>
+              <p className='text-muted-foreground'>{tr('my_payments_topup_help')}</p>
+              <p>
+                <span className='text-muted-foreground'>{tr('my_payments_topup_vs')}: </span>
+                <span className='font-mono font-medium'>{variableSymbol}</span>
+              </p>
+              <p className='break-all font-mono text-xs text-muted-foreground'>{iban}</p>
+              {recipientName === null ? null : (
+                <p className='text-xs text-muted-foreground'>{recipientName}</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className='text-sm text-muted-foreground'>{tr('my_payments_topup_unavailable')}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function MyPaymentsPage({ teamId, myStatus, topup = null }: MyPaymentsPageProps) {
   const kpis = computeKpis(myStatus);
   const hasOutstanding = myStatus.some((g) =>
     g.assignments.some((a) => isOutstandingStatus(a.status)),
@@ -174,6 +237,8 @@ export function MyPaymentsPage({ teamId, myStatus }: MyPaymentsPageProps) {
           ))}
         </div>
       )}
+
+      <TopupCard topup={topup} />
 
       {/* KPI Cards */}
       <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>

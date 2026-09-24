@@ -246,10 +246,12 @@ export function MemberCreditPopover({
                     <div className={`min-w-0 ${isVoided ? 'line-through' : ''}`}>
                       <div className='truncate'>
                         {formatLocalDate(deposit.paidAt)} · {paymentMethodLabel(deposit.method)}
-                        {Option.match(deposit.recorderName, {
-                          onNone: () => '',
-                          onSome: (name) => ` · ${name}`,
-                        })}
+                        {deposit.source === 'auto'
+                          ? ` · ${tr('finance_credit_source_auto')}`
+                          : Option.match(deposit.recorderName, {
+                              onNone: () => '',
+                              onSome: (name) => ` · ${name}`,
+                            })}
                         {isVoided ? ` (${tr('my_payments_history_voided')})` : ''}
                       </div>
                     </div>

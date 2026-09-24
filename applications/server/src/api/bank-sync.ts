@@ -209,6 +209,7 @@ const toConfigView = (config: BankSyncConfig.BankSyncConfig): BankSyncApi.BankSy
     provider: config.provider,
     enabled: config.enabled,
     autoMatchEnabled: config.auto_match_enabled,
+    autoCreditEnabled: config.auto_credit_enabled,
     accountPrefix: config.account_prefix,
     accountNumber: config.account_number,
     bankCode: config.bank_code,
@@ -242,6 +243,7 @@ const defaultConfigView = (teamId: Team.TeamId): BankSyncApi.BankSyncConfigView 
     provider: 'fio',
     enabled: false,
     autoMatchEnabled: true,
+    autoCreditEnabled: false,
     accountPrefix: Option.none(),
     accountNumber: Option.none(),
     bankCode: Option.none(),
@@ -844,6 +846,7 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                   team_id: teamId,
                   enabled: payload.enabled,
                   auto_match_enabled: payload.auto_match_enabled,
+                  auto_credit_enabled: payload.auto_credit_enabled,
                   account_prefix: payload.account_prefix,
                   account_number: Option.some(payload.account_number),
                   bank_code: Option.some(payload.bank_code),
@@ -1516,6 +1519,93 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                 return roster
                   .filter((entry) => assignedIds.has(entry.member_id as string))
                   .map((entry) => toRosterPlayer(entry));
+              }),
+            ),
+          )
+
+          // GET /teams/:teamId/my-topup
+          // The caller's OWN standing code. No memberId param by design: a player can only ever
+          // fetch their own, so there is no VS to leak and no ownership check to get wrong.
+          // Every field degrades to None rather than erroring — a half-configured club should
+          // see "not set up yet", not a broken page.
+          .handle('getMyTopup', ({ params: { teamId } }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.tap(({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.bind('configOpt', () => configRepo.findByTeam(teamId)),
+              Effect.bind('memberRows', ({ currentUser }) =>
+                sql<{ readonly variable_symbol: string | null }>`
+                  SELECT tm.variable_symbol FROM team_members tm
+                  WHERE tm.team_id = ${teamId} AND tm.user_id = ${currentUser.id}
+                `.pipe(catchSqlErrors),
+              ),
+              Effect.flatMap(({ configOpt, memberRows }) => {
+                const currency = Option.match(configOpt, {
+                  onNone: () => Schema.decodeSync(Fee.CurrencyCode)('CZK'),
+                  onSome: (c) => Schema.decodeSync(Fee.CurrencyCode)(c.currency),
+                });
+                const iban = Option.flatMap(configOpt, (config) =>
+                  Option.flatMap(config.account_number, (accountNumber) =>
+                    Option.flatMap(config.bank_code, (bankCode) =>
+                      CzIban.buildCzIban({
+                        prefix: Option.getOrUndefined(config.account_prefix),
+                        accountNumber,
+                        bankCode,
+                      }),
+                    ),
+                  ),
+                );
+                const recipientName = Option.flatMap(configOpt, (c) => c.recipient_name);
+                // Same normalisation the matcher applies when resolving a VS, so the code a
+                // player scans and the symbol the matcher looks up can never disagree.
+                const variableSymbol = Option.fromNullishOr(memberRows[0]?.variable_symbol).pipe(
+                  Option.map((vs) => vs.trim().replace(/^0+/, '')),
+                  Option.filter((vs) => vs !== ''),
+                );
+
+                // No AM and no DT: "any amount, any time" is the whole point of a standing code.
+                // No MSG either — there is no fee to name, and an empty MSG keeps the payload in
+                // QR alphanumeric mode.
+                const spaydOpt = Option.flatMap(iban, (acc) =>
+                  Option.isNone(variableSymbol)
+                    ? Option.none()
+                    : Spayd.buildSpayd({
+                        acc,
+                        currency,
+                        variableSymbol: variableSymbol.value,
+                        recipientName: Option.getOrUndefined(
+                          Option.map(recipientName, Spayd.transliterateToSpaydAscii),
+                        ),
+                      }),
+                );
+
+                const view = (qrPngDataUrl: Option.Option<string>) =>
+                  new BankSyncApi.MyTopupView({
+                    iban,
+                    variableSymbol,
+                    currency,
+                    recipientName,
+                    qrPngDataUrl,
+                  });
+
+                return Option.match(spaydOpt, {
+                  onNone: () => Effect.succeed(view(Option.none())),
+                  onSome: (spayd) =>
+                    renderQrPng(spayd).pipe(
+                      Effect.map((png) =>
+                        view(
+                          Option.some(
+                            `data:image/png;base64,${Buffer.from(png).toString('base64')}`,
+                          ),
+                        ),
+                      ),
+                      // A render failure is not worth a 500: the account and symbol below the
+                      // code are enough to pay by hand.
+                      Effect.catchTag('QrRenderError', () => Effect.succeed(view(Option.none()))),
+                    ),
+                });
               }),
             ),
           )

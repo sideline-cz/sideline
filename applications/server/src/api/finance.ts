@@ -153,6 +153,7 @@ const toMemberCreditDepositView = (
     paidAt: row.paid_at,
     note: row.note,
     recorderName: row.recorder_name,
+    source: row.source,
     voidedAt: row.voided_at,
     voidReason: row.void_reason,
   });

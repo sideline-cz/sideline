@@ -22,6 +22,7 @@ import { Option, Schema } from 'effect';
 export type FioBankFormValues = {
   enabled: boolean;
   autoMatchEnabled: boolean;
+  autoCreditEnabled: boolean;
   accountPrefix: string;
   accountNumber: string;
   bankCode: string;
@@ -41,6 +42,9 @@ export const FIO_BANK_NAME = 'Fio banka, a.s.';
 export const fioBankFormFrom = (config: Config): FioBankFormValues => ({
   enabled: config?.enabled ?? false,
   autoMatchEnabled: config?.autoMatchEnabled ?? true,
+  // Opt-in: false for a team that has never configured it, and false in the default view the
+  // server returns for a team with no config row at all.
+  autoCreditEnabled: config?.autoCreditEnabled ?? false,
   accountPrefix: Option.getOrElse(config?.accountPrefix ?? Option.none<string>(), () => ''),
   accountNumber: Option.getOrElse(config?.accountNumber ?? Option.none<string>(), () => ''),
   // Defaults to FIO_BANK_CODE, not '', for the same reason `bankName` defaults below: the card
@@ -165,6 +169,9 @@ export const fioBankRequestFrom = (
   const base: Omit<BankSyncApi.UpsertBankSyncConfigRequest, 'fio_token'> = {
     enabled: values.enabled,
     auto_match_enabled: values.autoMatchEnabled,
+    // Always Some from the web: the form knows the flag. The Option exists for OLD bundles,
+    // which omit the key entirely and mean "keep whatever is stored".
+    auto_credit_enabled: Option.some(values.autoCreditEnabled),
     account_prefix: optionOrNone(values.accountPrefix),
     account_number: values.accountNumber.trim(),
     bank_code: values.bankCode.trim(),

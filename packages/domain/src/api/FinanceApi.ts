@@ -4,7 +4,7 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/ht
 import { AuthMiddleware } from '~/api/Auth.js';
 import { AmountMinor, CurrencyCode, FeeId, FeeRecurrence, FeeTargetScope } from '~/models/Fee.js';
 import { FeeAssignmentId, FeeAssignmentStatus } from '~/models/FeeAssignment.js';
-import { MemberCreditDepositId } from '~/models/MemberCredit.js';
+import { MemberCreditDepositId, MemberCreditSource } from '~/models/MemberCredit.js';
 import { ManualPaymentMethod, PaymentId } from '~/models/Payment.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
@@ -118,7 +118,10 @@ export class MemberCreditDepositView extends Schema.Class<MemberCreditDepositVie
   method: ManualPaymentMethod,
   paidAt: Schemas.DateTimeFromIsoString,
   note: Schema.OptionFromNullOr(Schema.String),
+  // None for an 'auto' deposit: nobody recorded it. Stamping the Fio-config owner's name here
+  // would credit a treasurer with a deposit they never made.
   recorderName: Schema.OptionFromNullOr(Schema.String),
+  source: MemberCreditSource,
   voidedAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   voidReason: Schema.OptionFromNullOr(Schema.String),
 }) {}

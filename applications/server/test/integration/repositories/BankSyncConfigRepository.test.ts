@@ -60,6 +60,7 @@ const fullUpsertInput = (teamId: string, userId: string) => ({
   team_id: teamId,
   enabled: true,
   auto_match_enabled: true,
+  auto_credit_enabled: Option.some(true),
   account_prefix: Option.some('19'),
   account_number: Option.some('2000145399'),
   bank_code: Option.some('0800'),
@@ -93,6 +94,7 @@ describe('BankSyncConfigRepository — full-column round-trip (96)', () => {
           const cfg = found.value;
           expect(cfg.enabled).toBe(true);
           expect(cfg.auto_match_enabled).toBe(true);
+          expect(cfg.auto_credit_enabled).toBe(true);
           expect(cfg.account_prefix).toEqual(Option.some('19'));
           expect(cfg.account_number).toEqual(Option.some('2000145399'));
           expect(cfg.bank_code).toEqual(Option.some('0800'));

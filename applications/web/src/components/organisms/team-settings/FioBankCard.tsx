@@ -56,6 +56,7 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
   const {
     enabled,
     autoMatchEnabled,
+    autoCreditEnabled,
     accountPrefix,
     accountNumber,
     recipientName,
@@ -331,6 +332,21 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
                 checked={autoMatchEnabled}
                 onCheckedChange={(v) => setField('autoMatchEnabled', v)}
                 disabled={!enabled}
+              />
+            </div>
+
+            <div className='flex items-start justify-between gap-4'>
+              <div>
+                <label htmlFor='fio-auto-credit' className='text-sm font-medium block'>
+                  {tr('fio_autoCredit_label')}
+                </label>
+                <p className='text-xs text-muted-foreground mt-1'>{tr('fio_autoCredit_help')}</p>
+              </div>
+              <Switch
+                id='fio-auto-credit'
+                checked={autoCreditEnabled}
+                onCheckedChange={(v) => setField('autoCreditEnabled', v)}
+                disabled={!enabled || !autoMatchEnabled}
               />
             </div>
 

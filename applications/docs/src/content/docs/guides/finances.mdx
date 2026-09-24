@@ -92,7 +92,7 @@ Every fee a settlement pays off is recorded as an ordinary payment underneath, s
 
 ### Viewing and voiding credit
 
-A member's current credit balance appears as a badge next to their outstanding amount whenever it's non-zero. Click the badge to open a popover listing every credit top-up (deposit) in that currency, newest first, with the amount, method, date, and who recorded it.
+A member's current credit balance appears as a badge next to their outstanding amount whenever it's non-zero. Click the badge to open a popover listing every credit top-up (deposit) in that currency, newest first, with the amount, method, date, and who recorded it. A deposit created automatically from a member's own bank transfer (see [Turning leftover transfers into credit](#turning-leftover-transfers-into-credit)) is labelled **Automatic** instead of a recorder's name — nobody manually entered it.
 
 If you hold `finance:record_payments`, each active deposit has a **Cancel** action to void it, with a required reason. Because credit is a single running balance rather than a per-deposit ledger, a deposit can only be voided while its full amount is still unspent — if some of it has already been applied to a fee, Sideline tells you to void the payments that spent it first.
 
@@ -229,6 +229,12 @@ Optionally, expand **Details for documents** to add the club's IČO and register
 
 Once connected, Sideline checks the account for new payments automatically, roughly once an hour.
 
+### Turning leftover transfers into credit
+
+By default, a transfer that identifies exactly one member (by variable symbol) but doesn't exactly match one open fee still lands in the [matching queue](#the-bank-movements-matching-queue) for a treasurer to resolve by hand — even a transfer that's too big, too small, or arrives before any fee has been assigned to that member.
+
+Turn on **"Turn leftover transfers into credit"** on the bank connection card to have Sideline resolve these automatically instead: it pays that member's oldest open fees first, and anything left over becomes [credit](#settling-a-members-balance-and-paying-in-advance) on their account — exactly as if a treasurer had clicked **Settle**. It's off by default and separate from the main matching switch above; turning it on removes overpayment, underpayment, and pay-in-advance rows from the queue for clubs that want that, without changing how a missing, unrecognised, or ambiguous variable symbol is handled — those always still land in the queue.
+
 ### Testing the connection
 
 Click **Test the connection** on the bank connection card at any time to check the saved token against Fio directly, instead of waiting for the next automatic check. The result tells you exactly what happened:
@@ -309,7 +315,7 @@ The page has three tabs:
 **Grant export** — see [Exporting bank movements](#exporting-bank-movements-for-a-grant-audit) below.
 
 <Aside type="tip" title="Undoing a match">
-  If a payment was matched to the wrong member or fee, open it and cancel the assignment with a reason. The fee goes back to unpaid and the payment returns to the queue — nothing is deleted; the cancelled match stays in the history for the audit trail.
+  If a payment was matched to the wrong member or fee, open it and cancel the assignment with a reason. The fee goes back to unpaid and the payment returns to the queue — nothing is deleted; the cancelled match stays in the history for the audit trail. If the movement was auto-credited (see [Turning leftover transfers into credit](#turning-leftover-transfers-into-credit)), cancelling it also reverses the credit it added — unless the member has already spent that credit on a fee, in which case Sideline tells you to void that payment first.
 </Aside>
 
 ## Payment QR codes
@@ -318,7 +324,7 @@ Once a member has a variable symbol and the club's bank account is connected, Si
 
 **In Discord**, the payment reminder DM (see [Payment reminders](#payment-reminders) below) includes the QR code as an image attachment whenever one can be built, plus a plain-text fallback block for anyone who can't scan it.
 
-**On the My Payments page**, click the QR icon next to any outstanding fee to reveal the code inline.
+**On the My Payments page**, click the QR icon next to any outstanding fee to reveal the code inline. Above the fee list, a separate **"Top up your credit"** card shows a standing QR code for the member's own account — no amount and no due date baked in, so it can be scanned to send any amount at any time; see [My Payments page](#my-payments-page) below.
 
 <Aside type="note" title="Why the QR text looks different from the rest of the message">
   The text encoded *inside* the QR code (the payment message and the recipient name) is written in unaccented, uppercase letters — for example `PRISPEVEK PODZIM 2026 NOVAK` instead of "Příspěvek podzim 2026 Nováková". This is a requirement of the SPAYD payment-QR standard itself, not a Sideline bug or a translation error — the rest of the message around the QR code keeps full Czech diacritics as normal.
@@ -450,6 +456,8 @@ Returns `BalanceSummary[]` — one element per currency — with `incomeMinor`, 
 ## My Payments page
 
 Any team member can visit **Team → My Payments** (`/teams/:teamId/my-payments`) to see a personal summary of all their fee assignments. No special permission is required — every member sees only their own data.
+
+If your club has connected a bank account and you have a variable symbol, a **"Top up your credit"** card appears near the top of the page with a standing payment QR code for your own account — no fixed amount and no due date, so you can scan it and send whatever you like, whenever you like. It pays off any fees you already owe first (oldest due date first); anything left over sits as credit. If the club hasn't finished its bank setup yet, or you don't have a variable symbol, the card shows a short "not set up yet" message instead.
 
 If you hold [credit](#settling-a-members-balance-and-paying-in-advance) in any currency, a line above the KPI cards shows the balance — one line per currency. That credit is applied automatically the next time a treasurer settles your balance, so you don't need to do anything with it yourself.
 
@@ -605,7 +613,7 @@ Applies any existing credit first, then the submitted `amountMinor`, against the
 GET /api/teams/{teamId}/members/{memberId}/credits/deposits?currency=CZK
 ```
 
-Returns the member's credit top-up history in that currency (`currency` is required). Pass `includeVoided=true` to include already-voided deposits.
+Returns the member's credit top-up history in that currency (`currency` is required). Pass `includeVoided=true` to include already-voided deposits. Each deposit's `source` field is `"manual"` (recorded by a treasurer) or `"auto"` (the leftover remainder of the member's own bank transfer, only if the club has turned on [auto-crediting](#turning-leftover-transfers-into-credit)); `recorderName` is always `null` on an `"auto"` deposit.
 
 ```http
 DELETE /api/teams/{teamId}/members/{memberId}/credits/deposits/{depositId}
@@ -617,6 +625,14 @@ Content-Type: application/json
 ```
 
 Reverses the deposit's amount out of the member's credit balance. Returns `409 CreditDepositSpent` if some of that credit has already been applied to a fee — void the payments that spent it first.
+
+### Get your own standing top-up code
+
+```http
+GET /api/teams/{teamId}/my-topup
+```
+
+Returns the **caller's own** standing top-up code — there is no `memberId` in the path, since a member can only ever fetch their own. The response includes the club's IBAN, the caller's variable symbol, the currency, the recipient name, and `qrPngDataUrl` — a ready-to-display `data:image/png;base64,...` image, already rendered server-side. Any field can come back `null` if the club hasn't finished its bank setup or the caller has no variable symbol yet; there is no error response for that case, only `null` fields to render around.
 
 ### Void a payment
 

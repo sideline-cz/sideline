@@ -16,7 +16,13 @@
  * resolved lazily, inside `unmatch`'s own body — matching the plan's explicit instruction that
  * `/unmatch` voids payments via that repository method, never a hard delete.
  */
-import { type Auth, type BankTransaction, Payment } from '@sideline/domain';
+import {
+  type Auth,
+  BankSyncApi,
+  type BankTransaction,
+  Payment,
+  SettlementPlan,
+} from '@sideline/domain';
 import { Data, DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import type { SqlError } from 'effect/unstable/sql/SqlError';
@@ -106,6 +112,9 @@ interface TxRow {
 
 interface ConfigRow {
   readonly auto_match_enabled: boolean;
+  /** Opt-in, default false (migration 1792800001). Gates ONLY `writeAutoCredit`; with it off
+   * `decide()` runs untouched and this file behaves exactly as it did before the flag existed. */
+  readonly auto_credit_enabled: boolean;
   readonly configured_by_user_id: string;
 }
 
@@ -348,6 +357,213 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
         );
 
       // ---------------------------------------------------------------------
+      // Auto-credit — the `auto_credit_enabled` path
+      // ---------------------------------------------------------------------
+
+      /** Locked, currency-filtered, base-table twin of `fetchCandidates` (a view row cannot be
+       * locked). Deliberately the SAME predicate as `MemberCreditsRepository.settle`'s
+       * `lockAssignments`, so both money paths see exactly the same candidate set. */
+      const lockCreditCandidates = (tx: TxRow, memberId: string) =>
+        sql<{
+          readonly id: string;
+          readonly fee_id: string;
+          readonly fee_name: string;
+          readonly amount_minor: string;
+          readonly paid_minor: string;
+          readonly effective_due_at: Date | null;
+        }>`
+          SELECT fa.id::text AS id, fa.fee_id::text AS fee_id, f.name AS fee_name,
+                 fa.amount_minor::text AS amount_minor, fa.paid_minor::text AS paid_minor,
+                 COALESCE(fa.due_at, f.due_at) AS effective_due_at
+            FROM fee_assignments fa
+            JOIN fees f ON f.id = fa.fee_id
+           WHERE fa.team_member_id = ${memberId}::uuid
+             AND f.team_id         = ${tx.team_id}::uuid
+             AND f.currency        = ${tx.currency}
+             AND f.archived_at IS NULL
+             AND fa.stored_status  = 'active'
+             AND fa.amount_minor   > fa.paid_minor
+           ORDER BY fa.id ASC
+           FOR UPDATE OF fa
+        `;
+
+      /**
+       * Case A/B's greedy sibling: allocate the transfer oldest-due-first, turn whatever is left
+       * into credit. Reached ONLY when the team opted in, the VS resolved to exactly ONE member,
+       * and the duplicate pre-check came back clean.
+       *
+       * Locks in canonical order (root `AGENTS.md` invariant 2): `member_credit_accounts` ->
+       * `bank_transactions` -> `fee_assignments`. That is precisely why this cannot just call
+       * `MemberCreditsRepository.settle`: settle's own order is accounts -> assignments with no
+       * `bank_transactions` leg, so inserting bank-linked payments under it would take
+       * `bank_transactions` (via `payments_finance_recompute`) AFTER `fee_assignments` and
+       * deadlock (40P01) against this same file's `writeAutoMatch`. The shared piece is the PURE
+       * allocator, `SettlementPlan.planSettlement` — identical ordering, identical arithmetic,
+       * and identical to what the client's settlement preview renders.
+       *
+       * The credit pool is passed as 0, deliberately: the transfer allocates its OWN money only.
+       * Draining a balance the member already held would be a side effect of an event no
+       * treasurer triggered, and it would make `/unmatch` refund credit this transfer never
+       * created. `settle` stays the one place that SPENDS credit; this path only ADDS it.
+       */
+      const writeAutoCredit = (tx: TxRow, config: ConfigRow, memberId: string) =>
+        sql.withTransaction(
+          Effect.Do.pipe(
+            // Leg 1 — member_credit_accounts. The INSERT's SELECT is the team-ownership check;
+            // ON CONFLICT makes it idempotent (mirrors settle's step 0).
+            Effect.tap(
+              () => sql`
+                INSERT INTO member_credit_accounts (team_member_id, currency)
+                SELECT tm.id, ${tx.currency}
+                  FROM team_members tm
+                 WHERE tm.id = ${memberId}::uuid AND tm.team_id = ${tx.team_id}::uuid
+                ON CONFLICT (team_member_id, currency) DO NOTHING
+              `,
+            ),
+            // FOR UPDATE OF a, never a bare FOR UPDATE — that would pull team_members into the
+            // lock order. Zero rows means the member is not in this team: write nothing.
+            Effect.bind(
+              'accountRows',
+              () => sql<{ readonly balance_minor: string }>`
+                SELECT a.balance_minor::text AS balance_minor
+                  FROM member_credit_accounts a
+                  JOIN team_members tm ON tm.id = a.team_member_id
+                 WHERE a.team_member_id = ${memberId}::uuid
+                   AND tm.team_id       = ${tx.team_id}::uuid
+                   AND a.currency       = ${tx.currency}
+                 FOR UPDATE OF a
+              `,
+            ),
+            // Leg 2 — bank_transactions. Re-checked under the lock: a concurrent manual match or
+            // /unmatch since the candidate read means this call has nothing left to do.
+            Effect.bind(
+              'lockedTx',
+              () => sql<{ readonly id: string }>`
+                SELECT id::text AS id FROM bank_transactions
+                WHERE id = ${tx.id}::uuid AND match_state = 'unmatched'
+                  AND auto_match_suppressed = false
+                FOR UPDATE
+              `,
+            ),
+            // Leg 3 — fee_assignments, id ASC.
+            Effect.bind('candidates', ({ accountRows, lockedTx }) =>
+              accountRows.length === 0 || lockedTx.length === 0
+                ? Effect.succeed([])
+                : lockCreditCandidates(tx, memberId),
+            ),
+            Effect.bind(
+              'timezoneRows',
+              () => sql<{ readonly timezone: string | null }>`
+                SELECT timezone FROM team_settings WHERE team_id = ${tx.team_id}::uuid
+              `,
+            ),
+            Effect.flatMap(({ accountRows, lockedTx, candidates, timezoneRows }) => {
+              if (accountRows.length === 0 || lockedTx.length === 0) {
+                return Effect.succeed(QUEUED);
+              }
+
+              const plan = SettlementPlan.planSettlement(
+                candidates.map((row) => ({
+                  assignmentId: row.id,
+                  feeId: row.fee_id,
+                  feeName: row.fee_name,
+                  dueMinor: Number(row.amount_minor),
+                  paidMinor: Number(row.paid_minor),
+                  effectiveDueAt: Option.fromNullishOr(row.effective_due_at).pipe(
+                    Option.map((d) => d.getTime()),
+                  ),
+                })),
+                0,
+                Number(tx.amount_minor),
+              );
+
+              // A zero-amount movement allocates nothing and credits nothing. Leave it queued
+              // rather than stamping an empty auto-credit over it.
+              if (plan.lines.length === 0 && plan.creditAddedMinor <= 0) {
+                return Effect.succeed(QUEUED);
+              }
+
+              const timezone = timezoneRows[0]?.timezone ?? FALLBACK_ZONE;
+              const paidAt = DateTime.formatIso(noonInTeamTz(tx.booked_on, timezone));
+              const note = `Fio #${tx.fio_movement_id}`;
+
+              // Every plan line is source 'payment' (the credit pool is 0), so every row is a
+              // 'bank_transfer' payment carrying this transaction's provenance — exactly what
+              // writeAutoMatch writes, just possibly more than one of them.
+              const insertPayments: Effect.Effect<void, SqlError> =
+                plan.lines.length === 0
+                  ? Effect.void
+                  : sql`
+                      INSERT INTO payments (
+                        fee_assignment_id, team_member_id, amount_minor, method, paid_at, note,
+                        recorded_by_user_id, bank_transaction_id, matched_by
+                      ) VALUES ${sql.join(
+                        ',',
+                        false,
+                      )(
+                        plan.lines.map(
+                          (line) => sql`(
+                            ${line.assignmentId}::uuid, ${memberId}::uuid, ${line.amountMinor},
+                            'bank_transfer', ${paidAt}::timestamptz, ${note},
+                            ${config.configured_by_user_id}::uuid, ${tx.id}::uuid, 'auto'
+                          )`,
+                        ),
+                      )}
+                    `.pipe(Effect.asVoid);
+
+              // The remainder. `source = 'auto'` + `bank_transaction_id` is the pair migration
+              // 1792800001's CHECK enforces, and it is what lets /unmatch find this row again.
+              const addCredit: Effect.Effect<void, SqlError> =
+                plan.creditAddedMinor <= 0
+                  ? Effect.void
+                  : sql`
+                      UPDATE member_credit_accounts
+                         SET balance_minor = balance_minor + ${plan.creditAddedMinor},
+                             updated_at = now()
+                       WHERE team_member_id = ${memberId}::uuid AND currency = ${tx.currency}
+                    `.pipe(
+                      Effect.flatMap(
+                        () => sql`
+                          INSERT INTO member_credit_deposits (
+                            team_member_id, currency, amount_minor, method, paid_at, note,
+                            recorded_by_user_id, source, bank_transaction_id
+                          ) VALUES (
+                            ${memberId}::uuid, ${tx.currency}, ${plan.creditAddedMinor},
+                            'bank_transfer', ${paidAt}::timestamptz, ${note},
+                            ${config.configured_by_user_id}::uuid, 'auto', ${tx.id}::uuid
+                          )
+                        `,
+                      ),
+                      Effect.asVoid,
+                    );
+
+              return insertPayments.pipe(
+                Effect.flatMap(() => addCredit),
+                Effect.flatMap(
+                  () => sql`
+                    UPDATE bank_transactions
+                    SET match_reason = NULL,
+                        match_evidence = ${JSON.stringify({
+                          autoCredited: true,
+                          allocatedMinor: plan.lines.reduce((sum, l) => sum + l.amountMinor, 0),
+                          creditAddedMinor: plan.creditAddedMinor,
+                          lines: plan.lines.map((line) => ({
+                            assignmentId: line.assignmentId,
+                            amountMinor: line.amountMinor,
+                            coversFully: line.coversFully,
+                          })),
+                        })}::jsonb,
+                        updated_at = now()
+                    WHERE id = ${tx.id}::uuid
+                  `,
+                ),
+                Effect.as<MatchOutcome>({ _tag: 'AutoMatched' }),
+              );
+            }),
+          ),
+        );
+
+      // ---------------------------------------------------------------------
       // matchOne
       // ---------------------------------------------------------------------
 
@@ -357,6 +573,18 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
           Effect.bind('duplicateOfTransactionId', () => findDuplicate(tx)),
           Effect.tap(() => afterCandidateRead),
           Effect.flatMap(({ resolved, duplicateOfTransactionId }) => {
+            // The opt-in greedy path. Only ever reached with an unambiguously resolved member
+            // and a clean duplicate pre-check: a missing, unknown, or ambiguous variable symbol
+            // keeps queuing regardless of the flag, because money landing on the wrong person's
+            // balance is strictly worse than a row in the treasurer's review queue.
+            if (
+              config.auto_credit_enabled &&
+              resolved.resolution._tag === 'Resolved' &&
+              Option.isNone(duplicateOfTransactionId)
+            ) {
+              return writeAutoCredit(tx, config, resolved.resolution.memberId);
+            }
+
             const decisionInput: MatchDecisionInput = {
               member: resolved.resolution,
               txAmountMinor: Number(tx.amount_minor),
@@ -388,7 +616,8 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
           return Effect.succeed(QUEUED);
         }
         return sql<ConfigRow>`
-          SELECT auto_match_enabled, configured_by_user_id::text AS configured_by_user_id
+          SELECT auto_match_enabled, auto_credit_enabled,
+                 configured_by_user_id::text AS configured_by_user_id
           FROM bank_sync_config WHERE team_id = ${tx.team_id}::uuid
         `.pipe(
           Effect.flatMap((configRows) => {
@@ -420,10 +649,44 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
       // unmatch
       // ---------------------------------------------------------------------
 
+      /**
+       * The deposit twin of `PaymentsRepository.void_`'s credit-restore leg. Conditional UPDATE,
+       * never SELECT-then-UPDATE: `balance_minor >= d.amount_minor` is what turns "already spent"
+       * into a typed refusal instead of a `balance_minor >= 0` CHECK violation that would abort
+       * the whole transaction as an untyped `SqlError`.
+       */
+      const voidLinkedDeposit = (depositId: string, input: UnmatchInput) =>
+        sql<{ readonly id: string }>`
+          UPDATE member_credit_accounts a
+             SET balance_minor = a.balance_minor - d.amount_minor, updated_at = now()
+            FROM member_credit_deposits d
+           WHERE d.id = ${depositId}::uuid AND d.voided_at IS NULL
+             AND a.team_member_id = d.team_member_id AND a.currency = d.currency
+             AND a.balance_minor >= d.amount_minor
+           RETURNING d.id::text AS id
+        `.pipe(
+          Effect.flatMap(
+            (rows): Effect.Effect<void, BankSyncApi.UnmatchCreditSpent | SqlError> =>
+              rows.length === 0
+                ? Effect.fail(new BankSyncApi.UnmatchCreditSpent())
+                : sql`
+                    UPDATE member_credit_deposits
+                       SET voided_at = now(),
+                           voided_by_user_id = ${input.unmatchedByUserId}::uuid,
+                           void_reason = ${input.reason}
+                     WHERE id = ${depositId}::uuid AND voided_at IS NULL
+                  `.pipe(Effect.asVoid),
+          ),
+        );
+
       const unmatch = (
         txId: BankTransaction.BankTransactionId,
         input: UnmatchInput,
-      ): Effect.Effect<void, UnmatchReasonTooShort, PaymentsRepository> =>
+      ): Effect.Effect<
+        void,
+        UnmatchReasonTooShort | BankSyncApi.UnmatchCreditSpent,
+        PaymentsRepository
+      > =>
         Effect.Do.pipe(
           Effect.tap(() =>
             input.reason.trim().length >= 3
@@ -467,8 +730,20 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
                 //
                 // ponytail: hoist locks existing rows only; upsert zero-balance rows if a
                 // first-settlement-mid-unmatch 40P01 is ever observed (§3.1's named residual).
-                Effect.tap(({ paymentIds }) =>
-                  paymentIds.length === 0
+                // Read alongside paymentIds, and BEFORE the account hoist, for the same reason
+                // paymentIds is: the hoist must be keyed off the exact row set it will later
+                // touch. A pure top-up (member owed nothing) has ZERO payments and exactly one
+                // deposit, so the hoist can no longer be skipped on `paymentIds.length === 0`.
+                Effect.bind(
+                  'depositIds',
+                  () => sql<{ readonly id: string }>`
+                  SELECT id::text AS id FROM member_credit_deposits
+                  WHERE bank_transaction_id = ${txId}::uuid AND voided_at IS NULL
+                  ORDER BY id ASC
+                `,
+                ),
+                Effect.tap(({ paymentIds, depositIds }) =>
+                  paymentIds.length === 0 && depositIds.length === 0
                     ? Effect.void
                     : sql`
                         SELECT 1 FROM member_credit_accounts a
@@ -477,7 +752,11 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
                              FROM payments p
                              JOIN fee_assignments fa ON fa.id = p.fee_assignment_id
                              JOIN fees f ON f.id = fa.fee_id
-                            WHERE p.id = ANY(${paymentIds.map((row) => row.id)}::uuid[]))
+                            WHERE p.id = ANY(${paymentIds.map((row) => row.id)}::uuid[])
+                           UNION
+                           SELECT d.team_member_id, d.currency
+                             FROM member_credit_deposits d
+                            WHERE d.id = ANY(${depositIds.map((row) => row.id)}::uuid[]))
                          ORDER BY a.team_member_id, a.currency
                          FOR UPDATE
                       `,
@@ -495,6 +774,17 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
                       }),
                     { concurrency: 1, discard: true },
                   ),
+                ),
+                // 1b. THEN take back the credit this transaction added. Symmetry with the
+                //     payment voids above: an auto-credited transfer put money on the member's
+                //     balance, so unmatching it must take that money back off — otherwise the
+                //     credit outlives the transaction with nothing left pointing at it.
+                //     Sequential, id ASC, inside the already-hoisted account locks.
+                Effect.tap(({ depositIds }) =>
+                  Effect.forEach(depositIds, (row) => voidLinkedDeposit(row.id, input), {
+                    concurrency: 1,
+                    discard: true,
+                  }),
                 ),
                 Effect.tap(() => input.afterVoids ?? Effect.void),
                 // 2. THEN update bank_transactions.

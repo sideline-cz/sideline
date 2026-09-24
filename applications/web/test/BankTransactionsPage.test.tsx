@@ -21,6 +21,7 @@ const baseConfig = {
   provider: 'fio' as const,
   enabled: true,
   autoMatchEnabled: true,
+  autoCreditEnabled: false,
   accountPrefix: null,
   accountNumber: '2703474850',
   bankCode: '2010',
