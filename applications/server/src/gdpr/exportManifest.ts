@@ -154,6 +154,7 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
     ['token'],
   ),
   own('invite_acceptances', 'users', ['user_id'], pseudonymised),
+  own('member_credit_deposits', 'users', ['recorded_by_user_id', 'voided_by_user_id'], financial),
   own(
     'notifications',
     'users',
@@ -233,6 +234,8 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
   own('events', 'team_members', ['created_by', 'claimed_by'], authorship),
   own('fee_assignments', 'team_members', ['team_member_id'], financial),
   own('group_members', 'team_members', ['team_member_id'], pseudonymised),
+  own('member_credit_accounts', 'team_members', ['team_member_id'], financial),
+  own('member_credit_deposits', 'team_members', ['team_member_id'], financial),
   own('member_roles', 'team_members', ['team_member_id'], pseudonymised),
   own('payments', 'team_members', ['team_member_id'], financial),
   skip(

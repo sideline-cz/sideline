@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import { Option, Schema } from 'effect';
-import { Payment, PaymentMethod } from '~/models/Payment.js';
+import { PaymentView } from '~/api/FinanceApi.js';
+import { ManualPaymentMethod, Payment, PaymentMethod } from '~/models/Payment.js';
 
 const decodeSync = Schema.decodeUnknownSync;
 
@@ -39,12 +40,74 @@ describe('PaymentMethod', () => {
     expect(decodeSync(PaymentMethod)('bank_transfer')).toBe('bank_transfer');
   });
 
+  // 2.1 — the storage vocabulary includes 'credit'. Minted only by
+  // MemberCreditsRepository.settle; see ManualPaymentMethod below for the guard that
+  // stops it arriving on the wire from a client.
+  it("2.1 — accepts 'credit'", () => {
+    expect(decodeSync(PaymentMethod)('credit')).toBe('credit');
+  });
+
   it('rejects an unknown method', () => {
     expect(() => decodeSync(PaymentMethod)('credit_card')).toThrow();
   });
 
   it('rejects an empty string', () => {
     expect(() => decodeSync(PaymentMethod)('')).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ManualPaymentMethod — the write vocabulary. Two closed unions sharing literal
+// names without sharing code: this is the compile-time-and-runtime guarantee that
+// no client can mint a credit payment.
+// ---------------------------------------------------------------------------
+
+describe('ManualPaymentMethod', () => {
+  it("2.3 — accepts 'cash'", () => {
+    expect(decodeSync(ManualPaymentMethod)('cash')).toBe('cash');
+  });
+
+  it("2.3 — accepts 'bank_transfer'", () => {
+    expect(decodeSync(ManualPaymentMethod)('bank_transfer')).toBe('bank_transfer');
+  });
+
+  it("2.2 — REJECTS 'credit' — a client cannot mint a credit payment", () => {
+    expect(() => decodeSync(ManualPaymentMethod)('credit')).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PaymentView — the tolerant reader (§2.3 of the architecture doc). Widening a
+// stored enum that appears in a response DTO is a breaking change for every
+// already-loaded browser tab; the read schema must decode an unknown value rather
+// than fail the whole array.
+// ---------------------------------------------------------------------------
+
+describe('PaymentView — tolerant reader', () => {
+  const validPaymentView = {
+    paymentId: 'payment-uuid-001',
+    feeAssignmentId: 'assignment-uuid-001',
+    teamMemberId: 'member-uuid-001',
+    memberName: null,
+    amountMinor: 5000,
+    method: 'cash',
+    paidAt: '2025-03-15T12:00:00.000Z',
+    note: null,
+    recorderName: null,
+    voidedAt: null,
+    voidReason: null,
+  };
+
+  it("2.4 — decodes an unknown method string ('sepa_direct_debit') without failing", () => {
+    const view = decodeSync(PaymentView)({ ...validPaymentView, method: 'sepa_direct_debit' });
+    expect(view.method).toBe('sepa_direct_debit');
+  });
+
+  it("2.4 — still decodes the known methods 'cash', 'bank_transfer', 'credit'", () => {
+    for (const method of ['cash', 'bank_transfer', 'credit']) {
+      const view = decodeSync(PaymentView)({ ...validPaymentView, method });
+      expect(view.method).toBe(method);
+    }
   });
 });
 

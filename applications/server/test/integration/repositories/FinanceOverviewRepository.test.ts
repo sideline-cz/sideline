@@ -6,10 +6,23 @@
 //   - applications/server/src/repositories/FeeAssignmentsRepository.ts
 //   - applications/server/src/repositories/PaymentsRepository.ts
 //   - applications/server/src/repositories/FinanceOverviewRepository.ts
+//
+// T6 (6.8-6.12) — `.work-plans/finances/settle-all-and-credit-architecture.md` §6.2/§6.3 — added
+// on real Postgres, [R3]-moved off the mock harness: `finance.test.ts`'s
+// `MockFinanceOverviewRepositoryLayer` is literally `overviewByTeam: () => Effect.succeed([])`,
+// so it cannot observe the SQL under test here, and §6.3's `COUNT(*)` -> `COUNT(v.assignment_id)`
+// swap is "the single most likely off-by-one in the change" — it needs the real query. These
+// tests seed `member_credit_accounts` directly via raw SQL (there is no repository dependency:
+// §5.3b explicitly marks `overviewByTeam`/`myStatus`'s credit join as plain reads, no
+// `MemberCreditsRepository` involved) rather than through `MemberCreditsRepository.settle`, so
+// this file does not need that repository to exist to be useful once these two queries are
+// rewritten (though it currently WILL fail to compile like every other T4-T6 file, because
+// `packages/migrations/src/before/1792700000_create_member_credits.ts` must be built first).
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Fee, Team, User } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
@@ -18,6 +31,7 @@ import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { assertCreditReconciles } from '../creditReconciliation.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
 const TestLayer = Layer.mergeAll(
@@ -270,5 +284,180 @@ describe('FinanceOverviewRepository — myStatus', () => {
       ),
       Effect.provide(TestLayer),
     ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T6 (6.8-6.12) — credit joins on overviewByTeam / myStatus
+// ---------------------------------------------------------------------------
+
+/** Direct raw-SQL seed of an account row — a plain read-side fixture, not a trip through
+ * `MemberCreditsRepository.settle` (§5.3b: these two queries take no dependency on that
+ * repository, so this file shouldn't either). */
+const seedCredit = (memberId: string, currency: string, balanceMinor: number) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql`
+        INSERT INTO member_credit_accounts (team_member_id, currency, balance_minor)
+        VALUES (${memberId}, ${currency}, ${balanceMinor})
+        ON CONFLICT (team_member_id, currency) DO UPDATE SET balance_minor = EXCLUDED.balance_minor
+      `,
+    ),
+  );
+
+describe('FinanceOverviewRepository — myStatus with credit (6.8, 6.9)', () => {
+  it.effect('6.8 myStatus returns a group for a credit-only currency (no assignments)', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('930000000000000006', 'credit-only-status-1')),
+      Effect.bind('team', ({ user }) =>
+        createTeam('930600000000000000' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
+      Effect.tap(({ member }) => seedCredit((member as any).id, 'CZK', 300)),
+      Effect.bind('status', ({ team, user }) =>
+        FinanceOverviewRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.myStatus(team.id, user.id)),
+        ),
+      ),
+      Effect.tap(({ status }) =>
+        Effect.sync(() => {
+          expect(status).toHaveLength(1);
+          expect(status[0]?.currency).toBe('CZK');
+          expect((status[0] as any)?.assignments).toEqual([]);
+          expect((status[0] as any)?.creditMinor).toBe(300);
+          expect(status[0]?.totalOutstandingMinor).toBe(0);
+        }),
+      ),
+      Effect.tap(() => assertCreditReconciles()),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('6.9 myStatus reports creditMinor per currency (CZK + EUR)', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('930000000000000007', 'credit-only-status-2')),
+      Effect.bind('team', ({ user }) =>
+        createTeam('930700000000000000' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
+      Effect.tap(({ member }) => seedCredit((member as any).id, 'CZK', 300)),
+      Effect.tap(({ member }) => seedCredit((member as any).id, 'EUR', 40)),
+      Effect.bind('status', ({ team, user }) =>
+        FinanceOverviewRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.myStatus(team.id, user.id)),
+        ),
+      ),
+      Effect.tap(({ status }) =>
+        Effect.sync(() => {
+          expect(status).toHaveLength(2);
+          const byCurrency = new Map(status.map((s: any) => [s.currency, s]));
+          expect(byCurrency.get('CZK')?.creditMinor).toBe(300);
+          expect(byCurrency.get('EUR')?.creditMinor).toBe(40);
+        }),
+      ),
+      Effect.tap(() => assertCreditReconciles()),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+describe('FinanceOverviewRepository — overviewByTeam with credit (6.10, 6.11, 6.12)', () => {
+  it.effect(
+    '6.10 overview shows a credit-only member with zero counts (COUNT(v.assignment_id), not COUNT(*))',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('user', () => createUser('930000000000000008', 'credit-only-overview-1')),
+        Effect.bind('team', ({ user }) =>
+          createTeam('930800000000000000' as Discord.Snowflake, user.id),
+        ),
+        Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
+        Effect.tap(({ member }) => seedCredit((member as any).id, 'CZK', 500)),
+        Effect.bind('overview', ({ team }) =>
+          FinanceOverviewRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.overviewByTeam(team.id)),
+          ),
+        ),
+        Effect.tap(({ overview, member }) =>
+          Effect.sync(() => {
+            const row = overview.find(
+              (r) => r.teamMemberId === (member as any).id && r.currency === 'CZK',
+            ) as any;
+            expect(row).toBeDefined();
+            expect(row.creditMinor).toBe(500);
+            expect(row.overdueCount).toBe(0);
+            expect(row.pendingCount).toBe(0);
+            expect(row.paidCount).toBe(0);
+            expect(row.totalDueMinor).toBe(0);
+          }),
+        ),
+        Effect.tap(() => assertCreditReconciles()),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('6.11 overview creditMinor is per row currency (CZK fees + EUR credit)', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('930000000000000009', 'credit-only-overview-2')),
+      Effect.bind('team', ({ user }) =>
+        createTeam('930900000000000000' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
+      Effect.bind('czFee', ({ team }) => createFee(team.id, 1000, 'CZK')),
+      Effect.tap(({ czFee, member }) => assignFee(czFee.id, (member as any).id)),
+      Effect.tap(({ member }) => seedCredit((member as any).id, 'EUR', 25)),
+      Effect.bind('overview', ({ team }) =>
+        FinanceOverviewRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.overviewByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ overview, member }) =>
+        Effect.sync(() => {
+          const rows = overview.filter((r) => r.teamMemberId === (member as any).id) as any[];
+          expect(rows).toHaveLength(2);
+          const czRow = rows.find((r) => r.currency === 'CZK');
+          const eurRow = rows.find((r) => r.currency === 'EUR');
+          expect(czRow.creditMinor).toBe(0);
+          expect(czRow.totalDueMinor).toBe(1000);
+          expect(eurRow.creditMinor).toBe(25);
+          expect(eurRow.totalDueMinor).toBe(0);
+        }),
+      ),
+      Effect.tap(() => assertCreditReconciles()),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    '6.12 overview still returns the pre-existing shape for a member with no credit (WITH keys rewrite regression)',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('user', () => createUser('930000000000000010', 'no-credit-overview')),
+        Effect.bind('team', ({ user }) =>
+          createTeam('931000000000000000' as Discord.Snowflake, user.id),
+        ),
+        Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
+        Effect.bind('fee1', ({ team }) => createFee(team.id, 500, 'CZK')),
+        Effect.bind('fee2', ({ team }) => createFee(team.id, 700, 'CZK')),
+        Effect.tap(({ fee1, member }) => assignFee(fee1.id, (member as any).id)),
+        Effect.tap(({ fee2, member }) => assignFee(fee2.id, (member as any).id)),
+        Effect.bind('overview', ({ team }) =>
+          FinanceOverviewRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.overviewByTeam(team.id)),
+          ),
+        ),
+        Effect.tap(({ overview, member }) =>
+          Effect.sync(() => {
+            const memberCzkRows = overview.filter(
+              (r) => r.teamMemberId === (member as any).id && r.currency === 'CZK',
+            ) as any[];
+            expect(memberCzkRows).toHaveLength(1);
+            expect(memberCzkRows[0].totalDueMinor).toBe(1200);
+            expect(memberCzkRows[0].totalPaidMinor).toBe(0);
+            expect(memberCzkRows[0].pendingCount).toBe(2);
+            expect(memberCzkRows[0].creditMinor).toBe(0);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
   );
 });
