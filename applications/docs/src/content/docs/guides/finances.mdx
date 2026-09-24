@@ -436,7 +436,7 @@ Sideline automatically sends you a Discord DM when a fee is assigned to you and 
 | 10 days overdue | "Payment overdue" (red embed) |
 | 21 days overdue | "Payment overdue" (red embed) |
 
-Each DM shows the fee name, total amount, how much is still outstanding, and the due date. If your club has a connected bank account and you have a variable symbol, the DM also includes your [payment QR code](#payment-qr-codes) and a "Moje platby" button linking straight to your My Payments page. Reminders stop automatically once the assignment is marked paid or waived.
+Each DM shows the fee name, total amount, how much is still outstanding, and the due date. If your club has a connected bank account and you have a variable symbol, the DM also includes your [payment QR code](#payment-qr-codes) and a "Moje platby" button linking straight to your My Payments page. Reminders stop automatically once the assignment is marked paid or waived, or once the fee itself is archived.
 
 <Aside type="note" title="Reminders require Discord DMs">
 Reminders are sent as Discord direct messages. If you have DMs from server members disabled in your Discord privacy settings, you will not receive them. Check **User Settings → Privacy & Safety → Allow direct messages from server members** if you are not getting reminders you expect.
@@ -565,7 +565,7 @@ Content-Type: application/json
 
 ### Archive a fee
 
-Archiving a fee hides it from active listings but preserves all assignments and payments for historical records.
+Archiving a fee hides it from active listings but preserves all assignments and payments for historical records. Any pending [payment reminders](#payment-reminders) for its assignments stop as soon as it's archived.
 
 ```http
 DELETE /api/teams/{teamId}/fees/{feeId}
