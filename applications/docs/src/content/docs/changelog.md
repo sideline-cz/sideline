@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-24 — Fixed: changing your default role twice stopped reminders for earlier members
+
+If your team changed **"New members receive"** a second time, everyone who joined under the *previous* choice quietly stopped getting RSVP reminder DMs and stopped showing up in the organiser's non-responder list — their missed-RSVP streak stopped counting too. Sideline now remembers every role it has ever handed out as your default, so each group keeps its reminders no matter how many times the setting changes.
+
+- Nothing to do on your side: the fix applies automatically and no one gains or loses reminders at the moment it ships.
+- One exception: if your team had already changed the default twice *before* this fix, the affected members are only restored once you set that role as the default again — Sideline had no record of it. Re-assigning those members to your current default role works too.
+
 ## 2026-09-23 — New: choose which role new members get
 
 Previously every new member — via an invite link, auto-join, or joining the linked Discord server directly — always received the built-in **Player** role. **Team → Roles** now has a **"New members receive"** picker so an admin can point new joins at any role instead, including a custom one.
