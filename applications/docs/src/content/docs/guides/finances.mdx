@@ -12,6 +12,7 @@ Sideline's Finance module lets admins and members with the Treasurer role define
 - **Fee** — a named charge defined at the team level (e.g. "Spring 2026 membership", "Kit fee"). Each fee has a default amount, a currency, and an optional due date.
 - **Assignment** — the record that links a fee to a specific member. An assignment inherits the fee's amount and due date, but both can be overridden per member.
 - **Payment** — money received against an assignment. Payments are never deleted; they can be **voided** with a reason if recorded in error.
+- **Credit** — money a member has paid that isn't (yet) owed against any fee. Built up either by settling more than is currently outstanding ("pay in advance") or as leftover from a settle-all payment. Credit is automatically applied the next time that member is settled, in the same currency it was paid in. See [Settling a member's balance and paying in advance](#settling-a-members-balance-and-paying-in-advance) below.
 - **Variable symbol** — a short number (1–10 digits) attached to a member, printed on their payment QR codes and matched against incoming bank transfers. See [Setting up variable symbols](#setting-up-variable-symbols) below.
 - **Bank movement** — one transaction read from the club's connected bank account. See [Connecting a bank account](#connecting-a-bank-account-fio) below.
 - **Status** — computed automatically from the assignment's amounts and due date:
@@ -36,6 +37,7 @@ Finance permissions follow a treasurer-style split across four built-in roles. B
 | Create, edit, or archive fees | Yes | No | Yes | No |
 | Assign fees to members | Yes | No | Yes | No |
 | Record or void payments | Yes | No | Yes | No |
+| Settle a member's balance / add credit | Yes | No | Yes | No |
 | Create, edit, or delete expenses | Yes | No | Yes | No |
 | View own fee status (My Payments) | Yes | Yes | Yes | Yes |
 | Connect / edit the bank account (Fio) | Yes | No | Yes | No |
@@ -65,11 +67,31 @@ The page has three tabs:
 - **Expenses** — sum of all recorded expenditures
 - **Net** — Income minus Expenses (may be negative)
 
-Below the tiles, a summary table lists all active members with their total due, total paid, and assignment status counts. Use this view to quickly see who is behind on payments.
+Below the tiles, a summary table lists all active members with their total due, total paid, and assignment status counts. If a member holds credit in that currency, a small badge next to their outstanding amount shows the balance — click it to open the [credit history popover](#settling-a-members-balance-and-paying-in-advance). If you hold `finance:record_payments`, each row also has a **Settle** (or **Add credit**) button.
 
 **By assignment tab** — a flat list of individual payment records. Use the filter controls to narrow by member, fee, date range, or to include voided payments.
 
 **Expenses tab** — a list of all team expenditures. From this tab you can add, edit, and delete expense records (requires `finance:manage_fees`).
+
+## Settling a member's balance and paying in advance
+
+Instead of recording a payment fee-by-fee, treasurers can settle everything a member owes in one action from the **Overview** tab's summary table (requires `finance:record_payments`).
+
+Click **Settle** on a member's row to open the settle dialog. It shows every outstanding fee for that member in that currency, oldest due date first, and how much is still owed after any existing credit is applied automatically. Enter the amount received, choose a method and date (same fields as [recording a single payment](#fee-management-page)), and submit:
+
+- If the amount exactly covers what's owed, every listed fee is marked paid.
+- If it's less, fees are paid off oldest-first and the remainder stays outstanding — the dialog tells you up front which fee will only be partially covered.
+- If it's **more** than what's owed, the extra becomes **credit** on the member's account in that currency, ready to apply automatically next time they're settled.
+
+A member who owes nothing shows an **Add credit** button instead — use this for a member who is paying ahead of any fee being assigned to them (e.g. pre-paying next season's dues).
+
+Every fee a settlement pays off is recorded as an ordinary payment underneath, so it shows up in the **By assignment tab** and on the member's own **My Payments** history exactly like a payment recorded one at a time, and can be voided the same way if it turns out to be wrong.
+
+### Viewing and voiding credit
+
+A member's current credit balance appears as a badge next to their outstanding amount whenever it's non-zero. Click the badge to open a popover listing every credit top-up (deposit) in that currency, newest first, with the amount, method, date, and who recorded it.
+
+If you hold `finance:record_payments`, each active deposit has a **Cancel** action to void it, with a required reason. Because credit is a single running balance rather than a per-deposit ledger, a deposit can only be voided while its full amount is still unspent — if some of it has already been applied to a fee, Sideline tells you to void the payments that spent it first.
 
 ## Fee management page
 
@@ -349,6 +371,8 @@ Returns `BalanceSummary[]` — one element per currency — with `incomeMinor`, 
 
 Any team member can visit **Team → My Payments** (`/teams/:teamId/my-payments`) to see a personal summary of all their fee assignments. No special permission is required — every member sees only their own data.
 
+If you hold [credit](#settling-a-members-balance-and-paying-in-advance) in any currency, a line above the KPI cards shows the balance — one line per currency. That credit is applied automatically the next time a treasurer settles your balance, so you don't need to do anything with it yourself.
+
 ### Four KPI cards
 
 | Card | What it shows |
@@ -473,7 +497,46 @@ Content-Type: application/json
 }
 ```
 
-`method` is either `"cash"` or `"bank_transfer"`.
+`method` is either `"cash"` or `"bank_transfer"`. (A payment's `method` in API responses can also read `"credit"` — that value is written automatically when a settlement applies existing credit, and can never be submitted on a request.)
+
+### Settle a member's balance (settle-all / pay in advance)
+
+```http
+POST /api/teams/{teamId}/members/{memberId}/settlements
+Content-Type: application/json
+
+{
+  "currency": "CZK",
+  "amountMinor": 50000,
+  "method": "cash",
+  "paidAt": "2026-02-15T10:30:00.000Z",
+  "note": "Paid at training",
+  "expectedOutstandingMinor": 75000
+}
+```
+
+Applies any existing credit first, then the submitted `amountMinor`, against the member's outstanding fees in that currency — oldest due date first. Any amount left over once every outstanding fee is covered becomes credit. Send `amountMinor: 0` with `expectedOutstandingMinor: 0` to add pure credit for a member who owes nothing yet.
+
+`expectedOutstandingMinor` must match the member's current outstanding total in that currency (from `myStatus` or the finance overview) — a mismatch (someone else recorded a payment first) returns `409 SettlementStale` with the real total, so you can re-check before retrying. Returns `201 Created` with a `SettlementResult` breaking down how the amount was allocated.
+
+### List and void credit deposits
+
+```http
+GET /api/teams/{teamId}/members/{memberId}/credits/deposits?currency=CZK
+```
+
+Returns the member's credit top-up history in that currency (`currency` is required). Pass `includeVoided=true` to include already-voided deposits.
+
+```http
+DELETE /api/teams/{teamId}/members/{memberId}/credits/deposits/{depositId}
+Content-Type: application/json
+
+{
+  "reason": "Entered against wrong member"
+}
+```
+
+Reverses the deposit's amount out of the member's credit balance. Returns `409 CreditDepositSpent` if some of that credit has already been applied to a fee — void the payments that spent it first.
 
 ### Void a payment
 

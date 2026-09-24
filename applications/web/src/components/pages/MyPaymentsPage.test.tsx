@@ -29,7 +29,7 @@ import { describe, expect, it, vi } from 'vitest';
 // ---------------------------------------------------------------------------
 
 vi.mock('~/lib/translations.js', () => ({
-  tr: (key: string) => {
+  tr: (key: string, params?: Record<string, unknown>) => {
     const map: Record<string, string> = {
       my_payments_pageTitle: 'My Payments',
       my_payments_kpi_outstandingTotal: 'Outstanding',
@@ -53,8 +53,11 @@ vi.mock('~/lib/translations.js', () => ({
       finance_column_due: 'Due',
       finance_column_paid: 'Paid',
       finance_column_status: 'Status',
+      my_payments_credit_summary: 'You have {amount} in credit',
     };
-    return map[key] ?? key;
+    const template = map[key] ?? key;
+    if (!params) return template;
+    return template.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
   },
   setTranslationOverrides: vi.fn(),
 }));
@@ -100,6 +103,7 @@ type MyFinanceStatus = {
   currency: string;
   assignments: ReadonlyArray<FeeAssignmentView>;
   totalOutstandingMinor: number;
+  creditMinor: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -133,8 +137,9 @@ function makeGroup(
   currency: string,
   assignments: ReadonlyArray<FeeAssignmentView>,
   totalOutstandingMinor = 5000,
+  creditMinor = 0,
 ): MyFinanceStatus {
-  return { currency, assignments, totalOutstandingMinor };
+  return { currency, assignments, totalOutstandingMinor, creditMinor };
 }
 
 const TEAM_ID = 'team-1';
@@ -368,5 +373,38 @@ describe('MyPaymentsPage', () => {
     const historyRow = document.querySelector('[data-testid="payment-history-row"]');
     expect(historyRow).not.toBeNull();
     expect(historyRow?.getAttribute('data-fee-id')).toBe('fee-paid-fee');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Credit summary — settle-all-and-credit-ux.md §5 "The member's own view"
+// ---------------------------------------------------------------------------
+
+describe('MyPaymentsPage — credit summary', () => {
+  it('renders one credit line per currency, never a single summed figure', () => {
+    const czkGroup = makeGroup('CZK', [makeAssignment('a1', 'pending', 'CZK')], 5000, 30000);
+    const eurGroup = makeGroup('EUR', [makeAssignment('a2', 'pending', 'EUR')], 5000, 2000);
+
+    render(<MyPaymentsPage teamId={TEAM_ID} myStatus={[czkGroup, eurGroup]} />);
+
+    // One line per currency, each carrying its own formatted amount — never summed.
+    expect(screen.getByText('You have 300 CZK in credit')).not.toBeNull();
+    expect(screen.getByText('You have 20 EUR in credit')).not.toBeNull();
+  });
+
+  it('a credit-only currency (no assignments) still renders its credit line', () => {
+    const creditOnlyGroup = makeGroup('EUR', [], 0, 2000);
+
+    render(<MyPaymentsPage teamId={TEAM_ID} myStatus={[creditOnlyGroup]} />);
+
+    expect(screen.getByText('You have 20 EUR in credit')).not.toBeNull();
+  });
+
+  it('a currency with no credit renders no credit line', () => {
+    const group = makeGroup('CZK', [makeAssignment('a1', 'pending', 'CZK')], 5000, 0);
+
+    render(<MyPaymentsPage teamId={TEAM_ID} myStatus={[group]} />);
+
+    expect(screen.queryByText(/in credit/)).toBeNull();
   });
 });

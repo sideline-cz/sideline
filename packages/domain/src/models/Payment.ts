@@ -9,8 +9,17 @@ import { TeamMemberId } from '~/models/TeamMember.js';
 export const PaymentId = Schema.String.pipe(Schema.brand('PaymentId'));
 export type PaymentId = typeof PaymentId.Type;
 
-export const PaymentMethod = Schema.Literals(['cash', 'bank_transfer']);
+// Storage vocabulary. 'credit' is minted ONLY by MemberCreditsRepository.settle,
+// in the same transaction that debits member_credit_accounts. Never accepted on
+// the wire — see ManualPaymentMethod.
+export const PaymentMethod = Schema.Literals(['cash', 'bank_transfer', 'credit']);
 export type PaymentMethod = typeof PaymentMethod.Type;
+
+// Write vocabulary: what a human may choose. Two closed unions sharing literal names
+// without sharing code (packages/domain/AGENTS.md). Using this on every request payload
+// makes "credit never appears in a method radio" a compile-time fact.
+export const ManualPaymentMethod = Schema.Literals(['cash', 'bank_transfer']);
+export type ManualPaymentMethod = typeof ManualPaymentMethod.Type;
 
 export class Payment extends Model.Class<Payment>('Payment')({
   id: Model.Generated(PaymentId),

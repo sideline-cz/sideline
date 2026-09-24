@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-24 — New: settle a member's whole balance in one action, and pay in advance
+
+Treasurers can now settle everything a member owes with one action instead of recording each fee's payment separately — click **Settle** on a member's row in **Team → Finances → Overview**. The dialog shows every outstanding fee, applies any existing credit automatically, and pays off fees oldest-due-first with the amount you enter.
+
+- If a payment is more than what's currently owed, the extra becomes **credit** on the member's account, ready to go towards their fees the next time a treasurer settles their balance — useful for a member paying ahead of any fee being assigned to them (use the **Add credit** button for that).
+- Members see their credit balance on the **My Payments** page.
+- Credit top-ups can be voided (with a reason) from the balance badge's popover, as long as the credit hasn't already been applied to a fee.
+- API integrators: new `POST /teams/:teamId/members/:memberId/settlements`, `GET .../credits/deposits`, and `DELETE .../credits/deposits/:depositId` endpoints. `PaymentView.method` and `FinanceOverviewMemberRow`/`MyFinanceStatus` gain fields — see the [Finances guide](/guides/finances/#settling-a-members-balance-and-paying-in-advance) and the internal API reference.
+
 ## 2026-09-24 — Fixed: archived rosters cluttered roster pickers
 
 Linking a roster to an event and adding a member to an extra roster from their profile used to list every roster, including archived ones. Both pickers now only offer active rosters. The **rosters list page** also hides archived rosters by default — flip the new **Show inactive rosters** switch to see them again.

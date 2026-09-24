@@ -46,6 +46,7 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
+import { MemberCreditsRepository } from '~/repositories/MemberCreditsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
@@ -494,6 +495,20 @@ const MockPaymentsRepositoryLayer = Layer.succeed(PaymentsRepository, {
 const MockFinanceOverviewRepositoryLayer = Layer.succeed(FinanceOverviewRepository, {
   _tag: 'api/FinanceOverviewRepository',
   overviewByTeam: () => Effect.succeed([]),
+} as any);
+
+// T6b (`.work-plans/finances/settle-all-and-credit-architecture.md`) — [R3] this mock exists so
+// the file keeps CONSTRUCTING once `FinanceApiLive` depends on `MemberCreditsRepository`; it is
+// NOT how the T6b tests below assert anything (they only check permission short-circuits, which
+// fire before any repository method is called — see the T6b section's own header comment for why
+// a mock is the WRONG place for the cross-tenant / row-shaped assertions, which live on real
+// Postgres in `MemberCreditsRepository.test.ts` instead, T4.37/T4.38).
+const MockMemberCreditsRepositoryLayer = Layer.succeed(MemberCreditsRepository, {
+  _tag: 'api/MemberCreditsRepository',
+  settle: () => LogicError.die('MockMemberCreditsRepositoryLayer.settle not implemented'),
+  voidDeposit: () => LogicError.die('MockMemberCreditsRepositoryLayer.voidDeposit not implemented'),
+  listAccountsByMember: () => Effect.succeed([]),
+  listDepositsByMember: () => Effect.succeed([]),
 } as any);
 
 const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
@@ -992,6 +1007,7 @@ const TestLayer = ApiLive.pipe(
       MockPaymentsRepositoryLayer,
       MockFinanceOverviewRepositoryLayer,
       MockExpensesRepositoryLayer,
+      MockMemberCreditsRepositoryLayer,
     ),
   ),
 )
@@ -1823,5 +1839,151 @@ describe('Finance API — myPaymentHistory', () => {
     );
     // 200 even though player has no finance:view
     expect(response.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T6b — settlement & credit PERMISSION checks only
+// (`.work-plans/finances/settle-all-and-credit-architecture.md` test spec)
+//
+// [R3] Everything that needed a real row — the cross-tenant 404s (T4.37/T4.38), any read that
+// needed `member_credit_accounts` to actually exist — moved to
+// `MemberCreditsRepository.test.ts` on real Postgres. A mock returning `FinanceMemberNotFound`
+// would prove nothing about a fix that IS a SQL `JOIN team_members`. What stays here is exactly
+// the set of checks that fire before any repository method runs at all: `requirePermission` /
+// `requireMembership` short-circuits and the wire-level `ManualPaymentMethod` narrowing.
+// ---------------------------------------------------------------------------
+
+describe('Finance API — settlement & credit permission checks (T6b)', () => {
+  const settlementBody = () =>
+    JSON.stringify({
+      currency: 'CZK',
+      amountMinor: 0,
+      method: 'cash',
+      paidAt: '2025-05-01T10:00:00Z',
+      note: null,
+      expectedOutstandingMinor: 0,
+      expectedCreditMinor: 0,
+    });
+
+  // 6b.1 — createSettlement without finance:record_payments → 403, including a Captain token
+  // (Captain has only finance:view by default, per CAPTAIN_PERMISSIONS above).
+  it('6b.1a POST settlements as a Player (no finance:record_payments) → 403 FinanceForbidden', async () => {
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_TREASURER_MEMBER_ID}/settlements`,
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer player-token', 'Content-Type': 'application/json' },
+          body: settlementBody(),
+        },
+      ),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it('6b.1b POST settlements as a Captain (finance:view only) → 403 FinanceForbidden', async () => {
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_TREASURER_MEMBER_ID}/settlements`,
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer captain-token', 'Content-Type': 'application/json' },
+          body: settlementBody(),
+        },
+      ),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  // 6b.2 — voidCreditDeposit without finance:record_payments → 403.
+  it('6b.2 DELETE credits/deposits/:depositId without finance:record_payments → 403 FinanceForbidden', async () => {
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_PLAYER_MEMBER_ID}/credits/deposits/${crypto.randomUUID()}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: 'Bearer player-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'entered by mistake' }),
+        },
+      ),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  // 6b.3 — listMemberCreditDeposits without finance:view → 403.
+  it('6b.3 GET credits/deposits without finance:view → 403 FinanceForbidden', async () => {
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_PLAYER_MEMBER_ID}/credits/deposits?currency=CZK`,
+        { headers: { Authorization: 'Bearer player-token' } },
+      ),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  // 6b.4 — confirms the Q9 decision: a member can never pay in advance for themselves, money
+  // receipt is always recorded by whoever received it. The Player token targets ITS OWN
+  // membership id.
+  it('6b.4 a Player cannot settle for themselves → 403 FinanceForbidden', async () => {
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_PLAYER_MEMBER_ID}/settlements`,
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer player-token', 'Content-Type': 'application/json' },
+          body: settlementBody(),
+        },
+      ),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  // 6b.5 — the ManualPaymentMethod narrowing at the wire boundary (schema-level: RecordPaymentRequest.method
+  // is Payment.ManualPaymentMethod, which rejects 'credit'). No repository call is reachable — this is a
+  // pure decode failure, which is why it belongs on the mock harness rather than T4.
+  it("6b.5 recordPayment with method='credit' → 400 (ManualPaymentMethod rejects 'credit')", async () => {
+    const createResponse = await handler(
+      new Request(FEES_BASE, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer treasurer-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'T6b.5 Fee',
+          description: null,
+          amountMinor: 1000,
+          currency: 'CZK',
+          dueAt: null,
+          targetScope: 'all_members',
+        }),
+      }),
+    );
+    const fee = await createResponse.json();
+    const assignResponse = await handler(
+      new Request(`${FEES_BASE}/${fee.feeId}/assignments`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer treasurer-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          memberIds: [TEST_PLAYER_MEMBER_ID],
+          amountMinorOverride: null,
+          dueAtOverride: null,
+        }),
+      }),
+    );
+    const assignments = await assignResponse.json();
+    const assignmentId = assignments[0]?.assignmentId;
+
+    const paymentResponse = await handler(
+      new Request(`${FEES_BASE}/${fee.feeId}/assignments/${assignmentId}/payments`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer treasurer-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amountMinor: 1000,
+          method: 'credit',
+          paidAt: '2025-05-01T10:00:00Z',
+          note: null,
+        }),
+      }),
+    );
+    expect(paymentResponse.status).toBe(400);
   });
 });

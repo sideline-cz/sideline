@@ -37,6 +37,7 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
+import { MemberCreditsRepository } from '~/repositories/MemberCreditsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
@@ -622,6 +623,10 @@ const StubRepositoriesLayer = Layer.mergeAll(
     new Proxy({} as any, { get: () => () => Effect.succeed([]) }) as any,
   ),
   Layer.succeed(FinanceOverviewRepository, { overviewByTeam: () => Effect.succeed([]) } as any),
+  Layer.succeed(
+    MemberCreditsRepository,
+    new Proxy({} as any, { get: () => () => Effect.succeed([]) }) as any,
+  ),
   Layer.succeed(
     ExpensesRepository,
     new Proxy({} as any, { get: () => () => Effect.succeed([]) }) as any,

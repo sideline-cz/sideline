@@ -355,6 +355,8 @@ export * as InviteAcceptance from './models/InviteAcceptance.js';
 
 export * as Leaderboard from './models/Leaderboard.js';
 
+export * as MemberCredit from './models/MemberCredit.js';
+
 export * as MemberRole from './models/MemberRole.js';
 
 export * as Notification from './models/Notification.js';
@@ -432,6 +434,22 @@ export * as RulesLeaderboard from './models/RulesLeaderboard.js';
 export * as RulesProgress from './models/RulesProgress.js';
 
 export * as Session from './models/Session.js';
+
+/**
+ * Pure allocation of a settle-all payment across a member's outstanding fee assignments
+ * plus their credit balance.
+ *
+ * Pure algorithm module — see `packages/domain/AGENTS.md` ("Pure Algorithm Modules"). Shared,
+ * unmodified, by the client's settlement preview and the server's
+ * `MemberCreditsRepository.settle` (the `CzIban` / `Spayd` precedent) — "preview and server
+ * must agree" is a type-level fact, not a convention.
+ *
+ * Candidates are sorted `effectiveDueAt` ascending with `Option.none()` last, tie-broken by
+ * `assignmentId` ascending. The credit pool is drained to exhaustion before the cash pool,
+ * walking candidates in that same order. Integer minor units only — no division, no
+ * `Math.round`/`Math.floor` beyond the explicit `Math.max(0, …)` clamps below.
+ */
+export * as SettlementPlan from './models/SettlementPlan.js';
 
 /**
  * SPAYD (Short Payment Descriptor, v1.0) string builder for Czech payment QR codes.

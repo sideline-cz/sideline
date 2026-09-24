@@ -38,6 +38,7 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
+import { MemberCreditsRepository } from '~/repositories/MemberCreditsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
@@ -328,6 +329,12 @@ const MockFinanceOverviewRepositoryLayer = Layer.succeed(FinanceOverviewReposito
   overviewByTeam: () => Effect.succeed([]),
 } as any);
 
+const MockMemberCreditsRepositoryLayer = Layer.succeed(MemberCreditsRepository, {
+  _tag: 'api/MemberCreditsRepository',
+  listAccountsByMember: () => Effect.succeed([]),
+  listDepositsByMember: () => Effect.succeed([]),
+} as any);
+
 // All other repos: noop stubs
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const buildNoop = (tag: string, extra: Record<string, any> = {}): never =>
@@ -347,7 +354,9 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(SpyPaymentsRepositoryLayer),
   Layer.provide(MockFeesRepositoryLayer),
   Layer.provide(MockFeeAssignmentsRepositoryLayer),
-  Layer.provide(MockFinanceOverviewRepositoryLayer),
+  Layer.provide(
+    Layer.mergeAll(MockFinanceOverviewRepositoryLayer, MockMemberCreditsRepositoryLayer),
+  ),
   Layer.provide(
     Layer.mergeAll(
       Layer.succeed(

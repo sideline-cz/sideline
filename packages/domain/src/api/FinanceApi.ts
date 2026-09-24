@@ -4,7 +4,8 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/ht
 import { AuthMiddleware } from '~/api/Auth.js';
 import { AmountMinor, CurrencyCode, FeeId, FeeRecurrence, FeeTargetScope } from '~/models/Fee.js';
 import { FeeAssignmentId, FeeAssignmentStatus } from '~/models/FeeAssignment.js';
-import { PaymentId, PaymentMethod } from '~/models/Payment.js';
+import { MemberCreditDepositId } from '~/models/MemberCredit.js';
+import { ManualPaymentMethod, PaymentId } from '~/models/Payment.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
@@ -48,7 +49,11 @@ export class PaymentView extends Schema.Class<PaymentView>('PaymentView')({
   teamMemberId: TeamMemberId,
   memberName: Schema.OptionFromNullOr(Schema.String),
   amountMinor: AmountMinor,
-  method: PaymentMethod,
+  // Tolerant reader: widening a stored enum that appears in a response DTO breaks every
+  // already-loaded browser tab (rolling deploy) — an unknown literal must decode, not
+  // fail the whole array. The web renders this through a closed Record with a neutral
+  // fallback. The write side (RecordPaymentRequest/CreateSettlementRequest) stays closed.
+  method: Schema.String,
   paidAt: Schemas.DateTimeFromIsoString,
   note: Schema.OptionFromNullOr(Schema.String),
   recorderName: Schema.OptionFromNullOr(Schema.String),
@@ -67,12 +72,55 @@ export class FinanceOverviewMemberRow extends Schema.Class<FinanceOverviewMember
   overdueCount: Schema.Number,
   pendingCount: Schema.Number,
   paidCount: Schema.Number,
+  // this row's currency, 0 when none
+  creditMinor: Schema.Number,
 }) {}
 
 export class MyFinanceStatus extends Schema.Class<MyFinanceStatus>('MyFinanceStatus')({
   currency: CurrencyCode,
   assignments: Schema.Array(FeeAssignmentView),
   totalOutstandingMinor: Schema.Number,
+  creditMinor: Schema.Number,
+}) {}
+
+export class SettlementAllocation extends Schema.Class<SettlementAllocation>(
+  'SettlementAllocation',
+)({
+  assignmentId: FeeAssignmentId,
+  feeId: FeeId,
+  feeName: Schema.String,
+  amountMinor: AmountMinor,
+  source: Schema.Literals(['payment', 'credit']),
+  statusAfter: FeeAssignmentStatus,
+  // so the client can offer per-allocation undo
+  paymentId: PaymentId,
+}) {}
+
+export class SettlementResult extends Schema.Class<SettlementResult>('SettlementResult')({
+  currency: CurrencyCode,
+  creditAppliedMinor: AmountMinor,
+  paidMinor: AmountMinor,
+  creditAddedMinor: AmountMinor,
+  creditBalanceAfterMinor: AmountMinor,
+  allocations: Schema.Array(SettlementAllocation),
+}) {}
+
+export class MemberCreditDepositView extends Schema.Class<MemberCreditDepositView>(
+  'MemberCreditDepositView',
+)({
+  depositId: MemberCreditDepositId,
+  teamMemberId: TeamMemberId,
+  currency: CurrencyCode,
+  amountMinor: AmountMinor,
+  // Closed union, NOT Schema.String. Deposits are only ever written as ManualPaymentMethod
+  // and that union is never widened, so tolerance here buys nothing against a value that
+  // cannot go stale — it would just be noise.
+  method: ManualPaymentMethod,
+  paidAt: Schemas.DateTimeFromIsoString,
+  note: Schema.OptionFromNullOr(Schema.String),
+  recorderName: Schema.OptionFromNullOr(Schema.String),
+  voidedAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
+  voidReason: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -117,7 +165,7 @@ export type UpdateAssignmentRequest = Schema.Schema.Type<typeof UpdateAssignment
 
 export const RecordPaymentRequest = Schema.Struct({
   amountMinor: AmountMinor,
-  method: PaymentMethod,
+  method: ManualPaymentMethod,
   paidAt: Schemas.DateTimeFromIsoString,
   note: Schema.OptionFromNullOr(Schema.String),
 });
@@ -127,6 +175,27 @@ export const VoidPaymentRequest = Schema.Struct({
   reason: Schema.NonEmptyString,
 });
 export type VoidPaymentRequest = Schema.Schema.Type<typeof VoidPaymentRequest>;
+
+export const CreateSettlementRequest = Schema.Struct({
+  currency: CurrencyCode,
+  // 0 is legal: pure credit application, or a no-op
+  amountMinor: AmountMinor,
+  // ignored when amountMinor === 0; never 'credit'
+  method: ManualPaymentMethod,
+  paidAt: Schemas.DateTimeFromIsoString,
+  note: Schema.OptionFromNullOr(Schema.String),
+  expectedOutstandingMinor: AmountMinor,
+  // Reconciled alongside expectedOutstandingMinor — a credit balance that moved underneath
+  // an open settle dialog (e.g. a concurrent voidDeposit) must 409, even when outstanding
+  // alone still matches and the plan would otherwise be a silent no-op.
+  expectedCreditMinor: AmountMinor,
+});
+export type CreateSettlementRequest = Schema.Schema.Type<typeof CreateSettlementRequest>;
+
+export const VoidCreditDepositRequest = Schema.Struct({
+  reason: Schema.NonEmptyString,
+});
+export type VoidCreditDepositRequest = Schema.Schema.Type<typeof VoidCreditDepositRequest>;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -152,6 +221,31 @@ export class FinanceForbidden extends Schema.TaggedErrorClass<FinanceForbidden>(
 ) {}
 
 export class FeeArchived extends Schema.TaggedErrorClass<FeeArchived>()('FeeArchived', {}) {}
+
+export class SettlementStale extends Schema.TaggedErrorClass<SettlementStale>()('SettlementStale', {
+  // the server's figure, so the toast can be specific
+  outstandingMinor: Schema.Number,
+}) {}
+
+export class FinanceMemberNotFound extends Schema.TaggedErrorClass<FinanceMemberNotFound>()(
+  'FinanceMemberNotFound',
+  {},
+) {}
+
+export class InsufficientCredit extends Schema.TaggedErrorClass<InsufficientCredit>()(
+  'InsufficientCredit',
+  {},
+) {}
+
+export class CreditDepositNotFound extends Schema.TaggedErrorClass<CreditDepositNotFound>()(
+  'CreditDepositNotFound',
+  {},
+) {}
+
+export class CreditDepositSpent extends Schema.TaggedErrorClass<CreditDepositSpent>()(
+  'CreditDepositSpent',
+  {},
+) {}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -334,4 +428,50 @@ export class FinanceApiGroup extends HttpApiGroup.make('finance')
         feeId: Schema.OptionFromOptional(FeeId),
       },
     }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('createSettlement', '/teams/:teamId/members/:memberId/settlements', {
+      success: SettlementResult.pipe(HttpApiSchema.status(201)),
+      error: [
+        FinanceForbidden.pipe(HttpApiSchema.status(403)),
+        FinanceMemberNotFound.pipe(HttpApiSchema.status(404)),
+        SettlementStale.pipe(HttpApiSchema.status(409)),
+        InsufficientCredit.pipe(HttpApiSchema.status(409)),
+      ],
+      payload: CreateSettlementRequest,
+      params: { teamId: TeamId, memberId: TeamMemberId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get(
+      'listMemberCreditDeposits',
+      '/teams/:teamId/members/:memberId/credits/deposits',
+      {
+        success: Schema.Array(MemberCreditDepositView),
+        error: FinanceForbidden.pipe(HttpApiSchema.status(403)),
+        params: { teamId: TeamId, memberId: TeamMemberId },
+        // currency is REQUIRED, not optional: the popover is titled per currency, so
+        // filtering server-side beats shipping rows the client must discard.
+        query: {
+          currency: CurrencyCode,
+          includeVoided: Schema.OptionFromOptional(BooleanFromString),
+        },
+      },
+    ).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.delete(
+      'voidCreditDeposit',
+      '/teams/:teamId/members/:memberId/credits/deposits/:depositId',
+      {
+        success: Schema.Void.pipe(HttpApiSchema.status(204)),
+        error: [
+          FinanceForbidden.pipe(HttpApiSchema.status(403)),
+          CreditDepositNotFound.pipe(HttpApiSchema.status(404)),
+          CreditDepositSpent.pipe(HttpApiSchema.status(409)),
+        ],
+        payload: VoidCreditDepositRequest,
+        params: { teamId: TeamId, memberId: TeamMemberId, depositId: MemberCreditDepositId },
+      },
+    ).middleware(AuthMiddleware),
   ) {}

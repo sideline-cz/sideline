@@ -102,6 +102,9 @@ authedTest.describe('No horizontal overflow on mobile', () => {
     ['team settings', `/teams/${TEAM_ID}/settings`],
     ['roles', `/teams/${TEAM_ID}/roles`],
     ['groups', `/teams/${TEAM_ID}/groups`],
+    // The by-member table gains an Actions column + a currency code + a credit line in this
+    // ticket (settle-all-and-credit) — this is the regression net for it.
+    ['finances', `/teams/${TEAM_ID}/finances`],
   ] as const;
 
   for (const [name, url] of PAGES) {
@@ -109,6 +112,13 @@ authedTest.describe('No horizontal overflow on mobile', () => {
       await page.setViewportSize({ width: 360, height: 780 });
       await page.goto(url);
       await expect(page.locator('h1').first()).toBeVisible({ timeout: 30000 });
+
+      if (name === 'finances') {
+        // The overview tab is the default when balance summaries are present (mocked here) —
+        // switch to "By member" so the table this regression net targets actually renders.
+        await page.getByRole('tab', { name: /By member/i }).click();
+        await expect(page.getByRole('columnheader', { name: 'Actions' })).toBeVisible();
+      }
 
       const { scrollWidth, clientWidth } = await page.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,

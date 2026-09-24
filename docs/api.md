@@ -4166,7 +4166,7 @@ The Finance group exposes fee management and payment tracking. Permissions follo
 | `teamMemberId` | `TeamMemberId` (string) | Member who paid |
 | `memberName` | `string \| null` | Member display name |
 | `amountMinor` | `integer ≥ 0` | Payment amount in minor units |
-| `method` | `'cash' \| 'bank_transfer'` | Payment method |
+| `method` | `string` | Payment method. Deliberately a tolerant `string`, not the closed `'cash' \| 'bank_transfer' \| 'credit'` storage vocabulary — widening the stored enum must not break an already-loaded browser tab mid rolling-deploy, so this response schema stays permissive while write payloads (`RecordPaymentRequest`, `CreateSettlementRequest`) stay closed |
 | `paidAt` | `DateTime` | When the payment was made |
 | `note` | `string \| null` | Optional note |
 | `recorderName` | `string \| null` | Name of the user who recorded the payment |
@@ -4185,6 +4185,7 @@ The Finance group exposes fee management and payment tracking. Permissions follo
 | `overdueCount` | `number` | Number of overdue assignments |
 | `pendingCount` | `number` | Number of pending assignments |
 | `paidCount` | `number` | Number of paid assignments |
+| `creditMinor` | `number` | This member's credit balance in this row's currency; `0` when none |
 
 `MyFinanceStatus` — the invoking member's own status grouped by currency.
 
@@ -4193,6 +4194,45 @@ The Finance group exposes fee management and payment tracking. Permissions follo
 | `currency` | `string (3 chars)` | ISO 4217 currency code |
 | `assignments` | `FeeAssignmentView[]` | All assignments in this currency |
 | `totalOutstandingMinor` | `number` | Sum of `dueMinor - paidMinor` for non-waived assignments |
+| `creditMinor` | `number` | This member's credit balance in this currency; `0` when none |
+
+`SettlementAllocation` — one line of a settlement's payment plan.
+
+| Field | Type | Description |
+|---|---|---|
+| `assignmentId` | `FeeAssignmentId` (string) | Assignment this allocation applies to |
+| `feeId` | `FeeId` (string) | Parent fee |
+| `feeName` | `string` | Fee name (denormalised) |
+| `amountMinor` | `integer ≥ 0` | Amount allocated to this assignment by this line |
+| `source` | `'payment' \| 'credit'` | Whether this line was funded from the new payment or from existing credit |
+| `statusAfter` | `'pending' \| 'partial' \| 'paid' \| 'overdue' \| 'waived'` | Assignment status after the allocation |
+| `paymentId` | `PaymentId` (string) | The `payments` row this line was recorded as — every allocation, credit or cash, is written as an ordinary payment. Lets the client offer per-allocation undo |
+
+`SettlementResult` — the outcome of a settlement.
+
+| Field | Type | Description |
+|---|---|---|
+| `currency` | `string (3 chars)` | ISO 4217 currency code |
+| `creditAppliedMinor` | `integer ≥ 0` | Existing credit applied toward outstanding fees |
+| `paidMinor` | `integer ≥ 0` | New payment applied toward outstanding fees |
+| `creditAddedMinor` | `integer ≥ 0` | Leftover from the new payment added to credit (pay-in-advance) |
+| `creditBalanceAfterMinor` | `integer ≥ 0` | Member's credit balance in this currency after the settlement |
+| `allocations` | `SettlementAllocation[]` | Per-assignment breakdown |
+
+`MemberCreditDepositView` — one credit top-up.
+
+| Field | Type | Description |
+|---|---|---|
+| `depositId` | `MemberCreditDepositId` (string) | Deposit ID |
+| `teamMemberId` | `TeamMemberId` (string) | Member this deposit belongs to |
+| `currency` | `string (3 chars)` | ISO 4217 currency code |
+| `amountMinor` | `integer > 0` | Deposit amount in minor units |
+| `method` | `'cash' \| 'bank_transfer'` | How the money was received (never `'credit'` — a deposit is always money the club actually received) |
+| `paidAt` | `DateTime` | When the money was received |
+| `note` | `string \| null` | Optional note |
+| `recorderName` | `string \| null` | Name of the user who recorded the deposit |
+| `voidedAt` | `DateTime \| null` | Void timestamp; `null` if active |
+| `voidReason` | `string \| null` | Reason for voiding |
 
 ---
 
@@ -4640,6 +4680,110 @@ Returns the invoking member's individual payment records, optionally filtered to
 | Tag | Status | When |
 |---|---|---|
 | `FinanceForbidden` | 403 | Caller is not a member of this team |
+
+---
+
+#### `POST /teams/:teamId/members/:memberId/settlements`
+
+Settles a member's outstanding fees in one action ("settle-all"): applies existing credit first, then the submitted payment amount, oldest `effectiveDueAt` first (see `SettlementPlan.planSettlement`, shared between this endpoint and the client's settlement preview). Any amount left over after every outstanding fee in the currency is covered becomes credit. Submitting `amountMinor: 0` against a member with `expectedOutstandingMinor: 0` is how "pay in advance" happens — the whole submitted amount becomes credit with no fees to apply it to.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:record_payments` (a settlement writes `payments` rows, same trust boundary as recording a single payment)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member being settled |
+
+**Request Body:** `CreateSettlementRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `currency` | `string (3 chars)` | Yes | ISO 4217 currency code |
+| `amountMinor` | `integer ≥ 0` | Yes | New payment amount; `0` is legal (pure credit application, or a no-op) |
+| `method` | `'cash' \| 'bank_transfer'` | Yes | Method for the new payment; ignored when `amountMinor` is `0`; never `'credit'` |
+| `paidAt` | `DateTime` | Yes | When the payment was made |
+| `note` | `string \| null` | No | Optional note |
+| `expectedOutstandingMinor` | `integer ≥ 0` | Yes | The client's last-known outstanding total, for optimistic-concurrency detection |
+
+**Response:** `201 Created` — `SettlementResult`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:record_payments` permission |
+| `FinanceMemberNotFound` | 404 | Member does not exist, or does not belong to this team |
+| `SettlementStale` | 409 | The member's actual outstanding total (returned as `outstandingMinor`) no longer matches `expectedOutstandingMinor` — the client's view is stale (e.g. another payment landed since it last loaded) |
+| `InsufficientCredit` | 409 | Concurrent request already spent the credit this settlement was about to apply |
+
+---
+
+#### `GET /teams/:teamId/members/:memberId/credits/deposits`
+
+Lists a member's credit deposit history (top-ups) in one currency, for the credit popover.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:view`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member to list deposits for |
+
+**Query Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `currency` | `string (3 chars)` | Yes | ISO 4217 currency code — required, not optional: the popover is titled per currency, so filtering happens server-side |
+| `includeVoided` | `boolean` | No | Include voided deposits; defaults to `false` |
+
+**Response:** `200 OK` — `MemberCreditDepositView[]`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:view` permission |
+
+Note: if `memberId` does not resolve to a member of this team, the response is an empty array rather than a 404 — same non-leaking pattern as `listMemberAssignments`.
+
+---
+
+#### `DELETE /teams/:teamId/members/:memberId/credits/deposits/:depositId`
+
+Voids a credit deposit, reversing its amount out of the member's credit balance. Refused if the balance has already dropped below the deposit's own amount (the money it represents was already spent, and deposits are fungible — there is no way to tell which deposit funded which later application).
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:record_payments`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member the deposit belongs to |
+| `depositId` | `MemberCreditDepositId` (string) | Deposit to void |
+
+**Request Body:** `VoidCreditDepositRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reason` | `string (non-empty)` | Yes | Reason for voiding |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:record_payments` permission |
+| `CreditDepositNotFound` | 404 | Deposit does not exist, does not belong to this team, or is already voided |
+| `CreditDepositSpent` | 409 | The deposit's amount has already been spent (balance is below the deposit amount) — void the payments that spent it first |
 
 ---
 
@@ -7921,6 +8065,11 @@ The following table consolidates all error tags across all API groups.
 | `PaymentNotFound` | 404 | Finance | Payment does not exist |
 | `InvalidAmount` | 400 | Finance | Amount is negative (or zero for payments) |
 | `FeeArchived` | 409 | Finance | Fee is archived; the operation requires an active fee |
+| `FinanceMemberNotFound` | 404 | Finance | Member does not exist, or does not belong to this team (`createSettlement`) |
+| `SettlementStale` | 409 | Finance | Member's actual outstanding total no longer matches the client's `expectedOutstandingMinor`; carries the real `outstandingMinor` |
+| `InsufficientCredit` | 409 | Finance | Concurrent request already spent the credit this settlement was about to apply |
+| `CreditDepositNotFound` | 404 | Finance | Credit deposit does not exist, does not belong to this team, or is already voided |
+| `CreditDepositSpent` | 409 | Finance | Credit deposit's amount has already been spent; void the payments that spent it first |
 | `UnknownTranslationKeys` | 400 | Translations | Import payload contains key(s) not present in the compiled message registry |
 | `ExpenseForbidden` | 403 | Expenses | Missing required finance permission (`finance:view` for reads, `finance:manage_fees` for writes) |
 | `ExpenseNotFound` | 404 | Expenses | Expense does not exist or does not belong to this team |
