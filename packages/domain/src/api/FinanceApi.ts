@@ -185,6 +185,10 @@ export const CreateSettlementRequest = Schema.Struct({
   paidAt: Schemas.DateTimeFromIsoString,
   note: Schema.OptionFromNullOr(Schema.String),
   expectedOutstandingMinor: AmountMinor,
+  // Reconciled alongside expectedOutstandingMinor — a credit balance that moved underneath
+  // an open settle dialog (e.g. a concurrent voidDeposit) must 409, even when outstanding
+  // alone still matches and the plan would otherwise be a silent no-op.
+  expectedCreditMinor: AmountMinor,
 });
 export type CreateSettlementRequest = Schema.Schema.Type<typeof CreateSettlementRequest>;
 

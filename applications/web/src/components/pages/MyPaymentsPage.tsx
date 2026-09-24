@@ -36,6 +36,7 @@ type MyFinanceStatus = {
   currency: string;
   assignments: ReadonlyArray<FeeAssignmentView>;
   totalOutstandingMinor: number;
+  creditMinor: number;
 };
 
 type FilterValue = 'all' | 'outstanding' | 'paid' | 'waived';
@@ -154,9 +155,25 @@ export function MyPaymentsPage({ teamId, myStatus }: MyPaymentsPageProps) {
 
   const isEmpty = myStatus.length === 0;
 
+  // One line per currency holding credit — never a single summed figure (multi-currency
+  // rule). Rendered before the KPI grid, which is otherwise unchanged (4 cards, 2x2 on phone).
+  const creditGroups = myStatus.filter((g) => g.creditMinor > 0);
+
   return (
     <div className='space-y-6'>
       <h1 className='text-2xl font-bold'>{tr('my_payments_pageTitle')}</h1>
+
+      {creditGroups.length > 0 && (
+        <div className='flex flex-col gap-1'>
+          {creditGroups.map((group) => (
+            <p key={group.currency} className='text-sm text-emerald-700 dark:text-emerald-400'>
+              {tr('my_payments_credit_summary', {
+                amount: formatMoney(group.creditMinor, group.currency, 'en'),
+              })}
+            </p>
+          ))}
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>

@@ -32,6 +32,11 @@ describe('CreateSettlementRequest', () => {
     paidAt: PAID_AT_ISO,
     note: null,
     expectedOutstandingMinor: 1000,
+    // The client declares BOTH the outstanding total and the credit balance its preview was
+    // computed from. Outstanding alone is not sufficient: voidCreditDeposit moves credit
+    // without moving outstanding, so a settle that intended to "cover from credit" would
+    // otherwise allocate nothing and still return 201.
+    expectedCreditMinor: 0,
   };
 
   it('3.1 — Schema.encodeSync on a decoded plain object literal succeeds (it is a Struct, not a Class)', () => {

@@ -2,6 +2,7 @@ import { Fee, Team } from '@sideline/domain';
 import { useQuery } from '@tanstack/react-query';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
+import { paymentMethodLabel } from '~/lib/finance/paymentMethodLabels.js';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
@@ -104,7 +105,7 @@ export function MyPaymentHistoryRow({ teamId, feeId, currency }: MyPaymentHistor
                   {new Date(Number(DateTime.toEpochMillis(payment.paidAt))).toLocaleDateString()}
                 </span>
                 <span className='text-xs text-muted-foreground'>
-                  {tr(`finance_payment_method_${payment.method}`)}
+                  {paymentMethodLabel(payment.method)}
                 </span>
               </div>
               <div className='text-xs text-muted-foreground mt-0.5'>

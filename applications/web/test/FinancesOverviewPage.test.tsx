@@ -53,6 +53,7 @@ type MemberOverviewRow = {
   overdueCount: number;
   pendingCount: number;
   paidCount: number;
+  creditMinor: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,7 @@ const MEMBER_A_CZK: MemberOverviewRow = {
   overdueCount: 0,
   pendingCount: 1,
   paidCount: 1,
+  creditMinor: 0,
 };
 
 const MEMBER_B_CZK: MemberOverviewRow = {
@@ -79,6 +81,7 @@ const MEMBER_B_CZK: MemberOverviewRow = {
   overdueCount: 1,
   pendingCount: 0,
   paidCount: 0,
+  creditMinor: 0,
 };
 
 const sampleRows: MemberOverviewRow[] = [MEMBER_A_CZK, MEMBER_B_CZK];
@@ -186,6 +189,103 @@ describe('FinancesOverviewPage — tab navigation', () => {
     expect(screen.getByText('Alice')).not.toBeNull();
     // No tab buttons expected in the original single-pane layout
     // (the component may add tabs in future — just verify member list is visible)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [R2] KPI currency vote — settle-all-and-credit-architecture.md §6.3 / §9
+// ---------------------------------------------------------------------------
+
+describe('FinancesOverviewPage — KPI currency vote excludes credit-only rows', () => {
+  it('a credit-only EUR row does not flip the KPI currency away from CZK', () => {
+    // Deliberately ONE assignment-bearing CZK row against TWO credit-only EUR rows —
+    // `pickMostFrequentCurrency` votes by row count, so without the `kpiRows` filter EUR
+    // would win 2-to-1 and this test would pass on unfixed code too.
+    const czkRow: MemberOverviewRow = {
+      teamMemberId: 'member-czk-0',
+      memberName: 'Member 0',
+      currency: 'CZK',
+      totalDueMinor: 100000, // 1000 CZK
+      totalPaidMinor: 0,
+      overdueCount: 1,
+      pendingCount: 0,
+      paidCount: 0,
+      creditMinor: 0,
+    };
+    const eurCreditOnlyRows: MemberOverviewRow[] = Array.from({ length: 2 }, (_, i) => ({
+      teamMemberId: `member-eur-credit-${i}`,
+      memberName: `Credit Holder ${i}`,
+      currency: 'EUR',
+      totalDueMinor: 0,
+      totalPaidMinor: 0,
+      overdueCount: 0,
+      pendingCount: 0,
+      paidCount: 0,
+      creditMinor: 50000, // €500 credit, no assignments at all
+    }));
+
+    render(<FinancesOverviewPage rows={[czkRow, ...eurCreditOnlyRows]} />);
+
+    // KPI cards must stay in CZK: 1000 CZK total due, never €0.00.
+    const totalDueEl = document.querySelector('[data-kpi="total-due"]');
+    expect(totalDueEl).not.toBeNull();
+    expect(totalDueEl?.textContent).toMatch(/1[,.\s]?000/);
+    expect(totalDueEl?.textContent).not.toMatch(/€/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [Adversarial review #2] all-waived team must not regress to the "no fees" empty state
+// ---------------------------------------------------------------------------
+
+describe('FinancesOverviewPage — an all-waived team is not the "no fees" empty state', () => {
+  it('a team whose only member has every fee waived does not fall back to "no fees yet"', () => {
+    // Waived assignments land in none of overdueCount/pendingCount/paidCount (the overview SQL
+    // only counts overdue / pending|partial / paid) — same zero-count signature as a
+    // credit-only row. `kpiRows` (which excludes zero-count rows) must only gate the currency
+    // vote, never the empty state, or this row vanishes behind "You have no fees yet." With
+    // every row zero-count, `worstStatus` reads them all as 'paid' and the (pre-existing,
+    // unaffected-by-this-fix) all-caught-up branch renders instead — never the "no fees" CTA.
+    const allWaivedRow: MemberOverviewRow = {
+      teamMemberId: 'member-waived',
+      memberName: 'Waived Member',
+      currency: 'CZK',
+      totalDueMinor: 0,
+      totalPaidMinor: 0,
+      overdueCount: 0,
+      pendingCount: 0,
+      paidCount: 0,
+      creditMinor: 0,
+    };
+
+    render(<FinancesOverviewPage rows={[allWaivedRow]} />);
+
+    expect(screen.queryByText(/No fees yet/i)).toBeNull();
+    expect(screen.getByText('finance_empty_allPaid')).not.toBeNull();
+  });
+
+  it('worstStatus badges a zero-count row (all-waived or credit-only) as paid, not pending', () => {
+    // [R3] fixed the credit-only case (a member who owes nothing must not show a Pending
+    // badge); the same zero-count signature is indistinguishable from an all-waived member
+    // with the fields this row carries. Badging it "paid" (nothing owed) is the accepted
+    // behavior for both — pinned here so a future change notices it. Paired with a genuinely
+    // overdue row so the "all paid" branch doesn't short-circuit the table itself.
+    const zeroCountRow: MemberOverviewRow = {
+      teamMemberId: 'member-zero',
+      memberName: 'Zero Count',
+      currency: 'CZK',
+      totalDueMinor: 0,
+      totalPaidMinor: 0,
+      overdueCount: 0,
+      pendingCount: 0,
+      paidCount: 0,
+      creditMinor: 0,
+    };
+
+    render(<FinancesOverviewPage rows={[zeroCountRow, MEMBER_B_CZK]} />);
+
+    expect(document.querySelector('[data-status="paid"]')).not.toBeNull();
+    expect(document.querySelector('[data-status="pending"]')).toBeNull();
   });
 });
 

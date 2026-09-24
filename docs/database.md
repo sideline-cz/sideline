@@ -1240,7 +1240,7 @@ Single-row counter used for cache invalidation. Incremented by the application (
 
 ### 12. Finance
 
-The Finance subsystem tracks fee definitions, per-member fee assignments, payment records, and team expenditures. A PostgreSQL trigger (`payments_finance_recompute`) automatically maintains the denormalised `fee_assignments.paid_minor` column, and — since the Fio bank-sync feature — `bank_transactions.match_state`, so the server never needs to aggregate payments on read. A computed view (`fee_assignment_status_v`) derives the displayed status from stored data. Payment reminders are delivered asynchronously via two additional tables: `payment_reminder_sync_events` (outbox for the bot's Finance Sync worker) and `payment_reminders_sent` (idempotency guard so a reminder is never delivered twice for the same assignment/kind pair). Team expenditures are tracked in the `expenses` table; every change is journalled into `expense_history` by a Postgres trigger. See the Bank Sync section below for the tables that extend this subsystem with Fio bank-transaction ingestion and matching.
+The Finance subsystem tracks fee definitions, per-member fee assignments, payment records, member credit balances, and team expenditures. A PostgreSQL trigger (`payments_finance_recompute`) automatically maintains the denormalised `fee_assignments.paid_minor` column, and — since the Fio bank-sync feature — `bank_transactions.match_state`, so the server never needs to aggregate payments on read. A computed view (`fee_assignment_status_v`) derives the displayed status from stored data. Member credit (settle-all and pay-in-advance) is tracked by `member_credit_accounts` (one stored balance per member/currency) and `member_credit_deposits` (voidable history of every credit top-up) — see the notes on `member_credit_accounts` below for why the balance is a stored column and not a `SUM` over the deposit history. Payment reminders are delivered asynchronously via two additional tables: `payment_reminder_sync_events` (outbox for the bot's Finance Sync worker) and `payment_reminders_sent` (idempotency guard so a reminder is never delivered twice for the same assignment/kind pair) — reminder candidate selection also skips a member whose credit fully covers their outstanding balance in that currency (see `FeeAssignmentsRepository._findReminderCandidates`). Team expenditures are tracked in the `expenses` table; every change is journalled into `expense_history` by a Postgres trigger. See the Bank Sync section below for the tables that extend this subsystem with Fio bank-transaction ingestion and matching.
 
 #### `fees`
 
@@ -1302,7 +1302,7 @@ An individual payment against a fee assignment. Payments are never deleted; inst
 | `fee_assignment_id` | UUID | NOT NULL, FK → `fee_assignments(id)` ON DELETE RESTRICT | — |
 | `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE RESTRICT | — |
 | `amount_minor` | BIGINT | NOT NULL, CHECK > 0 | — |
-| `method` | TEXT | NOT NULL, CHECK (`'cash'`, `'bank_transfer'`) | — |
+| `method` | TEXT | NOT NULL, CHECK `payments_method_values` (`'cash'`, `'bank_transfer'`, `'credit'`) | — |
 | `paid_at` | TIMESTAMPTZ | NOT NULL | — |
 | `note` | TEXT | — | `NULL` |
 | `recorded_by_user_id` | UUID | NOT NULL, FK → `users(id)` ON DELETE RESTRICT | — |
@@ -1317,7 +1317,50 @@ An individual payment against a fee assignment. Payments are never deleted; inst
 
 **Indexes**: `idx_payments_assignment_active` on `(fee_assignment_id) WHERE voided_at IS NULL`; `idx_payments_member` on `(team_member_id)`; `idx_payments_paid_at` on `(paid_at DESC)`; `idx_payments_bank_transaction` on `(bank_transaction_id) WHERE bank_transaction_id IS NOT NULL`
 
-**Notes**: `amount_minor > 0` (not ≥ 0) — a zero-amount payment is rejected at the DB level. Voiding a payment triggers `payments_finance_recompute` to recompute `fee_assignments.paid_minor` (and, when the voided payment was bank-matched, `bank_transactions.match_state`). `bank_transaction_id`/`matched_by` were added in migration `1792000002_create_bank_transactions` — set on a `payments` row created by the Fio matcher (`matched_by = 'auto'`) or through the manual match endpoint (`matched_by = 'manual'`); `NULL`/`NULL` for cash payments and any payment recorded before this feature. One bank transaction may be linked from several payments (a split match across multiple fees); one payment links to at most one bank transaction.
+**Notes**: `amount_minor > 0` (not ≥ 0) — a zero-amount payment is rejected at the DB level. Voiding a payment triggers `payments_finance_recompute` to recompute `fee_assignments.paid_minor` (and, when the voided payment was bank-matched, `bank_transactions.match_state`). `bank_transaction_id`/`matched_by` were added in migration `1792000002_create_bank_transactions` — set on a `payments` row created by the Fio matcher (`matched_by = 'auto'`) or through the manual match endpoint (`matched_by = 'manual'`); `NULL`/`NULL` for cash payments and any payment recorded before this feature. One bank transaction may be linked from several payments (a split match across multiple fees); one payment links to at most one bank transaction. `method = 'credit'` was added by migration `1792700000_create_member_credits`, replacing the earlier unnamed CHECK with the named `payments_method_values` constraint (`'cash'`, `'bank_transfer'`, `'credit'`). A `'credit'` row is written exclusively by `MemberCreditsRepository.settle` in the same transaction as the account debit — it is how applying credit stays an ordinary payment, so `fee_assignments.paid_minor` stays owned entirely by the trigger instead of gaining a second write path. No client can mint one directly: the wire-level write schema (`ManualPaymentMethod`) never accepts `'credit'`, only the response schema (`PaymentView.method`, `Schema.String`) reads it back — see the notes on `member_credit_accounts` below.
+
+---
+
+#### `member_credit_accounts`
+
+One stored credit balance per team member per currency. Backs both "settle-all" (apply existing credit toward outstanding fees) and "pay in advance" (a payment that exceeds what is currently owed becomes credit).
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `team_member_id` | UUID | NOT NULL, PK (part 1), FK → `team_members(id)` ON DELETE RESTRICT | — |
+| `currency` | CHAR(3) | NOT NULL, PK (part 2) | — |
+| `balance_minor` | BIGINT | NOT NULL, CHECK ≥ 0 | `0` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Notes**: Added in migration `1792700000_create_member_credits`. `balance_minor` is a **stored column, not a `SUM` over `member_credit_deposits`** — this is deliberate, not a denormalisation shortcut. A signed ledger cannot be kept non-negative under READ COMMITTED: a concurrent insert is a phantom row with nothing to lock, so two concurrent settlements can each read the same balance and each debit it past zero. The stored balance gives every settlement a real row to serialise on: every debit is a conditional `UPDATE member_credit_accounts SET balance_minor = balance_minor - n WHERE ... AND balance_minor >= n`, and zero rows affected means insufficient credit (`InsufficientCredit`, never a `SELECT`-then-`UPDATE`). The `CHECK (balance_minor >= 0)` is a backstop against a raw SQL mistake, not a second live enforcement layer — the conditional `UPDATE` is what actually prevents going negative. `MemberCreditsRepository.settle` and `.voidDeposit` both lock the account row (`FOR UPDATE OF a`) before touching `fee_assignments`; `PaymentsRepository.void_` also takes this lock (to restore credit when a `'credit'`-method payment is voided) — see `applications/server/AGENTS.md` for the full lock-order rule. Row lifecycle: created on first credit activity (`INSERT ... ON CONFLICT DO NOTHING`), never deleted while `team_members` restricts member deletion.
+
+---
+
+#### `member_credit_deposits`
+
+Voidable history of every credit top-up ("pay in advance" or leftover cash from a settlement that overpaid outstanding fees). Purely additive history — it does not drive the balance; `member_credit_accounts.balance_minor` does.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE RESTRICT | — |
+| `currency` | CHAR(3) | NOT NULL | — |
+| `amount_minor` | BIGINT | NOT NULL, CHECK > 0 | — |
+| `method` | TEXT | NOT NULL, CHECK (`'cash'`, `'bank_transfer'`) | — |
+| `paid_at` | TIMESTAMPTZ | NOT NULL | — |
+| `note` | TEXT | — | `NULL` |
+| `recorded_by_user_id` | UUID | NOT NULL, FK → `users(id)` ON DELETE RESTRICT | — |
+| `voided_at` | TIMESTAMPTZ | — | `NULL` |
+| `voided_by_user_id` | UUID | FK → `users(id)` ON DELETE RESTRICT | `NULL` |
+| `void_reason` | TEXT | — | `NULL` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Constraint**: `voided_at`, `voided_by_user_id`, and `void_reason` must all be `NULL` or all non-`NULL` (atomic void state, same pattern as `payments`). `(team_member_id, currency)` FK → `member_credit_accounts(team_member_id, currency)` ON DELETE RESTRICT — a deposit cannot outlive its account.
+
+**Indexes**: `idx_member_credit_deposits_member` on `(team_member_id, currency)`; `idx_member_credit_deposits_active` on `(team_member_id, currency) WHERE voided_at IS NULL`.
+
+**Notes**: Added in migration `1792700000_create_member_credits`. `method` here is the closed `ManualPaymentMethod` (`'cash'`/`'bank_transfer'` only) — a deposit is always money the club actually received, so it is never `'credit'`. Deposits are **fungible**: nothing records which deposit funded which later fee application, so voiding one is refused (`CreditDepositSpent`, 409) once the account balance has dropped below the deposit's own amount — the caller must void the payments that spent it first. GDPR: `financial` disposition, keyed twice in `EXPORT_MANIFEST` — once on `team_members` (`team_member_id`, the member whose money this is) and once on `users` (`recorded_by_user_id`, `voided_by_user_id`).
 
 ---
 

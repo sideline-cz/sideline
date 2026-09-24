@@ -788,6 +788,7 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
                 paidAt: payload.paidAt,
                 note: payload.note,
                 expectedOutstandingMinor: payload.expectedOutstandingMinor,
+                expectedCreditMinor: payload.expectedCreditMinor,
                 recordedByUserId: currentUser.id,
               }),
             ),

@@ -77,6 +77,7 @@ export interface SettleInput {
   readonly paidAt: DateTime.Utc;
   readonly note: Option.Option<string>;
   readonly expectedOutstandingMinor: number;
+  readonly expectedCreditMinor: number;
   readonly recordedByUserId: Auth.UserId;
 }
 
@@ -210,7 +211,12 @@ export const make = (options: MemberCreditsRepositoryOptions = {}) =>
             (sum, c) => sum + Math.max(0, c.dueMinor - c.paidMinor),
             0,
           );
-          return outstandingMinor !== input.expectedOutstandingMinor
+          // Both figures are reconciled, not just outstanding: credit can fall (voidDeposit)
+          // without ever touching an assignment, and a plan built against a stale balance is
+          // not always a no-op (it can be a smaller, partial one) — so an "is the plan a
+          // no-op" check would miss it. Same treasurer, same page, different control.
+          return outstandingMinor !== input.expectedOutstandingMinor ||
+            balanceMinor !== input.expectedCreditMinor
             ? Effect.fail(new FinanceApi.SettlementStale({ outstandingMinor }))
             : Effect.succeed(
                 SettlementPlan.planSettlement(

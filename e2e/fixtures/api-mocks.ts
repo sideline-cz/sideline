@@ -661,6 +661,61 @@ async function setupApiMocks(page: Page) {
     }),
   );
 
+  // Finance overview: a few by-member rows (one carrying a credit balance) so the responsive
+  // no-overflow sweep actually exercises the by-member table's Actions column + currency code +
+  // credit line, not just the empty state.
+  await page.route(
+    '**/teams/*/finance/overview',
+    apiOnly(async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            teamMemberId: mock.MEMBER_ID,
+            memberName: 'Jan Novák',
+            currency: 'CZK',
+            totalDueMinor: 100000,
+            totalPaidMinor: 0,
+            overdueCount: 1,
+            pendingCount: 0,
+            paidCount: 0,
+            creditMinor: 0,
+          },
+          {
+            teamMemberId: 'test-member-00000002',
+            memberName: 'Petra Svobodová',
+            currency: 'CZK',
+            totalDueMinor: 50000,
+            totalPaidMinor: 20000,
+            overdueCount: 0,
+            pendingCount: 1,
+            paidCount: 0,
+            creditMinor: 30000,
+          },
+        ]),
+      });
+    }),
+  );
+
+  await page.route(
+    '**/teams/*/finances/balance-summary',
+    apiOnly(async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    }),
+  );
+
+  await page.route(
+    '**/teams/*/fees',
+    apiOnly(async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      } else {
+        await route.fallback();
+      }
+    }),
+  );
+
   // Team info (catch-all for /teams/:teamId)
   await page.route(
     '**/teams/*',

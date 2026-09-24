@@ -1863,6 +1863,7 @@ describe('Finance API — settlement & credit permission checks (T6b)', () => {
       paidAt: '2025-05-01T10:00:00Z',
       note: null,
       expectedOutstandingMinor: 0,
+      expectedCreditMinor: 0,
     });
 
   // 6b.1 — createSettlement without finance:record_payments → 403, including a Captain token

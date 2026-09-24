@@ -76,6 +76,7 @@ const settleInput = (opts: {
   currency?: Fee.CurrencyCode;
   amountMinor: number;
   expectedOutstandingMinor: number;
+  expectedCreditMinor: number;
 }) => ({
   teamId: opts.teamId,
   teamMemberId: opts.teamMemberId,
@@ -85,10 +86,13 @@ const settleInput = (opts: {
   paidAt: DateTime.nowUnsafe(),
   note: Option.none<string>(),
   expectedOutstandingMinor: opts.expectedOutstandingMinor,
+  expectedCreditMinor: opts.expectedCreditMinor,
   recordedByUserId: opts.recordedByUserId as never,
 });
 
-/** Pure "pay in advance" — no assignments needed, the whole amount becomes credit. */
+/** Pure "pay in advance" — no assignments needed, the whole amount becomes credit. Every call
+ * site deposits into a currency that holds zero credit beforehand (a fresh member, or a
+ * currency not yet touched), so `expectedCreditMinor: 0` is always the true pre-call balance. */
 const depositCredit = (
   // `any` deliberately: accepts the real repository's `settle` (a specific struct param), a
   // loosened mock, or the options-carrying `make(...)` instance without fighting parameter
@@ -103,7 +107,12 @@ const depositCredit = (
   },
 ) =>
   credits.settle(
-    settleInput({ ...opts, amountMinor: opts.amountMinor, expectedOutstandingMinor: 0 }),
+    settleInput({
+      ...opts,
+      amountMinor: opts.amountMinor,
+      expectedOutstandingMinor: 0,
+      expectedCreditMinor: 0,
+    }),
   );
 
 const balanceOf = (sql: SqlClient.SqlClient, memberId: string, currency: Fee.CurrencyCode = CZK) =>
@@ -204,6 +213,7 @@ describe('MemberCreditsRepository — negative-balance prevention', () => {
             recordedByUserId,
             amountMinor: 0,
             expectedOutstandingMinor: 2000,
+            expectedCreditMinor: 1000,
           });
 
           const fiberA = yield* Effect.forkChild(Effect.result(creditsA.settle(input)));
@@ -255,6 +265,7 @@ describe('MemberCreditsRepository — negative-balance prevention', () => {
             recordedByUserId,
             amountMinor: 0,
             expectedOutstandingMinor: 1000,
+            expectedCreditMinor: 300,
           }),
         )) as { creditAppliedMinor: number };
         expect(result.creditAppliedMinor).toBe(300);
@@ -346,6 +357,7 @@ describe('MemberCreditsRepository — deposit void after spend', () => {
           recordedByUserId,
           amountMinor: 0,
           expectedOutstandingMinor: 600,
+          expectedCreditMinor: 1000,
         }),
       );
       const sql = yield* SqlClient.SqlClient.asEffect();
@@ -391,6 +403,7 @@ describe('MemberCreditsRepository — deposit void after spend', () => {
           recordedByUserId,
           amountMinor: 0,
           expectedOutstandingMinor: 600,
+          expectedCreditMinor: 1000,
         }),
       )) as { allocations: ReadonlyArray<{ source: string; paymentId: string }> };
       const creditPayment = settleResult.allocations.find((a) => a.source === 'credit');
@@ -591,6 +604,7 @@ describe('MemberCreditsRepository — void behaviour of credit payments', () => 
           recordedByUserId,
           amountMinor: 0,
           expectedOutstandingMinor: 400,
+          expectedCreditMinor: 1000,
         }),
       )) as { allocations: ReadonlyArray<{ source: string; paymentId: string }> };
       const creditPayment = settleResult.allocations.find((a) => a.source === 'credit');
@@ -663,6 +677,7 @@ describe('MemberCreditsRepository — void behaviour of credit payments', () => 
           recordedByUserId,
           amountMinor: 0,
           expectedOutstandingMinor: 400,
+          expectedCreditMinor: 1000,
         }),
       )) as { allocations: ReadonlyArray<{ source: string; paymentId: string }> };
       const creditPayment = settleResult.allocations.find((a) => a.source === 'credit');
@@ -747,6 +762,7 @@ describe('MemberCreditsRepository — multi-currency', () => {
           currency: EUR,
           amountMinor: 0,
           expectedOutstandingMinor: 500,
+          expectedCreditMinor: 0,
         }),
       )) as { creditAppliedMinor: number };
       expect(result.creditAppliedMinor).toBe(0);
@@ -801,6 +817,7 @@ describe('MemberCreditsRepository — multi-currency', () => {
           recordedByUserId,
           amountMinor: 1000,
           expectedOutstandingMinor: 1000,
+          expectedCreditMinor: 0,
         }),
       )) as { outstandingMinor?: number; paidMinor: number };
       expect(result.paidMinor).toBe(1000);
@@ -832,6 +849,7 @@ describe('MemberCreditsRepository — multi-currency', () => {
           recordedByUserId,
           amountMinor: 300,
           expectedOutstandingMinor: 300,
+          expectedCreditMinor: 0,
         }),
       );
       yield* credits.settle(
@@ -842,6 +860,7 @@ describe('MemberCreditsRepository — multi-currency', () => {
           currency: EUR,
           amountMinor: 30,
           expectedOutstandingMinor: 30,
+          expectedCreditMinor: 0,
         }),
       );
 
@@ -879,6 +898,7 @@ describe('MemberCreditsRepository — waived / archived exclusion', () => {
           recordedByUserId,
           amountMinor: 0,
           expectedOutstandingMinor: 0,
+          expectedCreditMinor: 0,
         }),
       )) as { allocations: ReadonlyArray<unknown> };
       expect(result.allocations).toHaveLength(0);
@@ -906,6 +926,7 @@ describe('MemberCreditsRepository — waived / archived exclusion', () => {
           recordedByUserId,
           amountMinor: 0,
           expectedOutstandingMinor: 0,
+          expectedCreditMinor: 0,
         }),
       )) as { allocations: ReadonlyArray<unknown> };
       expect(result.allocations).toHaveLength(0);
@@ -943,6 +964,7 @@ describe('MemberCreditsRepository — waived / archived exclusion', () => {
           recordedByUserId,
           amountMinor: 1000,
           expectedOutstandingMinor: 1000,
+          expectedCreditMinor: 0,
         }),
       )) as { allocations: ReadonlyArray<unknown> };
       expect(result.allocations).toHaveLength(1);
@@ -974,6 +996,7 @@ describe('MemberCreditsRepository — waived / archived exclusion', () => {
           recordedByUserId,
           amountMinor: 0,
           expectedOutstandingMinor: 0,
+          expectedCreditMinor: 0,
         }),
       )) as { allocations: ReadonlyArray<unknown> };
       expect(result.allocations).toHaveLength(0);
@@ -1026,6 +1049,7 @@ describe('MemberCreditsRepository — arithmetic / general', () => {
           recordedByUserId,
           amountMinor: 1000,
           expectedOutstandingMinor: 1000,
+          expectedCreditMinor: 0,
         }),
       )) as { creditAddedMinor: number; paidMinor: number };
       expect(result.paidMinor).toBe(1000);
@@ -1048,6 +1072,7 @@ describe('MemberCreditsRepository — arithmetic / general', () => {
           recordedByUserId,
           amountMinor: 1500,
           expectedOutstandingMinor: 1000,
+          expectedCreditMinor: 0,
         }),
       )) as { creditAddedMinor: number; paidMinor: number };
       expect(result.paidMinor).toBe(1000);
@@ -1084,6 +1109,7 @@ describe('MemberCreditsRepository — arithmetic / general', () => {
           recordedByUserId,
           amountMinor: 300,
           expectedOutstandingMinor: 300,
+          expectedCreditMinor: 0,
         }),
       )) as { allocations: ReadonlyArray<{ assignmentId: string }> };
 
@@ -1110,6 +1136,7 @@ describe('MemberCreditsRepository — arithmetic / general', () => {
           recordedByUserId,
           amountMinor: 500,
           expectedOutstandingMinor: 500,
+          expectedCreditMinor: 0,
         }),
       );
 
@@ -1140,6 +1167,7 @@ describe('MemberCreditsRepository — arithmetic / general', () => {
             recordedByUserId,
             amountMinor: 700,
             expectedOutstandingMinor: 700,
+            expectedCreditMinor: 0,
           }),
         );
 
@@ -1169,6 +1197,7 @@ describe('MemberCreditsRepository — arithmetic / general', () => {
           recordedByUserId,
           amountMinor: 400,
           expectedOutstandingMinor: 400,
+          expectedCreditMinor: 0,
         }),
       );
 
@@ -1179,6 +1208,7 @@ describe('MemberCreditsRepository — arithmetic / general', () => {
           recordedByUserId,
           amountMinor: 0,
           expectedOutstandingMinor: 0,
+          expectedCreditMinor: 0,
         }),
       )) as { allocations: ReadonlyArray<unknown> };
       expect(second.allocations).toHaveLength(0);
@@ -1213,6 +1243,7 @@ describe('MemberCreditsRepository — cross-tenant authz and reads (re-homed fro
               recordedByUserId: recorderA.id,
               amountMinor: 100000,
               expectedOutstandingMinor: 0,
+              expectedCreditMinor: 0,
             }),
           ),
         );
@@ -1263,6 +1294,7 @@ describe('MemberCreditsRepository — cross-tenant authz and reads (re-homed fro
               recordedByUserId: recorderA.id,
               amountMinor: 100000,
               expectedOutstandingMinor: 0,
+              expectedCreditMinor: 0,
             }),
           ),
         );
@@ -1373,6 +1405,7 @@ describe('MemberCreditsRepository — cross-tenant authz and reads (re-homed fro
             recordedByUserId,
             amountMinor: 0,
             expectedOutstandingMinor: 300,
+            expectedCreditMinor: 1000,
           }),
         )) as { allocations: ReadonlyArray<{ source: string; paymentId: string }> };
         const creditPayment = settleResult.allocations.find((a) => a.source === 'credit');

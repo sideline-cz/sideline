@@ -385,11 +385,6 @@ const make = Effect.gen(function* () {
             SELECT 1 FROM bank_sync_config bsc
             WHERE bsc.team_id = tm.team_id AND bsc.enabled = true
           )
-          -- The assigned reminder is about a NEW assignment. Without a day-offset gate this
-          -- branch re-evaluates forever, so a credit-suppressed row would fire months later
-          -- when the balance drops. Two days is the same order as the branch's own
-          -- immediate-on-assignment intent.
-          AND fa.created_at > ${now}::timestamptz - INTERVAL '2 days'
           -- The club already holds enough of this member's money, in this fee's currency,
           -- to cover EVERYTHING they owe in it. Read-only: no FOR UPDATE, no lock.
           -- Deliberately absent from the lock-order table.

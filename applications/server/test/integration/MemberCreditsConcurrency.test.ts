@@ -90,6 +90,7 @@ const settleInput = (opts: {
   currency?: Fee.CurrencyCode;
   amountMinor: number;
   expectedOutstandingMinor: number;
+  expectedCreditMinor: number;
 }) => ({
   teamId: opts.teamId,
   teamMemberId: opts.teamMemberId,
@@ -99,6 +100,7 @@ const settleInput = (opts: {
   paidAt: DateTime.nowUnsafe(),
   note: Option.none<string>(),
   expectedOutstandingMinor: opts.expectedOutstandingMinor,
+  expectedCreditMinor: opts.expectedCreditMinor,
   recordedByUserId: opts.recordedByUserId as never,
 });
 
@@ -147,6 +149,7 @@ describe('MemberCreditsRepository — atomicity (5.1, 5.2)', () => {
           recordedByUserId,
           amountMinor: 500,
           expectedOutstandingMinor: 0,
+          expectedCreditMinor: 0,
         }),
       );
       const { assignment } = yield* createFeeAndAssignment(team.id, member.id, 300);
@@ -168,6 +171,7 @@ describe('MemberCreditsRepository — atomicity (5.1, 5.2)', () => {
             recordedByUserId,
             amountMinor: 100,
             expectedOutstandingMinor: 300,
+            expectedCreditMinor: 500,
           }),
         ),
       );
@@ -196,6 +200,7 @@ describe('MemberCreditsRepository — atomicity (5.1, 5.2)', () => {
             recordedByUserId,
             amountMinor: 900,
             expectedOutstandingMinor: 1000,
+            expectedCreditMinor: 0,
           }),
         ),
       );
@@ -213,6 +218,74 @@ describe('MemberCreditsRepository — atomicity (5.1, 5.2)', () => {
 
       yield* assertCreditReconciles();
     }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // Adversarial-review blocker: outstanding alone matching is NOT sufficient — a credit balance
+  // that moved underneath an open settle dialog (here: a concurrent voidDeposit cancelling the
+  // treasurer's own earlier deposit) must also 409, never a silent all-zero 201. Concrete
+  // scenario from the review: one unpaid 1000 fee, 1000 credit exactly covering it. Treasurer A
+  // opens the dialog (amount input hidden, "cover from credit" -> amountMinor: 0). Treasurer B
+  // cancels the deposit first (balance 1000 -> 0). A submits with the stale expectedCreditMinor
+  // it read (1000) — outstanding still matches (1000), so without reconciling credit too, the
+  // plan would silently become a no-op (creditApplied: 0, cashUsed: 0, zero lines) and still
+  // return 200/201.
+  it.effect(
+    '5.3 credit falling underneath an open settle (voidDeposit) fails SettlementStale, not a silent all-zero success',
+    () =>
+      Effect.gen(function* () {
+        const { team, member, recordedByUserId } = yield* seedMember();
+        const credits = yield* MemberCreditsRepository.asEffect();
+        yield* credits.settle(
+          settleInput({
+            teamId: team.id,
+            teamMemberId: member.id,
+            recordedByUserId,
+            amountMinor: 1000,
+            expectedOutstandingMinor: 0,
+            expectedCreditMinor: 0,
+          }),
+        );
+        const { assignment } = yield* createFeeAndAssignment(team.id, member.id, 1000);
+
+        // Treasurer A's read: outstanding=1000, credit=1000 (fully covers it).
+        const staleInput = settleInput({
+          teamId: team.id,
+          teamMemberId: member.id,
+          recordedByUserId,
+          amountMinor: 0,
+          expectedOutstandingMinor: 1000,
+          expectedCreditMinor: 1000,
+        });
+
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        const depositRows = yield* sql<{ id: string }>`
+          SELECT id::text AS id FROM member_credit_deposits
+           WHERE team_member_id = ${member.id} ORDER BY created_at DESC LIMIT 1
+        `;
+        const depositId = depositRows[0]?.id;
+        if (depositId === undefined) throw new Error('expected a deposit row');
+
+        // Treasurer B cancels the deposit before A submits — balance 1000 -> 0.
+        yield* credits.voidDeposit({
+          teamId: team.id,
+          memberId: member.id,
+          depositId: depositId as never,
+          voidedByUserId: recordedByUserId as never,
+          reason: 'cancelled by B, racing A’s open settle dialog',
+        });
+
+        const result = yield* Effect.result(credits.settle(staleInput));
+        expect(result._tag).toBe('Failure');
+        if (result._tag === 'Failure') {
+          expect((result as { failure: { _tag: string } }).failure._tag).toBe('SettlementStale');
+        }
+
+        // Nothing written: the fee is still unpaid.
+        expect(yield* paidMinorOf(sql, assignment.id)).toBe(0);
+        expect(yield* paymentCount(sql, member.id)).toBe(0);
+
+        yield* assertCreditReconciles();
+      }).pipe(Effect.provide(TestLayer)),
   );
 });
 
@@ -248,6 +321,7 @@ describe('MemberCreditsRepository — concurrency (5.4-5.8)', () => {
             recordedByUserId,
             amountMinor: 1000,
             expectedOutstandingMinor: 1000,
+            expectedCreditMinor: 0,
           }),
         ),
       );
@@ -300,6 +374,7 @@ describe('MemberCreditsRepository — concurrency (5.4-5.8)', () => {
                     recordedByUserId,
                     amountMinor: 1000,
                     expectedOutstandingMinor: 1000,
+                    expectedCreditMinor: 0,
                   }),
                 ),
               ),
@@ -370,6 +445,7 @@ describe('MemberCreditsRepository — concurrency (5.4-5.8)', () => {
               recordedByUserId,
               amountMinor,
               expectedOutstandingMinor: 0,
+              expectedCreditMinor: 0,
             });
 
           const fiberA = yield* Effect.forkChild(Effect.result(creditsA.settle(depositInput(500))));
@@ -382,12 +458,21 @@ describe('MemberCreditsRepository — concurrency (5.4-5.8)', () => {
           const resultB = yield* Fiber.join(fiberB);
           noDeadlock(resultA as never);
           noDeadlock(resultB as never);
+          // A is forced to acquire the account lock first (the afterAccountLock seam parks it
+          // there before B is even forked), so A always wins and commits its deposit. B blocks
+          // on the SAME row lock (proving serialisation, not a deadlock) and then runs its
+          // buildPlan against the now-current balance (500, post-A) — its `expectedCreditMinor:
+          // 0` is stale the moment it gets to run, so it correctly 409s rather than silently
+          // stacking a second deposit on a balance it never actually observed.
           expect(resultA._tag).toBe('Success');
-          expect(resultB._tag).toBe('Success');
+          expect(resultB._tag).toBe('Failure');
+          if (resultB._tag === 'Failure') {
+            expect((resultB as { failure: { _tag: string } }).failure._tag).toBe('SettlementStale');
+          }
 
           const sql = yield* SqlClient.SqlClient.asEffect();
-          // Serialised, not lost: both deposits landed (500 + 300).
-          expect(yield* balanceOf(sql, member.id)).toBe(800);
+          // Only A's deposit landed — B's was correctly refused, not silently lost.
+          expect(yield* balanceOf(sql, member.id)).toBe(500);
 
           yield* assertCreditReconciles();
         }),
@@ -433,6 +518,7 @@ describe('MemberCreditsRepository — concurrency (5.4-5.8)', () => {
                   recordedByUserId,
                   amountMinor: 0,
                   expectedOutstandingMinor: 1500,
+                  expectedCreditMinor: 0,
                 }),
               ),
             ),
@@ -473,6 +559,7 @@ describe('MemberCreditsRepository — concurrency (5.4-5.8)', () => {
               recordedByUserId,
               amountMinor: 1000,
               expectedOutstandingMinor: 0,
+              expectedCreditMinor: 0,
             }),
           );
           const { assignment: firstAssignment } = yield* createFeeAndAssignment(
@@ -487,6 +574,7 @@ describe('MemberCreditsRepository — concurrency (5.4-5.8)', () => {
               recordedByUserId,
               amountMinor: 0,
               expectedOutstandingMinor: 400,
+              expectedCreditMinor: 1000,
             }),
           )) as { allocations: ReadonlyArray<{ source: string; paymentId: string }> };
           const creditAllocation = firstSettle.allocations.find((a) => a.source === 'credit');
@@ -519,6 +607,7 @@ describe('MemberCreditsRepository — concurrency (5.4-5.8)', () => {
                   recordedByUserId,
                   amountMinor: 0,
                   expectedOutstandingMinor: 200,
+                  expectedCreditMinor: 600,
                 }),
               ),
             ),
@@ -585,6 +674,7 @@ describe('BankTransactionMatcher.unmatch — two multi-member transactions do no
                 recordedByUserId: recorder.id,
                 amountMinor: 100,
                 expectedOutstandingMinor: 0,
+                expectedCreditMinor: 0,
               }),
             );
             yield* credits.settle(
@@ -594,6 +684,7 @@ describe('BankTransactionMatcher.unmatch — two multi-member transactions do no
                 recordedByUserId: recorder.id,
                 amountMinor: 100,
                 expectedOutstandingMinor: 0,
+                expectedCreditMinor: 0,
               }),
             );
 

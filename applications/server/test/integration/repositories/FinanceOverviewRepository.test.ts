@@ -331,62 +331,6 @@ const seedCredit = (memberId: string, currency: string, balanceMinor: number) =>
     ),
   );
 
-describe('FinanceOverviewRepository — myStatus with credit (6.8, 6.9)', () => {
-  it.effect('6.8 myStatus returns a group for a credit-only currency (no assignments)', () =>
-    Effect.Do.pipe(
-      Effect.bind('user', () => createUser('930000000000000006', 'credit-only-status-1')),
-      Effect.bind('team', ({ user }) =>
-        createTeam('930600000000000000' as Discord.Snowflake, user.id),
-      ),
-      Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
-      Effect.tap(({ member }) => seedCredit((member as any).id, 'CZK', 300)),
-      Effect.bind('status', ({ team, user }) =>
-        FinanceOverviewRepository.asEffect().pipe(
-          Effect.andThen((repo) => repo.myStatus(team.id, user.id)),
-        ),
-      ),
-      Effect.tap(({ status }) =>
-        Effect.sync(() => {
-          expect(status).toHaveLength(1);
-          expect(status[0]?.currency).toBe('CZK');
-          expect((status[0] as any)?.assignments).toEqual([]);
-          expect((status[0] as any)?.creditMinor).toBe(300);
-          expect(status[0]?.totalOutstandingMinor).toBe(0);
-        }),
-      ),
-      Effect.tap(() => assertCreditReconciles()),
-      Effect.provide(TestLayer),
-    ),
-  );
-
-  it.effect('6.9 myStatus reports creditMinor per currency (CZK + EUR)', () =>
-    Effect.Do.pipe(
-      Effect.bind('user', () => createUser('930000000000000007', 'credit-only-status-2')),
-      Effect.bind('team', ({ user }) =>
-        createTeam('930700000000000000' as Discord.Snowflake, user.id),
-      ),
-      Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
-      Effect.tap(({ member }) => seedCredit((member as any).id, 'CZK', 300)),
-      Effect.tap(({ member }) => seedCredit((member as any).id, 'EUR', 40)),
-      Effect.bind('status', ({ team, user }) =>
-        FinanceOverviewRepository.asEffect().pipe(
-          Effect.andThen((repo) => repo.myStatus(team.id, user.id)),
-        ),
-      ),
-      Effect.tap(({ status }) =>
-        Effect.sync(() => {
-          expect(status).toHaveLength(2);
-          const byCurrency = new Map(status.map((s: any) => [s.currency, s]));
-          expect(byCurrency.get('CZK')?.creditMinor).toBe(300);
-          expect(byCurrency.get('EUR')?.creditMinor).toBe(40);
-        }),
-      ),
-      Effect.tap(() => assertCreditReconciles()),
-      Effect.provide(TestLayer),
-    ),
-  );
-});
-
 describe('FinanceOverviewRepository — overviewByTeam with credit (6.10, 6.11, 6.12)', () => {
   it.effect(
     '6.10 overview shows a credit-only member with zero counts (COUNT(v.assignment_id), not COUNT(*))',

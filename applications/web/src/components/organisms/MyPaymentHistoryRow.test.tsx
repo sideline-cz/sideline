@@ -41,6 +41,8 @@ vi.mock('~/lib/translations.js', () => ({
       my_payments_history_recordedBy: 'Recorded by: {name}',
       finance_payment_method_cash: 'Cash',
       finance_payment_method_bank_transfer: 'Bank transfer',
+      finance_payment_method_credit: 'From credit',
+      finance_payment_method_unknown: 'Other',
     };
     const template = map[key] ?? key;
     if (!params) return template;
@@ -208,6 +210,20 @@ describe('MyPaymentHistoryRow', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Cash')).not.toBeNull();
+    });
+  });
+
+  // [R2] §2.3 tolerant reader, other half: an unknown `method` must render the neutral
+  // fallback, never a raw `finance_payment_method_sepa_direct_debit` key.
+  it('an unknown method renders the neutral fallback label, not a raw key', async () => {
+    const payments = [makePayment('pay-unknown', { method: 'sepa_direct_debit' })];
+    apiCallSpy.mockResolvedValueOnce(Option.some(payments));
+
+    withQueryClient(<MyPaymentHistoryRow teamId={TEAM_ID} feeId={FEE_ID} currency='CZK' />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Other')).not.toBeNull();
+      expect(screen.queryByText(/finance_payment_method_sepa_direct_debit/)).toBeNull();
     });
   });
 

@@ -112,23 +112,6 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  // §5.3b / §6.2 — plain read, no dependency on MemberCreditsRepository: this query joins
-  // member_credit_accounts through team_members exactly as PaymentsRepository.listByTeam joins
-  // through fees. No FOR UPDATE, no lock.
-  const myCreditQuery = SqlSchema.findAll({
-    Request: Schema.Struct({ team_id: Team.TeamId, user_id: Auth.UserId }),
-    Result: Schema.Struct({
-      currency: Fee.CurrencyCode,
-      balance_minor: Fee.AmountMinor,
-    }),
-    execute: (input) => sql`
-      SELECT a.currency, a.balance_minor
-        FROM member_credit_accounts a
-        JOIN team_members tm ON tm.id = a.team_member_id
-       WHERE tm.team_id = ${input.team_id} AND tm.user_id = ${input.user_id}
-    `,
-  });
-
   // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
@@ -136,10 +119,8 @@ const make = Effect.gen(function* () {
   const overviewByTeam = (teamId: Team.TeamId) => overviewByTeamQuery(teamId).pipe(catchSqlErrors);
 
   const myStatus = (teamId: Team.TeamId, userId: Auth.UserId) =>
-    Effect.Do.pipe(
-      Effect.bind('rows', () => myStatusQuery({ team_id: teamId, user_id: userId })),
-      Effect.bind('creditRows', () => myCreditQuery({ team_id: teamId, user_id: userId })),
-      Effect.map(({ rows, creditRows }) => {
+    myStatusQuery({ team_id: teamId, user_id: userId }).pipe(
+      Effect.map((rows) => {
         // Group by currency
         const byCurrency = new Map<
           string,
@@ -167,24 +148,6 @@ const make = Effect.gen(function* () {
                   ? Math.max(0, row.due_minor - row.paid_minor)
                   : 0,
               creditMinor: 0,
-            });
-          }
-        }
-
-        // Merge in every credit balance AFTER the assignment loop — a currency with balance > 0
-        // but no assignments still gets a group, defaulting `assignments: []` /
-        // `totalOutstandingMinor: 0`, otherwise a member who paid in advance before any fee
-        // exists sees nothing at all.
-        for (const credit of creditRows) {
-          const existing = byCurrency.get(credit.currency);
-          if (existing) {
-            existing.creditMinor = credit.balance_minor;
-          } else {
-            byCurrency.set(credit.currency, {
-              currency: credit.currency,
-              assignments: [],
-              totalOutstandingMinor: 0,
-              creditMinor: credit.balance_minor,
             });
           }
         }

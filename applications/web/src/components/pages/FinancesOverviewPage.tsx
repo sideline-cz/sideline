@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 import React from 'react';
 import { PaymentStatusBadge } from '~/components/molecules/PaymentStatusBadge.js';
 import { BalanceDashboard } from '~/components/organisms/BalanceDashboard.js';
+import { MemberCreditPopover } from '~/components/organisms/MemberCreditPopover.js';
 import { Button } from '~/components/ui/button.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { tr } from '~/lib/translations.js';
@@ -22,12 +23,14 @@ export type MemberOverviewRow = {
   overdueCount: number;
   pendingCount: number;
   paidCount: number;
+  // This row's currency, 0 when the member holds no credit in it.
+  creditMinor: number;
 };
 
 interface FinancesOverviewPageProps {
   rows: ReadonlyArray<MemberOverviewRow>;
   /**
-   * Optional teamId, used for the "Record payment" dialog trigger.
+   * Optional teamId, used for the "Record payment" dialog trigger and the credit popover.
    * Not required in test scenarios.
    */
   teamId?: string;
@@ -56,6 +59,15 @@ interface FinancesOverviewPageProps {
   activeTab?: ActiveTab;
   /** Called when the user selects a different tab in controlled mode. */
   onTabChange?: (tab: ActiveTab) => void;
+  /**
+   * Gates the Actions column (settle-all / add-credit) and the void button inside the credit
+   * popover. Omitted/false in test scenarios that don't exercise the treasurer actions.
+   */
+  canRecordPayments?: boolean;
+  /** Row's "Settle all" / "Add credit" button was clicked — parent owns the dialog. */
+  onSettleRow?: (row: MemberOverviewRow) => void;
+  /** A credit deposit was voided from a row's popover — parent should refetch the overview. */
+  onCreditVoided?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +77,10 @@ interface FinancesOverviewPageProps {
 type WorstStatus = 'overdue' | 'partial' | 'pending' | 'paid' | 'waived';
 
 function worstStatus(row: MemberOverviewRow): WorstStatus {
+  // [R3] A credit-only row (a member who paid in advance and has never had a fee assigned)
+  // has zero counts and zero totals — the fall-through below would otherwise read that as
+  // 'pending' and put a member who owes NOTHING under a Pending badge and the Pending filter.
+  if (row.overdueCount + row.pendingCount + row.paidCount === 0) return 'paid';
   if (row.overdueCount > 0) return 'overdue';
   const outstandingMinor = row.totalDueMinor - row.totalPaidMinor;
   if (outstandingMinor <= 0 && row.paidCount > 0) return 'paid';
@@ -138,14 +154,27 @@ const FILTERS: ReadonlyArray<{ value: FilterValue; labelKey: string }> = [
 function ByMemberContent({
   rows,
   createFeeHref,
+  teamId,
+  canRecordPayments,
+  onSettleRow,
+  onCreditVoided,
 }: {
   rows: ReadonlyArray<MemberOverviewRow>;
   createFeeHref?: string;
+  teamId?: string;
+  canRecordPayments?: boolean;
+  onSettleRow?: (row: MemberOverviewRow) => void;
+  onCreditVoided?: () => void;
 }) {
   const [search, setSearch] = React.useState('');
   const [filter, setFilter] = React.useState<FilterValue>('all');
 
-  const currency = pickMostFrequentCurrency(rows);
+  // [R2] A credit-only row (no assignments, balance > 0) must not get a vote in the currency
+  // pick — pickMostFrequentCurrency votes by row COUNT, so one member's EUR credit can flip a
+  // CZK team's KPI cards to "Total due €0.00". Fall back to all rows only when every row is
+  // credit-only (nothing else to vote with).
+  const kpiRows = rows.filter((r) => r.overdueCount + r.pendingCount + r.paidCount > 0);
+  const currency = pickMostFrequentCurrency(kpiRows.length > 0 ? kpiRows : rows);
   const currencyRows = rows.filter((r) => r.currency === currency);
   const totalDueMinor = currencyRows.reduce((s, r) => s + r.totalDueMinor, 0);
   const totalPaidMinor = currencyRows.reduce((s, r) => s + r.totalPaidMinor, 0);
@@ -164,7 +193,10 @@ function ByMemberContent({
     return true;
   });
 
-  // Empty state: no rows at all
+  // Empty state: no rows at all. Deliberately keyed off `rows`, not `kpiRows` — `kpiRows`
+  // excludes every row with zero overdue/pending/paid counts (credit-only AND all-waived
+  // members alike), so a team whose fees are ALL waived would otherwise have `kpiRows === []`
+  // and see "you have no fees yet" instead of its (all-waived) member list.
   if (rows.length === 0) {
     return (
       <div className='flex flex-col items-center justify-center gap-4 py-16 text-center'>
@@ -257,17 +289,44 @@ function ByMemberContent({
               <th className='py-2 px-3 text-left text-xs font-medium text-muted-foreground'>
                 {tr('finance_column_status')}
               </th>
+              {canRecordPayments && (
+                <th className='py-2 px-3 text-left text-xs font-medium text-muted-foreground'>
+                  {/* Reuses the sibling "By assignment" tab's Actions column key — same
+                      table, same meaning, no need for a finance-overview-specific duplicate. */}
+                  {tr('assignments_tab_colActions')}
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {filtered.map((row) => {
               const outstanding = row.totalDueMinor - row.totalPaidMinor;
               const status = worstStatus(row);
+              const memberLabel = row.memberName ?? '—';
               return (
-                <tr key={row.teamMemberId} className='border-b hover:bg-muted/50'>
-                  <td className='py-3 px-3 font-medium'>{row.memberName ?? '—'}</td>
+                <tr
+                  key={`${row.teamMemberId}-${row.currency}`}
+                  className='border-b hover:bg-muted/50'
+                >
+                  <td className='py-3 px-3 font-medium'>
+                    {memberLabel}
+                    <span className='ml-1.5 text-xs font-normal text-muted-foreground'>
+                      {row.currency}
+                    </span>
+                  </td>
                   <td className='py-3 px-3 text-right tabular-nums'>
-                    {formatMoney(Math.max(0, outstanding), row.currency, 'en')}
+                    <div>{formatMoney(Math.max(0, outstanding), row.currency, 'en')}</div>
+                    {row.creditMinor > 0 && teamId !== undefined && (
+                      <MemberCreditPopover
+                        teamId={teamId}
+                        teamMemberId={row.teamMemberId}
+                        memberName={row.memberName ?? undefined}
+                        currency={row.currency}
+                        balanceMinor={row.creditMinor}
+                        canRecordPayments={canRecordPayments ?? false}
+                        onVoided={onCreditVoided}
+                      />
+                    )}
                   </td>
                   <td className='py-3 px-3 text-right tabular-nums'>
                     {formatMoney(row.totalPaidMinor, row.currency, 'en')}
@@ -275,6 +334,28 @@ function ByMemberContent({
                   <td className='py-3 px-3'>
                     <PaymentStatusBadge status={status} />
                   </td>
+                  {canRecordPayments && (
+                    <td className='py-3 px-3'>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        aria-label={tr(
+                          outstanding > 0
+                            ? 'finance_settle_rowAria'
+                            : 'finance_settle_rowAriaAddCredit',
+                          { member: memberLabel, currency: row.currency },
+                        )}
+                        onClick={() => onSettleRow?.(row)}
+                      >
+                        {tr(
+                          outstanding > 0
+                            ? 'finance_settle_action'
+                            : 'finance_settle_actionAddCredit',
+                        )}
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -293,12 +374,16 @@ type ActiveTab = 'overview' | 'by-member' | 'by-assignment';
 
 export function FinancesOverviewPage({
   rows,
+  teamId,
   userId,
   assignmentsTabContent,
   createFeeHref,
   balanceSummaries,
   activeTab: controlledActiveTab,
   onTabChange,
+  canRecordPayments,
+  onSettleRow,
+  onCreditVoided,
 }: FinancesOverviewPageProps) {
   const hasOverviewTab = balanceSummaries !== undefined;
   const defaultTab: ActiveTab = hasOverviewTab ? 'overview' : 'by-member';
@@ -337,14 +422,29 @@ export function FinancesOverviewPage({
 
   // When no tabs are requested and no overview, render the by-member content directly
   if (!assignmentsTabContent && !hasOverviewTab) {
-    return <ByMemberContent rows={rows} createFeeHref={createFeeHref} />;
+    return (
+      <div>
+        <h1 className='text-2xl font-bold mb-4'>{tr('finance_overview_title')}</h1>
+        <ByMemberContent
+          rows={rows}
+          createFeeHref={createFeeHref}
+          teamId={teamId}
+          canRecordPayments={canRecordPayments}
+          onSettleRow={onSettleRow}
+          onCreditVoided={onCreditVoided}
+        />
+      </div>
+    );
   }
 
   // Tab navigation
   return (
     <div>
+      <h1 className='text-2xl font-bold mb-4'>{tr('finance_overview_title')}</h1>
       {/* Tab bar */}
-      <div className='flex border-b mb-4' role='tablist'>
+      {/* overflow-x-auto: 3 tabs (Overview + its "New" badge, By member, By assignment) don't
+          all fit a 360px viewport — scroll the strip itself rather than the document. */}
+      <div className='flex overflow-x-auto border-b mb-4' role='tablist'>
         {hasOverviewTab && (
           <Button
             type='button'
@@ -396,7 +496,14 @@ export function FinancesOverviewPage({
       {activeTab === 'overview' && hasOverviewTab ? (
         <BalanceDashboard summaries={balanceSummaries ?? []} />
       ) : activeTab === 'by-member' ? (
-        <ByMemberContent rows={rows} createFeeHref={createFeeHref} />
+        <ByMemberContent
+          rows={rows}
+          createFeeHref={createFeeHref}
+          teamId={teamId}
+          canRecordPayments={canRecordPayments}
+          onSettleRow={onSettleRow}
+          onCreditVoided={onCreditVoided}
+        />
       ) : (
         assignmentsTabContent
       )}
