@@ -86,6 +86,7 @@ export const effectiveRolesFrom = (tm: string): string => `
       combined.name,
       combined.is_built_in,
       combined.is_default,
+      combined.was_default,
       combined.team_id,
       CASE
         WHEN bool_or(combined.via_direct) AND bool_or(combined.via_group) THEN 'both'
@@ -97,13 +98,13 @@ export const effectiveRolesFrom = (tm: string): string => `
         ARRAY[]::text[]
       ) AS group_names
     FROM (
-      SELECT r.id AS role_id, r.name, r.is_built_in, r.is_default, r.team_id,
+      SELECT r.id AS role_id, r.name, r.is_built_in, r.is_default, r.was_default, r.team_id,
              true AS via_direct, false AS via_group, NULL::text AS group_name
       FROM member_roles mr
       JOIN roles r ON r.id = mr.role_id AND r.is_archived = false
       WHERE mr.team_member_id = ${tm}.id
       UNION ALL
-      SELECT r.id AS role_id, r.name, r.is_built_in, r.is_default, r.team_id,
+      SELECT r.id AS role_id, r.name, r.is_built_in, r.is_default, r.was_default, r.team_id,
              false AS via_direct, true AS via_group, g.name AS group_name
       FROM group_members gm
       JOIN LATERAL (
@@ -125,7 +126,8 @@ export const effectiveRolesFrom = (tm: string): string => `
       JOIN roles r ON r.id = rg.role_id AND r.is_archived = false
       WHERE gm.team_member_id = ${tm}.id
     ) combined
-    GROUP BY combined.role_id, combined.name, combined.is_built_in, combined.is_default, combined.team_id
+    GROUP BY combined.role_id, combined.name, combined.is_built_in, combined.is_default,
+             combined.was_default, combined.team_id
   )
 `;
 
@@ -133,31 +135,50 @@ export const effectiveRolesFrom = (tm: string): string => `
  * "Does this member hold the role a NEW member would be given?" — the membership form of the
  * same rule `TeamMembersRepository.getDefaultRoleId` uses to PICK one role on join.
  *
- * The two must never drift: if they do, a team that sets a custom default (Poletime's `Guest`)
- * hands new members a role the RSVP-reminder and missed-RSVP queries do not recognise, and those
- * members silently stop receiving reminders. `is_default` is the configured default; the
- * built-in `Player` half is the same fallback the resolver carries, so a team with no configured
- * default keeps exactly today's population.
+ * `is_default` is the configured default; the built-in `Player` half is the same fallback the
+ * resolver carries, so a team that has configured nothing resolves to `Player` either way.
  *
- * Deliberately a UNION, not a priority pick (which is what the resolver does): a legacy member
- * still holding `Player` keeps receiving reminders after the team switches its default to
- * `Guest`. Dropping them would be a second, quieter bug.
- *
- * ponytail: the legacy half of this UNION is hardcoded to `Player` — it is NOT "whatever the
- * previous default was". That only covers a team's FIRST default change. A SECOND change (e.g.
- * Poletime later adds `Member` and switches the default from `Guest` to it) stops covering the
- * cohort that joined during the `Guest` era: they hold only `Guest`, `eff.is_default` is now
- * `false` for `Guest` rows, and they were never `Player`, so they silently drop out of
- * `findNonRespondersByEventId` and stop accruing `missed_rsvps`. Known ceiling, not fixed here.
- * Upgrade path: either a persistent `roles.is_rsvp_eligible` column set on every role that has
- * ever been the default (never cleared on a later change), or retaining the full history of past
- * defaults instead of collapsing to one `is_default` boolean.
+ * This one is CURRENT-default membership only. RSVP eligibility is a different, wider question —
+ * use `holdsRsvpEligibleRoleWhere` for that, never this. The two are not interchangeable: see its
+ * header.
  *
  * `${eff}` is an alias chosen in source (the `eff` alias over `effectiveRolesFrom`, or the `r`
  * alias in the resolver) — never a user value, no injection surface.
  */
 export const holdsDefaultRoleWhere = (eff: string): string =>
   `(${eff}.is_default OR (${eff}.name = 'Player' AND ${eff}.is_built_in = true))`;
+
+/**
+ * "Does this member hold a role that has EVER been handed out as this team's default?" — the RSVP
+ * reminder / `missed_rsvps` population, spliced by both `EventRsvpsRepository` non-responder
+ * queries. `holdsDefaultRoleWhere` with the STICKY flag in place of the current one, plus the same
+ * built-in `Player` floor.
+ *
+ * `was_default` is set by `RolesRepository.setDefaultRole` alongside `is_default` and deliberately
+ * never cleared by `clearDefaultByRoleTeamQuery`, so the population is cumulative: every cohort a
+ * team ever created keeps its reminders through any number of default changes. Swapping
+ * `is_default` for it is the whole fix. The old predicate covered a team's FIRST default change
+ * for free — every pre-existing member still held `Player` — and stranded the cohort in between on
+ * the SECOND: they hold only the superseded custom role, which is no longer `is_default` and was
+ * never `Player`.
+ *
+ * The `Player` half stays, as a FLOOR rather than as the stand-in for history it used to be. It is
+ * redundant against a correctly populated `was_default` (migration `1792600001` backfills every
+ * built-in `Player`, and `initTeamRoles` seeds it), which is exactly why it is cheap to keep: a
+ * `roles` row created by some other path — a hand-rolled fixture insert, a future seeder that
+ * forgets the column — costs that team its reminder DMs and its `missed_rsvps` accounting with no
+ * error anywhere. That is the failure mode this whole change exists to remove, so it does not get
+ * to reappear one forgotten INSERT later. It also keeps the documented promise that a legacy
+ * member still holding only built-in `Player` never loses reminders.
+ *
+ * The join-time resolver keeps `holdsDefaultRoleWhere` and must NOT move here: it PICKS ONE row by
+ * priority, and a superseded ex-default must not compete with the `Player` fallback for that slot.
+ * This predicate is a strict superset of that one (`setDefaultRole` writes both flags in the same
+ * statement), so the two can never disagree about the CURRENT default — the drift the join paths
+ * care about.
+ */
+export const holdsRsvpEligibleRoleWhere = (eff: string): string =>
+  `(${eff}.was_default OR (${eff}.name = 'Player' AND ${eff}.is_built_in = true))`;
 
 /**
  * The three aggregates below are each defined ONCE, parameterised by the SQL of the row

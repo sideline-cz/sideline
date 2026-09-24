@@ -438,3 +438,95 @@ describe('EventRsvpsRepository — RSVP eligibility follows the configured defau
       ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// The stranded-cohort bug: a team's SECOND default change.
+//
+// `holdsDefaultRoleWhere` (`is_default OR built-in Player`) covered the FIRST change for free —
+// every pre-existing member still held Player — and dropped the cohort in between on the second:
+// they hold only the superseded custom role, which is no longer `is_default` and was never
+// `Player`. The RSVP queries now splice `holdsRsvpEligibleRoleWhere` (the sticky
+// `roles.was_default`) instead, so every cohort a team ever created stays covered.
+//
+// The resolver deliberately did NOT move to `was_default` — case 3 below pins that a superseded
+// ex-default does not compete with the new default for the one join-time slot.
+// ---------------------------------------------------------------------------
+
+const seedSecondDefaultChangeFixture = () =>
+  seedDefaultRoleRsvpFixture().pipe(
+    Effect.bind('observerRoleId', ({ team }) =>
+      RolesRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.insertRole(team.id, 'Observer')),
+        Effect.map((r) => r.id),
+      ),
+    ),
+    Effect.tap(({ observerRoleId }) => setTeamDefaultRole(observerRoleId)),
+    Effect.bind('observerUserId', () => createUser('890000000000000105', 'observer-only-dr')),
+    Effect.bind('observerMember', ({ team, observerUserId }) =>
+      addTeamMember(team.id, observerUserId),
+    ),
+    Effect.tap(({ observerMember, observerRoleId }) =>
+      assignRole(observerMember.id, observerRoleId),
+    ),
+  );
+
+describe('EventRsvpsRepository — a second default change does not strand the previous cohort', () => {
+  it.effect(
+    '1. the Guest cohort STILL appears as non-responders after the default moves Guest → Observer',
+    () =>
+      seedSecondDefaultChangeFixture().pipe(
+        Effect.bind('nonResponders', ({ event, team }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.findNonRespondersByEventId(event.id, team.id, Option.none(), 4),
+            ),
+          ),
+        ),
+        Effect.tap(({ nonResponders, guestMember, legacyMember, observerMember, captainMember }) =>
+          Effect.sync(() => {
+            const ids = nonResponders.map((r) => r.team_member_id);
+            expect(ids).toContain(guestMember.id);
+            expect(ids).toContain(legacyMember.id);
+            expect(ids).toContain(observerMember.id);
+            expect(ids).not.toContain(captainMember.id);
+          }),
+        ),
+        Effect.provide(SeedLayer),
+      ),
+  );
+
+  it.effect('2. the Guest cohort keeps accruing missed_rsvps after the second change', () =>
+    seedSecondDefaultChangeFixture().pipe(
+      Effect.tap(({ event, team }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.incrementMissedForEventNonRespondersByEventId(event.id, team.id, Option.none()),
+          ),
+        ),
+      ),
+      Effect.bind('missed', ({ guestMember }) => getMissedRsvps(guestMember.id)),
+      Effect.tap(({ missed }) =>
+        Effect.sync(() => {
+          expect(missed).toBe(1);
+        }),
+      ),
+      Effect.provide(SeedLayer),
+    ),
+  );
+
+  it.effect('3. the join-time resolver still picks the CURRENT default, not a superseded one', () =>
+    seedSecondDefaultChangeFixture().pipe(
+      Effect.bind('resolved', ({ team }) =>
+        TeamMembersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.getDefaultRoleId(team.id)),
+        ),
+      ),
+      Effect.tap(({ resolved, observerRoleId }) =>
+        Effect.sync(() => {
+          expect(Option.getOrNull(resolved)?.id).toBe(observerRoleId);
+        }),
+      ),
+      Effect.provide(SeedLayer),
+    ),
+  );
+});

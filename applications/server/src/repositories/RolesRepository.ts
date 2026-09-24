@@ -179,12 +179,12 @@ const make = Effect.gen(function* () {
     // `provisionNewTeam.ts:112`, on a team created moments earlier. Do not call this on an
     // established team without clearing its default first.
     execute: (input) => sql`
-      INSERT INTO roles (team_id, name, is_built_in, is_default)
+      INSERT INTO roles (team_id, name, is_built_in, is_default, was_default)
       VALUES
-        (${input.team_id}, 'Admin', true, false),
-        (${input.team_id}, 'Captain', true, false),
-        (${input.team_id}, 'Player', true, true),
-        (${input.team_id}, 'Treasurer', true, false)
+        (${input.team_id}, 'Admin', true, false, false),
+        (${input.team_id}, 'Captain', true, false, false),
+        (${input.team_id}, 'Player', true, true, true),
+        (${input.team_id}, 'Treasurer', true, false, false)
       ON CONFLICT (team_id, name) DO NOTHING
     `,
   });
@@ -244,9 +244,14 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // `was_default` is set here and NEVER cleared by `clearDefaultByRoleTeamQuery` — that asymmetry
+  // is the fix for the stranded-cohort bug. The outgoing role stops being the default for new
+  // joins, but the members it already handed out stay in the RSVP population
+  // (`holdsRsvpEligibleRoleWhere`).
   const markDefaultQuery = SqlSchema.void({
     Request: Role.RoleId,
-    execute: (roleId) => sql`UPDATE roles SET is_default = true WHERE id = ${roleId}`,
+    execute: (roleId) =>
+      sql`UPDATE roles SET is_default = true, was_default = true WHERE id = ${roleId}`,
   });
 
   const findRolesByTeamId = (teamId: Team.TeamId) => findByTeamId(teamId).pipe(catchSqlErrors);
