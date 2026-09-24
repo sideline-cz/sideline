@@ -8,16 +8,19 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import { Fee } from '@sideline/domain';
-import { DateTime, Effect, Layer, Option, Schema } from 'effect';
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Schema } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
-import { MemberCreditsRepository } from '~/repositories/MemberCreditsRepository.js';
+import {
+  MemberCreditsRepository,
+  make as makeCredits,
+} from '~/repositories/MemberCreditsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
-import { BankTransactionMatcher } from '~/services/BankTransactionMatcher.js';
+import { BankTransactionMatcher, make as makeMatcher } from '~/services/BankTransactionMatcher.js';
 import {
   createFeeAndAssignment,
   createTeam,
@@ -29,7 +32,7 @@ import {
   setMemberVariableSymbol,
   setTeamTimezone,
 } from '../bankSyncFixtures.js';
-import { cleanDatabase, TestPgClient } from '../helpers.js';
+import { cleanDatabase, secondTestPgClient, TestPgClient } from '../helpers.js';
 
 const TestLayer = Layer.mergeAll(
   TeamsRepository.Default,
@@ -342,6 +345,119 @@ describe('unmatching an auto-credited transfer', () => {
       expect(yield* creditBalance(member.id)).toBe(0);
       const rows = yield* deposits(member.id);
       expect(rows[0]?.voided_at).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Concurrency — two REAL connections, not two fibers on one
+//
+// Two fibers sharing one SqlClient share one session and can never observe a row-lock wait, so
+// both tests below bind a second matcher to `secondTestPgClient`.
+//
+// MUTATION CHECK (run these by hand before trusting them):
+//   - "credits exactly once": delete `AND match_state = 'unmatched'` from writeAutoCredit's
+//     leg-2 SELECT and the member is credited TWICE.
+//   - "no deadlock against settle": move the `member_credit_accounts` lock BELOW
+//     `lockCreditCandidates` and this goes red with 40P01 — A would hold fee_assignments and
+//     want the account while settle holds the account and wants the same assignments.
+// ---------------------------------------------------------------------------
+
+describe('auto-credit under concurrency', () => {
+  it.effect('two connections matching the SAME transfer credit the member exactly once', () =>
+    Effect.gen(function* () {
+      const { team, member } = yield* seed(true);
+      const txId = yield* incoming(team.id, 500);
+
+      const reached = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+
+      const sql2 = yield* secondTestPgClient;
+      // Parked at afterCandidateRead — BEFORE the transaction opens, so A holds ZERO locks and
+      // B can genuinely run to completion. Parking at afterAccountLock instead would have A
+      // holding the very account row B needs, and the two would simply wait on each other.
+      const matcherA = yield* makeMatcher({
+        afterCandidateRead: Deferred.succeed(reached, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+        ),
+      });
+      const matcherB = yield* makeMatcher().pipe(Effect.provideService(SqlClient.SqlClient, sql2));
+
+      const fiberA = yield* Effect.forkChild(matcherA.matchOne(txId as never));
+      yield* Deferred.await(reached);
+
+      // B runs the whole thing to completion on its own connection and wins.
+      const outcomeB = yield* matcherB.matchOne(txId as never);
+      expect(outcomeB._tag).toBe('AutoMatched');
+      expect(yield* creditBalance(member.id)).toBe(500);
+
+      yield* Deferred.succeed(release, undefined);
+      const outcomeA = yield* Fiber.join(fiberA);
+
+      // A re-read bank_transactions under its own lock, found the row no longer 'unmatched',
+      // and wrote nothing. 500, never 1000, and exactly one deposit row.
+      expect(outcomeA._tag).toBe('Queued');
+      expect(yield* creditBalance(member.id)).toBe(500);
+      expect(yield* deposits(member.id)).toHaveLength(1);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('auto-credit racing a settle on the same member never deadlocks', () =>
+    Effect.gen(function* () {
+      const { user, team, member } = yield* seed(true);
+      yield* createFeeAndAssignment(team.id, member.id, 1000, { name: 'Příspěvek' });
+      const txId = yield* incoming(team.id, 1500);
+
+      const reached = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+
+      const sql2 = yield* secondTestPgClient;
+      const matcherA = yield* makeMatcher({
+        afterAccountLock: Deferred.succeed(reached, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+        ),
+      });
+      const creditsB = yield* makeCredits().pipe(Effect.provideService(SqlClient.SqlClient, sql2));
+
+      // A holds member_credit_accounts and has NOT yet taken bank_transactions or
+      // fee_assignments — the exact window a reversed acquisition order would expose.
+      const fiberA = yield* Effect.forkChild(matcherA.matchOne(txId as never));
+      yield* Deferred.await(reached);
+
+      // B wants the same member's account and the same assignment. It blocks on the account
+      // lock; it must never acquire an assignment first and cycle back.
+      const fiberB = yield* Effect.forkChild(
+        Effect.result(
+          creditsB.settle({
+            teamId: team.id,
+            teamMemberId: member.id,
+            currency: Schema.decodeSync(Fee.CurrencyCode)('CZK'),
+            amountMinor: 1000,
+            method: 'cash',
+            paidAt: DateTime.nowUnsafe(),
+            note: Option.none(),
+            expectedOutstandingMinor: 1000,
+            expectedCreditMinor: 0,
+            recordedByUserId: user.id,
+          }),
+        ),
+      );
+
+      yield* Deferred.succeed(release, undefined);
+      const outcomeA = yield* Fiber.join(fiberA);
+      const resultB = yield* Fiber.join(fiberB);
+
+      expect(outcomeA._tag).toBe('AutoMatched');
+
+      // B is allowed to fail — A settled the fee first, so B's expectedOutstandingMinor is
+      // stale. What it may NOT be is a deadlock: 40P01 arrives as an untyped SqlError (or a
+      // defect), never as SettlementStale.
+      if (resultB._tag === 'Failure') {
+        expect(resultB.failure._tag).toBe('SettlementStale');
+      }
+
+      // And the money is intact either way: the 1000 fee paid once, 500 left as credit.
+      expect(yield* creditBalance(member.id)).toBe(500);
     }).pipe(Effect.provide(TestLayer)),
   );
 });

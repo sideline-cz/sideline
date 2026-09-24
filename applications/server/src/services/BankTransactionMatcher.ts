@@ -44,6 +44,12 @@ export interface BankTransactionMatcherOptions {
   /** Test-only seam (§7.2 test 139/140): runs right after candidate assignments are read and
    * BEFORE the locking transaction begins. Defaults to `Effect.void`. */
   readonly afterCandidateRead?: Effect.Effect<void>;
+  /** Test-only seam, mirroring `MemberCreditsRepositoryOptions.afterAccountLock`: runs INSIDE
+   * `writeAutoCredit`'s transaction, immediately AFTER the `member_credit_accounts` lock and
+   * BEFORE the `bank_transactions` lock. Parking here holds exactly the outermost lock and
+   * nothing else, which is what lets a test prove the acquisition ORDER rather than merely that
+   * two calls do not both write. Defaults to `Effect.void`. */
+  readonly afterAccountLock?: Effect.Effect<void>;
 }
 
 export interface UnmatchInput {
@@ -137,6 +143,7 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
     Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
     Effect.map(({ sql }) => {
       const afterCandidateRead = options.afterCandidateRead ?? Effect.void;
+      const afterAccountLock = options.afterAccountLock ?? Effect.void;
 
       // ---------------------------------------------------------------------
       // Reads
@@ -434,6 +441,7 @@ export const make = (options: BankTransactionMatcherOptions = {}) =>
                  FOR UPDATE OF a
               `,
             ),
+            Effect.tap(() => afterAccountLock),
             // Leg 2 — bank_transactions. Re-checked under the lock: a concurrent manual match or
             // /unmatch since the candidate read means this call has nothing left to do.
             Effect.bind(
