@@ -77,7 +77,7 @@ Money received against a fee assignment. Payments are recorded by admins or trea
 
 ## Credit
 
-Money a member has paid that isn't (yet) owed against any fee, tracked per currency. Built up either by paying more than what's currently outstanding, or by paying in advance of any fee being assigned. Applied automatically the next time that member is settled. See [Settling a member's balance and paying in advance](/guides/finances/#settling-a-members-balance-and-paying-in-advance).
+Money a member has paid that isn't (yet) owed against any fee, tracked per currency. Built up either by paying more than what's currently outstanding, by paying in advance of any fee being assigned, or — if the club has turned on auto-crediting — as the leftover from a bank transfer a member sent via their standing top-up QR code. Applied automatically the next time that member is settled. See [Settling a member's balance and paying in advance](/guides/finances/#settling-a-members-balance-and-paying-in-advance).
 
 ## Variable symbol
 
@@ -85,7 +85,7 @@ A short number (1–10 digits) attached to a member, used to identify their bank
 
 ## Bank movement
 
-One transaction read from a club's connected bank account (currently Fio banka only). Sideline imports movements automatically, tries to match each one to a member's outstanding fee by variable symbol, and queues anything it can't confidently match for a treasurer to resolve by hand. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio).
+One transaction read from a club's connected bank account (currently Fio banka only). Sideline imports movements automatically, tries to match each one to a member's outstanding fee by variable symbol, and queues anything it can't confidently match for a treasurer to resolve by hand. If the club has turned on auto-crediting, a movement that identifies exactly one member is instead applied automatically — paying their oldest fees first and turning any remainder into credit — even when its amount doesn't exactly match one fee. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio).
 
 ## Weekly challenge
 

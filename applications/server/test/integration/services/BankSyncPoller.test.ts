@@ -931,6 +931,7 @@ describe('BankSyncPoller — account mismatch halts ingestion (iban-cross-check 
           team_id: team.id,
           enabled: true,
           auto_match_enabled: true,
+          auto_credit_enabled: Option.none(),
           account_prefix: Option.none(),
           account_number: Option.some('2703474850'),
           bank_code: Option.some('2010'),

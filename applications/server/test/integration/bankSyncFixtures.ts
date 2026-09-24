@@ -179,6 +179,7 @@ export const enableBankSync = (
   options: {
     readonly enabled?: boolean;
     readonly autoMatchEnabled?: boolean;
+    readonly autoCreditEnabled?: boolean;
     readonly accountNumber?: string;
     readonly bankCode?: string;
     readonly recipientName?: string;
@@ -190,10 +191,12 @@ export const enableBankSync = (
     Effect.andThen(
       (sql) => sql`
         INSERT INTO bank_sync_config (
-          team_id, enabled, auto_match_enabled, account_number, bank_code, recipient_name,
+          team_id, enabled, auto_match_enabled, auto_credit_enabled,
+          account_number, bank_code, recipient_name,
           fio_token_encrypted, fio_token_created_at, configured_by_user_id
         ) VALUES (
           ${teamId}, ${options.enabled ?? true}, ${options.autoMatchEnabled ?? true},
+          ${options.autoCreditEnabled ?? false},
           ${options.accountNumber ?? '2703474850'}, ${options.bankCode ?? '2010'},
           ${options.recipientName ?? 'Test Club, z.s.'},
           ${Option.getOrNull(options.fioTokenEncrypted ?? Option.none())},

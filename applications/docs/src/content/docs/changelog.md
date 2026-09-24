@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-25 — New: players can top up their own credit with a standing QR code
+
+Any member can now open **My Payments** and find a **"Top up your credit"** card — a standing payment QR code for their own account with no fixed amount and no due date, so it can be scanned to send any amount at any time. It pays off any fees the member already owes first (oldest due first); anything left over becomes credit.
+
+- Treasurers can opt in to fully automatic handling of these (and any other) transfers that identify a single member but don't land squarely on one fee: turn on **"Turn leftover transfers into credit"** on the bank connection card (Team settings → Finance) to have Sideline allocate them automatically instead of queuing them for manual review. Off by default — nothing changes for a club that doesn't touch it.
+- Credit deposits added this way show as **Automatic** in the credit history popover instead of a recorder's name.
+- Cancelling an auto-credited bank match now also reverses the credit it added, unless the member has already spent it.
+- API integrators: new `GET /teams/:teamId/my-topup` endpoint; `BankSyncConfigView`/`UpsertBankSyncConfigRequest` gain `autoCreditEnabled`/`auto_credit_enabled`; `MemberCreditDepositView` gains `source`; `POST .../unmatch` can now return `409 UnmatchCreditSpent`. See the [Finances guide](/guides/finances/#turning-leftover-transfers-into-credit) and the internal API reference.
+
 ## 2026-09-25 — New: membership plans
 
 Admins and Treasurers can now define membership plans from **Team → Finances → Membership plans** — named pricing tiers such as "Adult membership" or "Junior membership". Every team starts with one free, unnamed default plan.

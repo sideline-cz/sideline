@@ -50,6 +50,9 @@ export class BankSyncConfigView extends Schema.Class<BankSyncConfigView>('BankSy
   provider: BankSyncProvider,
   enabled: Schema.Boolean,
   autoMatchEnabled: Schema.Boolean,
+  // Opt-in, default false. Gates ONLY the "allocate oldest-due-first, credit the remainder"
+  // behaviour; cases A/B keep auto-matching under autoMatchEnabled alone, exactly as before.
+  autoCreditEnabled: Schema.Boolean,
 
   accountPrefix: Schema.OptionFromNullOr(Schema.String),
   accountNumber: Schema.OptionFromNullOr(Schema.String),
@@ -310,6 +313,12 @@ export class VariableSymbolSuggestion extends Schema.Class<VariableSymbolSuggest
 export const UpsertBankSyncConfigRequest = Schema.Struct({
   enabled: Schema.Boolean,
   auto_match_enabled: Schema.Boolean,
+  // Optional, NOT a plain Boolean: the deploy order is bot -> server -> web, so a new server
+  // always serves old web bundles for a window. A required field would 400 every config save
+  // made from one of those bundles. Absent means "keep whatever is stored" — the same contract
+  // `imap_secret` uses on UpsertEmailForwardingConfigRequest, and the reason the upsert COALESCEs
+  // the parameter rather than reading EXCLUDED (which has already defaulted absent to false).
+  auto_credit_enabled: Schema.OptionFromOptional(Schema.Boolean),
   account_prefix: Schema.OptionFromNullOr(Schema.String),
   account_number: Schema.String,
   bank_code: Schema.String,
@@ -396,8 +405,37 @@ export class BankSyncNotConfigured extends Schema.TaggedErrorClass<BankSyncNotCo
   {},
 ) {}
 
+/**
+ * The standing top-up code for the CALLER's own membership — no fee, no amount, no due date.
+ * A player scans it whenever they like and sends whatever they like.
+ *
+ * Every field is optional because a club may not have finished its bank setup (no IBAN) or may
+ * not have issued this member a variable symbol yet; the page renders a plain "not set up yet"
+ * line rather than a broken code.
+ */
+export class MyTopupView extends Schema.Class<MyTopupView>('MyTopupView')({
+  iban: Schema.OptionFromNullOr(Schema.String),
+  variableSymbol: Schema.OptionFromNullOr(Schema.String),
+  currency: CurrencyCode,
+  recipientName: Schema.OptionFromNullOr(Schema.String),
+  // A `data:image/png;base64,...` string, inlined rather than served from its own authenticated
+  // PNG route. The app's token lives in localStorage, not a cookie, so a browser-issued <img>
+  // request carries no Authorization header and 401s — the whole reason `useQrObjectUrl` exists.
+  // Riding along in an already-authenticated JSON response removes that dance for ~2 KB.
+  qrPngDataUrl: Schema.OptionFromNullOr(Schema.String),
+}) {}
+
 export class BankTransactionNotFound extends Schema.TaggedErrorClass<BankTransactionNotFound>()(
   'BankTransactionNotFound',
+  {},
+) {}
+
+// Unmatching an auto-credited transfer must take its credit back off the member's balance, and
+// credit is FUNGIBLE — nothing records which deposit funded which application. Once the member
+// has spent it, the only honest answer is "void those payments first", the same answer
+// voidCreditDeposit already gives.
+export class UnmatchCreditSpent extends Schema.TaggedErrorClass<UnmatchCreditSpent>()(
+  'UnmatchCreditSpent',
   {},
 ) {}
 
@@ -545,6 +583,7 @@ export class BankSyncApiGroup extends HttpApiGroup.make('bankSync')
         error: [
           BankSyncForbidden.pipe(HttpApiSchema.status(403)),
           BankTransactionNotFound.pipe(HttpApiSchema.status(404)),
+          UnmatchCreditSpent.pipe(HttpApiSchema.status(409)),
         ],
         payload: UnmatchBankTransactionRequest,
         params: { teamId: TeamId, txId: BankTransactionId },
@@ -657,6 +696,13 @@ export class BankSyncApiGroup extends HttpApiGroup.make('bankSync')
         params: { teamId: TeamId },
       },
     ).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get('getMyTopup', '/teams/:teamId/my-topup', {
+      success: MyTopupView,
+      error: [BankSyncForbidden.pipe(HttpApiSchema.status(403))],
+      params: { teamId: TeamId },
+    }).middleware(AuthMiddleware),
   )
   .add(
     HttpApiEndpoint.get(

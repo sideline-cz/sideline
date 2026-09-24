@@ -62,6 +62,7 @@ import { isFormDirty } from './useCardForm';
 const BASE: FioBankFormValues = {
   enabled: false,
   autoMatchEnabled: true,
+  autoCreditEnabled: false,
   accountPrefix: '',
   accountNumber: '',
   bankCode: '',
@@ -76,6 +77,7 @@ const BASE: FioBankFormValues = {
 const EDITED: FioBankFormValues = {
   enabled: true,
   autoMatchEnabled: false,
+  autoCreditEnabled: true,
   accountPrefix: '19',
   accountNumber: '2000145399',
   bankCode: '0800',

@@ -50,6 +50,7 @@ export class MemberCreditDepositRow extends Schema.Class<MemberCreditDepositRow>
   paid_at: Schemas.DateTimeFromDate,
   note: Schema.OptionFromNullOr(Schema.String),
   recorder_name: Schema.OptionFromNullOr(Schema.String),
+  source: MemberCredit.MemberCreditSource,
   voided_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   void_reason: Schema.OptionFromNullOr(Schema.String),
 }) {}
@@ -495,7 +496,11 @@ export const make = (options: MemberCreditsRepositoryOptions = {}) =>
       }) =>
         sql`
           SELECT d.id, d.team_member_id, d.currency, d.amount_minor, d.method, d.paid_at, d.note,
-                 ru.name AS recorder_name, d.voided_at, d.void_reason
+                 -- NULL for an 'auto' deposit even though recorded_by_user_id is NOT NULL and
+                 -- carries the Fio-config owner: naming them here would credit a treasurer with
+                 -- a deposit they never made. The UI renders 'automatic' off the source column.
+                 CASE WHEN d.source = 'auto' THEN NULL ELSE ru.name END AS recorder_name,
+                 d.source, d.voided_at, d.void_reason
             FROM member_credit_deposits d
             JOIN team_members tm ON tm.id = d.team_member_id
             LEFT JOIN users ru ON ru.id = d.recorded_by_user_id
