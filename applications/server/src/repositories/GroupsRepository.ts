@@ -89,14 +89,21 @@ const make = Effect.gen(function* () {
     Request: Schema.String,
     Result: GroupWithCount,
     execute: (teamId) => sql`
+            -- depth is the cycle bound required of every recursive groups.parent_id walk (see
+            -- applications/server/AGENTS.md). Nothing in the schema prevents a cycle and
+            -- moveGroup's check only stops NEW ones, so a pre-existing or direct-SQL row would
+            -- otherwise spin this forever -- and there is no statement_timeout configured, so it
+            -- pins a pool connection and the Groups page never loads for that team.
+            -- Archived/team guards were already correct here; only the bound was missing.
             WITH RECURSIVE group_tree AS (
-              SELECT g.id AS root_id, g.id AS descendant_id
+              SELECT g.id AS root_id, g.id AS descendant_id, 0 AS depth
               FROM groups g
               WHERE g.team_id = ${teamId} AND g.is_archived = false
               UNION ALL
-              SELECT gt.root_id, child.id
+              SELECT gt.root_id, child.id, gt.depth + 1
               FROM group_tree gt
               JOIN groups child ON child.parent_id = gt.descendant_id AND child.is_archived = false AND child.team_id = ${teamId}
+              WHERE gt.depth < 32
             ),
             member_counts AS (
               SELECT gt.root_id, COUNT(DISTINCT gm.team_member_id)::int AS member_count

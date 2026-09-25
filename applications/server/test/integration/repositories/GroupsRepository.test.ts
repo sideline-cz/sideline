@@ -496,6 +496,62 @@ describe('GroupsRepository — getMemberCount depth guard on a pre-existing pare
   );
 });
 
+// ---------------------------------------------------------------------------
+// The same cycle guard, for `findByTeamId`'s `group_tree` CTE.
+//
+// That walk already filtered archived and team correctly; it was the LAST recursive
+// groups.parent_id walk in this file without a depth bound (AGENTS.md's inventory named it).
+// It is a worse hang than `getMemberCount`'s: `findGroupsByTeamId` backs the Groups page, so a
+// single cyclic row makes that page never load and pins a pool connection per attempt — and no
+// `statement_timeout` is configured in the app. Same `SET LOCAL statement_timeout` containment
+// as the test above, so this cannot wedge the serial integration suite either way.
+describe('GroupsRepository — findByTeamId depth guard on a pre-existing parent_id cycle', () => {
+  it.effect(
+    'terminates instead of hanging when a team contains a 2-node parent_id cycle',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('100000000000000011', 'owner11')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('111111111111111111' as Discord.Snowflake, ownerId),
+        ),
+        Effect.bind('groupA', ({ team }) => createGroup(team.id, 'Cycle A')),
+        Effect.bind('groupB', ({ team, groupA }) =>
+          createGroup(team.id, 'Cycle B', Option.some(groupA.id)),
+        ),
+        Effect.tap(({ groupA, groupB }) => wireParentDirectly(groupA.id, groupB.id)),
+        Effect.bind('outcome', ({ team }) =>
+          Effect.Do.pipe(
+            Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
+            Effect.bind('repo', () => GroupsRepository.asEffect()),
+            Effect.flatMap(({ sql, repo }) =>
+              sql
+                .withTransaction(
+                  Effect.Do.pipe(
+                    Effect.tap(() => sql`SET LOCAL statement_timeout = '1500'`),
+                    Effect.flatMap(() => repo.findGroupsByTeamId(team.id)),
+                  ),
+                )
+                .pipe(Effect.exit),
+            ),
+          ),
+        ),
+        Effect.tap(({ outcome }) =>
+          Effect.sync(() => {
+            // Without the bound the CTE never terminates, Postgres kills it via
+            // statement_timeout, and catchSqlErrors surfaces that as a defect.
+            expect(Exit.isSuccess(outcome)).toBe(true);
+            if (Exit.isSuccess(outcome)) {
+              // Both groups still listed; the guard only has to make the walk stop.
+              expect(outcome.value.length).toBe(2);
+            }
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+    8000,
+  );
+});
+
 describe('GroupsRepository — findDescendantMembersWithDiscordIdByGroupId', () => {
   // (a) Multi-level recursion: G → C → GC; a member only in GC appears when querying G.
   it.effect(
