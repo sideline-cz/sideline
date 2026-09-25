@@ -4,6 +4,7 @@ import { Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
+import { BankTransactionsRepository } from '~/repositories/BankTransactionsRepository.js';
 import {
   type BalanceSummaryRow,
   ExpensesRepository,
@@ -14,6 +15,8 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 const forbidden = new ExpenseApi.ExpenseForbidden();
 const expenseNotFound = new ExpenseApi.ExpenseNotFound();
 const invalidAmount = new ExpenseApi.InvalidExpenseAmount();
+const alreadyExpensed = new ExpenseApi.BankTransactionAlreadyExpensed();
+const invalidBankTransaction = new ExpenseApi.InvalidBankTransactionForExpense();
 
 // ---------------------------------------------------------------------------
 // Helpers: build view DTOs from repo rows
@@ -28,6 +31,7 @@ const fromExpenseRow = (row: ExpenseWithNamesRow): ExpenseApi.ExpenseView =>
     spentAt: row.spent_at,
     category: row.category,
     description: row.description,
+    bankTransactionId: row.bank_transaction_id,
     createdByUserId: row.created_by_user_id,
     createdByName: row.created_by_name,
     updatedByUserId: row.updated_by_user_id,
@@ -60,7 +64,8 @@ export const ExpenseApiLive = HttpApiBuilder.group(Api, 'expenses', (handlers) =
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('expenses', () => ExpensesRepository.asEffect()),
-    Effect.map(({ members, expenses }) =>
+    Effect.bind('bankTransactions', () => BankTransactionsRepository.asEffect()),
+    Effect.map(({ members, expenses, bankTransactions }) =>
       handlers
         // ------------------------------------------------------------------
         // listExpenses
@@ -116,6 +121,27 @@ export const ExpenseApiLive = HttpApiBuilder.group(Api, 'expenses', (handlers) =
               requirePermission(membership, 'finance:manage_fees', forbidden),
             ),
             Effect.tap(() => (payload.amountMinor <= 0 ? Effect.fail(invalidAmount) : Effect.void)),
+            // Provenance link, when the treasurer created this from the bank tab. Only checks
+            // that the movement is this team's and is outgoing — "already expensed?" is left
+            // entirely to the `uq_expenses_bank_transaction_id` violation below, so two
+            // concurrent creates for one movement cannot both succeed.
+            Effect.tap(() =>
+              Option.match(payload.bankTransactionId, {
+                onNone: () => Effect.void,
+                onSome: (txId) =>
+                  bankTransactions.findByIdAndTeam(txId, teamId).pipe(
+                    Effect.flatMap(
+                      Option.match({
+                        onNone: () => Effect.fail(invalidBankTransaction),
+                        onSome: (tx) =>
+                          tx.direction === 'outgoing'
+                            ? Effect.void
+                            : Effect.fail(invalidBankTransaction),
+                      }),
+                    ),
+                  ),
+              }),
+            ),
             Effect.bind('expense', ({ currentUser }) =>
               expenses.insert({
                 team_id: teamId,
@@ -124,11 +150,13 @@ export const ExpenseApiLive = HttpApiBuilder.group(Api, 'expenses', (handlers) =
                 spent_at: payload.spentAt,
                 category: payload.category,
                 description: payload.description,
+                bank_transaction_id: payload.bankTransactionId,
                 created_by_user_id: currentUser.id,
                 updated_by_user_id: currentUser.id,
               }),
             ),
             Effect.map(({ expense }) => fromExpenseRow(expense)),
+            Effect.catchTag('BankTransactionAlreadyExpensed', () => Effect.fail(alreadyExpensed)),
             Effect.catchTag(
               'NoSuchElementError',
               LogicError.withMessage(() => 'Expense insert returned no row'),

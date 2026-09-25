@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { DateTime } from 'effect';
+import { DateTime, Option } from 'effect';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // Radix UI Select uses scrollIntoView which is not implemented in JSDOM.
@@ -120,6 +120,30 @@ function renderCreate(onSubmit = vi.fn(), onCancel = vi.fn()) {
       open={true}
       mode='create'
       teamId={TEAM_ID}
+      onSubmit={onSubmit}
+      onCancel={onCancel}
+    />,
+  );
+}
+
+function renderCreateWithPrefill(
+  prefill: {
+    amountMinor?: number;
+    currency?: 'CZK' | 'EUR' | 'USD';
+    spentAt?: string;
+    description?: string;
+    bankTransactionId?: string;
+  },
+  onSubmit = vi.fn(),
+  onCancel = vi.fn(),
+) {
+  return render(
+    <ExpenseFormDialog
+      open={true}
+      mode='create'
+      teamId={TEAM_ID}
+      // biome-ignore lint/suspicious/noExplicitAny: the branded BankTransactionId is irrelevant here
+      prefill={prefill as any}
       onSubmit={onSubmit}
       onCancel={onCancel}
     />,
@@ -326,5 +350,81 @@ describe('ExpenseFormDialog', () => {
 
     expect(onCancel).toHaveBeenCalledOnce();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prefill from an outgoing bank movement
+// ---------------------------------------------------------------------------
+
+describe('ExpenseFormDialog — prefill from a bank movement', () => {
+  const PREFILL = {
+    amountMinor: 250_00,
+    currency: 'CZK' as const,
+    spentAt: '2025-06-03',
+    description: 'Pitch Owner s.r.o. — June rent',
+    bankTransactionId: 'tx-42',
+  };
+
+  it('seeds amount, date and description from the movement', () => {
+    renderCreateWithPrefill(PREFILL);
+
+    const amountInput = document.querySelector('input[type="number"]') as HTMLInputElement | null;
+    expect(amountInput?.value).toBe('250');
+
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement | null;
+    expect(dateInput?.value).toBe('2025-06-03');
+
+    const descriptionInput = document.querySelector('textarea') as HTMLTextAreaElement | null;
+    expect(descriptionInput?.value).toBe('Pitch Owner s.r.o. — June rent');
+  });
+
+  it('carries bankTransactionId into the create request', async () => {
+    const onSubmit = vi.fn();
+    renderCreateWithPrefill(PREFILL, onSubmit);
+
+    fireEvent.click(screen.getByText('Add Expense'));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledOnce();
+    });
+
+    const arg = onSubmit.mock.calls[0][0] as { bankTransactionId: Option.Option<string> };
+    expect(Option.getOrNull(arg.bankTransactionId)).toBe('tx-42');
+  });
+
+  it('a hand-entered expense sends no bankTransactionId', async () => {
+    const onSubmit = vi.fn();
+    renderCreate(onSubmit);
+
+    const amountInput = document.querySelector('input[type="number"]') as HTMLInputElement | null;
+    fireEvent.change(amountInput!, { target: { value: '10' } });
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement | null;
+    fireEvent.change(dateInput!, { target: { value: '2025-05-01' } });
+
+    fireEvent.click(screen.getByText('Add Expense'));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledOnce();
+    });
+
+    const arg = onSubmit.mock.calls[0][0] as { bankTransactionId: Option.Option<string> };
+    expect(Option.isNone(arg.bankTransactionId)).toBe(true);
+  });
+
+  // The category is intentionally NOT seeded from the movement: nothing in a bank transfer
+  // implies one, so the treasurer still has to file it.
+  it('does not guess a category — it submits the neutral default', async () => {
+    const onSubmit = vi.fn();
+    renderCreateWithPrefill(PREFILL, onSubmit);
+
+    fireEvent.click(screen.getByText('Add Expense'));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledOnce();
+    });
+
+    const arg = onSubmit.mock.calls[0][0] as { category: string };
+    expect(arg.category).toBe('other');
   });
 });

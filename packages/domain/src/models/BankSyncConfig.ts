@@ -56,6 +56,10 @@ export class BankSyncConfig extends Model.Class<BankSyncConfig>('BankSyncConfig'
   enabled: Schema.Boolean,
   auto_match_enabled: Schema.Boolean,
   auto_credit_enabled: Schema.Boolean,
+  // Opt-in: turn every newly POLLED outgoing movement into an expense. Read only by
+  // `BankSyncPoller`; the backfill path never consults it, so enabling this cannot retroactively
+  // expense 90 days of imported history.
+  auto_create_expenses: Schema.Boolean,
 
   // Account identity — feeds the pure CZ IBAN builder (CzIban.buildCzIban) -> SPAYD ACC.
   account_prefix: Schema.OptionFromNullOr(Schema.String),

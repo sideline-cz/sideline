@@ -31,6 +31,7 @@ const baseConfig = {
   registeredId: null,
   registeredAddress: null,
   bankName: null,
+  autoCreateExpenses: false,
   fioTokenSet: true,
   tokenCreatedAt: null,
   tokenSavedAt: null,

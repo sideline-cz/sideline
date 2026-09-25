@@ -61,6 +61,7 @@ const fullUpsertInput = (teamId: string, userId: string) => ({
   enabled: true,
   auto_match_enabled: true,
   auto_credit_enabled: Option.some(true),
+  auto_create_expenses: false,
   account_prefix: Option.some('19'),
   account_number: Option.some('2000145399'),
   bank_code: Option.some('0800'),

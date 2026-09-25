@@ -38,6 +38,10 @@ import {
 import { FioSecretCrypto } from '~/services/FioSecretCrypto.js';
 import type { FioDecodedStatement } from '~/services/fioColumns.js';
 
+// Prefix on every auto-created expense's description, so the attribution to the bank-sync
+// configurer is self-explanatory wherever the row is read.
+const AUTO_EXPENSE_DESCRIPTION_PREFIX = 'Automaticky z bankovního výpisu — ';
+
 const SYNC_WINDOW_DAYS = 14; // module constant, not a user-facing knob (B-cut-4)
 const FIO_HISTORY_WALL_DAYS = 89; // Fio's 90-day limit, one day of slack
 // D10b(n)'s load-bearing invariant is `timeout < lease`: FetchHttpClient.layer has no request
@@ -182,6 +186,12 @@ const fetchAndIngest = (
     Effect.map(({ statement, mismatch }) => ({ statement, mismatch })),
   );
 
+const dbNow = (deps: TeamDeps) =>
+  deps.sql<{ readonly now: Date }>`SELECT now() AS now`.pipe(
+    Effect.map((rows) => rows[0]?.now ?? new Date(0)),
+    catchSqlErrors,
+  );
+
 // Runs the (self-contained) matcher over every freshly-ingested, still-unmatched incoming row.
 const matchIngested = (
   config: BankSyncConfig.BankSyncConfig,
@@ -210,6 +220,75 @@ const matchIngested = (
   );
 };
 
+/**
+ * Opt-in (`bank_sync_config.auto_create_expenses`): turn every freshly-polled OUTGOING movement
+ * into an `expenses` row.
+ *
+ * Two deliberate decisions live here:
+ *
+ * 1. **Authorship.** `expenses.created_by_user_id` is `NOT NULL REFERENCES users(id)`, and an
+ *    automatic write has no human actor, so the expense is attributed to whoever configured bank
+ *    sync. That is a real person's name on a book entry they did not make, which is why the
+ *    description says so in plain Czech — the Expenses list and `expense_history` both carry the
+ *    explanation. This is a chosen trade-off, not an oversight.
+ * 2. **Category.** Nothing in a Fio movement implies one, so every row lands as `'other'` for a
+ *    treasurer to re-file. `bank_transaction_id` makes "auto-created, needs filing" a one-column
+ *    filter.
+ *
+ * Scoped to movements FIRST SEEN during this cycle — `fio_movement_id = ANY(...)` alone is not
+ * enough, because `computeWindow` re-fetches a rolling >=14-day window on EVERY hourly poll, so
+ * that list is "everything in the window", not "everything new". Without the `ingested_at` floor
+ * the poller would re-expense a fortnight of history the first time the flag is switched on, and
+ * would resurrect any auto-created expense a treasurer deliberately deleted, once an hour, for
+ * two weeks. `upsertMany`'s `ON CONFLICT DO UPDATE` deliberately leaves `ingested_at` untouched,
+ * so it is a reliable first-seen stamp. `BankSyncBackfill` calls `upsertMany` directly and never
+ * reaches this function, so imported history is untouched on that path too.
+ *
+ * `ON CONFLICT DO NOTHING` on `uq_expenses_bank_transaction_id` makes it idempotent: a re-polled
+ * movement that already has an expense is skipped, and a treasurer who created one by hand wins.
+ *
+ * LIMITATION, by construction: bank data cannot distinguish a real expense from an internal
+ * transfer, a member refund, or a returned payment — every outgoing movement becomes an expense.
+ * The treasurer's lever is deleting the row, which the `ingested_at` floor above makes permanent.
+ */
+const autoCreateExpenses = (
+  config: BankSyncConfig.BankSyncConfig,
+  deps: TeamDeps,
+  movementIds: ReadonlyArray<string>,
+  cycleStartedAt: Date,
+) => {
+  if (!config.auto_create_expenses || movementIds.length === 0) return Effect.void;
+  return deps.sql<Record<string, never>>`
+    INSERT INTO expenses (
+      team_id, amount_minor, currency, spent_at, category, description,
+      bank_transaction_id, created_by_user_id, updated_by_user_id
+    )
+    SELECT
+      bt.team_id,
+      -bt.amount_minor,
+      bt.currency,
+      -- Noon UTC, mirroring the manual path's dateOnlyToUtcNoon, so the booking date cannot
+      -- slide a day under timezone conversion.
+      (bt.booked_on::text || ' 12:00:00+00')::timestamptz,
+      'other',
+      left(
+        ${AUTO_EXPENSE_DESCRIPTION_PREFIX}
+          || COALESCE(NULLIF(btrim(bt.counterparty_name), ''), 'neznámý příjemce')
+          || COALESCE(' — ' || NULLIF(btrim(bt.message_for_recipient), ''), ''),
+        500
+      ),
+      bt.id,
+      ${config.configured_by_user_id},
+      ${config.configured_by_user_id}
+    FROM bank_transactions bt
+    WHERE bt.team_id = ${config.team_id}::uuid
+      AND bt.direction = 'outgoing'
+      AND bt.fio_movement_id = ANY(${movementIds}::bigint[])
+      AND bt.ingested_at >= ${cycleStartedAt}
+    ON CONFLICT ON CONSTRAINT uq_expenses_bank_transaction_id DO NOTHING
+  `.pipe(Effect.asVoid, catchSqlErrors);
+};
+
 // D10 — the warning carries both IBANs (club banking identifiers, printed on every QR code — not
 // secrets); NEVER the token or a URL. Both `Option`s are `Some` whenever `isAccountMismatch` is
 // true; the `'?'` fallbacks exist only so this builder is total.
@@ -220,75 +299,101 @@ const accountMismatchWarning = (
   `Fio's token reads ${Option.getOrElse(statement.info.iban, () => '?')} but this team is configured as ${Option.getOrElse(configuredIbanOf(config), () => '?')}. Ingestion halted; fix the account number or the token.`;
 
 const runTeamCycle = (config: BankSyncConfig.BankSyncConfig, deps: TeamDeps): Effect.Effect<void> =>
-  resolveTokenAndWindow(config, deps).pipe(
-    Effect.flatMap(
-      Option.match({
-        // No token, or the decrypt/key-missing failure was already recorded above.
-        onNone: () => Effect.void,
-        onSome: ({ token, window }) =>
-          fetchAndIngest(config, deps, token, window).pipe(
-            Effect.flatMap(({ statement, mismatch }) =>
-              mismatch
-                ? Effect.logError(
-                    'BankSyncPoller: account mismatch — ingestion halted for this team',
-                  ).pipe(
-                    Effect.annotateLogs({ teamId: config.team_id }),
-                    Effect.andThen(
-                      deps.configRepo.recordAccountMismatch(
-                        config.team_id,
-                        accountMismatchWarning(config, statement),
+  // Stamped BEFORE the fetch, so it is a floor no row ingested by this cycle can fall below.
+  // Read from the DATABASE clock, not the app's: it is compared against `bank_transactions
+  // .ingested_at`, which `now()` stamps server-side, and a replica whose clock runs ahead would
+  // otherwise set a floor in the future and silently create nothing.
+  Effect.flatMap(dbNow(deps), (cycleStartedAt) =>
+    resolveTokenAndWindow(config, deps).pipe(
+      Effect.flatMap(
+        Option.match({
+          // No token, or the decrypt/key-missing failure was already recorded above.
+          onNone: () => Effect.void,
+          onSome: ({ token, window }) =>
+            fetchAndIngest(config, deps, token, window).pipe(
+              Effect.flatMap(({ statement, mismatch }) =>
+                mismatch
+                  ? Effect.logError(
+                      'BankSyncPoller: account mismatch — ingestion halted for this team',
+                    ).pipe(
+                      Effect.annotateLogs({ teamId: config.team_id }),
+                      Effect.andThen(
+                        deps.configRepo.recordAccountMismatch(
+                          config.team_id,
+                          accountMismatchWarning(config, statement),
+                        ),
+                      ),
+                    )
+                  : Effect.Do.pipe(
+                      Effect.tap(() => deps.configRepo.recordSuccess(config.team_id)),
+                      Effect.tap(() =>
+                        window.coverageGap
+                          ? deps.configRepo.recordCoverageGap(
+                              config.team_id,
+                              `Outage exceeds the ${String(FIO_HISTORY_WALL_DAYS)}-day Fio history wall — run a backfill.`,
+                            )
+                          : Effect.void,
+                      ),
+                      Effect.tap(() =>
+                        matchIngested(
+                          config,
+                          deps,
+                          statement.movements.map((m) => m.fioMovementId),
+                        ),
+                      ),
+                      // Writes to the club's ledger, so a failure must not vanish: `catchSqlErrors`
+                      // turns a `SqlError` into a defect, which `processTeam`'s `Effect.exit`
+                      // would otherwise swallow AFTER `recordSuccess` already marked the team
+                      // healthy. Log it and let the cycle finish — ingestion itself is committed.
+                      Effect.tap(() =>
+                        autoCreateExpenses(
+                          config,
+                          deps,
+                          statement.movements.map((m) => m.fioMovementId),
+                          cycleStartedAt,
+                        ).pipe(
+                          Effect.tapDefect((cause) =>
+                            Effect.logError(
+                              'BankSyncPoller: auto-create expenses failed',
+                              cause,
+                            ).pipe(Effect.annotateLogs({ teamId: config.team_id })),
+                          ),
+                          Effect.catchCause(() => Effect.void),
+                        ),
                       ),
                     ),
-                  )
-                : Effect.Do.pipe(
-                    Effect.tap(() => deps.configRepo.recordSuccess(config.team_id)),
-                    Effect.tap(() =>
-                      window.coverageGap
-                        ? deps.configRepo.recordCoverageGap(
-                            config.team_id,
-                            `Outage exceeds the ${String(FIO_HISTORY_WALL_DAYS)}-day Fio history wall — run a backfill.`,
-                          )
-                        : Effect.void,
-                    ),
-                    Effect.tap(() =>
-                      matchIngested(
-                        config,
-                        deps,
-                        statement.movements.map((m) => m.fioMovementId),
-                      ),
-                    ),
-                  ),
+              ),
+              Effect.asVoid,
+              Effect.catchTag('FioServerError', () =>
+                deps.configRepo.recordFailure(config.team_id, 'fio_error'),
+              ),
+              Effect.catchTag('FioRateLimited', () =>
+                deps.configRepo.recordFailure(config.team_id, 'rate_limited'),
+              ),
+              Effect.catchTag('FioTooManyMovements', () =>
+                deps.configRepo.recordFailure(config.team_id, 'too_many_movements'),
+              ),
+              Effect.catchTag('FioHistoryLocked', () =>
+                deps.configRepo.recordFailure(config.team_id, 'history_locked'),
+              ),
+              Effect.catchTag('FioBadRequest', () =>
+                deps.configRepo.recordFailure(config.team_id, 'bad_request'),
+              ),
+              Effect.catchTag('FioResponseInvalid', () =>
+                deps.configRepo.recordFailure(config.team_id, 'fio_error'),
+              ),
+              Effect.catchTag('FioNotConfigured', () =>
+                deps.configRepo.recordFailure(config.team_id, 'not_configured'),
+              ),
+              // `'unreachable'` is deliberately NOT `'fio_error'`, so `isFioError`
+              // (`bankSyncStatus.ts`) stays false and the config lands at `sync_failing` rather than
+              // escalating to `invalid` — a transport blip is not evidence the token is dead.
+              Effect.catchTag('FioUnreachable', () =>
+                deps.configRepo.recordFailure(config.team_id, 'unreachable'),
+              ),
             ),
-            Effect.asVoid,
-            Effect.catchTag('FioServerError', () =>
-              deps.configRepo.recordFailure(config.team_id, 'fio_error'),
-            ),
-            Effect.catchTag('FioRateLimited', () =>
-              deps.configRepo.recordFailure(config.team_id, 'rate_limited'),
-            ),
-            Effect.catchTag('FioTooManyMovements', () =>
-              deps.configRepo.recordFailure(config.team_id, 'too_many_movements'),
-            ),
-            Effect.catchTag('FioHistoryLocked', () =>
-              deps.configRepo.recordFailure(config.team_id, 'history_locked'),
-            ),
-            Effect.catchTag('FioBadRequest', () =>
-              deps.configRepo.recordFailure(config.team_id, 'bad_request'),
-            ),
-            Effect.catchTag('FioResponseInvalid', () =>
-              deps.configRepo.recordFailure(config.team_id, 'fio_error'),
-            ),
-            Effect.catchTag('FioNotConfigured', () =>
-              deps.configRepo.recordFailure(config.team_id, 'not_configured'),
-            ),
-            // `'unreachable'` is deliberately NOT `'fio_error'`, so `isFioError`
-            // (`bankSyncStatus.ts`) stays false and the config lands at `sync_failing` rather than
-            // escalating to `invalid` — a transport blip is not evidence the token is dead.
-            Effect.catchTag('FioUnreachable', () =>
-              deps.configRepo.recordFailure(config.team_id, 'unreachable'),
-            ),
-          ),
-      }),
+        }),
+      ),
     ),
   );
 

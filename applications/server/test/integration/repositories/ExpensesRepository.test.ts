@@ -1,5 +1,11 @@
 import { describe, expect, it } from '@effect/vitest';
-import type { Discord, Expense, Team, User } from '@sideline/domain';
+import {
+  BankTransaction,
+  type Discord,
+  type Expense,
+  type Team,
+  type User,
+} from '@sideline/domain';
 import { DateTime, Effect, Layer, Option, Schema } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
@@ -10,6 +16,7 @@ import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { insertBankTransaction } from '../bankSyncFixtures.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
 const TestLayer = Layer.mergeAll(
@@ -953,6 +960,151 @@ describe('ExpensesRepository — two-team isolation', () => {
         Effect.sync(() => {
           const ids = listB.map((e) => e.id);
           expect(ids).not.toContain(expenseA.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// bank_transaction_id — the duplicate guard
+// ---------------------------------------------------------------------------
+
+describe('ExpensesRepository — bank_transaction_id', () => {
+  const seed = Effect.Do.pipe(
+    Effect.bind('userId', () => createUser('930000000000000090', 'exp-bank-owner')),
+    Effect.bind('team', ({ userId }) =>
+      createTeam('930100000000000090' as Discord.Snowflake, userId),
+    ),
+    Effect.bind('txId', ({ team }) =>
+      insertBankTransaction(team.id, {
+        fioMovementId: 990001,
+        bookedOn: '2025-04-10',
+        amountMinor: -2000,
+        counterpartyName: 'Pitch Owner s.r.o.',
+      }),
+    ),
+  );
+
+  const insertLinked = (
+    teamId: Team.TeamId,
+    userId: User.UserId,
+    txId: string,
+    description = 'Linked expense',
+  ) =>
+    ExpensesRepository.asEffect().pipe(
+      Effect.andThen((repo) =>
+        repo.insert({
+          team_id: teamId,
+          amount_minor: 2000,
+          currency: 'CZK',
+          spent_at: DateTime.fromDateUnsafe(new Date('2025-04-10T12:00:00Z')),
+          category: 'other',
+          description,
+          bank_transaction_id: Option.some(
+            Schema.decodeSync(BankTransaction.BankTransactionId)(txId),
+          ),
+          created_by_user_id: userId,
+          updated_by_user_id: userId,
+        }),
+      ),
+    );
+
+  it.effect('an expense created from a movement round-trips the link', () =>
+    seed.pipe(
+      Effect.bind('expense', ({ team, userId, txId }) => insertLinked(team.id, userId, txId)),
+      Effect.tap(({ expense, txId }) =>
+        Effect.sync(() => {
+          expect(Option.getOrNull(expense.bank_transaction_id)).toBe(txId);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'a second expense for the SAME movement fails with BankTransactionAlreadyExpensed',
+    () =>
+      seed.pipe(
+        Effect.tap(({ team, userId, txId }) => insertLinked(team.id, userId, txId, 'first')),
+        Effect.bind('second', ({ team, userId, txId }) =>
+          insertLinked(team.id, userId, txId, 'second').pipe(Effect.flip),
+        ),
+        Effect.tap(({ second }) =>
+          Effect.sync(() => {
+            expect(second._tag).toBe('BankTransactionAlreadyExpensed');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('deleting the expense frees the movement to be expensed again', () =>
+    seed.pipe(
+      Effect.bind('first', ({ team, userId, txId }) =>
+        insertLinked(team.id, userId, txId, 'first'),
+      ),
+      Effect.tap(({ first, team, userId }) =>
+        ExpensesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.delete(first.id, team.id, userId)),
+        ),
+      ),
+      Effect.bind('second', ({ team, userId, txId }) =>
+        insertLinked(team.id, userId, txId, 'second'),
+      ),
+      Effect.tap(({ second, txId }) =>
+        Effect.sync(() => {
+          expect(Option.getOrNull(second.bank_transaction_id)).toBe(txId);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('many hand-entered expenses coexist — NULL is exempt from the unique guard', () =>
+    seed.pipe(
+      Effect.tap(({ team, userId }) => insertExpense(team.id, userId)),
+      Effect.tap(({ team, userId }) => insertExpense(team.id, userId)),
+      Effect.bind('list', ({ team }) =>
+        ExpensesRepository.asEffect().pipe(Effect.andThen((repo) => repo.listByTeam(team.id, {}))),
+      ),
+      Effect.tap(({ list }) =>
+        Effect.sync(() => {
+          expect(list.length).toBe(2);
+          expect(list.every((e) => Option.isNone(e.bank_transaction_id))).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // `expenses.bank_transaction_id` is ON DELETE RESTRICT while BOTH tables cascade from `teams`.
+  // If Postgres removed the movement before the expense that references it, RESTRICT would abort
+  // the whole team deletion — this pins that it does not.
+  it.effect('deleting the team still cascades both the movement and its expense away', () =>
+    seed.pipe(
+      Effect.tap(({ team, userId, txId }) => insertLinked(team.id, userId, txId)),
+      Effect.tap(({ team }) =>
+        SqlClient.SqlClient.asEffect().pipe(
+          Effect.flatMap((sql) => sql`DELETE FROM teams WHERE id = ${team.id}`),
+        ),
+      ),
+      Effect.bind('remaining', ({ team }) =>
+        SqlClient.SqlClient.asEffect().pipe(
+          Effect.flatMap(
+            (sql) => sql<{ expenses: string; txs: string }>`
+              SELECT
+                (SELECT count(*)::text FROM expenses WHERE team_id = ${team.id}) AS expenses,
+                (SELECT count(*)::text FROM bank_transactions WHERE team_id = ${team.id}) AS txs
+            `,
+          ),
+        ),
+      ),
+      Effect.tap(({ remaining }) =>
+        Effect.sync(() => {
+          expect(remaining[0]?.expenses).toBe('0');
+          expect(remaining[0]?.txs).toBe('0');
         }),
       ),
       Effect.provide(TestLayer),

@@ -180,6 +180,7 @@ export const enableBankSync = (
     readonly enabled?: boolean;
     readonly autoMatchEnabled?: boolean;
     readonly autoCreditEnabled?: boolean;
+    readonly autoCreateExpenses?: boolean;
     readonly accountNumber?: string;
     readonly bankCode?: string;
     readonly recipientName?: string;
@@ -191,12 +192,13 @@ export const enableBankSync = (
     Effect.andThen(
       (sql) => sql`
         INSERT INTO bank_sync_config (
-          team_id, enabled, auto_match_enabled, auto_credit_enabled,
+          team_id, enabled, auto_match_enabled, auto_credit_enabled, auto_create_expenses,
           account_number, bank_code, recipient_name,
           fio_token_encrypted, fio_token_created_at, configured_by_user_id
         ) VALUES (
           ${teamId}, ${options.enabled ?? true}, ${options.autoMatchEnabled ?? true},
           ${options.autoCreditEnabled ?? false},
+          ${options.autoCreateExpenses ?? false},
           ${options.accountNumber ?? '2703474850'}, ${options.bankCode ?? '2010'},
           ${options.recipientName ?? 'Test Club, z.s.'},
           ${Option.getOrNull(options.fioTokenEncrypted ?? Option.none())},
@@ -206,6 +208,7 @@ export const enableBankSync = (
         ON CONFLICT (team_id) DO UPDATE SET
           enabled = EXCLUDED.enabled,
           auto_match_enabled = EXCLUDED.auto_match_enabled,
+          auto_create_expenses = EXCLUDED.auto_create_expenses,
           account_number = EXCLUDED.account_number,
           bank_code = EXCLUDED.bank_code,
           recipient_name = EXCLUDED.recipient_name,
@@ -229,6 +232,8 @@ export const insertBankTransaction = (
     readonly amountMinor: number; // signed
     readonly currency?: string;
     readonly variableSymbol?: string | null;
+    readonly counterpartyName?: string | null;
+    readonly messageForRecipient?: string | null;
     readonly matchState?: string;
   },
 ) =>
@@ -237,10 +242,11 @@ export const insertBankTransaction = (
       (sql) => sql<InsertedBankTransactionRow>`
         INSERT INTO bank_transactions (
           team_id, fio_movement_id, booked_on, amount_minor, currency, variable_symbol,
-          match_state, raw
+          counterparty_name, message_for_recipient, match_state, raw
         ) VALUES (
           ${teamId}, ${input.fioMovementId}, ${input.bookedOn}, ${input.amountMinor},
           ${input.currency ?? 'CZK'}, ${input.variableSymbol ?? null},
+          ${input.counterpartyName ?? null}, ${input.messageForRecipient ?? null},
           ${input.matchState ?? (input.amountMinor < 0 ? 'not_applicable' : 'unmatched')},
           '{}'::jsonb
         )

@@ -1,5 +1,5 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
-import { Expense, type ExpenseApi } from '@sideline/domain';
+import { type BankTransaction, Expense, type ExpenseApi } from '@sideline/domain';
 import { Option, Schema } from 'effect';
 import React from 'react';
 import { useForm } from 'react-hook-form';
@@ -32,6 +32,15 @@ import { tr } from '~/lib/translations.js';
 
 type ExpenseCategory = Expense.ExpenseCategory;
 
+/** The currencies this form can offer. `Expense.CurrencyCode` is a branded string, not a literal
+ * union, so an unrecognised code (a stored expense in a currency we later dropped, or a Fio
+ * movement in one we never offered) is narrowed back to the default rather than cast blindly. */
+const FORM_CURRENCIES = ['CZK', 'EUR', 'USD'] as const;
+type FormCurrency = (typeof FORM_CURRENCIES)[number];
+
+const toFormCurrency = (value: string | undefined): FormCurrency =>
+  FORM_CURRENCIES.find((c) => c === value) ?? 'CZK';
+
 export type ExpenseView = {
   expenseId: string;
   teamId: string;
@@ -46,12 +55,25 @@ export type ExpenseView = {
   updatedAt: import('effect').DateTime.Utc;
 };
 
+/** Seed values for `mode: 'create'`. `category` is deliberately absent: an expense created from
+ * a bank movement still needs a treasurer to file it, and guessing would defeat the point. */
+export interface ExpensePrefill {
+  readonly amountMinor?: number;
+  readonly currency?: string;
+  /** `YYYY-MM-DD`. */
+  readonly spentAt?: string;
+  readonly description?: string;
+  /** Provenance link sent with the create request. */
+  readonly bankTransactionId?: BankTransaction.BankTransactionId;
+}
+
 type ExpenseFormDialogProps =
   | {
       open: boolean;
       mode: 'create';
       expense?: undefined;
       teamId: string;
+      prefill?: ExpensePrefill;
       onSubmit: (req: ExpenseApi.CreateExpenseRequest) => void;
       onCancel: () => void;
     }
@@ -60,6 +82,7 @@ type ExpenseFormDialogProps =
       mode: 'edit';
       expense?: ExpenseView;
       teamId: string;
+      prefill?: undefined;
       onSubmit: (req: ExpenseApi.UpdateExpenseRequest) => void;
       onCancel: () => void;
     };
@@ -88,7 +111,7 @@ const ExpenseFormSchema = Schema.Struct({
       ),
     ),
   ),
-  currency: Schema.Literals(['CZK', 'EUR', 'USD']),
+  currency: Schema.Literals(FORM_CURRENCIES),
   spentAt: Schema.NonEmptyString,
   category: Expense.ExpenseCategory,
   description: Schema.String.pipe(
@@ -107,15 +130,20 @@ type ExpenseFormValues = Schema.Schema.Type<typeof ExpenseFormSchema>;
 // ---------------------------------------------------------------------------
 
 export function ExpenseFormDialog(props: ExpenseFormDialogProps) {
-  const { open, mode, expense, onCancel } = props;
+  const { open, mode, expense, prefill, onCancel } = props;
   const isEdit = mode === 'edit';
 
   const defaults: ExpenseFormValues = {
-    amountStr: isEdit && expense ? String(expense.amountMinor / 100) : '',
-    currency: isEdit && expense ? (expense.currency as 'CZK' | 'EUR' | 'USD') : 'CZK',
-    spentAt: isEdit && expense ? formatLocalDate(expense.spentAt) : '',
+    amountStr:
+      isEdit && expense
+        ? String(expense.amountMinor / 100)
+        : prefill?.amountMinor !== undefined
+          ? String(prefill.amountMinor / 100)
+          : '',
+    currency: toFormCurrency(isEdit && expense ? expense.currency : prefill?.currency),
+    spentAt: isEdit && expense ? formatLocalDate(expense.spentAt) : (prefill?.spentAt ?? ''),
     category: isEdit && expense ? expense.category : 'other',
-    description: isEdit && expense ? expense.description : '',
+    description: isEdit && expense ? expense.description : (prefill?.description ?? ''),
   };
 
   const form = useForm<ExpenseFormValues>({
@@ -180,6 +208,7 @@ export function ExpenseFormDialog(props: ExpenseFormDialogProps) {
         spentAt: spentAtUtc,
         category: values.category,
         description: values.description.trim(),
+        bankTransactionId: Option.fromNullishOr(props.prefill?.bankTransactionId),
       });
     }
   };

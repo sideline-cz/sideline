@@ -10,6 +10,7 @@ import { AchievementSettingsRepository } from '~/repositories/AchievementSetting
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
+import { BankTransactionsRepository } from '~/repositories/BankTransactionsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
@@ -22,7 +23,10 @@ import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import type { ExpenseWithNamesRow } from '~/repositories/ExpensesRepository.js';
-import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
+import {
+  BankTransactionAlreadyExpensed,
+  ExpensesRepository,
+} from '~/repositories/ExpensesRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
@@ -209,6 +213,7 @@ const makeExpenseRow = (
     spent_at: now,
     category: 'fields',
     description: 'Test expense',
+    bank_transaction_id: Option.none<string>(),
     created_by_user_id: userId,
     created_by_name: Option.none<string>(),
     updated_by_user_id: userId,
@@ -217,6 +222,27 @@ const makeExpenseRow = (
     updated_at: now,
     ...overrides,
   }) as ExpenseWithNamesRow;
+
+// The three movements the createExpense handler's provenance check can be pointed at.
+const OUTGOING_TX_ID = '11111111-1111-4111-8111-111111111111';
+const INCOMING_TX_ID = '22222222-2222-4222-8222-222222222222';
+const OTHER_TEAM_TX_ID = '33333333-3333-4333-8333-333333333333';
+
+// Overrides the `BankTransactionsRepository` that `MockBankSyncLayers` provides, so the
+// createExpense handler's provenance check has movements to find.
+const MockBankTxLookupLayer = Layer.succeed(
+  BankTransactionsRepository,
+  buildNoop('api/BankTransactionsRepository', {
+    findByIdAndTeam: (id: string, teamId: string) => {
+      if (id === OUTGOING_TX_ID && teamId === TEST_TEAM_ID)
+        return Effect.succeed(Option.some({ id, team_id: teamId, direction: 'outgoing' } as any));
+      if (id === INCOMING_TX_ID && teamId === TEST_TEAM_ID)
+        return Effect.succeed(Option.some({ id, team_id: teamId, direction: 'incoming' } as any));
+      // OTHER_TEAM_TX_ID belongs to a different team, so this team's lookup finds nothing.
+      return Effect.succeed(Option.none());
+    },
+  }),
+);
 
 const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
   _tag: 'api/ExpensesRepository' as const,
@@ -230,6 +256,7 @@ const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
       spent_at: input.spent_at,
       category: input.category,
       description: input.description,
+      bank_transaction_id: input.bank_transaction_id ?? Option.none(),
       created_by_user_id: input.created_by_user_id,
       updated_by_user_id: input.updated_by_user_id,
       created_by_name: Option.none<string>(),
@@ -237,8 +264,22 @@ const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
       created_at: now,
       updated_at: now,
     };
+    // Mirrors the `uq_expenses_bank_transaction_id` violation the real repository maps.
+    const linkedTo = Option.getOrNull(input.bank_transaction_id ?? Option.none());
+    if (
+      linkedTo !== null &&
+      Array.from(expensesStore.values()).some(
+        (e: any) => Option.getOrNull(e.bank_transaction_id ?? Option.none()) === linkedTo,
+      )
+    ) {
+      return Effect.fail(new BankTransactionAlreadyExpensed());
+    }
     expensesStore.set(id, row);
-    return Effect.succeed(makeExpenseRow(id, input.team_id, input.created_by_user_id));
+    return Effect.succeed(
+      makeExpenseRow(id, input.team_id, input.created_by_user_id, {
+        bank_transaction_id: input.bank_transaction_id ?? Option.none(),
+      } as any),
+    );
   },
   findById: (expenseId: string, teamId: string) => {
     const row = expensesStore.get(expenseId);
@@ -385,7 +426,7 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockTeamsRepositoryLayer),
   Layer.provide(MockTeamMembersRepositoryLayer),
   Layer.provide(MockHttpClientLayer),
-  Layer.provide(MockExpensesRepositoryLayer),
+  Layer.provide(Layer.mergeAll(MockExpensesRepositoryLayer, MockBankTxLookupLayer)),
   Layer.provide(
     Layer.succeed(
       FeesRepository,
@@ -1280,5 +1321,57 @@ describe('Expense API — balanceSummary', () => {
       }),
     );
     expect(response.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createExpense — provenance link to an outgoing bank movement
+// ---------------------------------------------------------------------------
+
+describe('Expense API — createExpense from a bank movement', () => {
+  const bodyLinkedTo = (txId: string) =>
+    JSON.stringify({
+      amountMinor: 5000,
+      currency: 'CZK',
+      spentAt: '2025-05-01T12:00:00Z',
+      category: 'other',
+      description: 'Pitch rental',
+      bankTransactionId: txId,
+    });
+
+  const post = (body: string) =>
+    handler(
+      new Request(createUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer treasurer-token',
+          'Content-Type': 'application/json',
+        },
+        body,
+      }),
+    );
+
+  it("201 and echoes the link back when the movement is this team's and outgoing", async () => {
+    const response = await post(bodyLinkedTo(OUTGOING_TX_ID));
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.bankTransactionId).toBe(OUTGOING_TX_ID);
+  });
+
+  it('400 when the movement is INCOMING — those belong to the matcher, not to expenses', async () => {
+    const response = await post(bodyLinkedTo(INCOMING_TX_ID));
+    expect(response.status).toBe(400);
+  });
+
+  it('400 when the movement belongs to another team', async () => {
+    const response = await post(bodyLinkedTo(OTHER_TEAM_TX_ID));
+    expect(response.status).toBe(400);
+  });
+
+  it('409 when the movement already produced an expense', async () => {
+    const first = await post(bodyLinkedTo(OUTGOING_TX_ID));
+    expect(first.status).toBe(201);
+    const second = await post(bodyLinkedTo(OUTGOING_TX_ID));
+    expect(second.status).toBe(409);
   });
 });

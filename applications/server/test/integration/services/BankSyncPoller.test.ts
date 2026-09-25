@@ -38,6 +38,7 @@ import {
   enableBankSync,
   encryptFioTestToken,
   FIO_TEST_ENCRYPTION_KEY_B64,
+  insertBankTransaction,
   nextDiscordId,
   setMemberVariableSymbol,
   setTeamTimezone,
@@ -932,6 +933,7 @@ describe('BankSyncPoller — account mismatch halts ingestion (iban-cross-check 
           enabled: true,
           auto_match_enabled: true,
           auto_credit_enabled: Option.none(),
+          auto_create_expenses: false,
           account_prefix: Option.none(),
           account_number: Option.some('2703474850'),
           bank_code: Option.some('2010'),
@@ -967,5 +969,184 @@ describe('BankSyncPoller — account mismatch halts ingestion (iban-cross-check 
         expect(afterRecovery[0]?.last_error_code).toBeNull();
         expect(afterRecovery[0]?.coverage_warning).toBeNull();
       }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Auto-created expenses from outgoing movements
+// ---------------------------------------------------------------------------
+
+describe('BankSyncPoller — auto-create expenses from outgoing movements', () => {
+  const seedTeamWith = (name: string, autoCreateExpenses: boolean) =>
+    Effect.gen(function* () {
+      const user = yield* createUser(`treasurer-${name}`);
+      const team = yield* createTeam(nextDiscordId(), user.id, name);
+      yield* setTeamTimezone(team.id, 'Europe/Prague');
+      const token = yield* encryptFioTestToken(`test-token-${name}`);
+      yield* enableBankSync(team.id, user.id, {
+        fioTokenEncrypted: Option.some(token),
+        autoCreateExpenses,
+      });
+      return { user, team };
+    });
+
+  // One outgoing (negative) and one incoming movement in the same statement, so every assertion
+  // below also proves incoming movements are left alone.
+  const mixedStatement = () =>
+    validStatement([
+      { column0: { value: '2024-01-05+0100' }, column1: { value: -2500 }, column22: { value: 71 } },
+      { column0: { value: '2024-01-06+0100' }, column1: { value: 400 }, column22: { value: 72 } },
+    ]);
+
+  const expensesOf = (teamId: string) =>
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.flatMap(
+        (sql) => sql<{
+          amount_minor: string;
+          category: string;
+          currency: string;
+          description: string;
+          created_by_user_id: string;
+          spent_at: Date;
+          bank_transaction_id: string | null;
+        }>`
+          SELECT amount_minor::text, category, currency, description, created_by_user_id::text,
+                 spent_at, bank_transaction_id::text
+          FROM expenses WHERE team_id = ${teamId}
+        `,
+      ),
+    );
+
+  it.effect('flag ON — the outgoing movement becomes an expense, the incoming one does not', () =>
+    Effect.gen(function* () {
+      const { team, user } = yield* seedTeamWith('auto-expense-on', true);
+      const httpLayer = mockHttpLayer(() => ({ status: 200, body: mixedStatement() }));
+
+      yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+      const rows = yield* expensesOf(team.id);
+      expect(rows.length).toBe(1);
+      const row = rows[0];
+      // Fio reports major units: -2500 CZK ingests as -250000 minor, and the sign flip makes it
+      // positive — `expenses.amount_minor` has CHECK (amount_minor > 0).
+      expect(row?.amount_minor).toBe('250000');
+      expect(row?.category).toBe('other');
+      expect(row?.currency).toBe('CZK');
+      expect(row?.bank_transaction_id).not.toBeNull();
+      // Attribution is the bank-sync configurer, and the description says so.
+      expect(row?.created_by_user_id).toBe(user.id);
+      expect(row?.description.startsWith('Automaticky z bankovního výpisu — ')).toBe(true);
+      // Noon UTC, so the booking date cannot slide a day under timezone conversion.
+      expect(row?.spent_at.toISOString()).toBe('2024-01-05T12:00:00.000Z');
+    }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  it.effect('flag OFF — the outgoing movement is ingested but produces no expense', () =>
+    Effect.gen(function* () {
+      const { team } = yield* seedTeamWith('auto-expense-off', false);
+      const httpLayer = mockHttpLayer(() => ({ status: 200, body: mixedStatement() }));
+
+      yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+      const rows = yield* expensesOf(team.id);
+      expect(rows.length).toBe(0);
+
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      const txs = yield* sql<{ count: string }>`
+        SELECT count(*)::text AS count FROM bank_transactions
+        WHERE team_id = ${team.id} AND direction = 'outgoing'
+      `;
+      expect(txs[0]?.count).toBe('1');
+    }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  it.effect('re-polling the same movement does not create a second expense', () =>
+    Effect.gen(function* () {
+      const { team } = yield* seedTeamWith('auto-expense-idempotent', true);
+      const httpLayer = mockHttpLayer(() => ({ status: 200, body: mixedStatement() }));
+
+      yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+      yield* resetThrottle;
+      yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+      const rows = yield* expensesOf(team.id);
+      expect(rows.length).toBe(1);
+    }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  it.effect('a DELETED auto-created expense is not resurrected by the next poll', () =>
+    // `computeWindow` re-fetches a rolling >=14-day window every cycle, so the same movement is
+    // handed to the auto-create step hour after hour. Without the `ingested_at` floor the
+    // treasurer's deletion would be undone within the hour, ~336 times over, with no way to stop
+    // it short of turning the whole flag off.
+    Effect.gen(function* () {
+      const { team } = yield* seedTeamWith('auto-expense-deleted', true);
+      const httpLayer = mockHttpLayer(() => ({ status: 200, body: mixedStatement() }));
+
+      yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+      expect((yield* expensesOf(team.id)).length).toBe(1);
+
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      yield* sql`DELETE FROM expenses WHERE team_id = ${team.id}`;
+
+      yield* resetThrottle;
+      yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+      expect((yield* expensesOf(team.id)).length).toBe(0);
+    }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  it.effect('movements already in the table before the flag was enabled are NOT expensed', () =>
+    // The first poll after a club switches the flag on must not sweep up the fortnight of
+    // outgoing movements already sitting in `bank_transactions`.
+    Effect.gen(function* () {
+      const { team } = yield* seedTeamWith('auto-expense-preexisting', true);
+      // Ingested by an earlier cycle, well before this one starts.
+      yield* insertBankTransaction(team.id, {
+        fioMovementId: 71,
+        bookedOn: '2024-01-05',
+        amountMinor: -250000,
+        counterpartyName: 'Historic Landlord',
+      });
+
+      const httpLayer = mockHttpLayer(() => ({ status: 200, body: mixedStatement() }));
+      yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+      // The statement re-reports movement 71; it is an UPSERT, so `ingested_at` stays old.
+      expect((yield* expensesOf(team.id)).length).toBe(0);
+    }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  it.effect(
+    'the BACKFILL path never auto-creates expenses, even with the flag on',
+    () =>
+      // Enabling the flag must not retroactively expense a club's imported history: the backfill
+      // walk calls `upsertMany` directly and never reaches the poller's auto-create step.
+      TestClock.withLive(
+        Effect.gen(function* () {
+          const { team } = yield* seedTeamWith('auto-expense-backfill', true);
+          const httpLayer = mockHttpLayer(() => ({ status: 200, body: mixedStatement() }));
+
+          const { runBackfill } = yield* Effect.promise(
+            () => import('~/services/BankSyncBackfill.js'),
+          );
+          yield* runBackfill(team.id, '2024-01-01', '2024-01-31', randomUUID()).pipe(
+            Effect.provide(httpLayer),
+            Effect.provide(RepoLayer),
+          );
+
+          const sql = yield* SqlClient.SqlClient.asEffect();
+          const txs = yield* sql<{ count: string }>`
+            SELECT count(*)::text AS count FROM bank_transactions
+            WHERE team_id = ${team.id} AND direction = 'outgoing'
+          `;
+          // The movement WAS imported ...
+          expect(txs[0]?.count).toBe('1');
+          // ... and deliberately left un-expensed.
+          const rows = yield* expensesOf(team.id);
+          expect(rows.length).toBe(0);
+        }),
+      ).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+    40_000,
   );
 });

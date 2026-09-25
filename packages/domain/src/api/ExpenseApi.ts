@@ -2,6 +2,7 @@ import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware, UserId } from '~/api/Auth.js';
+import { BankTransactionId } from '~/models/BankTransaction.js';
 import { AmountMinor, CurrencyCode, ExpenseCategory, ExpenseId } from '~/models/Expense.js';
 import { TeamId } from '~/models/Team.js';
 
@@ -29,6 +30,9 @@ export class ExpenseView extends Schema.Class<ExpenseView>('ExpenseView')({
   spentAt: Schemas.DateTimeFromIsoString,
   category: ExpenseCategory,
   description: Schema.String,
+  // Set when the expense was created from an outgoing bank movement (either by a treasurer from
+  // the bank tab, or by the poller's opt-in auto-create).
+  bankTransactionId: Schema.OptionFromNullOr(BankTransactionId),
   createdByUserId: UserId,
   createdByName: Schema.OptionFromNullOr(Schema.String),
   updatedByUserId: UserId,
@@ -60,6 +64,9 @@ export const CreateExpenseRequest = Schema.Struct({
   spentAt: Schemas.DateTimeFromIsoString,
   category: ExpenseCategory,
   description: Schema.String.pipe(Schema.check(Schema.isMaxLength(500))),
+  // Optional provenance link. When present the movement must belong to this team and be
+  // outgoing; a movement that already has an expense is rejected with `BankTransactionAlreadyExpensed`.
+  bankTransactionId: Schema.OptionFromOptional(BankTransactionId),
 });
 export type CreateExpenseRequest = Schema.Schema.Type<typeof CreateExpenseRequest>;
 
@@ -88,6 +95,19 @@ export class ExpenseForbidden extends Schema.TaggedErrorClass<ExpenseForbidden>(
 
 export class InvalidExpenseAmount extends Schema.TaggedErrorClass<InvalidExpenseAmount>()(
   'InvalidExpenseAmount',
+  {},
+) {}
+
+// The referenced movement already produced an expense. Raised from the `expenses.bank_transaction_id`
+// unique violation, never from a pre-flight SELECT — the constraint is the only arbiter.
+export class BankTransactionAlreadyExpensed extends Schema.TaggedErrorClass<BankTransactionAlreadyExpensed>()(
+  'BankTransactionAlreadyExpensed',
+  {},
+) {}
+
+// The referenced movement is not an outgoing movement of this team.
+export class InvalidBankTransactionForExpense extends Schema.TaggedErrorClass<InvalidBankTransactionForExpense>()(
+  'InvalidBankTransactionForExpense',
   {},
 ) {}
 
@@ -125,6 +145,8 @@ export class ExpenseApiGroup extends HttpApiGroup.make('expenses')
         ExpenseForbidden.pipe(HttpApiSchema.status(403)),
         ExpenseNotFound.pipe(HttpApiSchema.status(404)),
         InvalidExpenseAmount.pipe(HttpApiSchema.status(400)),
+        InvalidBankTransactionForExpense.pipe(HttpApiSchema.status(400)),
+        BankTransactionAlreadyExpensed.pipe(HttpApiSchema.status(409)),
       ],
       payload: CreateExpenseRequest,
       params: { teamId: TeamId },

@@ -17,6 +17,7 @@ import {
   BankTransactionResolutionKind,
   SignedAmountMinor,
 } from '~/models/BankTransaction.js';
+import { ExpenseId } from '~/models/Expense.js';
 import { AmountMinor, CurrencyCode, FeeId } from '~/models/Fee.js';
 import { FeeAssignmentId } from '~/models/FeeAssignment.js';
 import { PaymentId } from '~/models/Payment.js';
@@ -53,6 +54,8 @@ export class BankSyncConfigView extends Schema.Class<BankSyncConfigView>('BankSy
   // Opt-in, default false. Gates ONLY the "allocate oldest-due-first, credit the remainder"
   // behaviour; cases A/B keep auto-matching under autoMatchEnabled alone, exactly as before.
   autoCreditEnabled: Schema.Boolean,
+  // Opt-in auto-creation of expenses from outgoing movements (poll path only).
+  autoCreateExpenses: Schema.Boolean,
 
   accountPrefix: Schema.OptionFromNullOr(Schema.String),
   accountNumber: Schema.OptionFromNullOr(Schema.String),
@@ -215,6 +218,9 @@ export class BankTransactionView extends Schema.Class<BankTransactionView>('Bank
   duplicateOfTransactionId: Schema.OptionFromNullOr(BankTransactionId),
   /** The member resolved from the VS, when one could be resolved — regardless of match outcome. */
   matchedMemberName: Schema.OptionFromNullOr(Schema.String),
+  // Set once this movement has produced an expense — the web shows a link to it instead of
+  // offering "create expense" again. Only ever populated for outgoing movements.
+  expenseId: Schema.OptionFromNullOr(ExpenseId),
   ingestedAt: Schemas.DateTimeFromIsoString,
 }) {}
 
@@ -278,6 +284,9 @@ export class BankTransactionDetailView extends Schema.Class<BankTransactionDetai
   candidateAssignments: Schema.Array(BankTransactionCandidateAssignment),
   matchedPayments: Schema.Array(BankTransactionMatchedPayment),
 
+  // See `BankTransactionView.expenseId`.
+  expenseId: Schema.OptionFromNullOr(ExpenseId),
+
   ingestedAt: Schemas.DateTimeFromIsoString,
   updatedAt: Schemas.DateTimeFromIsoString,
 }) {}
@@ -319,6 +328,7 @@ export const UpsertBankSyncConfigRequest = Schema.Struct({
   // `imap_secret` uses on UpsertEmailForwardingConfigRequest, and the reason the upsert COALESCEs
   // the parameter rather than reading EXCLUDED (which has already defaulted absent to false).
   auto_credit_enabled: Schema.OptionFromOptional(Schema.Boolean),
+  auto_create_expenses: Schema.Boolean,
   account_prefix: Schema.OptionFromNullOr(Schema.String),
   account_number: Schema.String,
   bank_code: Schema.String,
