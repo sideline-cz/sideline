@@ -696,7 +696,7 @@ The development workflow is split into composable skills:
 
 | Skill | Purpose |
 |-------|---------|
-| `/work` | Orchestrator: picks up a Notion story → `/implement` → `/ship` → updates Notion |
+| `/work` | Ticket bookkeeping: claims a Notion story/bug → `/dev-loop:work` → updates Notion. Owns the claim, not the loop |
 | `/implement` | Full dev loop: research → plan → TDD → verify tests → implement → verify → review → refactor |
 | `/ship` | Delivery loop: `/docs` → checks → commit → push → PR → CI → code review → `/revise` |
 | `/revise` | Triage review comments with `/architect` → `/implement` fixes → `/ship` |
@@ -706,7 +706,7 @@ The development workflow is split into composable skills:
 
 ### Composition
 
-- **`/work`** calls `/implement` then `/ship` — use for full story lifecycle with Notion integration
+- **`/work`** claims the ticket, calls `/dev-loop:work`, then releases the claim — use for full story lifecycle with Notion integration. The loop order (research → plan → implement → review → fix → ship) lives in `/dev-loop:work` and is deliberately NOT restated here
 - **`/implement`** is standalone — use when you already have a branch and want the full dev loop
 - **`/ship`** is standalone — use when code is ready and you want to commit, push, and handle review
 - **`/revise`** is standalone — use when a PR has review comments to address
