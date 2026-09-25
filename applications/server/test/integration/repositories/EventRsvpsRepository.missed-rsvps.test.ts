@@ -722,3 +722,127 @@ describe('TeamMembersRepository — resetMissedRsvps', () => {
     ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// Recursive group-walk guards.
+//
+// The descendant walk used to have no archived filter, no team match and no depth
+// bound. Consequences, in order of how much they matter:
+//   1. A member whose only membership was an ARCHIVED subgroup still received RSVP
+//      reminder DMs and still had missed_rsvps incremented, while every other
+//      group-scoped surface (api/scoping.ts) already excluded them.
+//   2. A cycle in groups.parent_id made the walk run forever. Nothing in the schema
+//      prevents one, and moveGroup's app-side check only stops NEW cycles.
+// The guards live in the RECURSIVE term only. In the anchor they would mean "this
+// event's own member group is archived, so remind NOBODY" -- a silent stop on a live
+// event -- which the third test below pins.
+// ---------------------------------------------------------------------------
+
+const archiveGroup = (groupId: GroupModel.GroupId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) => sql`UPDATE groups SET is_archived = true WHERE id = ${groupId}`),
+  );
+
+const setParent = (childId: GroupModel.GroupId, parentId: GroupModel.GroupId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) => sql`UPDATE groups SET parent_id = ${parentId} WHERE id = ${childId}`),
+  );
+
+describe('EventRsvpsRepository — descendant group-walk guards', () => {
+  it.effect('member whose only group is an ARCHIVED subgroup → EXCLUDED', () =>
+    seedTeamWithRoles('90').pipe(
+      Effect.bind('parent', ({ team }) => createGroup(team.id, 'Parent 90')),
+      Effect.bind('child', ({ team, parent }) =>
+        createGroup(team.id, 'Archived child 90', Option.some(parent.id)),
+      ),
+      Effect.tap(({ child, playerMember }) => addGroupMember(child.id, playerMember.id)),
+      Effect.tap(({ child }) => archiveGroup(child.id)),
+      Effect.bind('event', ({ team, playerMember }) => createEvent(team.id, playerMember.id)),
+      Effect.bind('nonResponders', ({ event, team, parent }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findNonRespondersByEventId(event.id, team.id, Option.some(parent.id), 4),
+          ),
+        ),
+      ),
+      Effect.tap(({ nonResponders, playerMember }) =>
+        Effect.sync(() => {
+          expect(nonResponders.map((r) => r.team_member_id)).not.toContain(playerMember.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('member in a LIVE subgroup of the same parent → still INCLUDED', () =>
+    seedTeamWithRoles('91').pipe(
+      Effect.bind('parent', ({ team }) => createGroup(team.id, 'Parent 91')),
+      Effect.bind('child', ({ team, parent }) =>
+        createGroup(team.id, 'Live child 91', Option.some(parent.id)),
+      ),
+      Effect.tap(({ child, playerMember }) => addGroupMember(child.id, playerMember.id)),
+      Effect.bind('event', ({ team, playerMember }) => createEvent(team.id, playerMember.id)),
+      Effect.bind('nonResponders', ({ event, team, parent }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findNonRespondersByEventId(event.id, team.id, Option.some(parent.id), 4),
+          ),
+        ),
+      ),
+      Effect.tap(({ nonResponders, playerMember }) =>
+        Effect.sync(() => {
+          expect(nonResponders.map((r) => r.team_member_id)).toContain(playerMember.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    "the event's OWN member group being archived does NOT silence the event (guards are in the recursive term, not the anchor)",
+    () =>
+      seedTeamWithRoles('92').pipe(
+        Effect.bind('group', ({ team }) => createGroup(team.id, 'Archived root 92')),
+        Effect.tap(({ group, playerMember }) => addGroupMember(group.id, playerMember.id)),
+        Effect.tap(({ group }) => archiveGroup(group.id)),
+        Effect.bind('event', ({ team, playerMember }) => createEvent(team.id, playerMember.id)),
+        Effect.bind('nonResponders', ({ event, team, group }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.findNonRespondersByEventId(event.id, team.id, Option.some(group.id), 4),
+            ),
+          ),
+        ),
+        Effect.tap(({ nonResponders, playerMember }) =>
+          Effect.sync(() => {
+            expect(nonResponders.map((r) => r.team_member_id)).toContain(playerMember.id);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('a parent_id CYCLE terminates instead of hanging', () =>
+    seedTeamWithRoles('93').pipe(
+      Effect.bind('a', ({ team }) => createGroup(team.id, 'Cycle A 93')),
+      Effect.bind('b', ({ team, a }) => createGroup(team.id, 'Cycle B 93', Option.some(a.id))),
+      // Close the loop: A's parent becomes B. Nothing in the schema prevents this.
+      Effect.tap(({ a, b }) => setParent(a.id, b.id)),
+      Effect.tap(({ b, playerMember }) => addGroupMember(b.id, playerMember.id)),
+      Effect.bind('event', ({ team, playerMember }) => createEvent(team.id, playerMember.id)),
+      Effect.bind('nonResponders', ({ event, team, a }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findNonRespondersByEventId(event.id, team.id, Option.some(a.id), 4),
+          ),
+        ),
+      ),
+      Effect.tap(({ nonResponders }) =>
+        Effect.sync(() => {
+          expect(Array.isArray(nonResponders)).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
