@@ -730,6 +730,51 @@ There is no Changesets flow and no `pnpm changeset*` command. A release is a set
 - After every `git push`, check that CI pipelines pass
 - After any structural change (new packages, new patterns, changed conventions), update the relevant section in AGENTS.md as part of the same PR
 
+## Worktree
+
+Config for the `worktree` plugin skill (`/worktree:worktree`). The repo-local `/worktree` skill
+reads nothing from here — it calls the same script directly.
+
+| Key | Value |
+|---|---|
+| `script` | `scripts/herdr-worktree.sh` |
+| `seed_paths` | `.env.local`, `.env.preview.local`, `.claude/settings.local.json` |
+| `install_cmd` | `pnpm install` |
+
+`seed_paths` is hand-maintained config a fresh checkout lacks; it mirrors `SEED_PATHS` in the
+script. The machine-generated gitignored dirs (`.local/`, `node_modules/`, `.direnv/`) are
+deliberately NOT seeded — `direnv allow` + `pnpm install` regenerate them, and copying
+`node_modules/` across worktrees produces stale native builds.
+
+Flags: `--no-install`, `--no-agent`, `--base <ref>`, `--prompt <text>`, `--label <text>`.
+
+## Sprint
+
+Config for the `notion-sprint` plugin skills (`/notion-sprint:work`, `:complete`, `:reconcile`)
+and their `agile-coach` agent. The database IDs restate the table in
+[Task Management (Notion)](#task-management-notion) because the plugin agent reads only this
+section — **keep the two in sync, or delete one once you settle on a single set of skills.**
+
+- Sprints: `a89cc7a7-ab1a-4e3f-945d-d42028c75f00` — active sprint is the one whose date range covers today
+- Stories: `9ec44d56-966b-4c3e-ba98-637b128c99a8` — title field `Story`, status `TODO → In Progress → In Review → In Test → Done`
+- Tasks: `2e0b6b31-d3bd-4e32-a127-3eedf257f228` — title field `Task`, status `TODO → In Progress → Done` (`Not Started` also exists)
+- Epics: `a040ab6d-10bb-4575-8c80-d4e827238b03` — title field `Epic`, numbered prefix (`E1: …`) drives ordering, status `Not Started → In Progress → In Review → Completed → Done`
+- Bugs: `e6b8eb47-ddcd-4dba-b5fd-c631763ac5bd` — title field `Bug`, status `🔴 Open → 🔵 In Progress → 🧪 In Review → ✅ Fixed` / `🚫 Won't Fix`
+- Milestones: `089dd440-070c-4cfb-a45d-1a68c299a2f2`
+
+**Actionable (pick-uppable):** bugs at `🔴 Open`, stories at `TODO`. Terminal: `✅ Fixed`,
+`🚫 Won't Fix`, `Done`.
+
+**Ordering:** bugs always before stories. Within bugs, higher `Severity` first
+(`🔥 Critical > 🟠 High > 🟡 Medium > 🟢 Low`). Within stories, by epic number ascending, then
+`Priority` (`🔴 Critical > 🟠 High > 🟡 Medium > 🟢 Low`).
+
+**Branch naming:** `feat/` for stories, `fix/` for bugs.
+
+**Every `Status` in this workspace is a `select`, not a `status`** — PATCH with
+`{"Status":{"select":{"name":"…"}}}`. Stories and Bugs also carry a `Claude session` rich-text
+property: non-empty means an agent has already claimed that ticket.
+
 ## Task Management (Notion)
 
 **Always use the `notion` CLI tool to check for tasks, stories, and sprint work.** Notion is the single source of truth.
