@@ -322,13 +322,13 @@ export class VariableSymbolSuggestion extends Schema.Class<VariableSymbolSuggest
 export const UpsertBankSyncConfigRequest = Schema.Struct({
   enabled: Schema.Boolean,
   auto_match_enabled: Schema.Boolean,
-  // Optional, NOT a plain Boolean: the deploy order is bot -> server -> web, so a new server
+  // Both optional, NOT plain Booleans: the deploy order is bot -> server -> web, so a new server
   // always serves old web bundles for a window. A required field would 400 every config save
   // made from one of those bundles. Absent means "keep whatever is stored" — the same contract
   // `imap_secret` uses on UpsertEmailForwardingConfigRequest, and the reason the upsert COALESCEs
   // the parameter rather than reading EXCLUDED (which has already defaulted absent to false).
   auto_credit_enabled: Schema.OptionFromOptional(Schema.Boolean),
-  auto_create_expenses: Schema.Boolean,
+  auto_create_expenses: Schema.OptionFromOptional(Schema.Boolean),
   account_prefix: Schema.OptionFromNullOr(Schema.String),
   account_number: Schema.String,
   bank_code: Schema.String,

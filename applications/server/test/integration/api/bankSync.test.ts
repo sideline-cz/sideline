@@ -444,6 +444,19 @@ describe('bank-sync API — authorization (157, 158, 159)', () => {
       expect(response.status).toBe(200);
     }).pipe(Effect.provide(SeedLayer)),
   );
+
+  // Deploy order is bot -> server -> web, so a new server serves old web bundles for a window.
+  // A bundle predating either flag omits its key; a required field would 400 every such save.
+  it.effect('a payload omitting auto_create_expenses and auto_credit_enabled is accepted', () =>
+    Effect.gen(function* () {
+      const { teamId } = yield* Effect.promise(() => setup('340100000000000010'));
+      const { auto_create_expenses: _omitted, ...stalePayload } = validUpsertPayload;
+      const response = yield* Effect.promise(() =>
+        putJson(`/teams/${teamId}/bank-sync`, 'treasurer-token', stalePayload),
+      );
+      expect(response.status).toBe(200);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -61,7 +61,7 @@ const fullUpsertInput = (teamId: string, userId: string) => ({
   enabled: true,
   auto_match_enabled: true,
   auto_credit_enabled: Option.some(true),
-  auto_create_expenses: false,
+  auto_create_expenses: Option.some(true),
   account_prefix: Option.some('19'),
   account_number: Option.some('2000145399'),
   bank_code: Option.some('0800'),
@@ -96,6 +96,7 @@ describe('BankSyncConfigRepository — full-column round-trip (96)', () => {
           expect(cfg.enabled).toBe(true);
           expect(cfg.auto_match_enabled).toBe(true);
           expect(cfg.auto_credit_enabled).toBe(true);
+          expect(cfg.auto_create_expenses).toBe(true);
           expect(cfg.account_prefix).toEqual(Option.some('19'));
           expect(cfg.account_number).toEqual(Option.some('2000145399'));
           expect(cfg.bank_code).toEqual(Option.some('0800'));
@@ -115,6 +116,43 @@ describe('BankSyncConfigRepository — full-column round-trip (96)', () => {
 // ---------------------------------------------------------------------------
 
 describe('BankSyncConfigRepository — upsert semantics (97, 98)', () => {
+  // The silent-loss path: a save from a bundle older than the server omits the flag entirely.
+  // If the DO UPDATE read EXCLUDED (already COALESCEd to false in the INSERT list), every such
+  // save would switch a club's auto-expense setting off without an error anywhere.
+  it.effect('omitting auto_create_expenses on a second upsert PRESERVES the stored true', () =>
+    Effect.gen(function* () {
+      const { user, team } = yield* setup;
+      const repo = yield* BankSyncConfigRepository.asEffect();
+      yield* repo.upsert(fullUpsertInput(team.id, user.id) as never);
+
+      yield* repo.upsert({
+        ...fullUpsertInput(team.id, user.id),
+        auto_create_expenses: Option.none(),
+      } as never);
+
+      const found = yield* repo.findByTeam(team.id);
+      expect(Option.isSome(found)).toBe(true);
+      if (Option.isSome(found)) expect(found.value.auto_create_expenses).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('setting auto_create_expenses to false on a second upsert APPLIES it', () =>
+    Effect.gen(function* () {
+      const { user, team } = yield* setup;
+      const repo = yield* BankSyncConfigRepository.asEffect();
+      yield* repo.upsert(fullUpsertInput(team.id, user.id) as never);
+
+      yield* repo.upsert({
+        ...fullUpsertInput(team.id, user.id),
+        auto_create_expenses: Option.some(false),
+      } as never);
+
+      const found = yield* repo.findByTeam(team.id);
+      expect(Option.isSome(found)).toBe(true);
+      if (Option.isSome(found)) expect(found.value.auto_create_expenses).toBe(false);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
   it.effect('omitting the token on a second upsert PRESERVES the stored one (COALESCE)', () =>
     Effect.gen(function* () {
       const { user, team } = yield* setup;

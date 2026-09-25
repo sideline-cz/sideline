@@ -171,10 +171,10 @@ export const fioBankRequestFrom = (
   const base: Omit<BankSyncApi.UpsertBankSyncConfigRequest, 'fio_token'> = {
     enabled: values.enabled,
     auto_match_enabled: values.autoMatchEnabled,
-    // Always Some from the web: the form knows the flag. The Option exists for OLD bundles,
-    // which omit the key entirely and mean "keep whatever is stored".
+    // Always Some from the web: the form knows the flags. The Options exist for OLD bundles,
+    // which omit the keys entirely and mean "keep whatever is stored".
     auto_credit_enabled: Option.some(values.autoCreditEnabled),
-    auto_create_expenses: values.autoCreateExpenses,
+    auto_create_expenses: Option.some(values.autoCreateExpenses),
     account_prefix: optionOrNone(values.accountPrefix),
     account_number: values.accountNumber.trim(),
     bank_code: values.bankCode.trim(),
