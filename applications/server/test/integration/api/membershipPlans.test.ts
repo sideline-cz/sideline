@@ -641,3 +641,264 @@ describe('PUT /teams/:teamId/membership-plans/:membershipPlanId/default', () => 
     expect(previousDefault.isDefault).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Slice 2 ("Setup memberships") — listMembershipPlans selection/deadline fields,
+// PUT .../me/membership-plan (self-service), PUT .../membership-selection-deadline
+// ---------------------------------------------------------------------------
+
+const getMemberColumn = (memberId: TeamMember.TeamMemberId) =>
+  runSeeded(
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.flatMap(
+        (sql) =>
+          sql<{
+            membership_plan_id: string | null;
+          }>`SELECT membership_plan_id FROM team_members WHERE id = ${memberId}`,
+      ),
+      Effect.map((rows) => rows[0]?.membership_plan_id ?? null),
+    ),
+  );
+
+const listResponseBody = async (teamId: Team.TeamId, token: string) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/membership-plans`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  ).then(asJson);
+
+const selectPlan = (teamId: Team.TeamId, token: string, membershipPlanId: string) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/me/membership-plan`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ membershipPlanId }),
+    }),
+  );
+
+const setDeadline = (teamId: Team.TeamId, token: string, deadline: string | null) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/membership-selection-deadline`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deadline }),
+    }),
+  );
+
+describe('GET /teams/:teamId/membership-plans — selection and deadline fields', () => {
+  it('a member who never chose a plan sees selectedPlanId null', async () => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+
+    expect(body.selectedPlanId).toBeNull();
+  });
+
+  it('a member who chose a plan sees selectedPlanId as that plan id', async () => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+
+    const selectResponse = await selectPlan(fixture.team.id, 'actor-token', seeded?.id);
+    expect(selectResponse.status).toBe(204);
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+    expect(body.selectedPlanId).toBe(seeded?.id);
+  });
+
+  it('a configured deadline is present as an ISO string', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const deadline = '2099-06-15T12:00:00.000Z';
+
+    const deadlineResponse = await setDeadline(fixture.team.id, 'actor-token', deadline);
+    expect(deadlineResponse.status).toBe(204);
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+    expect(body.selectionDeadline).toBe(deadline);
+  });
+});
+
+describe('PUT /teams/:teamId/me/membership-plan', () => {
+  it(
+    'an ordinary member with NO permissions gets 204, and the plan is reflected in a ' +
+      'follow-up list call — self-service must NOT require finance:manage_fees',
+    async () => {
+      const fixture = await seedFixture([]);
+      sessionsStore.set('actor-token', fixture.actorUserId);
+      const [seeded] = await getPlanRows(fixture.team.id);
+
+      const response = await selectPlan(fixture.team.id, 'actor-token', seeded?.id);
+
+      expect(response.status).toBe(204);
+      const body = await listResponseBody(fixture.team.id, 'actor-token');
+      expect(body.selectedPlanId).toBe(seeded?.id);
+    },
+  );
+
+  it('a non-member gets 403 MembershipPlanForbidden', async () => {
+    const fixture = await seedFixture([]);
+    const outsiderUserId = await runSeeded(createUser('mp-outsider2'));
+    sessionsStore.set('outsider-token', outsiderUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+
+    const response = await selectPlan(fixture.team.id, 'outsider-token', seeded?.id);
+
+    expect(response.status).toBe(403);
+    const body = await asJson(response);
+    expect(body._tag).toBe('MembershipPlanForbidden');
+  });
+
+  it("another team's plan id -> 404 MembershipPlanNotFound, and the member's column is still NULL", async () => {
+    const fixtureA = await seedFixture([]);
+    const fixtureB = await seedFixture([]);
+    sessionsStore.set('actor-a-token', fixtureA.actorUserId);
+    const [planB] = await getPlanRows(fixtureB.team.id);
+
+    const response = await selectPlan(fixtureA.team.id, 'actor-a-token', planB?.id);
+
+    expect(response.status).toBe(404);
+    const body = await asJson(response);
+    expect(body._tag).toBe('MembershipPlanNotFound');
+    const column = await getMemberColumn(fixtureA.actorMemberId);
+    expect(column).toBeNull();
+  });
+
+  it('an archived plan id -> 404 MembershipPlanNotFound', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+
+    const created = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/membership-plans`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(basicPayload),
+      }),
+    ).then(asJson);
+    await handler(
+      new Request(
+        `http://localhost/teams/${fixture.team.id}/membership-plans/${created.membershipPlanId}`,
+        { method: 'DELETE', headers: { Authorization: 'Bearer actor-token' } },
+      ),
+    );
+
+    const response = await selectPlan(fixture.team.id, 'actor-token', created.membershipPlanId);
+
+    expect(response.status).toBe(404);
+    const body = await asJson(response);
+    expect(body._tag).toBe('MembershipPlanNotFound');
+  });
+
+  it('a deadline in the past -> 409 MembershipSelectionClosed, column unchanged', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    const pastDeadline = '2020-01-01T00:00:00.000Z';
+    const deadlineResponse = await setDeadline(fixture.team.id, 'actor-token', pastDeadline);
+    expect(deadlineResponse.status).toBe(204);
+
+    const response = await selectPlan(fixture.team.id, 'actor-token', seeded?.id);
+
+    expect(response.status).toBe(409);
+    const body = await asJson(response);
+    expect(body._tag).toBe('MembershipSelectionClosed');
+    const column = await getMemberColumn(fixture.actorMemberId);
+    expect(column).toBeNull();
+  });
+
+  it('a deadline in the future -> 204', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    const futureDeadline = '2099-06-15T12:00:00.000Z';
+    const deadlineResponse = await setDeadline(fixture.team.id, 'actor-token', futureDeadline);
+    expect(deadlineResponse.status).toBe(204);
+
+    const response = await selectPlan(fixture.team.id, 'actor-token', seeded?.id);
+
+    expect(response.status).toBe(204);
+  });
+
+  it('switching plans twice: 204 both times, last write wins', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seededDefault] = await getPlanRows(fixture.team.id);
+    const created = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/membership-plans`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(basicPayload),
+      }),
+    ).then(asJson);
+
+    const firstResponse = await selectPlan(fixture.team.id, 'actor-token', seededDefault?.id);
+    expect(firstResponse.status).toBe(204);
+
+    const secondResponse = await selectPlan(
+      fixture.team.id,
+      'actor-token',
+      created.membershipPlanId,
+    );
+    expect(secondResponse.status).toBe(204);
+
+    const column = await getMemberColumn(fixture.actorMemberId);
+    expect(column).toBe(created.membershipPlanId);
+  });
+});
+
+describe('PUT /teams/:teamId/membership-selection-deadline', () => {
+  it('a finance:manage_fees holder gets 204, reflected in the list response', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const deadline = '2099-06-15T12:00:00.000Z';
+
+    const response = await setDeadline(fixture.team.id, 'actor-token', deadline);
+
+    expect(response.status).toBe(204);
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+    expect(body.selectionDeadline).toBe(deadline);
+  });
+
+  it('a member WITHOUT finance:manage_fees gets 403, deadline unchanged', async () => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+
+    const response = await setDeadline(fixture.team.id, 'actor-token', '2099-06-15T12:00:00.000Z');
+
+    expect(response.status).toBe(403);
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+    expect(body.selectionDeadline).toBeNull();
+  });
+
+  it('a non-member gets 403', async () => {
+    const fixture = await seedFixture([]);
+    const outsiderUserId = await runSeeded(createUser('mp-outsider3'));
+    sessionsStore.set('outsider-token', outsiderUserId);
+
+    const response = await setDeadline(
+      fixture.team.id,
+      'outsider-token',
+      '2099-06-15T12:00:00.000Z',
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("{ deadline: null } -> 204, and a select that previously 409'd now returns 204", async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    const pastDeadline = '2020-01-01T00:00:00.000Z';
+    await setDeadline(fixture.team.id, 'actor-token', pastDeadline);
+
+    const closedAttempt = await selectPlan(fixture.team.id, 'actor-token', seeded?.id);
+    expect(closedAttempt.status).toBe(409);
+
+    const clearResponse = await setDeadline(fixture.team.id, 'actor-token', null);
+    expect(clearResponse.status).toBe(204);
+
+    const reopenedAttempt = await selectPlan(fixture.team.id, 'actor-token', seeded?.id);
+    expect(reopenedAttempt.status).toBe(204);
+  });
+});

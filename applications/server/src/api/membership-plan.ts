@@ -1,6 +1,6 @@
 import { Auth, type MembershipPlan, MembershipPlanApi, type Team } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
-import { Array, Effect, Layer, Option } from 'effect';
+import { Array, DateTime, Effect, Layer, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
@@ -37,6 +37,7 @@ export const toMembershipPlanInfo = (
 
 const forbidden = new MembershipPlanApi.Forbidden();
 const notFound = new MembershipPlanApi.MembershipPlanNotFound();
+const selectionClosed = new MembershipPlanApi.MembershipSelectionClosed();
 
 export const MembershipPlanApiLive = HttpApiBuilder.group(
   Api,
@@ -60,12 +61,29 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                 hasPermission(membership, 'finance:manage_fees'),
               ),
               Effect.bind('list', () => plans.findMembershipPlansByTeamId(teamId)),
-              Effect.map(
-                ({ list, canManage }) =>
-                  new MembershipPlanApi.MembershipPlanListResponse({
-                    canManage,
-                    plans: Array.map(list, toMembershipPlanInfo),
-                  }),
+              // `findMemberSelection` returns `Option<row>` (`findOneOption`) — a missing row
+              // (should never happen for a real member, but the query has no reason to assume
+              // it can't) must flatten to `Option.none()` for both fields, not throw.
+              Effect.bind('selection', ({ membership }) =>
+                plans.findMemberSelection(membership.id, teamId),
+              ),
+              Effect.map(({ list, canManage, selection }) =>
+                Option.match(selection, {
+                  onNone: () =>
+                    new MembershipPlanApi.MembershipPlanListResponse({
+                      canManage,
+                      plans: Array.map(list, toMembershipPlanInfo),
+                      selectedPlanId: Option.none(),
+                      selectionDeadline: Option.none(),
+                    }),
+                  onSome: (row) =>
+                    new MembershipPlanApi.MembershipPlanListResponse({
+                      canManage,
+                      plans: Array.map(list, toMembershipPlanInfo),
+                      selectedPlanId: row.membership_plan_id,
+                      selectionDeadline: row.membership_selection_deadline,
+                    }),
+                }),
               ),
             ),
           )
@@ -223,6 +241,90 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                       )
                     : Effect.void,
               ),
+            ),
+          )
+          // Self-service — `requireMembership` ONLY, never `requirePermission` and never
+          // `requireReadAccess`. Any member may pick their OWN plan; there is no member id to
+          // forge because the payload never carries one — `membership.id` from
+          // `requireMembership` IS the self-service handle. `requireReadAccess` is wrong here on
+          // purpose: it mints a `GLOBAL_ADMIN_SENTINEL_ID` membership with no real `team_members`
+          // row when the caller is a global admin who isn't a member, and writing against that
+          // sentinel id would be a bug, not a permission escalation.
+          .handle('selectMembershipPlan', ({ params: { teamId }, payload }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.bind('rowsAffected', ({ membership }) =>
+                plans.selectMembershipPlan({
+                  member_id: membership.id,
+                  team_id: teamId,
+                  plan_id: payload.membershipPlanId,
+                }),
+              ),
+              // 0 rows affected is the Atomic Conditional UPDATE's combined guard result (not a
+              // real member / wrong team / archived-or-foreign plan / deadline passed) — re-read
+              // ONCE to pick the better-fitting error message. This classification is
+              // best-effort under concurrency, same stance as `deleteMembershipPlan`'s re-read
+              // above: a captain changing the deadline between the UPDATE and this re-read can
+              // make the response say "closed" when it was really "not found" or vice versa, but
+              // it can never produce a wrong WRITE — every real guard already lives in the SQL,
+              // and this read only chooses which error tag to report. `findMemberSelection` now
+              // requires `tm.active` too, so a member deactivated between `requireMembership` and
+              // the UPDATE reads back `None` here — report `forbidden`, not the misleading
+              // "membership plan not found".
+              Effect.flatMap(
+                ({
+                  membership,
+                  rowsAffected,
+                }): Effect.Effect<
+                  void,
+                  | MembershipPlanApi.Forbidden
+                  | MembershipPlanApi.MembershipPlanNotFound
+                  | MembershipPlanApi.MembershipSelectionClosed
+                > =>
+                  rowsAffected === 0
+                    ? plans.findMemberSelection(membership.id, teamId).pipe(
+                        Effect.flatMap(
+                          (
+                            selection,
+                          ): Effect.Effect<
+                            never,
+                            | MembershipPlanApi.Forbidden
+                            | MembershipPlanApi.MembershipPlanNotFound
+                            | MembershipPlanApi.MembershipSelectionClosed
+                          > =>
+                            Option.match(selection, {
+                              onNone: () => Effect.fail(forbidden),
+                              onSome: (row) =>
+                                Option.isSome(row.membership_selection_deadline) &&
+                                DateTime.isLessThanOrEqualTo(
+                                  row.membership_selection_deadline.value,
+                                  DateTime.nowUnsafe(),
+                                )
+                                  ? Effect.fail(selectionClosed)
+                                  : Effect.fail(notFound),
+                            }),
+                        ),
+                      )
+                    : Effect.void,
+              ),
+            ),
+          )
+          // Deliberately `finance:manage_fees`, NOT `team:manage` — same gate as
+          // create/update/archive above: pricing is finance, and `team:manage` would lock out
+          // the Treasurer.
+          .handle('setMembershipSelectionDeadline', ({ params: { teamId }, payload }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'finance:manage_fees', forbidden),
+              ),
+              Effect.flatMap(() => plans.setSelectionDeadline(teamId, payload.deadline)),
             ),
           ),
       ),

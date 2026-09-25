@@ -7756,9 +7756,9 @@ Reorders a team's active event types. Requires `team:manage`.
 
 **Source:** `packages/domain/src/api/MembershipPlanApi.ts`
 
-Slice 1 of "Setup memberships" — the per-team catalogue of membership tiers (pricing and lifecycle only; nothing here assigns a plan to a member, that is a later slice). Every team is seeded with one default plan (`name: null`, renders the built-in translated label, zero price, `'CZK'`). A captain can add more plans, edit any plan's pricing, promote a different plan to be the team's default, and archive a plan that is no longer offered.
+Slice 1 of "Setup memberships" — the per-team catalogue of membership tiers (pricing and lifecycle only). Every team is seeded with one default plan (`name: null`, renders the built-in translated label, zero price, `'CZK'`). A captain can add more plans, edit any plan's pricing, promote a different plan to be the team's default, and archive a plan that is no longer offered. Slice 2 lets a player pick which plan they want, with an optional per-team deadline after which selection closes (`selectMembershipPlan` / `setMembershipSelectionDeadline` below).
 
-Permissions deliberately follow the **finance**, not the **team**, boundary: listing is membership-gated only (`canManage` in the response tells the caller whether they may mutate), while create/update/setDefault/delete all require `finance:manage_fees` — the same permission `fees` uses. This is not `team:manage`: pricing is a finance decision, and gating it on `team:manage` would lock out the Treasurer, the role that exists specifically to own money. By default Admin and Treasurer hold `finance:manage_fees`; a team that wants its Captain to manage plans grants the permission through the existing per-team role editor — no migration needed.
+Permissions deliberately follow the **finance**, not the **team**, boundary: listing is membership-gated only (`canManage` in the response tells the caller whether they may mutate), while create/update/setDefault/delete/setMembershipSelectionDeadline all require `finance:manage_fees` — the same permission `fees` uses. This is not `team:manage`: pricing is a finance decision, and gating it on `team:manage` would lock out the Treasurer, the role that exists specifically to own money. By default Admin and Treasurer hold `finance:manage_fees`; a team that wants its Captain to manage plans grants the permission through the existing per-team role editor — no migration needed. `selectMembershipPlan` is the one exception: it is membership-gated only, since any member picks their own plan.
 
 #### Schemas
 
@@ -7805,6 +7805,8 @@ Lists a team's active (non-archived) plans, the team's default plan first, then 
 |---|---|---|
 | `canManage` | `boolean` | Whether the caller holds `finance:manage_fees` and may create/update/archive/set-default |
 | `plans` | `MembershipPlanInfo[]` | Active plans only, default plan first |
+| `selectedPlanId` | `MembershipPlanId \| null` | The caller's own RAW chosen plan (`team_members.membership_plan_id`); `null`/absent means never picked one, NOT "on the default plan" — the web resolves the effective plan from `plans` itself |
+| `selectionDeadline` | `string \| null` (ISO datetime) | The team's `membership_selection_deadline`; `null`/absent means selection is always open |
 
 **Errors:**
 
@@ -7916,6 +7918,66 @@ Archives (never hard-deletes) a membership plan. Requires `finance:manage_fees`.
 | `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
 | `MembershipPlanNotFound` | 404 | Plan does not exist, or does not belong to `teamId` |
 | `MembershipPlanIsDefault` | 409 | This is the team's current default plan |
+
+---
+
+#### `PUT /teams/:teamId/me/membership-plan`
+
+Slice 2 of "Setup memberships". The caller picks which plan they're on. Self-service only — membership-gated, **no** `finance:manage_fees` requirement — and there is no member id in the payload; the caller's own membership row (from `requireMembership`) is the only handle, so there is nothing to forge. Mirrors the path shape of `PATCH /teams/:teamId/me/event-preferences` (`TeamApi.ts`).
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `SelectMembershipPlanRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `membershipPlanId` | `MembershipPlanId` | Yes | The plan to select |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Not a member of this team |
+| `MembershipPlanNotFound` | 404 | Plan does not exist, does not belong to `teamId`, or is archived |
+| `MembershipSelectionClosed` | 409 | The team's `membership_selection_deadline` has passed |
+
+Every real precondition (membership, team match, active membership row, deadline, plan tenancy/archived) lives in one atomic `UPDATE ... WHERE` in `MembershipPlansRepository.selectMembershipPlan` — never a preceding read-then-check. On zero rows affected, the handler re-reads the caller's own selection once to choose between `404` and `409`; this classification is best-effort under concurrency (a captain changing the deadline between the write and the re-read can pick the less-precise error), but it can never produce a wrong write.
+
+---
+
+#### `PUT /teams/:teamId/membership-selection-deadline`
+
+Sets (or clears) the team's membership-selection deadline. Requires `finance:manage_fees` — deliberately not `team:manage`, same reasoning as create/update/archive above. Not nested under `/membership-plans/...` to avoid colliding with the `:membershipPlanId` path segment.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `SetSelectionDeadlineRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `deadline` | `string \| null` (ISO datetime) | Yes | `null` clears the deadline (selection stays open indefinitely) |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
 
 ---
 

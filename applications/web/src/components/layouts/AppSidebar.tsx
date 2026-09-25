@@ -214,11 +214,13 @@ function getTeamNavGroups(
           requiredPermission: 'finance:view' satisfies Role.Permission,
         },
         {
+          // Ungated — every member picks their own plan here (Slice 2 of "Setup
+          // memberships"), not just captains. Sits in the `coach` group alongside other
+          // ungated entries (team_members, team_rosters).
           title: tr('membershipPlan_title'),
           icon: IdCard,
           to: '/teams/$teamId/membership-plans',
           params: { teamId },
-          requiredPermission: 'finance:manage_fees' satisfies Role.Permission,
         },
         {
           title: tr('expenses_navTitle'),

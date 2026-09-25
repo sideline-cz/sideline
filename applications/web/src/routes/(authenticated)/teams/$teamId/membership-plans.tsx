@@ -1,6 +1,6 @@
 import { Team } from '@sideline/domain';
 import { createFileRoute } from '@tanstack/react-router';
-import { Effect, pipe, Schema } from 'effect';
+import { Effect, Option, pipe, Schema } from 'effect';
 import { MembershipPlansPage } from '~/components/pages/MembershipPlansPage.js';
 import { ApiClient, NotFound, warnAndCatchAll } from '~/lib/runtime';
 
@@ -30,6 +30,8 @@ function MembershipPlansRoute() {
       teamId={teamId}
       canManage={response?.canManage ?? false}
       plans={response?.plans ?? []}
+      selectedPlanId={response?.selectedPlanId ?? Option.none()}
+      selectionDeadline={response?.selectionDeadline ?? Option.none()}
     />
   );
 }

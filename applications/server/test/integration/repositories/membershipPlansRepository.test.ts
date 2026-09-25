@@ -10,21 +10,23 @@
 // `MembershipPlansRepository.ts`'s own comments on `markDefaultQuery` and `archiveQuery`.
 
 import { describe, expect, it } from '@effect/vitest';
-import type { MembershipPlan, Team } from '@sideline/domain';
-import { Deferred, Effect, Fiber, Layer, Option } from 'effect';
+import type { MembershipPlan, Team, TeamMember } from '@sideline/domain';
+import { DateTime, Deferred, Effect, Fiber, Layer, Option } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
+import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
-import { createTeam, createUser, nextDiscordId } from '../bankSyncFixtures.js';
+import { createTeam, createTeamMember, createUser, nextDiscordId } from '../bankSyncFixtures.js';
 import { cleanDatabase, secondTestPgClient, TestPgClient } from '../helpers.js';
 
 const TestLayer = Layer.mergeAll(
   MembershipPlansRepository.Default,
   TeamsRepository.Default,
   UsersRepository.Default,
+  TeamMembersRepository.Default,
 ).pipe(Layer.provideMerge(TestPgClient));
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
@@ -334,6 +336,400 @@ describe('MembershipPlansRepository.findMembershipPlanByIdScoped — cross-tenan
       );
 
       expect(Option.isNone(found)).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Slice 2 ("Setup memberships") — findMemberSelection, selectMembershipPlan,
+// setSelectionDeadline
+// ---------------------------------------------------------------------------
+
+const findMemberSelection = (memberId: TeamMember.TeamMemberId, teamId: Team.TeamId) =>
+  MembershipPlansRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.findMemberSelection(memberId, teamId)),
+  );
+
+const selectMembershipPlan = (input: {
+  member_id: TeamMember.TeamMemberId;
+  team_id: Team.TeamId;
+  plan_id: MembershipPlan.MembershipPlanId;
+}) =>
+  MembershipPlansRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.selectMembershipPlan(input)),
+  );
+
+const setSelectionDeadline = (teamId: Team.TeamId, deadline: Option.Option<DateTime.Utc>) =>
+  MembershipPlansRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.setSelectionDeadline(teamId, deadline)),
+  );
+
+const addMember = (teamId: Team.TeamId, suffix: string) =>
+  Effect.gen(function* () {
+    const user = yield* createUser(`membership-selection-${suffix}`);
+    return yield* createTeamMember(teamId, user.id);
+  });
+
+const getMemberColumn = (memberId: TeamMember.TeamMemberId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.flatMap(
+      (sql) =>
+        sql<{
+          membership_plan_id: string | null;
+        }>`SELECT membership_plan_id FROM team_members WHERE id = ${memberId}`,
+    ),
+    Effect.map((rows) => rows[0]?.membership_plan_id ?? null),
+  );
+
+const setMemberActive = (memberId: TeamMember.TeamMemberId, active: boolean) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.flatMap((sql) => sql`UPDATE team_members SET active = ${active} WHERE id = ${memberId}`),
+  );
+
+const countTeamSettings = (teamId: Team.TeamId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.flatMap(
+      (sql) =>
+        sql<{
+          count: string;
+        }>`SELECT count(*) FROM team_settings WHERE team_id = ${teamId}`,
+    ),
+    Effect.map((rows) => Number(rows[0]?.count ?? '0')),
+  );
+
+describe('MembershipPlansRepository.findMemberSelection', () => {
+  it.effect('a member who never chose a plan reads back membership_plan_id as None', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel-find1');
+      const member = yield* addMember(team.id, 'find1');
+
+      const found = yield* findMemberSelection(member.id, team.id);
+
+      expect(Option.isSome(found)).toBe(true);
+      if (Option.isSome(found)) {
+        expect(Option.isNone(found.value.membership_plan_id)).toBe(true);
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a member who chose plan B reads back Some(B)', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel-find2');
+      const member = yield* addMember(team.id, 'find2');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+
+      const rowsAffected = yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: planB.id,
+      });
+      expect(rowsAffected).toBe(1);
+
+      const found = yield* findMemberSelection(member.id, team.id);
+
+      expect(Option.isSome(found)).toBe(true);
+      if (Option.isSome(found)) {
+        expect(Option.isSome(found.value.membership_plan_id)).toBe(true);
+        if (Option.isSome(found.value.membership_plan_id)) {
+          expect(found.value.membership_plan_id.value).toBe(planB.id);
+        }
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a team with no deadline reads back membership_selection_deadline as None', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel-find3');
+      const member = yield* addMember(team.id, 'find3');
+
+      const found = yield* findMemberSelection(member.id, team.id);
+
+      expect(Option.isSome(found)).toBe(true);
+      if (Option.isSome(found)) {
+        expect(Option.isNone(found.value.membership_selection_deadline)).toBe(true);
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'a team with a deadline reads it back as Some(DateTime) — guards the ' +
+      'DateTimeFromDate vs DateTimeFromIsoString decode mismatch',
+    () =>
+      Effect.gen(function* () {
+        const team = yield* seedTeam('sel-find4');
+        const member = yield* addMember(team.id, 'find4');
+        const deadline = DateTime.add(DateTime.nowUnsafe(), { days: 7 });
+        yield* setSelectionDeadline(team.id, Option.some(deadline));
+
+        const found = yield* findMemberSelection(member.id, team.id);
+
+        expect(Option.isSome(found)).toBe(true);
+        if (Option.isSome(found)) {
+          const decoded = found.value.membership_selection_deadline;
+          expect(Option.isSome(decoded)).toBe(true);
+          if (Option.isSome(decoded)) {
+            expect(DateTime.toEpochMillis(decoded.value)).toBe(DateTime.toEpochMillis(deadline));
+          }
+        }
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // Regression test for the review fix: `findMemberSelectionQuery` used to scope by
+  // `tm.id` alone with no `team_id` — safe only because both call sites happened to pass
+  // the caller's own team id. A foreign team id must read back None, same as
+  // `findMembershipPlanByIdScoped`'s cross-tenant test above.
+  it.effect("a foreign team's id reads back None even for a real member id", () =>
+    Effect.gen(function* () {
+      const teamA = yield* seedTeam('sel-scope-a');
+      const teamB = yield* seedTeam('sel-scope-b');
+      const member = yield* addMember(teamA.id, 'scope');
+
+      const found = yield* findMemberSelection(member.id, teamB.id);
+
+      expect(Option.isNone(found)).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // Regression test for the review fix: the query now requires `tm.active` too, so a
+  // deactivated member reads back None instead of their stale selection.
+  it.effect('a deactivated member reads back None', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel-inactive');
+      const member = yield* addMember(team.id, 'inactive');
+      yield* setMemberActive(member.id, false);
+
+      const found = yield* findMemberSelection(member.id, team.id);
+
+      expect(Option.isNone(found)).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+describe('MembershipPlansRepository.selectMembershipPlan', () => {
+  it.effect('no deadline, active same-team plan -> 1 row, column written', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel1');
+      const member = yield* addMember(team.id, 's1');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+
+      const rowsAffected = yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: planB.id,
+      });
+
+      expect(rowsAffected).toBe(1);
+      const column = yield* getMemberColumn(member.id);
+      expect(column).toBe(planB.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a deadline in the future -> 1 row', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel2');
+      const member = yield* addMember(team.id, 's2');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      yield* setSelectionDeadline(
+        team.id,
+        Option.some(DateTime.add(DateTime.nowUnsafe(), { days: 1 })),
+      );
+
+      const rowsAffected = yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: planB.id,
+      });
+
+      expect(rowsAffected).toBe(1);
+      const column = yield* getMemberColumn(member.id);
+      expect(column).toBe(planB.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a deadline in the PAST -> 0 rows, column unchanged', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel3');
+      const member = yield* addMember(team.id, 's3');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      yield* setSelectionDeadline(
+        team.id,
+        Option.some(DateTime.subtract(DateTime.nowUnsafe(), { days: 1 })),
+      );
+
+      const rowsAffected = yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: planB.id,
+      });
+
+      expect(rowsAffected).toBe(0);
+      const column = yield* getMemberColumn(member.id);
+      expect(column).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a plan belonging to ANOTHER team -> 0 rows, column unchanged (tenancy)', () =>
+    Effect.gen(function* () {
+      const teamA = yield* seedTeam('sel4a');
+      const teamB = yield* seedTeam('sel4b');
+      const member = yield* addMember(teamA.id, 's4');
+      const planB = yield* insertPlan(teamB.id, 'Plan B');
+
+      const rowsAffected = yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: teamA.id,
+        plan_id: planB.id,
+      });
+
+      expect(rowsAffected).toBe(0);
+      const column = yield* getMemberColumn(member.id);
+      expect(column).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an ARCHIVED plan -> 0 rows', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel5');
+      const member = yield* addMember(team.id, 's5');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      yield* archivePlan(planB.id, team.id);
+
+      const rowsAffected = yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: planB.id,
+      });
+
+      expect(rowsAffected).toBe(0);
+      const column = yield* getMemberColumn(member.id);
+      expect(column).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an unknown random UUID plan id -> 0 rows, and no foreign-key error', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel6');
+      const member = yield* addMember(team.id, 's6');
+
+      const result = yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: '00000000-0000-0000-0000-000000000000' as MembershipPlan.MembershipPlanId,
+      }).pipe(Effect.result);
+
+      expect(result._tag).toBe('Success');
+      if (result._tag === 'Success') {
+        expect(result.success).toBe(0);
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("a DIFFERENT member's id in the same team -> only that member's row changes", () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel7');
+      const memberA = yield* addMember(team.id, 's7a');
+      const memberB = yield* addMember(team.id, 's7b');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+
+      const rowsAffected = yield* selectMembershipPlan({
+        member_id: memberA.id,
+        team_id: team.id,
+        plan_id: planB.id,
+      });
+
+      expect(rowsAffected).toBe(1);
+      const columnA = yield* getMemberColumn(memberA.id);
+      const columnB = yield* getMemberColumn(memberB.id);
+      expect(columnA).toBe(planB.id);
+      expect(columnB).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an INACTIVE member -> 0 rows', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('sel8');
+      const member = yield* addMember(team.id, 's8');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      yield* setMemberActive(member.id, false);
+
+      const rowsAffected = yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: planB.id,
+      });
+
+      expect(rowsAffected).toBe(0);
+      const column = yield* getMemberColumn(member.id);
+      expect(column).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+describe('MembershipPlansRepository.setSelectionDeadline', () => {
+  it.effect('sets the deadline on teams', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('deadline1');
+      const deadline = DateTime.add(DateTime.nowUnsafe(), { days: 3 });
+
+      yield* setSelectionDeadline(team.id, Option.some(deadline));
+
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      const rows = yield* sql<{
+        membership_selection_deadline: Date | null;
+      }>`SELECT membership_selection_deadline FROM teams WHERE id = ${team.id}`;
+
+      expect(rows[0]?.membership_selection_deadline).not.toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'Option.none() clears the deadline back to NULL, reopening selection — a select that ' +
+      'returned 0 rows now returns 1',
+    () =>
+      Effect.gen(function* () {
+        const team = yield* seedTeam('deadline2');
+        const member = yield* addMember(team.id, 'd2');
+        const planB = yield* insertPlan(team.id, 'Plan B');
+        yield* setSelectionDeadline(
+          team.id,
+          Option.some(DateTime.subtract(DateTime.nowUnsafe(), { days: 1 })),
+        );
+
+        const closedAttempt = yield* selectMembershipPlan({
+          member_id: member.id,
+          team_id: team.id,
+          plan_id: planB.id,
+        });
+        expect(closedAttempt).toBe(0);
+
+        yield* setSelectionDeadline(team.id, Option.none());
+
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        const rows = yield* sql<{
+          membership_selection_deadline: Date | null;
+        }>`SELECT membership_selection_deadline FROM teams WHERE id = ${team.id}`;
+        expect(rows[0]?.membership_selection_deadline).toBeNull();
+
+        const reopenedAttempt = yield* selectMembershipPlan({
+          member_id: member.id,
+          team_id: team.id,
+          plan_id: planB.id,
+        });
+        expect(reopenedAttempt).toBe(1);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('setting the deadline does NOT create a team_settings row', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('deadline3');
+
+      yield* setSelectionDeadline(
+        team.id,
+        Option.some(DateTime.add(DateTime.nowUnsafe(), { days: 1 })),
+      );
+
+      const count = yield* countTeamSettings(team.id);
+      expect(count).toBe(0);
     }).pipe(Effect.provide(TestLayer)),
   );
 });
