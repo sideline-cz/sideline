@@ -697,7 +697,6 @@ The development workflow is split into composable skills:
 | Skill | Purpose |
 |-------|---------|
 | `/work` | Orchestrator: picks up a Notion story → `/implement` → `/ship` → updates Notion |
-| `/worktree` | Picks up a Notion ticket → opens it in an isolated herdr worktree (branch + seeded env + `pnpm install`) → launches a Claude agent inside it |
 | `/implement` | Full dev loop: research → plan → TDD → verify tests → implement → verify → review → refactor |
 | `/ship` | Delivery loop: `/docs` → checks → commit → push → PR → CI → code review → `/revise` |
 | `/revise` | Triage review comments with `/architect` → `/implement` fixes → `/ship` |
@@ -712,7 +711,7 @@ The development workflow is split into composable skills:
 - **`/ship`** is standalone — use when code is ready and you want to commit, push, and handle review
 - **`/revise`** is standalone — use when a PR has review comments to address
 - **`/complete`** is standalone — use after a PR is merged to finalize Notion statuses
-- **`/worktree`** is standalone — runs `scripts/herdr-worktree.sh` to spin up parallel work on a ticket in an isolated herdr worktree; the launched agent then boots into `/work <ticket-page-id>` there
+- **`/worktree:worktree`** (plugin) is standalone — runs `scripts/herdr-worktree.sh` to spin up parallel work on a ticket in an isolated herdr worktree; the launched agent then boots into `/work <ticket-page-id>` there. Configured by [Worktree](#worktree) and [Sprint](#sprint) below
 
 ## Releases
 
@@ -732,8 +731,10 @@ There is no Changesets flow and no `pnpm changeset*` command. A release is a set
 
 ## Worktree
 
-Config for the `worktree` plugin skill (`/worktree:worktree`). The repo-local `/worktree` skill
-reads nothing from here — it calls the same script directly.
+Config for the `worktree` plugin skill (`/worktree:worktree`), which replaced the repo-local
+`/worktree` skill. The claim-protection that skill carried now lives in the [Sprint](#sprint)
+claim-property rules, which the plugin's `agile-coach` reads — do not drop it, or two parallel
+runs will put two agents on one ticket.
 
 | Key | Value |
 |---|---|
@@ -772,8 +773,14 @@ section — **keep the two in sync, or delete one once you settle on a single se
 **Branch naming:** `feat/` for stories, `fix/` for bugs.
 
 **Every `Status` in this workspace is a `select`, not a `status`** — PATCH with
-`{"Status":{"select":{"name":"…"}}}`. Stories and Bugs also carry a `Claude session` rich-text
-property: non-empty means an agent has already claimed that ticket.
+`{"Status":{"select":{"name":"…"}}}`.
+
+**Claim property: `Claude session`** (rich text, on Stories and Bugs). Non-empty means another
+agent is already working that ticket in its own worktree. Skip those when auto-selecting — filter
+in the query (`{"property":"Claude session","rich_text":{"is_empty":true}}`) rather than fetching
+and discarding, so paging cannot hide the unclaimed ones. Never write it during selection: the
+agent that does the work stamps its own session. Without this, two parallel `/worktree` runs put
+two agents on one ticket.
 
 ## Task Management (Notion)
 
