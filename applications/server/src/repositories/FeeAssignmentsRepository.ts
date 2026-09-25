@@ -395,6 +395,18 @@ const make = Effect.gen(function* () {
           -- already honours it (recordPayment 409s, the bank matcher skips it, settle-all
           -- excludes it); reminders were the last path that did not.
           AND f.archived_at IS NULL
+          -- NOTE: never use backticks or a dollar-brace in this comment - the whole query is
+          -- a template literal.
+          -- 'assigned' is the one-shot DM that carries a payment QR for the amount, so firing
+          -- it mid-month would quote a training fee the member will not owe by the 30th (S3
+          -- keeps revising it every period-relevant recompute). The time-ordered candidates
+          -- branch above needs no equivalent gate: every one of its instants derives from
+          -- due_at, which is already after period end for a training fee. Bound on the same
+          -- now parameter the rest of this CTE uses, so tests are deterministic.
+          AND NOT (
+            f.kind = 'training'
+            AND (f.period_start + INTERVAL '1 month')::timestamptz > ${now}::timestamptz
+          )
           AND EXISTS (
             SELECT 1 FROM bank_sync_config bsc
             WHERE bsc.team_id = tm.team_id AND bsc.enabled = true

@@ -9,6 +9,11 @@ import { nestedOptionToNullable } from '~/repositories/patchHelpers.js';
 // Row schemas
 // ---------------------------------------------------------------------------
 
+// `kind`/`period_start` are server-internal only (never on the wire, never in
+// packages/domain): a 'training' fee is written exclusively by
+// `recompute_training_period_fees` (packages/migrations), and the one thing app code needs to
+// know about it is that its identity (currency, period) is not app-editable — see updateFee
+// and updateAssignment in api/finance.ts.
 export class FeeRow extends Schema.Class<FeeRow>('FeeRow')({
   id: Fee.FeeId,
   team_id: Team.TeamId,
@@ -22,6 +27,7 @@ export class FeeRow extends Schema.Class<FeeRow>('FeeRow')({
   created_at: Schemas.DateTimeFromDate,
   updated_at: Schemas.DateTimeFromDate,
   archived_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+  kind: Schema.Literals(['manual', 'training']),
 }) {}
 
 export class FeeWithCountsRow extends Schema.Class<FeeWithCountsRow>('FeeWithCountsRow')({
