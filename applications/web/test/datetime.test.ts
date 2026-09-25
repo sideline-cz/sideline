@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from '@effect/vitest';
 import { DateTime, Option } from 'effect';
 import {
+  dateOnlyToLocalEndOfDay,
   formatEventDateRange,
   formatLocalDate,
   formatLocalTime,
@@ -271,5 +272,28 @@ describe('formatTimeInZone', () => {
     expect(formatTimeInZone(instant, 'Mars/Olympus')).toBe(
       formatTimeInZone(instant, 'Europe/Prague'),
     );
+  });
+});
+
+describe('dateOnlyToLocalEndOfDay (Europe/Prague — the ambient pin)', () => {
+  it('anchors to 23:59:59.999 LOCAL, not noon UTC', () => {
+    const dt = dateOnlyToLocalEndOfDay('2026-09-30');
+    expect(formatLocalDate(dt)).toBe('2026-09-30');
+    expect(formatLocalTime(dt)).toBe('23:59');
+  });
+
+  it('differs from the noon-UTC anchor used elsewhere — proves this is a distinct helper', () => {
+    const endOfDay = dateOnlyToLocalEndOfDay('2026-09-30');
+    const noon = DateTime.makeUnsafe('2026-09-30T12:00:00Z');
+    expect(DateTime.toEpochMillis(endOfDay)).not.toBe(DateTime.toEpochMillis(noon));
+  });
+
+  it('the local calendar date survives the UTC conversion for a positive-offset zone', () => {
+    // Prague is UTC+2 in September (CEST): local 23:59:59.999 on the 30th is still the 30th
+    // in UTC (22:59:59.999Z), so this would pass even with a bug that dropped the offset.
+    // The real regression guard is `formatLocalDate` above, which reads it back through the
+    // SAME local-timezone lens `dateOnlyToLocalEndOfDay` was anchored in.
+    const dt = dateOnlyToLocalEndOfDay('2026-01-15');
+    expect(formatLocalDate(dt)).toBe('2026-01-15');
   });
 });

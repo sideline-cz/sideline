@@ -17,6 +17,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import { DateTime, Option } from 'effect';
 import {
+  dateOnlyToLocalEndOfDay,
   formatEventDateRange,
   formatLocalDate,
   formatLocalTime,
@@ -102,5 +103,45 @@ describe('localToUtc — DST gap behaviour across timezones', () => {
     expect(prague).not.toBe(helsinki);
     expect(prague).toBe('03:30');
     expect(helsinki).toBe('04:30');
+  });
+});
+
+// `dateOnlyToLocalEndOfDay` (the membership-selection-deadline anchor, Slice 2 of "Setup
+// memberships") builds via `new Date(y, mo-1, d, 23, 59, 59, 999)` — the exact same local-time
+// construction as `localToUtc` above, just with a fixed time-of-day. Same `withTz` precedent:
+// each case pins a DIFFERENT zone and spans a DST boundary, asserting the produced instant reads
+// back through `formatLocalDate`, in that SAME zone, as the SAME calendar date it was given —
+// the property `handleSaveDeadline` actually relies on (see MembershipPlansPage.tsx).
+describe('dateOnlyToLocalEndOfDay — DST boundary round-trip across timezones', () => {
+  it('America/Santiago: spring-forward gap sits at local midnight, the day after the anchor', () => {
+    withTz('America/Santiago', () => {
+      // 2026-09-06 04:00Z is when Santiago springs forward (local 00:00-00:59 on the 6th does
+      // not exist) — nowhere near 23:59:59.999 on the 6th itself, so this is unaffected by it.
+      const dt = dateOnlyToLocalEndOfDay('2026-09-06');
+      expect(formatLocalDate(dt)).toBe('2026-09-06');
+    });
+  });
+
+  it('America/Santiago: fall-back makes local 23:xx ambiguous (it happens twice)', () => {
+    withTz('America/Santiago', () => {
+      // Santiago falls back at 2026-04-05T03:00Z: local 23:00-23:59 occurs twice that day.
+      // Whichever occurrence `new Date` resolves to, its calendar date is still the 5th.
+      const dt = dateOnlyToLocalEndOfDay('2026-04-05');
+      expect(formatLocalDate(dt)).toBe('2026-04-05');
+    });
+  });
+
+  it('Pacific/Auckland: spring-forward gap sits at 02:00 local, far from the day boundary', () => {
+    withTz('Pacific/Auckland', () => {
+      const dt = dateOnlyToLocalEndOfDay('2026-09-27');
+      expect(formatLocalDate(dt)).toBe('2026-09-27');
+    });
+  });
+
+  it('Pacific/Auckland: fall-back day round-trips too', () => {
+    withTz('Pacific/Auckland', () => {
+      const dt = dateOnlyToLocalEndOfDay('2026-04-05');
+      expect(formatLocalDate(dt)).toBe('2026-04-05');
+    });
   });
 });

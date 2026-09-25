@@ -1,6 +1,6 @@
 import { Fee, MembershipPlan, type MembershipPlanApi, Team } from '@sideline/domain';
 import { Link, useRouter } from '@tanstack/react-router';
-import { Effect, Option, Schema } from 'effect';
+import { DateTime, Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -21,7 +21,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '~/components/ui/select';
-import { dateOnlyToUtcNoon, formatLocalDate } from '~/lib/datetime.js';
+import {
+  dateOnlyToLocalEndOfDay,
+  dateOnlyToUtcNoon,
+  formatLocalDate,
+  formatLocalTime,
+} from '~/lib/datetime.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { formatMinorToMajor, parseAmount } from '~/lib/finance/parseAmount.js';
 import { ApiClient, ClientError, SilentClientError, useRun } from '~/lib/runtime';
@@ -43,6 +48,22 @@ function parseExpiresAtField(value: string) {
 // at every site that shows it (row, badge, and the edit form's seed value).
 const planDisplayName = (plan: MembershipPlanApi.MembershipPlanInfo): string =>
   Option.getOrElse(plan.name, () => tr('membershipPlan_defaultName'));
+
+// The member's EFFECTIVE plan: their raw chosen plan IF it's still in this (active-only) list,
+// otherwise the team's current default. Falling through to the default covers TWO cases with
+// the same line: the member never chose (`selectedPlanId` is `None`), and the member's chosen
+// plan was since archived (archived plans aren't in `plans` at all, so the id lookup below just
+// misses). Both read as "no real choice on record" and both should show the default, not a
+// blank row.
+const resolveEffectivePlanId = (
+  plans: ReadonlyArray<MembershipPlanApi.MembershipPlanInfo>,
+  selectedPlanId: Option.Option<MembershipPlan.MembershipPlanId>,
+): string | undefined => {
+  const chosenId = Option.getOrUndefined(selectedPlanId);
+  const chosenIsActive =
+    chosenId !== undefined && plans.some((p) => p.membershipPlanId === chosenId);
+  return chosenIsActive ? chosenId : plans.find((p) => p.isDefault)?.membershipPlanId;
+};
 
 // ---------------------------------------------------------------------------
 // Form dialog
@@ -329,9 +350,17 @@ interface MembershipPlansPageProps {
   teamId: string;
   canManage: boolean;
   plans: ReadonlyArray<MembershipPlanApi.MembershipPlanInfo>;
+  selectedPlanId: Option.Option<MembershipPlan.MembershipPlanId>;
+  selectionDeadline: Option.Option<DateTime.Utc>;
 }
 
-export function MembershipPlansPage({ teamId, canManage, plans }: MembershipPlansPageProps) {
+export function MembershipPlansPage({
+  teamId,
+  canManage,
+  plans,
+  selectedPlanId,
+  selectionDeadline,
+}: MembershipPlansPageProps) {
   const run = useRun();
   const router = useRouter();
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
@@ -340,6 +369,30 @@ export function MembershipPlansPage({ teamId, canManage, plans }: MembershipPlan
   const [editTarget, setEditTarget] = React.useState<MembershipPlanApi.MembershipPlanInfo | null>(
     null,
   );
+
+  const effectivePlanId = resolveEffectivePlanId(plans, selectedPlanId);
+
+  // Advisory only — clock skew between browser and server means this can be a little wrong in
+  // either direction. The server re-checks on the actual PUT (`MembershipSelectionClosed`,
+  // handled below); this only decides whether to grey out the Choose buttons up front.
+  const isSelectionClosed = Option.match(selectionDeadline, {
+    onNone: () => false,
+    onSome: (deadline) => DateTime.isLessThan(deadline, DateTime.nowUnsafe()),
+  });
+
+  // Seeded from the loader; a plain `useState` synced on prop change (not react-hook-form —
+  // its `reset`/`keepDirtyValues` merges `resetOptions` in a way that can keep edits a discard
+  // should throw away). Re-synced via `useEffect` because `router.invalidate()` after
+  // Save/Clear re-renders this component with new props, not a fresh mount.
+  const [deadlineInput, setDeadlineInput] = React.useState(() =>
+    Option.match(selectionDeadline, { onNone: () => '', onSome: (d) => formatLocalDate(d) }),
+  );
+  React.useEffect(() => {
+    setDeadlineInput(
+      Option.match(selectionDeadline, { onNone: () => '', onSome: (d) => formatLocalDate(d) }),
+    );
+  }, [selectionDeadline]);
+  const [isSavingDeadline, setIsSavingDeadline] = React.useState(false);
 
   const editTargetRef = React.useRef<MembershipPlanApi.MembershipPlanInfo | null>(null);
   if (editTarget !== null) editTargetRef.current = editTarget;
@@ -365,6 +418,81 @@ export function MembershipPlansPage({ teamId, canManage, plans }: MembershipPlan
     },
     [teamIdBranded, run, router],
   );
+
+  // Mirrors `handleMakeDefault` above exactly, plus one branch: a plan row shown to this
+  // caller can go stale for reasons entirely outside their own click — a captain archives it
+  // (404), the deadline passes server-side between page load and this click (409
+  // `MembershipSelectionClosed`, the client-side `isSelectionClosed` check is only advisory),
+  // or the caller loses membership mid-session (403). ALL of those must repaint the page, not
+  // just the one tag we happen to have a nicer message for — `tapError`, not `tapErrorTag`, or
+  // an archived row's Choose button stays enabled forever and every later click 404s the same
+  // way with only a generic toast to show for it.
+  const handleChoose = React.useCallback(
+    async (plan: MembershipPlanApi.MembershipPlanInfo) => {
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.membershipPlan.selectMembershipPlan({
+            params: { teamId: teamIdBranded },
+            payload: { membershipPlanId: plan.membershipPlanId },
+          }),
+        ),
+        Effect.tapError(() => Effect.sync(() => router.invalidate())),
+        Effect.mapError((e) =>
+          e._tag === 'MembershipSelectionClosed'
+            ? ClientError.make(tr('membershipPlan_selectionClosed'))
+            : ClientError.make(tr('membershipPlan_chooseFailed')),
+        ),
+        run({ success: tr('membershipPlan_chosen') }),
+      );
+      if (Option.isSome(result)) {
+        router.invalidate();
+      }
+    },
+    [teamIdBranded, run, router],
+  );
+
+  const handleSaveDeadline = React.useCallback(async () => {
+    const trimmed = deadlineInput.trim();
+    if (!trimmed) return;
+
+    setIsSavingDeadline(true);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.membershipPlan.setMembershipSelectionDeadline({
+          params: { teamId: teamIdBranded },
+          // ANCHORING: end of the LOCAL day, not noon UTC — this deadline is ENFORCED
+          // server-side (unlike the inert `expiresAt` above), so anchoring "30 Sep" to noon
+          // UTC would close selection ~14:00 local in UTC+2, which reads as a bug. Closing a
+          // few hours late from clock skew is harmless; closing early is not.
+          payload: { deadline: Option.some(dateOnlyToLocalEndOfDay(trimmed)) },
+        }),
+      ),
+      Effect.mapError(() => ClientError.make(tr('membershipPlan_deadlineSaveFailed'))),
+      run({ success: tr('membershipPlan_deadlineSaved') }),
+    );
+    setIsSavingDeadline(false);
+    if (Option.isSome(result)) {
+      router.invalidate();
+    }
+  }, [teamIdBranded, run, router, deadlineInput]);
+
+  const handleClearDeadline = React.useCallback(async () => {
+    setIsSavingDeadline(true);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.membershipPlan.setMembershipSelectionDeadline({
+          params: { teamId: teamIdBranded },
+          payload: { deadline: Option.none() },
+        }),
+      ),
+      Effect.mapError(() => ClientError.make(tr('membershipPlan_deadlineSaveFailed'))),
+      run({ success: tr('membershipPlan_deadlineCleared') }),
+    );
+    setIsSavingDeadline(false);
+    if (Option.isSome(result)) {
+      router.invalidate();
+    }
+  }, [teamIdBranded, run, router]);
 
   const handleArchive = React.useCallback(
     async (plan: MembershipPlanApi.MembershipPlanInfo) => {
@@ -402,11 +530,70 @@ export function MembershipPlansPage({ teamId, canManage, plans }: MembershipPlan
           </Link>
         </Button>
         <h1 className='text-2xl font-bold'>{tr('membershipPlan_title')}</h1>
-        <p className='text-muted-foreground mt-1'>{tr('membershipPlan_subtitle')}</p>
+        <p className='text-muted-foreground mt-1'>
+          {canManage ? tr('membershipPlan_subtitle') : tr('membershipPlan_subtitleMember')}
+        </p>
+        <p className='text-sm text-muted-foreground mt-2'>
+          {Option.match(selectionDeadline, {
+            onNone: () => tr('membershipPlan_noDeadlineNotice'),
+            // WITH the time, not just the date: the deadline is an INSTANT, enforced
+            // server-side at that instant, not at local midnight of the date shown — a
+            // date-only notice reads as "closes at midnight" to every viewer outside the
+            // captain's own timezone, when it actually closes hours earlier or later for them.
+            onSome: (deadline) =>
+              isSelectionClosed
+                ? tr('membershipPlan_selectionClosedNotice', {
+                    date: formatLocalDate(deadline),
+                    time: formatLocalTime(deadline),
+                  })
+                : tr('membershipPlan_deadlineNotice', {
+                    date: formatLocalDate(deadline),
+                    time: formatLocalTime(deadline),
+                  }),
+          })}
+        </p>
       </header>
 
       {canManage && (
-        <div className='flex justify-end mb-4'>
+        <div className='flex flex-wrap items-end justify-between gap-3 mb-4'>
+          <div className='flex flex-wrap items-end gap-2'>
+            <div className='flex flex-col gap-1.5'>
+              <Label htmlFor='membership-selection-deadline'>
+                {tr('membershipPlan_deadlineLabel')}
+              </Label>
+              <Input
+                id='membership-selection-deadline'
+                type='date'
+                // `min` stops two failure modes at once: `<input type='date'>` accepts a 1-4
+                // digit year, so typing `0026-09-30` decodes as 1926 and instantly locks
+                // selection, and it also guards against an accidental past-deadline lockout.
+                min={formatLocalDate(DateTime.nowUnsafe())}
+                value={deadlineInput}
+                onChange={(e) => setDeadlineInput(e.target.value)}
+              />
+              <p className='text-xs text-muted-foreground'>{tr('membershipPlan_deadlineHint')}</p>
+            </div>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              disabled={isSavingDeadline || !deadlineInput.trim()}
+              onClick={handleSaveDeadline}
+            >
+              {isSavingDeadline ? tr('membershipPlan_saving') : tr('membershipPlan_save')}
+            </Button>
+            {Option.isSome(selectionDeadline) && (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={isSavingDeadline}
+                onClick={handleClearDeadline}
+              >
+                {tr('membershipPlan_deadlineClear')}
+              </Button>
+            )}
+          </div>
           <Button onClick={() => setCreateOpen(true)}>+ {tr('membershipPlan_add')}</Button>
         </div>
       )}
@@ -433,6 +620,7 @@ export function MembershipPlansPage({ teamId, canManage, plans }: MembershipPlan
             const expiresLabel = Option.isSome(plan.expiresAt)
               ? tr('membershipPlan_expiresOn', { date: formatLocalDate(plan.expiresAt.value) })
               : tr('membershipPlan_noExpiry');
+            const isEffectivePlan = plan.membershipPlanId === effectivePlanId;
 
             return (
               <div
@@ -445,43 +633,62 @@ export function MembershipPlansPage({ teamId, canManage, plans }: MembershipPlan
                     {plan.isDefault && (
                       <Badge variant='secondary'>{tr('membershipPlan_defaultBadge')}</Badge>
                     )}
+                    {isEffectivePlan && (
+                      <Badge variant='secondary'>{tr('membershipPlan_yourPlanBadge')}</Badge>
+                    )}
                   </div>
                   <div className='text-xs text-muted-foreground'>
                     {priceLabel} · {perTrainingLabel} · {expiresLabel}
                   </div>
                 </div>
-                {canManage && (
-                  <div className='ml-auto flex flex-wrap items-center gap-1'>
+                <div className='ml-auto flex flex-wrap items-center gap-1'>
+                  {/* Every member picks their own plan, captains included — a captain is also
+                      a paying member. */}
+                  {!isEffectivePlan && (
                     <Button
                       type='button'
                       variant='outline'
                       size='sm'
-                      disabled={plan.isDefault}
-                      aria-label={tr('membershipPlan_makeDefaultAria', { name })}
-                      onClick={() => handleMakeDefault(plan)}
+                      disabled={isSelectionClosed}
+                      aria-label={tr('membershipPlan_chooseAria', { name })}
+                      onClick={() => handleChoose(plan)}
                     >
-                      {tr('membershipPlan_makeDefault')}
+                      {tr('membershipPlan_choose')}
                     </Button>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      aria-label={tr('membershipPlan_editAria', { name })}
-                      onClick={() => setEditTarget(plan)}
-                    >
-                      {tr('membershipPlan_edit')}
-                    </Button>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      aria-label={tr('membershipPlan_archiveAria', { name })}
-                      onClick={() => handleArchive(plan)}
-                    >
-                      {tr('membershipPlan_archiveAction')}
-                    </Button>
-                  </div>
-                )}
+                  )}
+                  {canManage && (
+                    <>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        disabled={plan.isDefault}
+                        aria-label={tr('membershipPlan_makeDefaultAria', { name })}
+                        onClick={() => handleMakeDefault(plan)}
+                      >
+                        {tr('membershipPlan_makeDefault')}
+                      </Button>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        aria-label={tr('membershipPlan_editAria', { name })}
+                        onClick={() => setEditTarget(plan)}
+                      >
+                        {tr('membershipPlan_edit')}
+                      </Button>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        aria-label={tr('membershipPlan_archiveAria', { name })}
+                        onClick={() => handleArchive(plan)}
+                      >
+                        {tr('membershipPlan_archiveAction')}
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             );
           })}

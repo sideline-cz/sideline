@@ -35,6 +35,19 @@ export const dateOnlyToUtcNoon = (date: string): DateTime.Utc =>
   DateTime.makeUnsafe(`${date}T12:00:00Z`);
 
 /**
+ * A date-only value that IS enforced server-side (a membership selection deadline, plan
+ * §Slice 2) — unlike `dateOnlyToUtcNoon`'s inert reference dates, closing this early reads as
+ * a bug, not a rounding error. Anchored to the END of that LOCAL calendar day (23:59:59.999
+ * local), not noon UTC: noon UTC would close selection at ~14:00 local in UTC+2, hours before
+ * the picked day actually ends. Grace from clock skew (closing a few hours *late*) is
+ * harmless; closing early is not — so this deliberately favours the member.
+ */
+export const dateOnlyToLocalEndOfDay = (date: string): DateTime.Utc => {
+  const [y, mo, d] = date.split('-').map(Number);
+  return DateTime.fromDateUnsafe(new Date(y, mo - 1, d, 23, 59, 59, 999));
+};
+
+/**
  * Format a UTC DateTime as YYYY-MM-DD in UTC.
  * This is now only the rolling-deploy fallback for all-day events (plan §11.2/§17): when
  * an older server hasn't shipped the derived team-local `startDate`/`endDate` yet, readers

@@ -1307,10 +1307,10 @@ The following structured descriptions cover the most significant use cases in th
 | Field | Detail |
 |---|---|
 | **Actor** | Treasurer; Admin |
-| **Precondition** | The actor is authenticated and holds `finance:manage_fees` (default: Admin, Treasurer). The underlying `GET` endpoint is membership-gated only (any team member could call it directly), but the web app's sidebar link is hidden from anyone without `finance:manage_fees`, so in practice only Treasurer/Admin reach this page today. |
-| **Main Flow** | 1. A Treasurer or Admin opens **Team → Finances → Membership Plans** (`/teams/:teamId/membership-plans`, hidden from the sidebar for anyone without `finance:manage_fees`) and calls `GET /teams/:teamId/membership-plans`, which returns the team's active plans (default plan first) and a `canManage` flag. 2. The actor clicks **Add plan**, filling in an optional name, price, currency, per-training price, and optional expiry; the web app calls `POST /teams/:teamId/membership-plans`. 3. The server inserts a `membership_plans` row and returns a `MembershipPlanInfo`. 4. The actor edits an existing plan's fields (full-replace `PATCH`), promotes a different plan to be the team's default (`PUT .../default`, demoting the previous one), or archives a plan that is no longer offered (`DELETE`, which is refused with `409 MembershipPlanIsDefault` if the plan is the current default — another plan must be promoted first). |
+| **Precondition** | The actor is authenticated and holds `finance:manage_fees` (default: Admin, Treasurer). The `GET` endpoint is membership-gated, and since Slice 2 the sidebar link is visible to every member (they use the same page to choose their own plan, UC-43) — every mutating control on it is gated on `canManage`. |
+| **Main Flow** | 1. A Treasurer or Admin opens **Team → Membership Plans** (`/teams/:teamId/membership-plans`) and calls `GET /teams/:teamId/membership-plans`, which returns the team's active plans (default plan first) and a `canManage` flag. 2. The actor clicks **Add plan**, filling in an optional name, price, currency, per-training price, and optional expiry; the web app calls `POST /teams/:teamId/membership-plans`. 3. The server inserts a `membership_plans` row and returns a `MembershipPlanInfo`. 4. The actor edits an existing plan's fields (full-replace `PATCH`), promotes a different plan to be the team's default (`PUT .../default`, demoting the previous one), or archives a plan that is no longer offered (`DELETE`, which is refused with `409 MembershipPlanIsDefault` if the plan is the current default — another plan must be promoted first). |
 | **Postcondition** | The team's plan catalogue reflects the change. Exactly one active plan is always the team's default. |
-| **Notes** | Slice 1 of "Setup memberships": this use case covers pricing and lifecycle only. Every team starts with one free, unnamed default plan (renders the built-in translated label) seeded at team creation. Nothing in this slice assigns a plan to a member, enforces the per-training price, or enforces the expiry date — a player choosing a plan and any charging or expiry behaviour are a later slice. |
+| **Notes** | Slice 1 of "Setup memberships": this use case covers pricing and lifecycle only. Every team starts with one free, unnamed default plan (renders the built-in translated label) seeded at team creation. A member chooses their own plan (UC-43), optionally bounded by a decision deadline. Nothing yet enforces the per-training price or the expiry date — charging and expiry behaviour are a later slice. |
 
 ### UC-43: Player Tops Up Their Own Credit via a Standing QR Code (Player)
 
@@ -1324,3 +1324,18 @@ The following structured descriptions cover the most significant use cases in th
 | **Notes** | `GET /teams/:teamId/my-topup` takes no member-id parameter — it always returns the caller's own code, so there is no ownership check to get wrong and no other member's variable symbol to leak. |
 
 ---
+
+### UC-43: Choose a Membership Plan (Any Member)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Any team member (including Treasurer/Admin — a captain is also a paying member) |
+| **Precondition** | The actor is authenticated and is an active member of the team. No permission is required. |
+| **Main Flow** | 1. The member opens **Team → Membership Plans** (`/teams/:teamId/membership-plans`) and calls `GET /teams/:teamId/membership-plans`, which returns the team's active plans, the member's own `selectedPlanId`, and the team's `selectionDeadline`. 2. The page marks the member's effective plan — their chosen plan if it is still active, otherwise the team's default — and offers a **Choose** button on every other plan. 3. The member clicks Choose; the web app calls `PUT /teams/:teamId/me/membership-plan` with the plan id. 4. The server writes `team_members.membership_plan_id` in a single conditional `UPDATE` whose `WHERE` carries every guard: the membership is the caller's own and active, the plan belongs to the same team and is not archived, and the team's deadline has not passed. |
+| **Alternate Flow A** | The deadline has passed: the `UPDATE` matches no row and the server returns `409 MembershipSelectionClosed`. The page repaints with every Choose button disabled. |
+| **Alternate Flow B** | The plan id names another team's plan or an archived plan: the `UPDATE` matches no row and the server returns `404 MembershipPlanNotFound`. |
+| **Postcondition** | The member's chosen plan is recorded. A member who never chooses keeps `membership_plan_id IS NULL` and is treated as being on the team's current default — a computed fallback, so they follow the default if a captain later promotes a different plan. |
+| **Notes** | Slice 2 of "Setup memberships". The endpoint takes no member id — the caller's own membership resolves it, so there is nothing to forge. The deadline is a single instant on `teams`, set by a `finance:manage_fees` holder via `PUT /teams/:teamId/membership-selection-deadline` (null clears it). Choosing a plan still charges nothing: the price and per-training price are recorded, not billed, until a later slice. |
+
+---
+

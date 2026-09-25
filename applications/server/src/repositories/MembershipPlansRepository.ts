@@ -1,4 +1,4 @@
-import { Fee, MembershipPlan, Team } from '@sideline/domain';
+import { Fee, MembershipPlan, Team, TeamMember } from '@sideline/domain';
 import { Schemas, SqlErrors } from '@sideline/effect-lib';
 import { type DateTime, Effect, Layer, type Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -31,6 +31,14 @@ const ScopedRequest = Schema.Struct({
   id: MembershipPlan.MembershipPlanId,
   team_id: Team.TeamId,
 });
+
+class MemberSelectionRow extends Schema.Class<MemberSelectionRow>('MemberSelectionRow')({
+  // `None` means "on the team's default plan" — see the migration comment.
+  membership_plan_id: Schema.OptionFromNullOr(MembershipPlan.MembershipPlanId),
+  // Driver returns a JS `Date` here, never an ISO string — `DateTimeFromDate`, same as
+  // `expires_at` above.
+  membership_selection_deadline: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+}) {}
 
 const InsertInput = Schema.Struct({
   team_id: Team.TeamId,
@@ -168,6 +176,66 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // Slice 2 of "Setup memberships". The RAW chosen plan id and the team's deadline — no fallback
+  // resolution here, the caller (web) already has the active plan list and resolves the
+  // effective (chosen-or-default) plan from it. `team_id` is a real tenancy boundary here, not a
+  // redundant belt-and-braces check — every sibling method in this file scopes its own SQL by
+  // team_id (see `markDefaultQuery`'s comment), so a caller can never rely on a pre-check done
+  // elsewhere. `tm.active` too: a member deactivated between the caller's own membership check
+  // and this read must read back as "gone", not as their last selection.
+  const findMemberSelectionQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({ member_id: TeamMember.TeamMemberId, team_id: Team.TeamId }),
+    Result: MemberSelectionRow,
+    execute: (input) => sql`
+      SELECT tm.membership_plan_id, t.membership_selection_deadline
+      FROM team_members tm
+      JOIN teams t ON t.id = tm.team_id
+      WHERE tm.id = ${input.member_id} AND tm.team_id = ${input.team_id} AND tm.active
+    `,
+  });
+
+  // Atomic Conditional UPDATE (AGENTS.md): every guard lives in this one UPDATE's own `WHERE`,
+  // never a preceding read-then-check, or a concurrent deadline change / plan archive could slip
+  // past between the read and the write. `mp.team_id = tm.team_id`, NOT a bare `team_id` param —
+  // the row itself is the tenancy boundary, same as `markDefaultQuery` above. `NULL >
+  // now()` is NULL (neither true nor false), hence the explicit `IS NULL` disjunct for "always
+  // open". `team_members` has no `updated_at` column — none is set here.
+  const selectMembershipPlanQuery = SqlSchema.findAll({
+    Request: Schema.Struct({
+      member_id: TeamMember.TeamMemberId,
+      team_id: Team.TeamId,
+      plan_id: MembershipPlan.MembershipPlanId,
+    }),
+    Result: Schema.Struct({ id: TeamMember.TeamMemberId }),
+    execute: (input) => sql`
+      UPDATE team_members tm
+      SET membership_plan_id = ${input.plan_id}
+      WHERE tm.id = ${input.member_id} AND tm.team_id = ${input.team_id} AND tm.active
+        AND EXISTS (
+          SELECT 1 FROM teams t
+          WHERE t.id = tm.team_id
+            AND (t.membership_selection_deadline IS NULL OR t.membership_selection_deadline > now())
+        )
+        AND EXISTS (
+          SELECT 1 FROM membership_plans mp
+          WHERE mp.id = ${input.plan_id} AND mp.team_id = tm.team_id AND mp.archived_at IS NULL
+        )
+      RETURNING tm.id
+    `,
+  });
+
+  // Plain UPDATE, no upsert — a `teams` row always exists, unlike `team_settings` (see the
+  // migration comment for why the deadline lives here and not there).
+  const setSelectionDeadlineQuery = SqlSchema.void({
+    Request: Schema.Struct({
+      team_id: Team.TeamId,
+      deadline: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+    }),
+    execute: (input) => sql`
+      UPDATE teams SET membership_selection_deadline = ${input.deadline} WHERE id = ${input.team_id}
+    `,
+  });
+
   const findMembershipPlansByTeamId = (teamId: Team.TeamId) =>
     findByTeamIdQuery(teamId).pipe(catchSqlErrors);
 
@@ -237,6 +305,22 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const findMemberSelection = (memberId: TeamMember.TeamMemberId, teamId: Team.TeamId) =>
+    findMemberSelectionQuery({ member_id: memberId, team_id: teamId }).pipe(catchSqlErrors);
+
+  const selectMembershipPlan = (input: {
+    member_id: TeamMember.TeamMemberId;
+    team_id: Team.TeamId;
+    plan_id: MembershipPlan.MembershipPlanId;
+  }) =>
+    selectMembershipPlanQuery(input).pipe(
+      Effect.map((rows) => rows.length),
+      catchSqlErrors,
+    );
+
+  const setSelectionDeadline = (teamId: Team.TeamId, deadline: Option.Option<DateTime.Utc>) =>
+    setSelectionDeadlineQuery({ team_id: teamId, deadline }).pipe(catchSqlErrors);
+
   return {
     findMembershipPlansByTeamId,
     findMembershipPlanByIdScoped,
@@ -244,6 +328,9 @@ const make = Effect.gen(function* () {
     updateMembershipPlan,
     setDefaultMembershipPlan,
     archiveMembershipPlan,
+    findMemberSelection,
+    selectMembershipPlan,
+    setSelectionDeadline,
   };
 });
 
