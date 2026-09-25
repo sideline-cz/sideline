@@ -2081,3 +2081,137 @@ describe('PersonalEventChannelsRepository — getGuildsNeedingPersonalProvisioni
       ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// Cycle bounds on this file's four descendant_groups walks.
+//
+// A cycle in groups.parent_id is corrupt data, not a normal state — but nothing in the
+// schema prevents one and moveGroup's check only stops NEW cycles, so pre-existing or
+// direct-SQL rows can still have them. Unbounded, the walk never terminates and there is
+// no statement_timeout configured in the app.
+//
+// The second test is the one that matters. getGuildsNeedingPersonalProvisioning takes NO
+// team scope — it scans every team — so a single cyclic row in ONE team stalled personal
+// channel provisioning for EVERY guild on the instance. SET LOCAL statement_timeout bounds
+// the blast radius so an unguarded query fails the assertion rather than wedging the
+// (serial) integration suite.
+// ---------------------------------------------------------------------------
+
+const wireParentDirectly = (groupId: GroupModel.GroupId, parentId: GroupModel.GroupId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) => sql`UPDATE groups SET parent_id = ${parentId} WHERE id = ${groupId}`),
+  );
+
+// Sets BOTH columns on purpose. The poll's outer WHERE requires
+// discord_personal_events_category_id IS NOT NULL, so a fixture that sets only the group id
+// is filtered out BEFORE the recursive CTE runs -- the test then passes whether or not the
+// depth bound exists, which is exactly how this test first passed for the wrong reason.
+const setPersonalEventsGroup = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql`
+        INSERT INTO team_settings (team_id, discord_personal_events_group_id, discord_personal_events_category_id)
+        VALUES (${teamId}, ${groupId}, '999000000000000001')
+        ON CONFLICT (team_id) DO UPDATE SET
+          discord_personal_events_group_id = EXCLUDED.discord_personal_events_group_id,
+          discord_personal_events_category_id = EXCLUDED.discord_personal_events_category_id
+      `,
+    ),
+  );
+
+describe('PersonalEventChannelsRepository — descendant walk cycle bounds', () => {
+  it.effect(
+    'getMembersNeedingPersonalChannel terminates when the scoping group is in a parent_id cycle',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '403000000000000901',
+            'cycle-member-1',
+            '403090909090909090' as Discord.Snowflake,
+          ),
+        ),
+        Effect.bind('groupA', ({ seed }) => createGroup(seed.team.id, 'Cycle A')),
+        Effect.bind('groupB', ({ seed, groupA }) =>
+          createGroup(seed.team.id, 'Cycle B', Option.some(groupA.id)),
+        ),
+        Effect.tap(({ groupA, groupB }) => wireParentDirectly(groupA.id, groupB.id)),
+        Effect.tap(({ groupB, seed }) => addGroupMember(groupB.id, seed.member.id)),
+        Effect.bind('outcome', ({ seed, groupA }) =>
+          Effect.Do.pipe(
+            Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
+            Effect.bind('repo', () => PersonalEventChannelsRepository.asEffect()),
+            Effect.flatMap(({ sql, repo }) =>
+              sql
+                .withTransaction(
+                  Effect.Do.pipe(
+                    Effect.tap(() => sql`SET LOCAL statement_timeout = '1500'`),
+                    Effect.flatMap(() =>
+                      repo.getMembersNeedingPersonalChannel(
+                        seed.team.id,
+                        Option.some(groupA.id),
+                        100,
+                      ),
+                    ),
+                  ),
+                )
+                .pipe(Effect.exit),
+            ),
+          ),
+        ),
+        Effect.tap(({ outcome }) =>
+          Effect.sync(() => {
+            expect(Exit.isSuccess(outcome)).toBe(true);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+    8000,
+  );
+
+  it.effect(
+    'getGuildsNeedingPersonalProvisioning terminates — one cyclic team must not stall every guild',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '403000000000000902',
+            'cycle-member-2',
+            '403090909090909091' as Discord.Snowflake,
+          ),
+        ),
+        Effect.bind('groupA', ({ seed }) => createGroup(seed.team.id, 'Poll cycle A')),
+        Effect.bind('groupB', ({ seed, groupA }) =>
+          createGroup(seed.team.id, 'Poll cycle B', Option.some(groupA.id)),
+        ),
+        Effect.tap(({ groupA, groupB }) => wireParentDirectly(groupA.id, groupB.id)),
+        Effect.tap(({ groupB, seed }) => addGroupMember(groupB.id, seed.member.id)),
+        // Point the team's personal-events group at the cyclic root, so the poll's own
+        // correlated walk hits the cycle.
+        Effect.tap(({ seed, groupA }) => setPersonalEventsGroup(seed.team.id, groupA.id)),
+        Effect.bind('outcome', () =>
+          Effect.Do.pipe(
+            Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
+            Effect.bind('repo', () => PersonalEventChannelsRepository.asEffect()),
+            Effect.flatMap(({ sql, repo }) =>
+              sql
+                .withTransaction(
+                  Effect.Do.pipe(
+                    Effect.tap(() => sql`SET LOCAL statement_timeout = '1500'`),
+                    Effect.flatMap(() => repo.getGuildsNeedingPersonalProvisioning(50)),
+                  ),
+                )
+                .pipe(Effect.exit),
+            ),
+          ),
+        ),
+        Effect.tap(({ outcome }) =>
+          Effect.sync(() => {
+            expect(Exit.isSuccess(outcome)).toBe(true);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+    8000,
+  );
+});
