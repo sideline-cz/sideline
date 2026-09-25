@@ -697,7 +697,6 @@ The development workflow is split into composable skills:
 | Skill | Purpose |
 |-------|---------|
 | `/work` | Orchestrator: picks up a Notion story → `/implement` → `/ship` → updates Notion |
-| `/worktree` | Picks up a Notion ticket → opens it in an isolated herdr worktree (branch + seeded env + `pnpm install`) → launches a Claude agent inside it |
 | `/implement` | Full dev loop: research → plan → TDD → verify tests → implement → verify → review → refactor |
 | `/ship` | Delivery loop: `/docs` → checks → commit → push → PR → CI → code review → `/revise` |
 | `/revise` | Triage review comments with `/architect` → `/implement` fixes → `/ship` |
@@ -712,7 +711,7 @@ The development workflow is split into composable skills:
 - **`/ship`** is standalone — use when code is ready and you want to commit, push, and handle review
 - **`/revise`** is standalone — use when a PR has review comments to address
 - **`/complete`** is standalone — use after a PR is merged to finalize Notion statuses
-- **`/worktree`** is standalone — runs `scripts/herdr-worktree.sh` to spin up parallel work on a ticket in an isolated herdr worktree; the launched agent then boots into `/work <ticket-page-id>` there
+- **`/worktree:worktree`** (plugin) is standalone — runs `scripts/herdr-worktree.sh` to spin up parallel work on a ticket in an isolated herdr worktree; the launched agent then boots into `/work <ticket-page-id>` there. Configured by [Worktree](#worktree) and [Sprint](#sprint) below
 
 ## Releases
 
@@ -729,6 +728,59 @@ There is no Changesets flow and no `pnpm changeset*` command. A release is a set
 - Before every commit, run `pnpm format` and `pnpm codegen`, stage resulting changes
 - After every `git push`, check that CI pipelines pass
 - After any structural change (new packages, new patterns, changed conventions), update the relevant section in AGENTS.md as part of the same PR
+
+## Worktree
+
+Config for the `worktree` plugin skill (`/worktree:worktree`), which replaced the repo-local
+`/worktree` skill. The claim-protection that skill carried now lives in the [Sprint](#sprint)
+claim-property rules, which the plugin's `agile-coach` reads — do not drop it, or two parallel
+runs will put two agents on one ticket.
+
+| Key | Value |
+|---|---|
+| `script` | `scripts/herdr-worktree.sh` |
+| `seed_paths` | `.env.local`, `.env.preview.local`, `.claude/settings.local.json` |
+| `install_cmd` | `pnpm install` |
+
+`seed_paths` is hand-maintained config a fresh checkout lacks; it mirrors `SEED_PATHS` in the
+script. The machine-generated gitignored dirs (`.local/`, `node_modules/`, `.direnv/`) are
+deliberately NOT seeded — `direnv allow` + `pnpm install` regenerate them, and copying
+`node_modules/` across worktrees produces stale native builds.
+
+Flags: `--no-install`, `--no-agent`, `--base <ref>`, `--prompt <text>`, `--label <text>`.
+
+## Sprint
+
+Config for the `notion-sprint` plugin skills (`/notion-sprint:work`, `:complete`, `:reconcile`)
+and their `agile-coach` agent. The database IDs restate the table in
+[Task Management (Notion)](#task-management-notion) because the plugin agent reads only this
+section — **keep the two in sync, or delete one once you settle on a single set of skills.**
+
+- Sprints: `a89cc7a7-ab1a-4e3f-945d-d42028c75f00` — active sprint is the one whose date range covers today
+- Stories: `9ec44d56-966b-4c3e-ba98-637b128c99a8` — title field `Story`, status `TODO → In Progress → In Review → In Test → Done`
+- Tasks: `2e0b6b31-d3bd-4e32-a127-3eedf257f228` — title field `Task`, status `TODO → In Progress → Done` (`Not Started` also exists)
+- Epics: `a040ab6d-10bb-4575-8c80-d4e827238b03` — title field `Epic`, numbered prefix (`E1: …`) drives ordering, status `Not Started → In Progress → In Review → Completed → Done`
+- Bugs: `e6b8eb47-ddcd-4dba-b5fd-c631763ac5bd` — title field `Bug`, status `🔴 Open → 🔵 In Progress → 🧪 In Review → ✅ Fixed` / `🚫 Won't Fix`
+- Milestones: `089dd440-070c-4cfb-a45d-1a68c299a2f2`
+
+**Actionable (pick-uppable):** bugs at `🔴 Open`, stories at `TODO`. Terminal: `✅ Fixed`,
+`🚫 Won't Fix`, `Done`.
+
+**Ordering:** bugs always before stories. Within bugs, higher `Severity` first
+(`🔥 Critical > 🟠 High > 🟡 Medium > 🟢 Low`). Within stories, by epic number ascending, then
+`Priority` (`🔴 Critical > 🟠 High > 🟡 Medium > 🟢 Low`).
+
+**Branch naming:** `feat/` for stories, `fix/` for bugs.
+
+**Every `Status` in this workspace is a `select`, not a `status`** — PATCH with
+`{"Status":{"select":{"name":"…"}}}`.
+
+**Claim property: `Claude session`** (rich text, on Stories and Bugs). Non-empty means another
+agent is already working that ticket in its own worktree. Skip those when auto-selecting — filter
+in the query (`{"property":"Claude session","rich_text":{"is_empty":true}}`) rather than fetching
+and discarding, so paging cannot hide the unclaimed ones. Never write it during selection: the
+agent that does the work stamps its own session. Without this, two parallel `/worktree` runs put
+two agents on one ticket.
 
 ## Task Management (Notion)
 
