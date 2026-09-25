@@ -69,6 +69,9 @@ vi.mock('~/components/organisms/EventRsvpPanel.js', () => ({ EventRsvpPanel: () 
 vi.mock('~/components/organisms/EventAttendanceRosterSection.js', () => ({
   EventAttendanceRosterSection: () => null,
 }));
+vi.mock('~/components/organisms/EventAttendanceConfirmSection.js', () => ({
+  EventAttendanceConfirmSection: () => <div data-testid='attendance-confirm-section' />,
+}));
 vi.mock('~/components/organisms/TrainingResultSection.js', () => ({
   TrainingResultSection: () => null,
 }));
@@ -121,7 +124,10 @@ function makeEventDetail(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function renderPage(eventDetailOverrides: Record<string, unknown> = {}) {
+function renderPage(
+  eventDetailOverrides: Record<string, unknown> = {},
+  attendanceOverrides: Record<string, unknown> = {},
+) {
   const eventDetail = makeEventDetail(eventDetailOverrides);
   const props = {
     teamId: 'team-1',
@@ -130,6 +136,12 @@ function renderPage(eventDetailOverrides: Record<string, unknown> = {}) {
     trainingTypes: [],
     eventTypes: [],
     rsvpDetail: {},
+    attendance: {
+      canConfirm: false,
+      confirmedAt: Option.none(),
+      entries: [],
+      ...attendanceOverrides,
+    },
     nonResponders: [],
     groups: [],
     rosters: [],
@@ -276,5 +288,23 @@ describe('EventDetailPage', () => {
     });
     expect(screen.getByRole('button', { name: 'This event only' })).not.toBeNull();
     expect(screen.getByRole('button', { name: 'All future events in series' })).not.toBeNull();
+  });
+
+  it('the attendance confirm section is NOT rendered when canConfirm is false', () => {
+    renderPage(
+      { eventType: 'training', status: 'active' },
+      { canConfirm: false, confirmedAt: Option.none(), entries: [] },
+    );
+
+    expect(screen.queryByTestId('attendance-confirm-section')).toBeNull();
+  });
+
+  it('the attendance confirm section renders when canConfirm is true for an active training', () => {
+    renderPage(
+      { eventType: 'training', status: 'active' },
+      { canConfirm: true, confirmedAt: Option.none(), entries: [] },
+    );
+
+    expect(screen.getByTestId('attendance-confirm-section')).not.toBeNull();
   });
 });

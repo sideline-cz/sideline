@@ -69,6 +69,8 @@ export * as EmailForwardingApi from './api/EmailForwardingApi.js';
  */
 export * as EventApi from './api/EventApi.js';
 
+export * as EventAttendanceApi from './api/EventAttendanceApi.js';
+
 export * as EventRosterApi from './api/EventRosterApi.js';
 
 export * as EventRsvpApi from './api/EventRsvpApi.js';

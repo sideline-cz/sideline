@@ -227,6 +227,11 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
     reason:
       "The RSVP message is free text the person wrote. Attendance itself is part of other members' event history and stays.",
   }),
+  own('event_attendance', 'team_members', ['team_member_id', 'confirmed_by'], {
+    kind: 'keep',
+    reason:
+      "A captain-confirmed attendance record is the evidence a per-training charge was calculated from; removing it would make the team's finance history unexplainable. It holds no free text, and both references are pseudonymised by scrubbing `users`.",
+  }),
   // Dumped raw, so `times_are_team_local` (Release N,
   // `.work-plans/series-time-conversion.md`) rides along automatically — it is a
   // per-row storage-dialect marker about `start_time`/`end_time`, not personal data of its own.

@@ -156,6 +156,21 @@ async function setupApiMocks(page: Page) {
     }),
   );
 
+  await page.route(
+    '**/teams/*/events/*/attendance',
+    apiOnly(async (route) => {
+      if (route.request().method() === 'PUT') {
+        await route.fulfill({ status: 204 });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ canConfirm: false, confirmedAt: null, entries: [] }),
+        });
+      }
+    }),
+  );
+
   // Single event detail (must be before events list)
   await page.route(
     '**/teams/*/events/*',

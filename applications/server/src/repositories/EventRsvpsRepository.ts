@@ -235,6 +235,15 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // `TrainingAutoLogCron` is the one caller — it reads this list, then inserts an activity-log
+  // auto-entry per member, with no further consultation of `event_attendance`. The `NOT EXISTS`
+  // below is evaluated AT INSERT TIME (the moment `event_attendance` gains a confirmed-absent
+  // row), which is what closes the confirm-vs-cron race: the cron reads its member list once and
+  // acts on it, so a flag stamped onto that snapshot could never retroactively stop an insert
+  // already in flight, while a predicate on the read itself always sees the latest committed
+  // state. A member a captain confirms ABSENT (`confirmed_at IS NOT NULL AND NOT present`)
+  // therefore never gets auto-logged, no matter which order the RSVP, the confirm, and the cron
+  // tick land in. A member with no attendance row, or one whose row is `present`, is unaffected.
   const findYesRsvpMemberIds = SqlSchema.findAll({
     Request: Event.EventId,
     Result: Schema.Struct({ team_member_id: TeamMember.TeamMemberId }),
@@ -243,6 +252,13 @@ const make = Effect.gen(function* () {
       FROM event_rsvps
       WHERE event_id = ${eventId}
         AND response IN ('yes', 'coming_later')
+        AND NOT EXISTS (
+          SELECT 1 FROM event_attendance ea
+          WHERE ea.event_id = event_rsvps.event_id
+            AND ea.team_member_id = event_rsvps.team_member_id
+            AND ea.confirmed_at IS NOT NULL
+            AND NOT ea.present
+        )
     `,
   });
 

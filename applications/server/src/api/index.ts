@@ -14,6 +14,7 @@ import { DashboardApiLive } from '~/api/dashboard.js';
 import { DashboardLayoutApiLive } from '~/api/dashboard-layout.js';
 import { EmailForwardingApiLive } from '~/api/email-forwarding.js';
 import { EventApiLive } from '~/api/event.js';
+import { EventAttendanceApiLive } from '~/api/event-attendance.js';
 import { EventRosterApiLive } from '~/api/event-roster.js';
 import { EventRsvpApiLive } from '~/api/event-rsvp.js';
 import { EventSeriesApiLive } from '~/api/event-series.js';
@@ -86,6 +87,9 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(BankSyncApiLive),
     Layer.provide(EventTypeApiLive),
     Layer.provide(MembershipPlanApiLive),
-  );
+  )
+  // Third block — both blocks above are already at the 20-argument `.pipe()` overload cliff
+  // (see `api/membership-plan.ts`'s header comment for the same limit hit earlier).
+  .pipe(Layer.provide(EventAttendanceApiLive));
 
 export { Redirect } from '~/api/redirect.js';
