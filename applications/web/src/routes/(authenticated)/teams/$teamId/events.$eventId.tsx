@@ -1,11 +1,13 @@
 import {
   Event,
+  type EventAttendanceApi,
   type EventRosterApi,
   type PlayerRatingApi,
   type Roster,
   Team,
 } from '@sideline/domain';
 import { createFileRoute } from '@tanstack/react-router';
+import type { DateTime } from 'effect';
 import { Effect, Option, Schema } from 'effect';
 import { EventDetailPage } from '~/components/pages/EventDetailPage';
 import { ApiClient, warnAndCatchAll } from '~/lib/runtime';
@@ -23,6 +25,18 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/events/$eve
           trainingTypes: api.trainingType.listTrainingTypes({ params: { teamId } }),
           eventTypes: api.eventType.listEventTypes({ params: { teamId } }),
           rsvpDetail: api.eventRsvp.getRsvps({ params: { teamId, eventId } }),
+          // Wrapped in its own catch: an old server / an unmocked e2e route must not take down
+          // the whole event page through `warnAndCatchAll` just because this one call 404s/403s.
+          attendance: api.eventAttendance.getEventAttendance({ params: { teamId, eventId } }).pipe(
+            Effect.tapError((e) => Effect.logWarning('Failed to load attendance for event', e)),
+            Effect.catch(() =>
+              Effect.succeed<{
+                canConfirm: boolean;
+                confirmedAt: Option.Option<DateTime.Utc>;
+                entries: ReadonlyArray<EventAttendanceApi.EventAttendanceEntry>;
+              }>({ canConfirm: false, confirmedAt: Option.none(), entries: [] }),
+            ),
+          ),
           nonResponders: api.eventRsvp
             .getNonResponders({ params: { teamId, eventId } })
             .pipe(Effect.catch(() => Effect.succeed({ nonResponders: [] }))),
@@ -88,6 +102,7 @@ function EventDetailRoute() {
       trainingTypes={data.trainingTypes.trainingTypes}
       eventTypes={data.eventTypes.eventTypes}
       rsvpDetail={data.rsvpDetail}
+      attendance={data.attendance}
       nonResponders={data.nonResponders.nonResponders}
       groups={data.groups}
       rosters={data.rosters.rosters}

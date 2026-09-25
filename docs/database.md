@@ -618,6 +618,29 @@ Attendance responses submitted by team members for a specific event.
 
 ---
 
+#### `event_attendance`
+
+Slice 3a of "Setup memberships" — the billing source of truth. `membership_plans` (see [39. Membership Plan](#39-membership-plan) in `docs/api.md`) carries a per-training price, but nothing recorded that a member ATTENDED a training until this table existed. A later slice bills ONLY rows where `confirmed_at IS NOT NULL AND present` — never a live `event_rsvps` response, never an unconfirmed pre-tick.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `event_id` | UUID | NOT NULL, FK → `events(id)` ON DELETE CASCADE | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
+| `present` | BOOLEAN | NOT NULL | — |
+| `confirmed_at` | TIMESTAMPTZ | — | — |
+| `confirmed_by` | UUID | FK → `team_members(id)` ON DELETE SET NULL | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(event_id, team_member_id)`
+
+**Check**: `confirmed_by IS NULL OR confirmed_at IS NOT NULL` — deliberately one-directional, not the two-sided `(confirmed_at IS NULL) = (confirmed_by IS NULL)` an equivalence check would suggest. A two-sided CHECK breaks `confirmed_by`'s `ON DELETE SET NULL`: Postgres executes that action as an internal `UPDATE ... SET confirmed_by = NULL`, which re-evaluates every CHECK on the row, and a two-sided form would then fail with an opaque `23514` the moment the confirming member is deleted (verified on PG17) — the FK action can clear `confirmed_by` alone, but it cannot also clear `confirmed_at` in the same statement to keep an equivalence CHECK satisfied. The one-directional form survives that delete and still keeps the half that matters: an unconfirmed row (`confirmed_at IS NULL`) can never carry a confirmer.
+
+**Notes**: Added in migration `1793100000_create_event_attendance`. No partial index — every query in this slice is keyed by `event_id` and already served by the `(event_id, team_member_id)` unique constraint above; a future slice adds one next to whichever query first needs it. `present` is the captain's stored yes/no for one member at one event. `confirmed_at`/`NULL` is the whole state machine: `NULL` means unconfirmed (this row, if it exists at all, is not evidence of anything to billing), non-`NULL` means a captain (or anyone holding `event:edit` plus the owner-group check) affirmed it via `PUT /teams/:teamId/events/:eventId/attendance` (`docs/api.md` § 40). That PUT is a FULL REPLACE of the confirmed set for the event: every candidate member visible on the page is sent in the same payload, and every written row gets `confirmed_at = now()` in the same statement — there is no partial confirm. "This event is confirmed" therefore means "it has any confirmed row for it", unambiguously, because confirmation is all-or-nothing. See `applications/server/AGENTS.md`'s "Event Attendance" section for the read-side candidate population and the activity-log integration.
+
+---
+
 #### `event_rosters`
 
 Links a single event to a roster for attendance tracking. One event can have at most one linked roster (enforced by `UNIQUE (event_id)`).
@@ -2311,6 +2334,7 @@ All 110 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1792600000 | `drop_role_sync` | Drops `role_sync_events`, `discord_role_mappings`, and `member_role_grants` tables; drops `team_members.last_role_sync_at`, `last_role_sync_state`, `last_role_sync_error` columns. Completes the removal of Sideline-role → Discord-role mirroring (Release B of the expand/contract); `teams.guild_id` and `idx_teams_guild_id` are unaffected — Discord roles still come from groups/rosters (`channel_sync_events`) and achievements (`discord_role_provision_events`) |
 | 1792800000 | `create_membership_plans` | Creates `membership_plans` (see [12. Finance](#12-finance) above), seeds every pre-existing team with one default plan (`NULL` name, `'CZK'`, zero price), and creates `seed_default_membership_plan()` — an `AFTER INSERT ON teams` trigger seeding the same default row for every future team. Creates the partial unique indexes `idx_membership_plans_team_default` and `idx_membership_plans_team_name`, and the partial (non-unique) index `idx_membership_plans_team_active`. |
 | 1792800001 | `auto_credit_bank_transfers` | Adds `auto_credit_enabled BOOLEAN NOT NULL DEFAULT false` (`IF NOT EXISTS`) to `bank_sync_config` — see the Bank Sync section above. Adds `bank_transaction_id UUID` (FK → `bank_transactions` RESTRICT) and `source TEXT NOT NULL DEFAULT 'manual'` (both `IF NOT EXISTS`) to `member_credit_deposits`, plus constraints `member_credit_deposits_source_values` and `member_credit_deposits_bank_source_pair` and the partial index `idx_member_credit_deposits_bank_tx` — see the `member_credit_deposits` notes above. Replaces `recompute_bank_match_state` to also sum active `member_credit_deposits`, and creates `credit_deposits_bank_recompute()` and its `AFTER INSERT OR UPDATE OR DELETE ON member_credit_deposits` trigger — see the `payments_finance_recompute` notes under [12. Finance](#12-finance) above. |
+| 1793100000 | `create_event_attendance` | Creates `event_attendance` (see [6. Events](#6-events) above) — Slice 3a of "Setup memberships". No seed, no backfill: every pre-existing training simply has zero attendance rows, which reads as "never confirmed", the correct state for history predating this feature. |
 
 ### After Migrations (seed data)
 

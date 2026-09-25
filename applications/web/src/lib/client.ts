@@ -12,6 +12,7 @@ import {
   DashboardLayoutApi,
   EmailForwardingApi,
   EventApi,
+  EventAttendanceApi,
   EventRosterApi,
   EventRsvpApi,
   EventSeriesApi,
@@ -70,6 +71,7 @@ class ClientApi extends HttpApi.make('api')
   .add(RoleApi.RoleApiGroup)
   .add(Roster.RosterApiGroup)
   .add(EventApi.EventApiGroup)
+  .add(EventAttendanceApi.EventAttendanceApiGroup)
   .add(EventRsvpApi.EventRsvpApiGroup)
   .add(EventSeriesApi.EventSeriesApiGroup)
   .add(EventTypeApi.EventTypeApiGroup)

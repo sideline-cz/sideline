@@ -1,6 +1,7 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type {
   EventApi,
+  EventAttendanceApi,
   EventRosterApi,
   EventRsvpApi,
   EventTypeApi,
@@ -11,6 +12,7 @@ import type {
 } from '@sideline/domain';
 import { Event, EventSeries, EventType, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
+import type { DateTime } from 'effect';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { useForm } from 'react-hook-form';
@@ -18,6 +20,7 @@ import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { EventFactBar } from '~/components/molecules/EventFactBar.js';
 import { EventTypePicker } from '~/components/molecules/EventTypePicker';
+import { EventAttendanceConfirmSection } from '~/components/organisms/EventAttendanceConfirmSection.js';
 import { EventAttendanceRosterSection } from '~/components/organisms/EventAttendanceRosterSection.js';
 import { EventRsvpPanel } from '~/components/organisms/EventRsvpPanel.js';
 import { TeamGeneratorSection } from '~/components/organisms/TeamGeneratorSection.js';
@@ -113,6 +116,11 @@ interface EventDetailPageProps {
   trainingTypes: ReadonlyArray<TrainingTypeApi.TrainingTypeInfo>;
   eventTypes: ReadonlyArray<EventTypeApi.EventTypeInfo>;
   rsvpDetail: EventRsvpApi.EventRsvpDetail;
+  attendance: {
+    canConfirm: boolean;
+    confirmedAt: Option.Option<DateTime.Utc>;
+    entries: ReadonlyArray<EventAttendanceApi.EventAttendanceEntry>;
+  };
   nonResponders: ReadonlyArray<EventRsvpApi.NonResponderEntry>;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
   rosters: ReadonlyArray<RosterDomain.RosterInfo>;
@@ -131,6 +139,7 @@ export function EventDetailPage({
   trainingTypes,
   eventTypes,
   rsvpDetail,
+  attendance,
   nonResponders,
   groups,
   rosters,
@@ -900,6 +909,18 @@ export function EventDetailPage({
             eventId={eventId}
             attendees={rsvpYesAttendees}
             initialGames={initialTrainingGames}
+            onRefresh={() => router.invalidate()}
+          />
+        </div>
+      )}
+
+      {attendance.canConfirm && eventDetail.eventType === 'training' && status !== 'cancelled' && (
+        <div className='mt-6'>
+          <EventAttendanceConfirmSection
+            teamId={teamId}
+            eventId={eventId}
+            confirmedAt={attendance.confirmedAt}
+            entries={attendance.entries}
             onRefresh={() => router.invalidate()}
           />
         </div>

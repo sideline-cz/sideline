@@ -672,3 +672,124 @@ describe('EventRsvpsRepository — findRsvpMessageByEventAndDiscordUser', () => 
     ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// Slice 3a ("Setup memberships") — findYesRsvpMemberIds' NOT EXISTS predicate against
+// `event_attendance`. This is the WHOLE activity-log integration for this slice: the training
+// auto-log cron (`TrainingAutoLogCron`) reads this list and logs one entry per member with no
+// further consultation of `event_attendance`, so the predicate here is the only place a
+// captain's confirmed-absent verdict can ever suppress an auto-log entry.
+//
+// Insert directly into `event_attendance` via raw SQL (no `EventAttendanceRepository` in this
+// file's `TestLayer`) — these tests exist to pin the READ side of the predicate, not to exercise
+// the write guards `confirmAttendance` itself already owns (see
+// `EventAttendanceRepository.test.ts`).
+// ---------------------------------------------------------------------------
+
+const insertAttendanceRow = (
+  eventId: Event.EventId,
+  memberId: TeamMember.TeamMemberId,
+  present: boolean,
+  confirmed: boolean,
+) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) =>
+      confirmed
+        ? sql`INSERT INTO event_attendance (event_id, team_member_id, present, confirmed_at)
+              VALUES (${eventId}, ${memberId}, ${present}, now())`
+        : sql`INSERT INTO event_attendance (event_id, team_member_id, present)
+              VALUES (${eventId}, ${memberId}, ${present})`,
+    ),
+  );
+
+const yesRsvpMemberIds = (eventId: Event.EventId) =>
+  EventRsvpsRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.findYesRsvpMemberIdsByEventId(eventId)),
+    Effect.map((rows) => rows.map((r) => r.team_member_id)),
+  );
+
+describe('EventRsvpsRepository.findYesRsvpMemberIdsByEventId — the event_attendance predicate (Slice 3a)', () => {
+  it.effect("RSVP'd yes, no attendance row -> INCLUDED", () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('219000000000000001', 'att-log-user-1')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('219100000000000001' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('event', ({ team, member }) => createEvent(team.id, member.id)),
+      Effect.tap(({ event, member }) => submitYesRsvp(event.id, member.id)),
+      Effect.bind('ids', ({ event }) => yesRsvpMemberIds(event.id)),
+      Effect.tap(({ ids, member }) =>
+        Effect.sync(() => {
+          expect(ids).toContain(member.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'same member with a CONFIRMED absent row (confirmed_at set, present false) -> EXCLUDED',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createUser('219000000000000002', 'att-log-user-2')),
+        Effect.bind('team', ({ userId }) =>
+          createTeam('219100000000000002' as Discord.Snowflake, userId),
+        ),
+        Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+        Effect.bind('event', ({ team, member }) => createEvent(team.id, member.id)),
+        Effect.tap(({ event, member }) => submitYesRsvp(event.id, member.id)),
+        Effect.tap(({ event, member }) => insertAttendanceRow(event.id, member.id, false, true)),
+        Effect.bind('ids', ({ event }) => yesRsvpMemberIds(event.id)),
+        Effect.tap(({ ids, member }) =>
+          Effect.sync(() => {
+            expect(ids).not.toContain(member.id);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'same member with an UNCONFIRMED absent row (confirmed_at NULL, present false) -> still ' +
+      'INCLUDED — an unconfirmed draft must not suppress the log',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createUser('219000000000000003', 'att-log-user-3')),
+        Effect.bind('team', ({ userId }) =>
+          createTeam('219100000000000003' as Discord.Snowflake, userId),
+        ),
+        Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+        Effect.bind('event', ({ team, member }) => createEvent(team.id, member.id)),
+        Effect.tap(({ event, member }) => submitYesRsvp(event.id, member.id)),
+        Effect.tap(({ event, member }) => insertAttendanceRow(event.id, member.id, false, false)),
+        Effect.bind('ids', ({ event }) => yesRsvpMemberIds(event.id)),
+        Effect.tap(({ ids, member }) =>
+          Effect.sync(() => {
+            expect(ids).toContain(member.id);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('member with a CONFIRMED PRESENT row -> INCLUDED', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('219000000000000004', 'att-log-user-4')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('219100000000000004' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('event', ({ team, member }) => createEvent(team.id, member.id)),
+      Effect.tap(({ event, member }) => submitYesRsvp(event.id, member.id)),
+      Effect.tap(({ event, member }) => insertAttendanceRow(event.id, member.id, true, true)),
+      Effect.bind('ids', ({ event }) => yesRsvpMemberIds(event.id)),
+      Effect.tap(({ ids, member }) =>
+        Effect.sync(() => {
+          expect(ids).toContain(member.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

@@ -7981,6 +7981,96 @@ Sets (or clears) the team's membership-selection deadline. Requires `finance:man
 
 ---
 
+### 40. Event Attendance
+
+**Source:** `packages/domain/src/api/EventAttendanceApi.ts`
+
+Slice 3a of "Setup memberships" — the billing source of truth. Nothing previously recorded that a member ATTENDED a training, so nothing could be billed from `membershipPlan.pricePerTrainingMinor` (§ 39). A later slice bills ONLY rows where `event_attendance.confirmed_at IS NOT NULL AND present`; this pair of endpoints is the one write path to that state, gated so only a human who could already edit the event can affirm it.
+
+`GET` is deliberately permissive: any member who can see the event may read the current pre-tick, including the Treasurer (`finance:view`), who holds no event permissions but needs to answer "why was I charged". `PUT` is a **full replace** of the event's confirmed set — every candidate the caller was shown is re-sent in one payload, and every written row gets a fresh `confirmed_at`. There is no partial-confirm endpoint. "This event is confirmed" therefore means "it has any confirmed row for it", unambiguously.
+
+For a non-training event, `GET` returns `200` with `canConfirm: false`, no `confirmedAt`, and an empty `entries` list — never `403`/`404` — because the web loader calls this endpoint for every event on a team's calendar, and the overwhelming majority aren't trainings.
+
+#### Schemas
+
+`EventAttendanceEntry`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `teamMemberId` | `TeamMemberId` | No | Candidate member |
+| `displayName` | `string` | No | Resolved display name (profile name → Discord nickname → Discord display name → username) |
+| `rsvpResponse` | `'yes' \| 'no' \| 'maybe' \| 'coming_later' \| null` | Yes | The member's own `event_rsvps` response, if any |
+| `present` | `boolean` | No | The stored value once a captain has confirmed; otherwise the live RSVP pre-tick (`response` is `yes`/`coming_later`), defaulting to `false` when neither exists |
+
+`EventAttendanceResponse`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `canConfirm` | `boolean` | No | Whether the caller holds the write gate below — same boolean the `PUT` enforces |
+| `confirmedAt` | `string \| null` (ISO datetime) | Yes | `null` means nobody has confirmed this event yet; otherwise the event has at least one confirmed row |
+| `entries` | `EventAttendanceEntry[]` | No | One row per candidate member — see the candidate population note below |
+
+`ConfirmAttendanceRequest` — full-replace payload:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `entries` | `{ teamMemberId: TeamMemberId; present: boolean }[]` | Yes | Every candidate shown to the caller, with the final present/absent tick for each |
+
+**Candidate population** (server-side, not part of the wire schema): the same member cohort `EventRsvpsRepository`'s missed-RSVP reminder population uses — active members of the event's member group (or the whole team when unset), holding a role that has ever been the team's default (`was_default`, or the built-in `Player`) — MINUS that population's `missed_rsvps` targeting filter (which exists only to cap reminder spam and would silently drop members from a billing list), PLUS two escape hatches: any member with an `event_rsvps` row for this event, and any member with an existing `event_attendance` row for this event, so real evidence is never hidden by a later role/group change.
+
+#### `GET /teams/:teamId/events/:eventId/attendance`
+
+Returns the current attendance state for an event: stored confirmations where they exist, the live RSVP pre-tick otherwise.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `eventId` | `EventId` (string) | Event ID |
+
+**Response:** `200 OK` — `EventAttendanceResponse`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventAttendanceForbidden` | 403 | Not a member of this team, or (for a training event) missing both the write gate and `finance:view` |
+| `EventAttendanceEventNotFound` | 404 | Event does not exist, or does not belong to `teamId` |
+
+#### `PUT /teams/:teamId/events/:eventId/attendance`
+
+Confirms attendance for a training. Full replace: every listed entry is written with a fresh `confirmed_at`; a member the caller does not include is left as it was (never cleared implicitly — the caller is expected to resend every candidate it was shown).
+
+Requires `event:edit` **and** (`team:manage` **or** membership of the event's owner group) — the same expression `GET /teams/:teamId/events/:eventId` uses for `canEdit`, but deliberately *not* that endpoint's `EventDetail.canEdit` field itself: `canEdit` is additionally gated on the event still accepting RSVP changes, which is false for every event that has started — i.e. false for exactly the events attendance can be confirmed on.
+
+The event itself must be a `'training'`, not `'cancelled'`, and started (`start_at <= now()`) — enforced atomically in the same statement as the write, not a preceding check, so a concurrent cancellation cannot land between the check and the write.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `eventId` | `EventId` (string) | Event ID |
+
+**Request Body:** `ConfirmAttendanceRequest`
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventAttendanceForbidden` | 403 | Not a member of this team, or missing the write gate |
+| `EventAttendanceEventNotFound` | 404 | Event does not exist, or does not belong to `teamId` |
+| `EventAttendanceNotConfirmable` | 409 | The event is not a training, is cancelled, or has not started yet |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
