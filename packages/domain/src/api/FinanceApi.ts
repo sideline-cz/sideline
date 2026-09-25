@@ -225,6 +225,17 @@ export class FinanceForbidden extends Schema.TaggedErrorClass<FinanceForbidden>(
 
 export class FeeArchived extends Schema.TaggedErrorClass<FeeArchived>()('FeeArchived', {}) {}
 
+// A 'training' fee's identity (currency, period) and a training assignment's amount are
+// written exclusively by `recompute_training_period_fees` (packages/migrations). Letting
+// updateFee change currency would violate the DB's partial unique index on
+// (team_id, period_start, currency) WHERE kind = 'training' and surface as an untyped 500 via
+// catchSqlErrors; letting updateAssignment change amount would silently revert on the next
+// recompute. Both are rejected with this one typed error instead.
+export class TrainingFeeImmutable extends Schema.TaggedErrorClass<TrainingFeeImmutable>()(
+  'TrainingFeeImmutable',
+  {},
+) {}
+
 export class SettlementStale extends Schema.TaggedErrorClass<SettlementStale>()('SettlementStale', {
   // the server's figure, so the toast can be specific
   outstandingMinor: Schema.Number,
@@ -302,6 +313,7 @@ export class FinanceApiGroup extends HttpApiGroup.make('finance')
         FeeNotFound.pipe(HttpApiSchema.status(404)),
         FeeArchived.pipe(HttpApiSchema.status(409)),
         InvalidAmount.pipe(HttpApiSchema.status(400)),
+        TrainingFeeImmutable.pipe(HttpApiSchema.status(409)),
       ],
       payload: UpdateFeeRequest,
       params: { teamId: TeamId, feeId: FeeId },
@@ -359,6 +371,7 @@ export class FinanceApiGroup extends HttpApiGroup.make('finance')
           AssignmentNotFound.pipe(HttpApiSchema.status(404)),
           FeeArchived.pipe(HttpApiSchema.status(409)),
           InvalidAmount.pipe(HttpApiSchema.status(400)),
+          TrainingFeeImmutable.pipe(HttpApiSchema.status(409)),
         ],
         payload: UpdateAssignmentRequest,
         params: { teamId: TeamId, feeId: FeeId, assignmentId: FeeAssignmentId },

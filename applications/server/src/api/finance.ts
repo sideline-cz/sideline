@@ -24,6 +24,7 @@ const assignmentNotFound = new FinanceApi.AssignmentNotFound();
 const paymentNotFound = new FinanceApi.PaymentNotFound();
 const invalidAmount = new FinanceApi.InvalidAmount();
 const feeArchived = new FinanceApi.FeeArchived();
+const trainingFeeImmutable = new FinanceApi.TrainingFeeImmutable();
 
 // ---------------------------------------------------------------------------
 // Helpers: build view DTOs from repo rows
@@ -296,6 +297,16 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
               }
               return Effect.void;
             }),
+            // A 'training' fee's currency is part of its identity (the partial unique index
+            // is on team_id, period_start, currency): changing it here would either violate
+            // that index or silently orphan the fee from recompute_training_period_fees, which
+            // only ever finds it by (team_id, period_start, currency). Caught here, as a typed
+            // 409, rather than left to surface as an untyped 500 via catchSqlErrors.
+            Effect.tap(({ existing }) =>
+              existing.kind === 'training' && Option.isSome(payload.currency)
+                ? Effect.fail(trainingFeeImmutable)
+                : Effect.void,
+            ),
             Effect.tap(() =>
               fees.update(feeId, {
                 name: payload.name,
@@ -471,6 +482,15 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
               }
               return Effect.void;
             }),
+            // A training assignment's amount is owned by recompute_training_period_fees — the
+            // next attendance/event write (or the next period recompute) would silently revert
+            // a manual edit here, so refuse it up front instead of accepting a change that
+            // never sticks.
+            Effect.tap(({ fee }) =>
+              fee.kind === 'training' && Option.isSome(payload.amountMinor)
+                ? Effect.fail(trainingFeeImmutable)
+                : Effect.void,
+            ),
             Effect.tap(() =>
               assignments.update(assignmentId, {
                 amountMinor: payload.amountMinor,
