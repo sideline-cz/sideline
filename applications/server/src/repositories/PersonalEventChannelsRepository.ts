@@ -160,15 +160,29 @@ const make = Effect.Do.pipe(
           AND tm.active = true
           AND u.discord_id IS NOT NULL
           AND (pec.id IS NULL OR pec.discord_channel_id IS NULL)
+          -- All four descendant walks in this file carry the same depth bound, required of every
+          -- recursive groups.parent_id walk (applications/server/AGENTS.md). Nothing in the schema
+          -- prevents a cycle and moveGroup only stops NEW ones, so a pre-existing or direct-SQL row
+          -- would otherwise spin forever -- and there is no statement_timeout configured.
+          --
+          -- The poll walks below are the reason this matters beyond one team: their query takes no
+          -- team scope at all, so it scans every team. ONE cyclic row anywhere stalled personal
+          -- channel provisioning for EVERY guild on the instance, not just that team's.
+          --
+          -- These walks still do NOT filter is_archived, so a member reachable only through an
+          -- archived subgroup is still treated as in scope. That is a real defect but a separate,
+          -- DESTRUCTIVE change: adding the filter deprovisions existing channels and purges
+          -- personal_event_messages, and all four walks must change together or provision and
+          -- deprovision disagree and fight each other every tick.
           AND (
             ${input.group_id}::uuid IS NULL
             OR EXISTS (
               WITH RECURSIVE descendant_groups AS (
-                SELECT id FROM groups WHERE id = ${input.group_id}::uuid AND team_id = ${input.team_id}
+                SELECT id, 0 AS depth FROM groups WHERE id = ${input.group_id}::uuid AND team_id = ${input.team_id}
                 UNION ALL
-                SELECT g.id FROM groups g
+                SELECT g.id, dg.depth + 1 FROM groups g
                   JOIN descendant_groups dg ON g.parent_id = dg.id
-                WHERE g.team_id = ${input.team_id}
+                WHERE g.team_id = ${input.team_id} AND dg.depth < 32
               )
               SELECT 1 FROM group_members gm
               WHERE gm.group_id IN (SELECT id FROM descendant_groups)
@@ -195,11 +209,11 @@ const make = Effect.Do.pipe(
           AND pec.discord_channel_id IS NOT NULL
           AND NOT EXISTS (
             WITH RECURSIVE descendant_groups AS (
-              SELECT id FROM groups WHERE id = ${input.group_id}::uuid AND team_id = ${input.team_id}
+              SELECT id, 0 AS depth FROM groups WHERE id = ${input.group_id}::uuid AND team_id = ${input.team_id}
               UNION ALL
-              SELECT g.id FROM groups g
+              SELECT g.id, dg.depth + 1 FROM groups g
                 JOIN descendant_groups dg ON g.parent_id = dg.id
-              WHERE g.team_id = ${input.team_id}
+              WHERE g.team_id = ${input.team_id} AND dg.depth < 32
             )
             SELECT 1 FROM group_members gm
             WHERE gm.group_id IN (SELECT id FROM descendant_groups)
@@ -288,12 +302,12 @@ const make = Effect.Do.pipe(
                 ts.discord_personal_events_group_id IS NULL
                 OR EXISTS (
                   WITH RECURSIVE descendant_groups AS (
-                    SELECT id FROM groups
+                    SELECT id, 0 AS depth FROM groups
                       WHERE id = ts.discord_personal_events_group_id AND team_id = t.id
                     UNION ALL
-                    SELECT g.id FROM groups g
+                    SELECT g.id, dg.depth + 1 FROM groups g
                       JOIN descendant_groups dg ON g.parent_id = dg.id
-                    WHERE g.team_id = t.id
+                    WHERE g.team_id = t.id AND dg.depth < 32
                   )
                   SELECT 1 FROM group_members gm
                   WHERE gm.group_id IN (SELECT id FROM descendant_groups)
@@ -307,12 +321,12 @@ const make = Effect.Do.pipe(
               AND ts.discord_personal_events_group_id IS NOT NULL
               AND NOT EXISTS (
                 WITH RECURSIVE descendant_groups AS (
-                  SELECT id FROM groups
+                  SELECT id, 0 AS depth FROM groups
                     WHERE id = ts.discord_personal_events_group_id AND team_id = t.id
                   UNION ALL
-                  SELECT g.id FROM groups g
+                  SELECT g.id, dg.depth + 1 FROM groups g
                     JOIN descendant_groups dg ON g.parent_id = dg.id
-                  WHERE g.team_id = t.id
+                  WHERE g.team_id = t.id AND dg.depth < 32
                 )
                 SELECT 1 FROM group_members gm
                 WHERE gm.group_id IN (SELECT id FROM descendant_groups)
