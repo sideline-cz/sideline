@@ -469,10 +469,21 @@ const make = Effect.gen(function* () {
               SELECT rtt.training_type_id
               FROM group_members gm
               JOIN LATERAL (
+                -- depth is the cycle bound required of every recursive groups.parent_id walk
+                -- (applications/server/AGENTS.md). Pure availability: a cycle is corrupt data and
+                -- no healthy tree reaches 32.
+                --
+                -- This walk also lacks an is_archived filter, and adding one here is NOT the safe
+                -- tightening it looks like. It feeds checkCoachScoping (api/scoping.ts), which
+                -- treats an EMPTY allowed-set as "allow every training type". Filtering archived
+                -- groups out can only shrink the set, so a coach scoped solely through an archived
+                -- group would go from "may create type X only" to "may create ANY type" --
+                -- tightening the query LOOSENS the permission. Decide the empty-set semantics
+                -- before touching that.
                 WITH RECURSIVE ancestors AS (
-                  SELECT gm.group_id AS id
+                  SELECT gm.group_id AS id, 0 AS depth
                   UNION ALL
-                  SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
+                  SELECT g.parent_id, a.depth + 1 FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL AND a.depth < 32
                 )
                 SELECT id FROM ancestors
               ) anc ON true
