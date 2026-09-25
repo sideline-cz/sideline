@@ -21,7 +21,7 @@ export interface UpsertBankSyncConfigInput {
   readonly enabled: boolean;
   readonly auto_match_enabled: boolean;
   readonly auto_credit_enabled: Option.Option<boolean>;
-  readonly auto_create_expenses: boolean;
+  readonly auto_create_expenses: Option.Option<boolean>;
   readonly account_prefix: Option.Option<string>;
   readonly account_number: Option.Option<string>;
   readonly bank_code: Option.Option<string>;
@@ -147,7 +147,7 @@ const make = Effect.gen(function* () {
       enabled: Schema.Boolean,
       auto_match_enabled: Schema.Boolean,
       auto_credit_enabled: Schema.OptionFromNullOr(Schema.Boolean),
-      auto_create_expenses: Schema.Boolean,
+      auto_create_expenses: Schema.OptionFromNullOr(Schema.Boolean),
       account_prefix: Schema.OptionFromNullOr(Schema.String),
       account_number: Schema.OptionFromNullOr(Schema.String),
       bank_code: Schema.OptionFromNullOr(Schema.String),
@@ -173,7 +173,7 @@ const make = Effect.gen(function* () {
         -- template emits a distinct placeholder per interpolation, so this parameter inherits
         -- no type from the one in the DO UPDATE clause below.
         COALESCE(${input.auto_credit_enabled}::boolean, false),
-        ${input.auto_create_expenses},
+        COALESCE(${input.auto_create_expenses}::boolean, false),
         ${input.account_prefix}, ${input.account_number}, ${input.bank_code}, ${input.currency},
         ${input.recipient_name}, ${input.registered_id}, ${input.registered_address}, ${input.bank_name},
         ${input.fio_token_encrypted}, ${input.fio_token_created_at}::timestamptz,
@@ -192,7 +192,7 @@ const make = Effect.gen(function* () {
         -- the parameter, not EXCLUDED: EXCLUDED already COALESCEd absent to false above,
         -- which would silently switch the flag off for every save from an older bundle.
         auto_credit_enabled = COALESCE(${input.auto_credit_enabled}::boolean, bank_sync_config.auto_credit_enabled),
-        auto_create_expenses = EXCLUDED.auto_create_expenses,
+        auto_create_expenses = COALESCE(${input.auto_create_expenses}::boolean, bank_sync_config.auto_create_expenses),
         account_prefix = EXCLUDED.account_prefix,
         account_number = EXCLUDED.account_number,
         bank_code = EXCLUDED.bank_code,
