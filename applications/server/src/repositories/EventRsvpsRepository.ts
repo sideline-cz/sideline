@@ -217,13 +217,26 @@ const make = Effect.gen(function* () {
       LEFT JOIN users u ON u.id = tm.user_id
       WHERE r.event_id = ${input.event_id}
         AND r.response IN ('yes', 'coming_later')
+        -- The archived/team/depth guards live in the RECURSIVE term only, never the anchor.
+        -- In the recursive term they SEVER the walk: an archived subgroup and everything under
+        -- it drops out, which is what every other group-scoped surface already does
+        -- (api/scoping.ts's getDescendantMemberIds). In the anchor they would instead mean
+        -- "this event's own member group is archived, so remind NOBODY" -- a silent stop on a
+        -- real, live event. The team-id match keeps a stray cross-team parent_id from pulling
+        -- in another team, and the depth bound stops a parent_id cycle: nothing in the
+        -- schema prevents one, and moveGroup's app-side check only stops NEW ones (see the
+        -- comment on GroupsRepository.findAncestorsQuery), so rows predating it can still hang
+        -- an unbounded walk.
         AND (
           ${input.member_group_id}::uuid IS NULL
           OR tm.id IN (
             WITH RECURSIVE descendant_groups AS (
-              SELECT id FROM groups WHERE id = ${input.member_group_id}::uuid
+              SELECT g.id, g.team_id, 0 AS depth FROM groups g
+                WHERE g.id = ${input.member_group_id}::uuid
               UNION ALL
-              SELECT g.id FROM groups g JOIN descendant_groups dg ON g.parent_id = dg.id
+              SELECT g.id, g.team_id, dg.depth + 1 FROM groups g
+                JOIN descendant_groups dg ON g.parent_id = dg.id
+                WHERE g.is_archived = false AND g.team_id = dg.team_id AND dg.depth < 32
             )
             SELECT gm.team_member_id
             FROM group_members gm
@@ -281,9 +294,12 @@ const make = Effect.gen(function* () {
             ${input.member_group_id}::uuid IS NULL
             OR tm.id IN (
               WITH RECURSIVE descendant_groups AS (
-                SELECT id FROM groups WHERE id = ${input.member_group_id}::uuid
+                SELECT g.id, g.team_id, 0 AS depth FROM groups g
+                  WHERE g.id = ${input.member_group_id}::uuid
                 UNION ALL
-                SELECT g.id FROM groups g JOIN descendant_groups dg ON g.parent_id = dg.id
+                SELECT g.id, g.team_id, dg.depth + 1 FROM groups g
+                  JOIN descendant_groups dg ON g.parent_id = dg.id
+                  WHERE g.is_archived = false AND g.team_id = dg.team_id AND dg.depth < 32
               )
               SELECT gm.team_member_id
               FROM group_members gm
@@ -313,9 +329,12 @@ const make = Effect.gen(function* () {
     }),
     execute: (input) => sql`
       WITH RECURSIVE descendant_groups AS (
-        SELECT id FROM groups WHERE id = ${input.member_group_id}::uuid
+        SELECT g.id, g.team_id, 0 AS depth FROM groups g
+          WHERE g.id = ${input.member_group_id}::uuid
         UNION ALL
-        SELECT g.id FROM groups g JOIN descendant_groups dg ON g.parent_id = dg.id
+        SELECT g.id, g.team_id, dg.depth + 1 FROM groups g
+          JOIN descendant_groups dg ON g.parent_id = dg.id
+          WHERE g.is_archived = false AND g.team_id = dg.team_id AND dg.depth < 32
       )
       UPDATE team_members tm
       SET missed_rsvps = missed_rsvps + 1
