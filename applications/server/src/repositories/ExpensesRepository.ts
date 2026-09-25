@@ -1,8 +1,16 @@
-import { Auth, Expense, ExpenseApi, Team } from '@sideline/domain';
-import { Schemas } from '@sideline/effect-lib';
-import { type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
+import { Auth, BankTransaction, Expense, ExpenseApi, Team } from '@sideline/domain';
+import { Schemas, SqlErrors } from '@sideline/effect-lib';
+import { Data, type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+
+const BANK_TRANSACTION_UNIQUE_CONSTRAINT = 'uq_expenses_bank_transaction_id';
+
+/** The referenced movement already has an expense. Raised from the unique violation alone —
+ * there is deliberately no pre-flight SELECT, so two concurrent inserts cannot both win. */
+export class BankTransactionAlreadyExpensed extends Data.TaggedError(
+  'BankTransactionAlreadyExpensed',
+)<{}> {}
 
 // ---------------------------------------------------------------------------
 // Row schemas
@@ -16,6 +24,7 @@ export class ExpenseRow extends Schema.Class<ExpenseRow>('ExpenseRow')({
   spent_at: Schemas.DateTimeFromDate,
   category: Expense.ExpenseCategory,
   description: Schema.String,
+  bank_transaction_id: Schema.OptionFromNullOr(BankTransaction.BankTransactionId),
   created_by_user_id: Auth.UserId,
   updated_by_user_id: Auth.UserId,
   created_at: Schemas.DateTimeFromDate,
@@ -30,6 +39,7 @@ export class ExpenseWithNamesRow extends Schema.Class<ExpenseWithNamesRow>('Expe
   spent_at: Schemas.DateTimeFromDate,
   category: Expense.ExpenseCategory,
   description: Schema.String,
+  bank_transaction_id: Schema.OptionFromNullOr(BankTransaction.BankTransactionId),
   created_by_user_id: Auth.UserId,
   updated_by_user_id: Auth.UserId,
   created_at: Schemas.DateTimeFromDate,
@@ -90,13 +100,14 @@ const make = Effect.gen(function* () {
       spent_at: Schemas.DateTimeFromDate,
       category: Expense.ExpenseCategory,
       description: Schema.String,
+      bank_transaction_id: Schema.OptionFromNullOr(BankTransaction.BankTransactionId),
       created_by_user_id: Auth.UserId,
       updated_by_user_id: Auth.UserId,
     }),
     Result: ExpenseWithNamesRow,
     execute: (input) => sql`
       WITH affected AS (
-        INSERT INTO expenses (team_id, amount_minor, currency, spent_at, category, description, created_by_user_id, updated_by_user_id)
+        INSERT INTO expenses (team_id, amount_minor, currency, spent_at, category, description, bank_transaction_id, created_by_user_id, updated_by_user_id)
         VALUES (
           ${input.team_id},
           ${input.amount_minor},
@@ -104,6 +115,7 @@ const make = Effect.gen(function* () {
           ${input.spent_at},
           ${input.category},
           ${input.description},
+          ${input.bank_transaction_id},
           ${input.created_by_user_id},
           ${input.updated_by_user_id}
         )
@@ -222,6 +234,7 @@ const make = Effect.gen(function* () {
     spent_at: DateTime.Utc;
     category: Expense.ExpenseCategory;
     description: string;
+    bank_transaction_id?: Option.Option<BankTransaction.BankTransactionId> | undefined;
     created_by_user_id: Auth.UserId;
     updated_by_user_id: Auth.UserId;
   }) =>
@@ -232,9 +245,17 @@ const make = Effect.gen(function* () {
       spent_at: input.spent_at,
       category: input.category,
       description: input.description,
+      bank_transaction_id: input.bank_transaction_id ?? Option.none(),
       created_by_user_id: input.created_by_user_id,
       updated_by_user_id: input.updated_by_user_id,
-    }).pipe(catchSqlErrors);
+    }).pipe(
+      // Must precede `catchSqlErrors`, which would otherwise turn the violation into a defect.
+      SqlErrors.catchUniqueViolationOn(
+        BANK_TRANSACTION_UNIQUE_CONSTRAINT,
+        () => new BankTransactionAlreadyExpensed(),
+      ),
+      catchSqlErrors,
+    );
 
   const findById = (id: Expense.ExpenseId, teamId: Team.TeamId) =>
     findByIdQuery({ id, team_id: teamId }).pipe(catchSqlErrors);

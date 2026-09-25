@@ -36,6 +36,7 @@ import {
   type BankSyncConfig,
   BankTransaction,
   CzIban,
+  Expense,
   Fee,
   FeeAssignment,
   Payment,
@@ -210,6 +211,7 @@ const toConfigView = (config: BankSyncConfig.BankSyncConfig): BankSyncApi.BankSy
     enabled: config.enabled,
     autoMatchEnabled: config.auto_match_enabled,
     autoCreditEnabled: config.auto_credit_enabled,
+    autoCreateExpenses: config.auto_create_expenses,
     accountPrefix: config.account_prefix,
     accountNumber: config.account_number,
     bankCode: config.bank_code,
@@ -244,6 +246,7 @@ const defaultConfigView = (teamId: Team.TeamId): BankSyncApi.BankSyncConfigView 
     enabled: false,
     autoMatchEnabled: true,
     autoCreditEnabled: false,
+    autoCreateExpenses: false,
     accountPrefix: Option.none(),
     accountNumber: Option.none(),
     bankCode: Option.none(),
@@ -559,6 +562,20 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
               ORDER BY p.created_at ASC
             `.pipe(catchSqlErrors),
           ),
+          // The expense this movement produced, if any — `expenses.bank_transaction_id` is UNIQUE,
+          // so there is at most one. Only ever set for outgoing movements.
+          Effect.bind('expenseId', ({ tx }) =>
+            sql<{ readonly id: string }>`
+              SELECT id::text FROM expenses WHERE bank_transaction_id = ${tx.id}
+            `.pipe(
+              catchSqlErrors,
+              Effect.map((rows) =>
+                Option.fromNullishOr(rows[0]).pipe(
+                  Option.map((r) => Schema.decodeSync(Expense.ExpenseId)(r.id)),
+                ),
+              ),
+            ),
+          ),
           Effect.bind('nameHints', ({ tx }) =>
             Option.match(tx.counterparty_name, {
               onNone: () => Effect.succeed<ReadonlyArray<string>>([]),
@@ -580,69 +597,74 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                 ),
             }),
           ),
-          Effect.map(({ tx, resolvedMember, candidates, matchedPayments, nameHints }) => {
-            const evidenceOpt = Option.fromNullishOr(tx.match_evidence);
-            return new BankSyncApi.BankTransactionDetailView({
-              id: tx.id,
-              bookedOn: tx.booked_on,
-              amountMinor: tx.amount_minor,
-              currency: tx.currency,
-              direction: tx.direction,
-              counterpartyName: tx.counterparty_name,
-              counterpartyAccount: tx.counterparty_account,
-              counterpartyBankCode: tx.counterparty_bank_code,
-              counterpartyBankName: tx.counterparty_bank_name,
-              counterpartyBic: tx.counterparty_bic,
-              variableSymbol: tx.variable_symbol,
-              constantSymbol: tx.constant_symbol,
-              specificSymbol: tx.specific_symbol,
-              messageForRecipient: tx.message_for_recipient,
-              userIdentification: tx.user_identification,
-              comment: tx.comment,
-              matchState: tx.match_state,
-              matchReason: tx.match_reason,
-              resolutionKind: tx.resolution_kind,
-              ignoredReason: tx.ignored_reason,
-              duplicateOfTransactionId: extractDuplicateHint(evidenceOpt),
-              suggestedMemberNames: nameHints,
-              resolvedMemberId: Option.map(resolvedMember, (m) =>
-                Schema.decodeSync(TeamMember.TeamMemberId)(m.member_id),
-              ),
-              resolvedMemberName: Option.flatMap(resolvedMember, (m) =>
-                Option.fromNullishOr(m.name),
-              ),
-              candidateAssignments: candidates.map(
-                (c) =>
-                  new BankSyncApi.BankTransactionCandidateAssignment({
-                    assignmentId: Schema.decodeSync(FeeAssignment.FeeAssignmentId)(c.assignment_id),
-                    feeId: Schema.decodeSync(Fee.FeeId)(c.fee_id),
-                    feeName: c.fee_name,
-                    currency: Schema.decodeSync(Fee.CurrencyCode)(c.currency),
-                    outstandingMinor: Schema.decodeSync(Fee.AmountMinor)(
-                      Number(c.outstanding_minor),
-                    ),
-                    effectiveDueAt: Option.fromNullishOr(c.effective_due_at).pipe(
-                      Option.map((d) => DateTime.makeUnsafe(d)),
-                    ),
-                  }),
-              ),
-              matchedPayments: matchedPayments.map(
-                (p) =>
-                  new BankSyncApi.BankTransactionMatchedPayment({
-                    paymentId: Schema.decodeSync(Payment.PaymentId)(p.payment_id),
-                    feeAssignmentId: Schema.decodeSync(FeeAssignment.FeeAssignmentId)(
-                      p.fee_assignment_id,
-                    ),
-                    feeName: p.fee_name,
-                    amountMinor: Schema.decodeSync(Fee.AmountMinor)(Number(p.amount_minor)),
-                    matchedBy: p.matched_by === 'manual' ? 'manual' : 'auto',
-                    recordedAt: DateTime.makeUnsafe(p.created_at),
-                  }),
-              ),
-              ingestedAt: tx.ingested_at,
-              updatedAt: tx.updated_at,
-            });
-          }),
+          Effect.map(
+            ({ tx, resolvedMember, candidates, matchedPayments, nameHints, expenseId }) => {
+              const evidenceOpt = Option.fromNullishOr(tx.match_evidence);
+              return new BankSyncApi.BankTransactionDetailView({
+                id: tx.id,
+                bookedOn: tx.booked_on,
+                amountMinor: tx.amount_minor,
+                currency: tx.currency,
+                direction: tx.direction,
+                counterpartyName: tx.counterparty_name,
+                counterpartyAccount: tx.counterparty_account,
+                counterpartyBankCode: tx.counterparty_bank_code,
+                counterpartyBankName: tx.counterparty_bank_name,
+                counterpartyBic: tx.counterparty_bic,
+                variableSymbol: tx.variable_symbol,
+                constantSymbol: tx.constant_symbol,
+                specificSymbol: tx.specific_symbol,
+                messageForRecipient: tx.message_for_recipient,
+                userIdentification: tx.user_identification,
+                comment: tx.comment,
+                matchState: tx.match_state,
+                matchReason: tx.match_reason,
+                resolutionKind: tx.resolution_kind,
+                ignoredReason: tx.ignored_reason,
+                duplicateOfTransactionId: extractDuplicateHint(evidenceOpt),
+                expenseId,
+                suggestedMemberNames: nameHints,
+                resolvedMemberId: Option.map(resolvedMember, (m) =>
+                  Schema.decodeSync(TeamMember.TeamMemberId)(m.member_id),
+                ),
+                resolvedMemberName: Option.flatMap(resolvedMember, (m) =>
+                  Option.fromNullishOr(m.name),
+                ),
+                candidateAssignments: candidates.map(
+                  (c) =>
+                    new BankSyncApi.BankTransactionCandidateAssignment({
+                      assignmentId: Schema.decodeSync(FeeAssignment.FeeAssignmentId)(
+                        c.assignment_id,
+                      ),
+                      feeId: Schema.decodeSync(Fee.FeeId)(c.fee_id),
+                      feeName: c.fee_name,
+                      currency: Schema.decodeSync(Fee.CurrencyCode)(c.currency),
+                      outstandingMinor: Schema.decodeSync(Fee.AmountMinor)(
+                        Number(c.outstanding_minor),
+                      ),
+                      effectiveDueAt: Option.fromNullishOr(c.effective_due_at).pipe(
+                        Option.map((d) => DateTime.makeUnsafe(d)),
+                      ),
+                    }),
+                ),
+                matchedPayments: matchedPayments.map(
+                  (p) =>
+                    new BankSyncApi.BankTransactionMatchedPayment({
+                      paymentId: Schema.decodeSync(Payment.PaymentId)(p.payment_id),
+                      feeAssignmentId: Schema.decodeSync(FeeAssignment.FeeAssignmentId)(
+                        p.fee_assignment_id,
+                      ),
+                      feeName: p.fee_name,
+                      amountMinor: Schema.decodeSync(Fee.AmountMinor)(Number(p.amount_minor)),
+                      matchedBy: p.matched_by === 'manual' ? 'manual' : 'auto',
+                      recordedAt: DateTime.makeUnsafe(p.created_at),
+                    }),
+                ),
+                ingestedAt: tx.ingested_at,
+                updatedAt: tx.updated_at,
+              });
+            },
+          ),
         );
       }
 
@@ -847,6 +869,7 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                   enabled: payload.enabled,
                   auto_match_enabled: payload.auto_match_enabled,
                   auto_credit_enabled: payload.auto_credit_enabled,
+                  auto_create_expenses: payload.auto_create_expenses,
                   account_prefix: payload.account_prefix,
                   account_number: Option.some(payload.account_number),
                   bank_code: Option.some(payload.bank_code),
@@ -1076,6 +1099,7 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                   readonly resolution_kind: string | null;
                   readonly match_evidence: unknown;
                   readonly matched_member_name: string | null;
+                  readonly expense_id: string | null;
                   readonly ingested_at: Date;
                 }>`
                   SELECT bt.id::text, bt.booked_on::text, bt.amount_minor::text, bt.currency,
@@ -1087,7 +1111,8 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                           WHERE tm.team_id = bt.team_id AND tm.active = true
                             AND bt.variable_symbol IS NOT NULL
                             AND NULLIF(ltrim(tm.variable_symbol, '0'), '') = NULLIF(ltrim(bt.variable_symbol, '0'), '')
-                          LIMIT 1) AS matched_member_name
+                          LIMIT 1) AS matched_member_name,
+                         (SELECT e.id::text FROM expenses e WHERE e.bank_transaction_id = bt.id) AS expense_id
                   FROM bank_transactions bt
                   WHERE bt.team_id = ${teamId}
                     AND (${Option.isNone(query.from)} OR bt.booked_on >= ${Option.getOrNull(query.from)}::date)
@@ -1133,6 +1158,9 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                         Option.fromNullishOr(row.match_evidence),
                       ),
                       matchedMemberName: Option.fromNullishOr(row.matched_member_name),
+                      expenseId: Option.fromNullishOr(row.expense_id).pipe(
+                        Option.map(Schema.decodeSync(Expense.ExpenseId)),
+                      ),
                       ingestedAt: DateTime.makeUnsafe(row.ingested_at),
                     }),
                 ),

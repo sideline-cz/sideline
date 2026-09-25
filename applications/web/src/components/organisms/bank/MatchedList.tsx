@@ -1,36 +1,59 @@
-import type { BankSyncApi } from '@sideline/domain';
-import { BankTransaction, Team } from '@sideline/domain';
+import type { ExpenseApi } from '@sideline/domain';
+import { type BankSyncApi, BankTransaction, Team } from '@sideline/domain';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import { ChevronRight } from 'lucide-react';
 import React from 'react';
 import { UnmatchDialog } from '~/components/organisms/bank/UnmatchDialog';
+import { ExpenseFormDialog } from '~/components/organisms/ExpenseFormDialog';
 import { Button } from '~/components/ui/button';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
-type MatchedFilter = 'all' | 'matched' | 'other_income' | 'ignored' | 'voided';
+type MatchedFilter = 'all' | 'matched' | 'other_income' | 'ignored' | 'expenses' | 'voided';
 
 const FILTER_CHIPS: ReadonlyArray<{ value: MatchedFilter; labelKey: string }> = [
   { value: 'all', labelKey: 'bank_matched_filterAll' },
   { value: 'matched', labelKey: 'bank_tab_matched' },
   { value: 'other_income', labelKey: 'bank_matched_filterOther' },
   { value: 'ignored', labelKey: 'bank_matched_filterIgnored' },
+  { value: 'expenses', labelKey: 'bank_matched_filterExpenses' },
   { value: 'voided', labelKey: 'bank_matched_filterVoided' },
 ];
+
+/** Outgoing movements are parked at ingestion as `not_applicable` and never enter the matcher —
+ * the statement export has always labelled them "Výdaj", so the list says the same. */
+const isOutgoing = (t: BankSyncApi.BankTransactionView) => t.direction === 'outgoing';
+
+/** The expense form only offers these. `CurrencyCode` is any 3-char string, so a multi-currency
+ * Fio account can yield e.g. `PLN` — prefilling that would silently fall back to CZK and record
+ * a foreign amount under the wrong currency, so the action is disabled instead. */
+const EXPENSE_CURRENCIES: ReadonlyArray<string> = ['CZK', 'EUR', 'USD'];
 
 interface MatchedListProps {
   readonly teamId: string;
   readonly transactions: ReadonlyArray<BankSyncApi.BankTransactionView>;
+  /** Gates the "create expense" action — `createExpense` requires `finance:manage_fees`, which
+   * this page's own `finance:record_payments` gate does not imply. */
+  readonly canManageExpenses?: boolean;
   readonly onChanged: () => void;
 }
 
 /** The audit trail (design §3.10) — auto-matched transactions must not be invisible. */
-export function MatchedList({ teamId, transactions, onChanged }: MatchedListProps) {
+export function MatchedList({
+  teamId,
+  transactions,
+  canManageExpenses = false,
+  onChanged,
+}: MatchedListProps) {
   const [filter, setFilter] = React.useState<MatchedFilter>('all');
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const [unmatchTargetId, setUnmatchTargetId] = React.useState<string | null>(null);
+  const [expenseTarget, setExpenseTarget] = React.useState<BankSyncApi.BankTransactionView | null>(
+    null,
+  );
 
   const filtered = transactions.filter((t) => {
     if (filter === 'all') return true;
@@ -42,6 +65,7 @@ export function MatchedList({ teamId, transactions, onChanged }: MatchedListProp
     if (filter === 'ignored') {
       return t.matchState === 'ignored' && Option.getOrNull(t.resolutionKind) === 'not_relevant';
     }
+    if (filter === 'expenses') return isOutgoing(t);
     return false;
   });
 
@@ -111,9 +135,39 @@ export function MatchedList({ teamId, transactions, onChanged }: MatchedListProp
                         ? Option.getOrNull(t.resolutionKind) === 'other_income'
                           ? tr('bank_matched_filterOther')
                           : tr('bank_matched_filterIgnored')
-                        : Option.getOrElse(t.matchedMemberName, () => '—')}
+                        : isOutgoing(t)
+                          ? tr('bank_status_expense')
+                          : Option.getOrElse(t.matchedMemberName, () => '—')}
                     </td>
-                    <td className='py-3 px-3' />
+                    <td className='py-3 px-3 text-right'>
+                      {isOutgoing(t) &&
+                        Option.match(t.expenseId, {
+                          onNone: () =>
+                            !canManageExpenses ? null : EXPENSE_CURRENCIES.includes(t.currency) ? (
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                onClick={() => setExpenseTarget(t)}
+                              >
+                                {tr('bank_expense_create')}
+                              </Button>
+                            ) : (
+                              <span className='text-xs text-muted-foreground'>
+                                {tr('bank_expense_unsupportedCurrency')}
+                              </span>
+                            ),
+                          onSome: (expenseId) => (
+                            <Button asChild variant='ghost' size='sm'>
+                              <Link
+                                to='/teams/$teamId/finances/expenses/$expenseId'
+                                params={{ teamId, expenseId }}
+                              >
+                                {tr('bank_expense_view')}
+                              </Link>
+                            </Button>
+                          ),
+                        })}
+                    </td>
                   </tr>
                   {isExpanded && (
                     <tr id={`matched-detail-${t.id}`}>
@@ -140,6 +194,16 @@ export function MatchedList({ teamId, transactions, onChanged }: MatchedListProp
         onCancel={() => setUnmatchTargetId(null)}
         onUnmatched={() => {
           setUnmatchTargetId(null);
+          onChanged();
+        }}
+      />
+
+      <CreateExpenseFromTransaction
+        teamId={teamId}
+        transaction={expenseTarget}
+        onCancel={() => setExpenseTarget(null)}
+        onCreated={() => {
+          setExpenseTarget(null);
           onChanged();
         }}
       />
@@ -318,6 +382,81 @@ function UnmatchTargetLoader({
       onCancel={onCancel}
       onConfirm={handleConfirm}
       submitting={submitting}
+    />
+  );
+}
+
+/**
+ * Opens the ordinary expense form seeded from an outgoing movement. Amount, currency, date and a
+ * description are filled in; the CATEGORY is deliberately left for the treasurer, because nothing
+ * in a bank movement implies one.
+ *
+ * The provenance link travels in the create payload, and the server rejects a second expense for
+ * the same movement via the `uq_expenses_bank_transaction_id` constraint — this component does no
+ * duplicate checking of its own.
+ */
+function CreateExpenseFromTransaction({
+  teamId,
+  transaction,
+  onCancel,
+  onCreated,
+}: {
+  readonly teamId: string;
+  readonly transaction: BankSyncApi.BankTransactionView | null;
+  readonly onCancel: () => void;
+  readonly onCreated: () => void;
+}) {
+  const run = useRun();
+  if (transaction === null) return null;
+
+  const describe = () => {
+    const counterparty = Option.getOrElse(transaction.counterpartyName, () => '');
+    const message = Option.getOrElse(transaction.messageForRecipient, () => '');
+    return [counterparty, message]
+      .filter((part) => part.trim() !== '')
+      .join(' — ')
+      .slice(0, 500);
+  };
+
+  const handleSubmit = async (req: ExpenseApi.CreateExpenseRequest) => {
+    // The realistic 409: the poller's auto-create won the race while this dialog was open. Say
+    // so specifically, and still refresh — the row has an expense now, it just isn't this one.
+    let alreadyExpensed = false;
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.expenses.createExpense({
+          params: { teamId: Schema.decodeSync(Team.TeamId)(teamId) },
+          payload: req,
+        }),
+      ),
+      Effect.catchTag('BankTransactionAlreadyExpensed', (e) => {
+        alreadyExpensed = true;
+        return Effect.fail(e);
+      }),
+      Effect.mapError(() =>
+        ClientError.make(
+          alreadyExpensed ? tr('bank_expense_alreadyExists') : tr('expense_create_failed'),
+        ),
+      ),
+      run({ success: tr('expense_create_success') }),
+    );
+    if (Option.isSome(result) || alreadyExpensed) onCreated();
+  };
+
+  return (
+    <ExpenseFormDialog
+      open
+      mode='create'
+      teamId={teamId}
+      prefill={{
+        amountMinor: Math.abs(transaction.amountMinor),
+        currency: transaction.currency,
+        spentAt: transaction.bookedOn,
+        description: describe(),
+        bankTransactionId: transaction.id,
+      }}
+      onSubmit={handleSubmit}
+      onCancel={onCancel}
     />
   );
 }

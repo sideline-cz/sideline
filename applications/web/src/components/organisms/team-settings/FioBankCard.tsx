@@ -57,6 +57,7 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
     enabled,
     autoMatchEnabled,
     autoCreditEnabled,
+    autoCreateExpenses,
     accountPrefix,
     accountNumber,
     recipientName,
@@ -347,6 +348,23 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
                 checked={autoCreditEnabled}
                 onCheckedChange={(v) => setField('autoCreditEnabled', v)}
                 disabled={!enabled || !autoMatchEnabled}
+              />
+            </div>
+
+            <div className='flex items-start justify-between gap-4'>
+              <div>
+                <label htmlFor='fio-auto-create-expenses' className='text-sm font-medium block'>
+                  {tr('bank_autoCreateExpenses')}
+                </label>
+                <p className='text-xs text-muted-foreground mt-1'>
+                  {tr('bank_autoCreateExpenses_help')}
+                </p>
+              </div>
+              <Switch
+                id='fio-auto-create-expenses'
+                checked={autoCreateExpenses}
+                onCheckedChange={(v) => setField('autoCreateExpenses', v)}
+                disabled={!enabled}
               />
             </div>
 

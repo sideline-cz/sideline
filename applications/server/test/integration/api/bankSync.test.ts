@@ -336,6 +336,7 @@ const post = (path: string, token: string, body?: unknown) =>
 const validUpsertPayload = {
   enabled: false,
   auto_match_enabled: true,
+  auto_create_expenses: false,
   account_prefix: null,
   account_number: '2703474850',
   bank_code: '2010',

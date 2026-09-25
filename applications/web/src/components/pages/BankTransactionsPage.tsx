@@ -20,6 +20,9 @@ interface BankTransactionsPageProps {
   readonly config: BankSyncApi.BankSyncConfigView | null;
   readonly summary: BankSyncApi.BankSyncSummaryView | null;
   readonly transactions: ReadonlyArray<BankSyncApi.BankTransactionView>;
+  /** `finance:manage_fees` — creating an expense needs it; opening this page only needs
+   * `finance:record_payments`, so the two can come apart on a custom role. */
+  readonly canManageExpenses?: boolean;
   readonly activeTab?: BankTab;
   readonly onTabChange?: (tab: BankTab) => void;
   readonly onRefresh: () => void;
@@ -42,6 +45,7 @@ export function BankTransactionsPage({
   config,
   summary,
   transactions,
+  canManageExpenses = false,
   activeTab: controlledActiveTab,
   onTabChange,
   onRefresh,
@@ -233,7 +237,12 @@ export function BankTransactionsPage({
             ))}
 
           {activeTab === 'matched' && (
-            <MatchedList teamId={teamId} transactions={matchedTransactions} onChanged={onRefresh} />
+            <MatchedList
+              teamId={teamId}
+              transactions={matchedTransactions}
+              canManageExpenses={canManageExpenses}
+              onChanged={onRefresh}
+            />
           )}
 
           {activeTab === 'export' && (

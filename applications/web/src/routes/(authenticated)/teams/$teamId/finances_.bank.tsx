@@ -20,6 +20,9 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances_/b
     const team = Array.findFirst(context.teams, (t) => t.teamId === params.teamId);
     const permissions = Option.isSome(team) ? team.value.permissions : [];
     const canRecordPayments = permissions.includes('finance:record_payments');
+    // Creating an expense is gated on manage_fees, NOT on the record_payments that opens this
+    // page — a custom role can hold one without the other.
+    const canManageExpenses = permissions.includes('finance:manage_fees');
 
     return ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
@@ -63,7 +66,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances_/b
             : Effect.succeed<ReadonlyArray<BankSyncApi.BankTransactionView>>([]),
         }),
       ),
-      Effect.map((data) => ({ ...data, canRecordPayments })),
+      Effect.map((data) => ({ ...data, canRecordPayments, canManageExpenses })),
       warnAndCatchAll,
       context.run,
     );
@@ -77,7 +80,7 @@ function BankTransactionsRoute() {
   const navigate = useNavigate({ from: Route.fullPath });
   const router = useRouter();
   const run = useRun();
-  const { config, summary, transactions } = Route.useLoaderData();
+  const { config, summary, transactions, canManageExpenses } = Route.useLoaderData();
 
   const activeTab = searchTab ?? 'queue';
   const handleTabChange = (tab: BankTab) => navigate({ search: { tab } });
@@ -103,6 +106,7 @@ function BankTransactionsRoute() {
       config={config}
       summary={summary}
       transactions={transactions}
+      canManageExpenses={canManageExpenses}
       activeTab={activeTab}
       onTabChange={handleTabChange}
       onRefresh={handleRefresh}
