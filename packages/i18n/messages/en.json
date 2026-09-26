@@ -3095,7 +3095,7 @@
   "waive_dialog_title": "Mark as Waived",
   "waive_dialog_validation_reasonRequired": "Reason is required",
   "teamSettings_rsvpLockHoursBefore": "Close RSVPs before start (hours)",
-  "teamSettings_rsvpLockHoursBefore_help": "Leave blank to keep RSVPs open until the event starts. Set a number and members can't add or change their answer once that many hours remain — 0 closes them exactly at the start. For all-day events any value, including 0, measures from midnight on the first day and removes the same-day grace period; if the team's timezone changes after an event was created, that midnight is the one that applied when it was created.",
+  "teamSettings_rsvpLockHoursBefore_help": "Leave blank to keep RSVPs open until the event starts. Set a number and answers lock that many hours before — 0 locks them exactly at the start. All-day events count back from midnight on the first day, so any value, including 0, also removes the same-day grace period.",
   "teamSettings_rsvpLockHoursBeforeOverrides": "Per event type",
   "teamSettings_rsvpLockHoursBeforeOverrides_help": "Set each type to \"Inherit\" to use the value above, to \"Hours\" with its own number, or to \"Off\" — RSVPs for that type then stay open until the event starts.",
   "teamSettings_lockOverride_inherit": "Inherit",
@@ -3106,6 +3106,6 @@
   "rsvp_eventStarted": "This event has already started, so RSVPs are closed.",
   "rsvp_lockedJustNow": "RSVP just closed for this event. Reload the page to see the final list.",
   "rsvp_yourAnswerLabel": "Your answer",
-  "rsvp_noAnswerLocked": "You didn't respond before the deadline.",
+  "rsvp_noAnswerLocked": "We didn't get an answer from you before the deadline.",
   "bot_embed_rsvp_until": "🔒 RSVP until {when}"
 }

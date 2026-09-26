@@ -67,6 +67,8 @@ Once the deadline passes you can still see the event and the answer you gave —
   For an all-day event the deadline counts back from **midnight at the start of the first day**, not from the time people actually turn up. A weekend tournament with a team-wide 24-hour deadline therefore closes on Friday morning. If that is too early, set that event type to **Off** in the **Per event type** grid, or give it a smaller number of its own.
 
   Note that `0` is not the same as **Off** here. With no deadline set, an all-day event stays open for answers right through its last day. Setting `0` closes it at midnight on the first day — earlier than the default, not later. **Off** is what keeps the original behaviour.
+
+  One edge case: if your team changes its timezone *after* an all-day event was created, that event's deadline is still measured from the midnight that applied when it was created. Recreate the event if you need it re-anchored.
 </Aside>
 
 <Aside type="caution" title="After the event">
