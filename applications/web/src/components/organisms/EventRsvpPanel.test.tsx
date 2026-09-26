@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { Option } from 'effect';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { DateTime, Option } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -27,6 +27,14 @@ vi.mock('~/lib/translations.js', () => ({
       rsvp_messageHelpRequired: 'Tell the team when you will arrive — required for "Coming later".',
       rsvp_messageHelpOptional: 'Optional note for the team.',
       rsvp_deadlinePassed: 'RSVP deadline has passed.',
+      // T7 — the deadline surface (design §6).
+      rsvp_closesAt: "RSVP closes {relative}, at {when}. After that you can't change your answer.",
+      rsvp_lockedBeforeStart:
+        'RSVPs closed {when}. The headcount is final — talk to your captain if something changes.',
+      rsvp_eventStarted: 'This event has already started, so RSVPs are closed.',
+      rsvp_lockedJustNow: 'RSVP just closed for this event. Reload the page to see the final list.',
+      rsvp_yourAnswerLabel: 'Your answer',
+      rsvp_noAnswerLocked: "You didn't respond before the deadline.",
       rsvp_attending: '{count} going',
       rsvp_notAttending: '{count} not going',
       rsvp_undecided: '{count} not sure',
@@ -85,6 +93,9 @@ type RsvpDetailView = {
   comingLaterCount: number;
   canRsvp: boolean;
   minPlayersThreshold: number;
+  // T7 — `OptionFromOptionalKey` on the wire, so `None` is both "no lock
+  // configured" and "an older server that has never heard of one".
+  rsvpClosesAt: Option.Option<DateTime.Utc>;
 };
 
 function makeRsvpEntry(overrides: Partial<RsvpEntryView> = {}): RsvpEntryView {
@@ -110,16 +121,20 @@ function makeRsvpDetail(overrides: Partial<RsvpDetailView> = {}): RsvpDetailView
     comingLaterCount: 0,
     canRsvp: true,
     minPlayersThreshold: 0,
+    rsvpClosesAt: Option.none(),
     ...overrides,
   };
 }
 
-function makeEventDetail(overrides: Partial<{ canEdit: boolean; canCancel: boolean }> = {}) {
+function makeEventDetail(
+  overrides: Partial<{ canEdit: boolean; canCancel: boolean; status: string }> = {},
+) {
   return {
     eventId: 'event-1',
     teamId: 'team-1',
     canEdit: false,
     canCancel: false,
+    status: 'active',
     ...overrides,
   };
 }
@@ -668,5 +683,240 @@ describe('EventRsvpPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save note' }));
 
     expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// T7 — the RSVP deadline surface
+// ============================================================================
+//
+// Branch order matters and is not obvious. `!canRsvp && status === 'started'`
+// must be checked with the `!canRsvp` half: an all-day event that is
+// `started` but still RSVP-able (the end-of-day grace) has `canRsvp === true`
+// and must fall through to the OPEN state. A bare `status === 'started'`
+// first branch silently hides the buttons for every all-day event mid-event.
+
+describe('EventRsvpPanel — RSVP deadline notice', () => {
+  const inHours = (hours: number) =>
+    Option.some(DateTime.add(DateTime.nowUnsafe(), { hours })) as Option.Option<DateTime.Utc>;
+
+  const inMinutes = (minutes: number) =>
+    Option.some(DateTime.add(DateTime.nowUnsafe(), { minutes })) as Option.Option<DateTime.Utc>;
+
+  const buttonsRendered = () =>
+    screen.queryByRole('button', { name: 'Yes' }) !== null &&
+    screen.queryByRole('button', { name: 'No' }) !== null;
+
+  it('case 1: open with no deadline → no notice at all, buttons render', () => {
+    renderPanel({ rsvpDetail: makeRsvpDetail({ canRsvp: true, rsvpClosesAt: Option.none() }) });
+
+    expect(buttonsRendered()).toBe(true);
+    expect(screen.queryByText(/RSVP closes/)).toBeNull();
+    expect(screen.queryByText(/RSVPs closed/)).toBeNull();
+    expect(screen.queryByText('RSVP deadline has passed.')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('case 2: open, deadline 3 days out → a muted line, NOT an Alert', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        canRsvp: true,
+        rsvpClosesAt: inHours(72),
+        minPlayersThreshold: 0,
+      }),
+    });
+
+    expect(buttonsRendered()).toBe(true);
+    const notice = screen.getByText(/RSVP closes/);
+    expect(notice.tagName).toBe('P');
+    // `role='status'` is the escalation — it must not be present this far out.
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('case 3: open, deadline 5 hours out → the SAME string, escalated into a role=status Alert', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        canRsvp: true,
+        rsvpClosesAt: inHours(5),
+        minPlayersThreshold: 0,
+      }),
+    });
+
+    expect(buttonsRendered()).toBe(true);
+    const alert = screen.getByRole('status');
+    expect(alert.textContent).toMatch(/RSVP closes/);
+    // One key, two wrappers — never `role='alert'`: it is present on load, not
+    // an interruption.
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('case 4: locked before start → rsvp_lockedBeforeStart, buttons ABSENT', () => {
+    renderPanel({
+      eventDetail: makeEventDetail({ status: 'active' }),
+      rsvpDetail: makeRsvpDetail({ canRsvp: false, rsvpClosesAt: inHours(-2) }),
+    });
+
+    expect(buttonsRendered()).toBe(false);
+    expect(screen.getByText(/RSVPs closed/)).toBeTruthy();
+    expect(screen.queryByText('RSVP deadline has passed.')).toBeNull();
+  });
+
+  it('case 5: BRANCH ORDER — closed AND started → rsvp_eventStarted, not rsvp_lockedBeforeStart', () => {
+    renderPanel({
+      eventDetail: makeEventDetail({ status: 'started' }),
+      rsvpDetail: makeRsvpDetail({ canRsvp: false, rsvpClosesAt: inHours(-2) }),
+    });
+
+    expect(screen.getByText('This event has already started, so RSVPs are closed.')).toBeTruthy();
+    expect(screen.queryByText(/RSVPs closed/)).toBeNull();
+  });
+
+  it('case 6: BRANCH ORDER — started but still RSVP-able (all-day grace) falls through to OPEN', () => {
+    // What a bare `status === 'started'` first branch would break.
+    renderPanel({
+      eventDetail: makeEventDetail({ status: 'started' }),
+      rsvpDetail: makeRsvpDetail({ canRsvp: true, rsvpClosesAt: Option.none() }),
+    });
+
+    expect(buttonsRendered()).toBe(true);
+    expect(screen.queryByText('This event has already started, so RSVPs are closed.')).toBeNull();
+  });
+
+  it("case 7: closed with NO deadline keeps today's generic sentence (not-invited, and old-server skew)", () => {
+    renderPanel({
+      eventDetail: makeEventDetail({ status: 'active' }),
+      rsvpDetail: makeRsvpDetail({ canRsvp: false, rsvpClosesAt: Option.none() }),
+    });
+
+    expect(screen.getByText('RSVP deadline has passed.')).toBeTruthy();
+    expect(screen.queryByText(/RSVPs closed/)).toBeNull();
+    expect(buttonsRendered()).toBe(false);
+  });
+
+  it('case 8 [Q6]: a locked panel still shows the member their own stored answer', () => {
+    // Locked must never look like "your answer was lost".
+    renderPanel({
+      eventDetail: makeEventDetail({ status: 'active' }),
+      rsvpDetail: makeRsvpDetail({
+        canRsvp: false,
+        rsvpClosesAt: inHours(-2),
+        myResponse: Option.some('yes'),
+        myMessage: Option.none(),
+      }),
+    });
+
+    expect(screen.getByText('Your answer')).toBeTruthy();
+    expect(screen.getByText('Yes')).toBeTruthy();
+    expect(screen.queryByText("You didn't respond before the deadline.")).toBeNull();
+  });
+
+  it('case 8 [Q6]: a locked panel with no answer says so explicitly', () => {
+    renderPanel({
+      eventDetail: makeEventDetail({ status: 'active' }),
+      rsvpDetail: makeRsvpDetail({
+        canRsvp: false,
+        rsvpClosesAt: inHours(-2),
+        myResponse: Option.none(),
+      }),
+    });
+
+    expect(screen.getByText("You didn't respond before the deadline.")).toBeTruthy();
+    expect(screen.queryByText('Your answer')).toBeNull();
+  });
+
+  it('case 9: the escalation boundary itself — exactly CLOSING_SOON_MS is already an Alert', () => {
+    // `<=`, not `<`. Tested at 72h and 5h above, which both pass either way.
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        canRsvp: true,
+        rsvpClosesAt: inHours(24),
+        minPlayersThreshold: 0,
+      }),
+    });
+
+    expect(screen.getByRole('status').textContent).toMatch(/RSVP closes/);
+  });
+
+  // The tick added for case 10 has a sharp edge: `canRsvp` came from the server at LOAD and never
+  // refetches, so once the deadline passes the open branch is still the one rendering. Without the
+  // `remaining <= 0` guard the same 60s tick turns the sentence into "RSVP closes 1 minute ago, at
+  // 18:00. After that you can't change your answer." — in a warning Alert, above live buttons.
+  it('case 11: the deadline passing while the page sits open swaps the copy for rsvp_lockedJustNow', () => {
+    vi.useFakeTimers();
+    try {
+      renderPanel({
+        rsvpDetail: makeRsvpDetail({
+          canRsvp: true,
+          rsvpClosesAt: inMinutes(2),
+          minPlayersThreshold: 0,
+        }),
+      });
+
+      expect(screen.getByRole('status').textContent).toMatch(/RSVP closes/);
+
+      act(() => {
+        vi.advanceTimersByTime(3 * 60 * 1000);
+      });
+
+      expect(screen.getByRole('status').textContent).toBe(
+        'RSVP just closed for this event. Reload the page to see the final list.',
+      );
+      expect(screen.queryByText(/RSVP closes/)).toBeNull();
+      expect(screen.queryByText(/ago/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('case 12: the lock boundary itself — at exactly the deadline instant it is already locked', () => {
+    // `remaining <= 0`, not `< 0`. Case 11 advances past the instant and passes either way.
+    vi.useFakeTimers();
+    try {
+      renderPanel({
+        rsvpDetail: makeRsvpDetail({
+          canRsvp: true,
+          rsvpClosesAt: inMinutes(2),
+          minPlayersThreshold: 0,
+        }),
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(2 * 60 * 1000);
+      });
+
+      expect(screen.getByRole('status').textContent).toBe(
+        'RSVP just closed for this event. Reload the page to see the final list.',
+      );
+      expect(screen.queryByText(/RSVP closes/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('case 10: the sentence TICKS — a page left open escalates without a reload', () => {
+    // Both `formatRelative` and the `CLOSING_SOON_MS` comparison read `Date.now()` during render,
+    // so without the interval this panel is frozen at mount: it would still read "in 2 days" long
+    // after the deadline passed, and the under-24h warning would never appear on a page opened
+    // earlier.
+    vi.useFakeTimers();
+    try {
+      renderPanel({
+        rsvpDetail: makeRsvpDetail({
+          canRsvp: true,
+          rsvpClosesAt: inHours(25),
+          minPlayersThreshold: 0,
+        }),
+      });
+
+      expect(screen.queryByRole('status')).toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(2 * 60 * 60 * 1000);
+      });
+
+      expect(screen.getByRole('status').textContent).toMatch(/RSVP closes/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

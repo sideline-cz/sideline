@@ -9,13 +9,14 @@ import {
 } from './shared';
 
 /**
- * The event types that can carry their own reminder lead time. Kept as flat `string` fields on the
- * form rather than a nested map because `useCardForm` compares with `!==` over primitives — a
- * nested object would be a fresh reference every render and so read as permanently dirty.
+ * The event types that can carry a per-type override — reminder lead time (`reminderDaysBefore_*`)
+ * and RSVP lock (`lockHoursBefore_*`). Both are kept as flat `string` fields on the form rather
+ * than a nested map because `useCardForm` compares with `!==` over primitives — a nested object
+ * would be a fresh reference every render and so read as permanently dirty.
  *
- * An empty string means "no override": that type falls back to `rsvpReminderDaysBefore`.
+ * What an empty string means differs per feature and is documented at each mapping site below.
  */
-export const REMINDER_OVERRIDE_EVENT_TYPES = [
+export const OVERRIDE_EVENT_TYPES = [
   'training',
   'match',
   'tournament',
@@ -31,6 +32,26 @@ type ReminderOverrideFields = {
 export const reminderOverrideField = <K extends Event.EventType>(
   eventType: K,
 ): `reminderDaysBefore_${K}` => `reminderDaysBefore_${eventType}`;
+
+type LockOverrideFields = {
+  [K in Event.EventType as `lockHoursBefore_${K}`]: string;
+};
+
+export const lockOverrideField = <K extends Event.EventType>(
+  eventType: K,
+): `lockHoursBefore_${K}` => `lockHoursBefore_${eventType}`;
+
+/**
+ * The per-type "no early lock at all" value, as it lives in the form. Written by the `Off` option
+ * of each row's selector in `GeneralLimitsCard`, never typed.
+ *
+ * It is a string sentinel rather than a second field because `settingsRequestFrom` is called with
+ * `values` alone — it never sees the settings that were loaded — and `useCardForm` only holds flat
+ * primitives. Rendering a stored `null` as `''` would make it indistinguishable from "key absent",
+ * so the next save of any unrelated setting on this page would silently flip that event type from
+ * off back to inherit, without the user touching the field.
+ */
+export const LOCK_OVERRIDE_OFF = 'off';
 
 /**
  * Every field the team-settings Save button owns — the single source for both
@@ -64,22 +85,48 @@ export type SettingsFormValues = {
   createDiscordChannelOnRoster: boolean;
   roleFormat: string;
   channelFormat: string;
-} & ReminderOverrideFields;
+  // Blank means OFF — no early lock anywhere. The opposite of the blank in `lockHoursBefore_*`,
+  // which means "inherit this value".
+  rsvpLockHoursBefore: string;
+} & ReminderOverrideFields &
+  LockOverrideFields;
 
 const overrideFieldsFrom = (
   overrides: TeamSettingsApi.TeamSettingsInfo['rsvpReminderDaysBeforeOverrides'],
 ): ReminderOverrideFields =>
   Object.fromEntries(
-    REMINDER_OVERRIDE_EVENT_TYPES.map((eventType) => [
+    OVERRIDE_EVENT_TYPES.map((eventType) => [
       reminderOverrideField(eventType),
       overrides[eventType] === undefined ? '' : String(overrides[eventType]),
     ]),
   ) as ReminderOverrideFields;
 
+/**
+ * Three stored states, three form values: key absent -> `''` (inherit the team-wide value), a
+ * number -> its digits, an explicit `null` -> the `off` sentinel.
+ */
+const lockOverrideFieldsFrom = (
+  overrides: TeamSettingsApi.TeamSettingsInfo['rsvpLockHoursBeforeOverrides'],
+): LockOverrideFields =>
+  Object.fromEntries(
+    OVERRIDE_EVENT_TYPES.map((eventType) => {
+      const stored = overrides[eventType];
+      return [
+        lockOverrideField(eventType),
+        stored === undefined ? '' : stored === null ? LOCK_OVERRIDE_OFF : String(stored),
+      ];
+    }),
+  ) as LockOverrideFields;
+
 export const settingsFormFrom = (
   settings: TeamSettingsApi.TeamSettingsInfo,
 ): SettingsFormValues => ({
   ...overrideFieldsFrom(settings.rsvpReminderDaysBeforeOverrides),
+  ...lockOverrideFieldsFrom(settings.rsvpLockHoursBeforeOverrides),
+  rsvpLockHoursBefore: Option.match(settings.rsvpLockHoursBefore, {
+    onNone: () => '',
+    onSome: String,
+  }),
   horizonDays: String(settings.eventHorizonDays),
   minPlayersThreshold: String(settings.minPlayersThreshold),
   rsvpRemindersEnabled: settings.rsvpRemindersEnabled,
@@ -161,9 +208,29 @@ export const findInvalidSettingsField = (values: SettingsFormValues): string | u
     ],
     [outside(int(values.rulesQuizIntervalDays), 1, 90), 'teamSettings_rulesQuizInterval'],
     [!HH_MM.test(normaliseTime(values.rulesQuizTime)), 'teamSettings_rulesQuizTime'],
-    // Per-event-type overrides. Blank is the valid "no override" value here, unlike every other
-    // number field above where blank is the bug being guarded against.
-    ...REMINDER_OVERRIDE_EVENT_TYPES.map(
+    // Blank is VALID here — it means "no early lock at all" — unlike every other number field
+    // above where blank is the half-typed value being guarded against. The `off` sentinel is NOT
+    // valid in the team-wide scalar: blank already says the same thing.
+    [
+      values.rsvpLockHoursBefore.trim() !== '' && outside(int(values.rsvpLockHoursBefore), 0, 336),
+      'teamSettings_rsvpLockHoursBefore',
+    ],
+    // Blank is VALID here too, but it means "inherit the scalar above" — the other of this card's
+    // two blanks. `outside(NaN, 0, 336)` is `TRUE` (see `outside` above), so every non-numeric
+    // string is rejected — including the `off` sentinel. Matching `off` EXPLICITLY is what lets
+    // it through, while every typo next to it (`offf`, `nope`) still fails. Compared lowercased
+    // so a value that did not come from the card's selector — a hand-edited stored `Off`, an
+    // older client — is not turned into a validation error the user cannot clear.
+    ...OVERRIDE_EVENT_TYPES.map((eventType) => {
+      const raw = values[lockOverrideField(eventType)].trim().toLowerCase();
+      return [
+        raw !== '' && raw !== LOCK_OVERRIDE_OFF && outside(int(raw), 0, 336),
+        'teamSettings_rsvpLockHoursBeforeOverrides',
+      ] as const;
+    }),
+    // Per-event-type reminder overrides. Blank is the valid "no override" value here, unlike every
+    // other number field above where blank is the bug being guarded against.
+    ...OVERRIDE_EVENT_TYPES.map(
       (eventType) =>
         [
           values[reminderOverrideField(eventType)].trim() !== '' &&
@@ -183,11 +250,31 @@ export const findInvalidSettingsField = (values: SettingsFormValues): string | u
 export const settingsRequestFrom = (
   values: SettingsFormValues,
 ): TeamSettingsApi.UpdateTeamSettingsRequest => ({
+  // Blank means OFF — there is no lock at all — so it is sent as a present-but-cleared
+  // `Some(None)` rather than omitted. (Blank in the override map below means the opposite:
+  // inherit this value. Two different blanks in one card.)
+  rsvpLockHoursBefore: Option.some(
+    values.rsvpLockHoursBefore.trim() === ''
+      ? Option.none()
+      : Option.some(Number.parseInt(values.rsvpLockHoursBefore, 10)),
+  ),
+  // Blank means INHERIT the value above, so the key is omitted entirely. `off` is the explicit
+  // per-type "no lock" and must survive as a real `null` — flattening it to blank here is what
+  // would let the next save of an unrelated field silently turn that type back to inherit.
+  rsvpLockHoursBeforeOverrides: Option.some(
+    Object.fromEntries(
+      OVERRIDE_EVENT_TYPES.flatMap((eventType) => {
+        const raw = values[lockOverrideField(eventType)].trim().toLowerCase();
+        if (raw === '') return [];
+        return [[eventType, raw === LOCK_OVERRIDE_OFF ? null : Number.parseInt(raw, 10)] as const];
+      }),
+    ),
+  ),
   // Blank means "no override", so the key is omitted entirely rather than sent as 0 — the server
   // falls back to `rsvpReminderDaysBefore` for any type missing from the map.
   rsvpReminderDaysBeforeOverrides: Option.some(
     Object.fromEntries(
-      REMINDER_OVERRIDE_EVENT_TYPES.flatMap((eventType) => {
+      OVERRIDE_EVENT_TYPES.flatMap((eventType) => {
         const raw = values[reminderOverrideField(eventType)].trim();
         return raw === '' ? [] : [[eventType, Number.parseInt(raw, 10)] as const];
       }),

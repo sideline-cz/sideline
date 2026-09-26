@@ -25,6 +25,12 @@ const ReminderOverridesFromJson = Schema.fromJsonString(
   TeamSettingsModel.RsvpReminderDaysBeforeOverrides,
 );
 
+/** `team_settings.rsvp_lock_hours_before_overrides`, through TEXT in both directions for the
+ * same reason as the reminder map above. A value of `null` here is meaningful — "no early lock
+ * for this event type" — and is not the same as the key being absent, which inherits the
+ * team-wide `rsvp_lock_hours_before`. */
+const LockOverridesFromJson = Schema.fromJsonString(TeamSettingsModel.RsvpLockHoursBeforeOverrides);
+
 class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   team_id: Team.TeamId,
   event_horizon_days: Schema.Number,
@@ -32,6 +38,8 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   rsvp_reminders_enabled: Schema.Boolean,
   rsvp_reminder_days_before: Schema.Number,
   rsvp_reminder_days_before_overrides: ReminderOverridesFromJson,
+  rsvp_lock_hours_before: Schema.OptionFromNullOr(Schema.Int),
+  rsvp_lock_hours_before_overrides: LockOverridesFromJson,
   rsvp_reminder_time: Schema.String,
   reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   timezone: Schema.String,
@@ -94,6 +102,8 @@ const TeamSettingsUpsertInput = Schema.Struct({
   rsvp_reminders_enabled: Schema.Boolean,
   rsvp_reminder_days_before: Schema.Number,
   rsvp_reminder_days_before_overrides: ReminderOverridesFromJson,
+  rsvp_lock_hours_before: Schema.OptionFromNullOr(Schema.Int),
+  rsvp_lock_hours_before_overrides: LockOverridesFromJson,
   rsvp_reminder_time: Schema.String,
   reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   timezone: Schema.String,
@@ -180,6 +190,8 @@ const make = Effect.gen(function* () {
              rsvp_reminders_enabled,
              rsvp_reminder_days_before,
              rsvp_reminder_days_before_overrides::text AS rsvp_reminder_days_before_overrides,
+             rsvp_lock_hours_before,
+             rsvp_lock_hours_before_overrides::text AS rsvp_lock_hours_before_overrides,
              TO_CHAR(rsvp_reminder_time, 'HH24:MI') AS rsvp_reminder_time,
              reminders_channel_id, timezone,
              discord_channel_late_rsvp,
@@ -242,6 +254,8 @@ const make = Effect.gen(function* () {
                                  rsvp_reminders_enabled,
                                  rsvp_reminder_days_before,
                                  rsvp_reminder_days_before_overrides,
+                                 rsvp_lock_hours_before,
+                                 rsvp_lock_hours_before_overrides,
                                  rsvp_reminder_time,
                                  reminders_channel_id, timezone,
                                  discord_channel_late_rsvp,
@@ -268,6 +282,8 @@ const make = Effect.gen(function* () {
               ${input.rsvp_reminders_enabled},
               ${input.rsvp_reminder_days_before},
               ${input.rsvp_reminder_days_before_overrides}::jsonb,
+              ${input.rsvp_lock_hours_before},
+              ${input.rsvp_lock_hours_before_overrides}::jsonb,
               ${input.rsvp_reminder_time},
               ${input.reminders_channel_id}, ${input.timezone},
               ${input.discord_channel_late_rsvp},
@@ -295,6 +311,8 @@ const make = Effect.gen(function* () {
         rsvp_reminders_enabled = ${input.rsvp_reminders_enabled},
         rsvp_reminder_days_before = ${input.rsvp_reminder_days_before},
         rsvp_reminder_days_before_overrides = ${input.rsvp_reminder_days_before_overrides}::jsonb,
+        rsvp_lock_hours_before = ${input.rsvp_lock_hours_before},
+        rsvp_lock_hours_before_overrides = ${input.rsvp_lock_hours_before_overrides}::jsonb,
         rsvp_reminder_time = ${input.rsvp_reminder_time},
         reminders_channel_id = ${input.reminders_channel_id},
         timezone = ${input.timezone},
@@ -324,6 +342,8 @@ const make = Effect.gen(function* () {
                 rsvp_reminders_enabled,
                 rsvp_reminder_days_before,
                 rsvp_reminder_days_before_overrides::text AS rsvp_reminder_days_before_overrides,
+                rsvp_lock_hours_before,
+                rsvp_lock_hours_before_overrides::text AS rsvp_lock_hours_before_overrides,
                 TO_CHAR(rsvp_reminder_time, 'HH24:MI') AS rsvp_reminder_time,
                 reminders_channel_id, timezone,
                 discord_channel_late_rsvp,
@@ -477,6 +497,9 @@ const make = Effect.gen(function* () {
     rsvpReminderDaysBefore = 1,
     // `{}` keeps every event type on the scalar default — the pre-override behaviour.
     rsvpReminderDaysBeforeOverrides = {},
+    // `None` = no early RSVP lock, which is every team until a captain sets one.
+    rsvpLockHoursBefore = Option.none<number>(),
+    rsvpLockHoursBeforeOverrides = {},
     rsvpReminderTime = '18:00',
     remindersChannelId = Option.none(),
     timezone = 'Europe/Prague',
@@ -509,6 +532,8 @@ const make = Effect.gen(function* () {
     rsvpRemindersEnabled?: boolean;
     rsvpReminderDaysBefore?: number;
     rsvpReminderDaysBeforeOverrides?: TeamSettingsModel.RsvpReminderDaysBeforeOverrides;
+    rsvpLockHoursBefore?: Option.Option<number>;
+    rsvpLockHoursBeforeOverrides?: TeamSettingsModel.RsvpLockHoursBeforeOverrides;
     rsvpReminderTime?: string;
     remindersChannelId?: Option.Option<Discord.Snowflake>;
     timezone?: string;
@@ -540,6 +565,8 @@ const make = Effect.gen(function* () {
       rsvp_reminders_enabled: rsvpRemindersEnabled,
       rsvp_reminder_days_before: rsvpReminderDaysBefore,
       rsvp_reminder_days_before_overrides: rsvpReminderDaysBeforeOverrides,
+      rsvp_lock_hours_before: rsvpLockHoursBefore,
+      rsvp_lock_hours_before_overrides: rsvpLockHoursBeforeOverrides,
       rsvp_reminder_time: rsvpReminderTime,
       reminders_channel_id: remindersChannelId,
       timezone,

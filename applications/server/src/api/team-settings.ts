@@ -1,4 +1,9 @@
-import { Auth, EventApi, TeamSettingsApi } from '@sideline/domain';
+import {
+  Auth,
+  EventApi,
+  TeamSettingsApi,
+  type TeamSettings as TeamSettingsModel,
+} from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -6,6 +11,7 @@ import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import { eventVisibleNow } from '~/repositories/eventVisibility.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import {
@@ -15,6 +21,30 @@ import {
 } from '~/utils/applyDiscordFormat.js';
 
 const forbidden = new EventApi.Forbidden();
+
+/**
+ * The RSVP-lock configuration of a settings row, as one comparable string, so
+ * the tap below can dirty-mark personal cards ONLY when the lock actually
+ * changed — the same "don't touch every row on an unrelated save" gating the
+ * timezone taps use, and the reason this is a fingerprint rather than a `!==`:
+ * the overrides map is a fresh object on every decode, so identity says nothing.
+ * Entries are sorted, so a pure key-order difference in the JSONB is not a
+ * change either.
+ */
+// The `tz` argument `eventVisibleNow` requires: never NULL, single-valued per event. Correlated
+// subselect because the dirty-mark UPDATE has no join to `team_settings`. Same literal fallback as
+// the column default and `EventsRepository.ts:1168`, so both halves agree on it.
+const TEAM_TIMEZONE_SUBSELECT =
+  "COALESCE((SELECT ts.timezone FROM team_settings ts WHERE ts.team_id = e.team_id), 'Europe/Prague')";
+
+const lockFingerprint = (
+  hours: Option.Option<number>,
+  overrides: TeamSettingsModel.RsvpLockHoursBeforeOverrides,
+): string =>
+  JSON.stringify([
+    Option.getOrNull(hours),
+    Object.entries(overrides).sort(([a], [b]) => (a < b ? -1 : 1)),
+  ]);
 
 export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (handlers) =>
   Effect.Do.pipe(
@@ -40,6 +70,8 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     rsvpRemindersEnabled: true,
                     rsvpReminderDaysBefore: 1,
                     rsvpReminderDaysBeforeOverrides: {},
+                    rsvpLockHoursBefore: Option.none(),
+                    rsvpLockHoursBeforeOverrides: {},
                     claimRequestDaysBefore: 3,
                     rsvpReminderTime: '18:00',
                     remindersChannelId: Option.none(),
@@ -71,6 +103,8 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     rsvpRemindersEnabled: s.rsvp_reminders_enabled,
                     rsvpReminderDaysBefore: s.rsvp_reminder_days_before,
                     rsvpReminderDaysBeforeOverrides: s.rsvp_reminder_days_before_overrides,
+                    rsvpLockHoursBefore: s.rsvp_lock_hours_before,
+                    rsvpLockHoursBeforeOverrides: s.rsvp_lock_hours_before_overrides,
                     claimRequestDaysBefore: s.claim_request_days_before,
                     rsvpReminderTime: s.rsvp_reminder_time,
                     remindersChannelId: s.reminders_channel_id,
@@ -118,7 +152,18 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                 onSome: (s) => s.timezone,
               }),
             ),
-            Effect.bind('result', ({ existing, oldTz }) =>
+            // The team's OLD lock configuration, for the same reason: a change to
+            // it makes every already-rendered personal card's `RSVP until` line
+            // stale (or newly due), and nothing else dirty-marks for it. A team
+            // with no settings row yet has no lock and no cards to stale.
+            Effect.let('oldLock', ({ existing }) =>
+              Option.match(existing, {
+                onNone: () => lockFingerprint(Option.none(), {}),
+                onSome: (s) =>
+                  lockFingerprint(s.rsvp_lock_hours_before, s.rsvp_lock_hours_before_overrides),
+              }),
+            ),
+            Effect.bind('result', ({ existing, oldLock, oldTz }) =>
               SqlClient.SqlClient.asEffect().pipe(
                 Effect.flatMap((sql) =>
                   sql
@@ -142,6 +187,15 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                             ),
                             rsvpReminderDaysBeforeOverrides: Option.getOrElse(
                               payload.rsvpReminderDaysBeforeOverrides,
+                              () => ({}),
+                            ),
+                            // Nested `Option`, like `remindersChannelId` below: flatten is
+                            // right here only because there is no stored row to preserve —
+                            // outer `None` (field absent) and inner `None` (cleared) both mean
+                            // "no lock" on a brand-new settings row.
+                            rsvpLockHoursBefore: Option.flatten(payload.rsvpLockHoursBefore),
+                            rsvpLockHoursBeforeOverrides: Option.getOrElse(
+                              payload.rsvpLockHoursBeforeOverrides,
                               () => ({}),
                             ),
                             claimRequestDaysBefore: Option.getOrElse(
@@ -230,6 +284,18 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                             rsvpReminderDaysBeforeOverrides: Option.getOrElse(
                               payload.rsvpReminderDaysBeforeOverrides,
                               () => s.rsvp_reminder_days_before_overrides,
+                            ),
+                            // `Option.match`, never `Option.getOrElse` — the payload field is
+                            // an `Option<Option<number>>` and `getOrElse` would collapse
+                            // "field absent, leave it alone" into "cleared to off". Same shape
+                            // and same reason as `remindersChannelId` below.
+                            rsvpLockHoursBefore: Option.match(payload.rsvpLockHoursBefore, {
+                              onNone: () => s.rsvp_lock_hours_before,
+                              onSome: (v) => v,
+                            }),
+                            rsvpLockHoursBeforeOverrides: Option.getOrElse(
+                              payload.rsvpLockHoursBeforeOverrides,
+                              () => s.rsvp_lock_hours_before_overrides,
                             ),
                             claimRequestDaysBefore: Option.getOrElse(
                               payload.claimRequestDaysBefore,
@@ -409,6 +475,40 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                           AND es.times_are_team_local
                       `.pipe(Effect.asVoid),
                         ),
+                        // A lock change re-renders this team's personal cards: the
+                        // `RSVP until` line on every already-sent card is now stale,
+                        // or newly due, and nothing else dirty-marks for it (nothing
+                        // dirty-marks at the DEADLINE either — that stays a carried
+                        // risk, and is a different thing).
+                        //
+                        // The population is `eventVisibleNow`, NOT the timezone taps'
+                        // `status = 'active' AND start_at >= now()`. That narrower guard is
+                        // correct for THEM — they rewrite future series times and must leave a
+                        // running event's start alone — but copying it here silently skipped
+                        // every in-progress all-day event, because an all-day event flips to
+                        // `'started'` at the same instant its `start_at` passes while staying
+                        // visible and RSVP-able (`eventVisibility.ts`). A lock set during a
+                        // Fri–Sun tournament would never have reached those cards.
+                        // The `CASE` matches the taps above and `EventsRepository.ts:1183`'s
+                        // `IS NULL` guard: an existing stamp is never pushed later, so an
+                        // in-flight reconcile is undisturbed.
+                        Effect.tap((upserted) =>
+                          oldLock ===
+                          lockFingerprint(
+                            upserted.rsvp_lock_hours_before,
+                            upserted.rsvp_lock_hours_before_overrides,
+                          )
+                            ? Effect.void
+                            : sql`
+                        UPDATE events e SET
+                          personal_messages_dirty_at = CASE
+                            WHEN e.personal_messages_dirty_at IS NULL
+                            THEN date_trunc('milliseconds', now())
+                            ELSE e.personal_messages_dirty_at END
+                        WHERE e.team_id = ${teamId}
+                          AND ${sql.unsafe(eventVisibleNow('e', TEAM_TIMEZONE_SUBSELECT))}
+                      `.pipe(Effect.asVoid),
+                        ),
                       ),
                     )
                     .pipe(catchSqlErrors),
@@ -424,6 +524,8 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   rsvpRemindersEnabled: result.rsvp_reminders_enabled,
                   rsvpReminderDaysBefore: result.rsvp_reminder_days_before,
                   rsvpReminderDaysBeforeOverrides: result.rsvp_reminder_days_before_overrides,
+                  rsvpLockHoursBefore: result.rsvp_lock_hours_before,
+                  rsvpLockHoursBeforeOverrides: result.rsvp_lock_hours_before_overrides,
                   claimRequestDaysBefore: result.claim_request_days_before,
                   rsvpReminderTime: result.rsvp_reminder_time,
                   remindersChannelId: result.reminders_channel_id,

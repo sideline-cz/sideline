@@ -218,6 +218,10 @@ type EventRecord = {
   // undefined, exactly as today). Only the new all-day fixtures below set them.
   all_day?: boolean;
   timezone?: string;
+  // RSVP lock (T2). Optional for the same reason, and deliberately so: every
+  // fixture above leaves it `undefined`, which is exactly the shape
+  // `rsvpClosesAtOf` must coalesce to `Option.none()` rather than throw on.
+  rsvp_lock_hours_before?: Option.Option<number>;
 };
 
 let eventsStore: Map<Event.EventId, EventRecord>;
@@ -1824,6 +1828,7 @@ type RpcEventRecord = {
   // PR 4 additions (plan §7.7e, BL1) — see the identical note on `EventRecord` above.
   all_day?: boolean;
   timezone?: string;
+  rsvp_lock_hours_before?: Option.Option<number>;
 };
 
 type RpcRsvpRecord = {
@@ -3407,5 +3412,255 @@ describe('canRsvp agreement — HTTP getRsvps vs RPC Event/GetRsvpCounts (PR 4, 
 
     expect(httpBody.canRsvp).toBe(true);
     expect(rpcResult.canRsvp).toBe(true);
+  });
+});
+
+// ============================================================================
+// T2 — the RSVP lock, end to end over the two web surfaces
+// ============================================================================
+//
+// The lock rides on the event (`rsvp_lock_hours_before`, resolved in SQL from
+// `team_settings`), so it is seeded on the store fixtures, not on the settings
+// mock. Every pre-existing fixture in this file leaves the field `undefined`:
+// that is the shape `rsvpClosesAtOf` must read as `Option.none()` instead of
+// throwing, and case "no lock" below pins it.
+
+describe('RSVP lock — HTTP getRsvps / submitRsvp', () => {
+  const NOW = '2029-06-01T12:00:00.000Z';
+  const LOCKED_EVENT = '00000000-0000-0000-0000-0000000000a0' as Event.EventId;
+  const GROUPED_EVENT = '00000000-0000-0000-0000-0000000000a1' as Event.EventId;
+
+  const seedTimed = (
+    id: Event.EventId,
+    startAtIso: string,
+    lock: Option.Option<number>,
+    extra: Partial<EventRecord> = {},
+  ) => {
+    eventsStore.set(id, {
+      id,
+      team_id: TEST_TEAM_ID,
+      training_type_id: Option.none(),
+      event_type: 'training',
+      title: 'Lockable Training',
+      description: Option.none(),
+      start_at: DateTime.makeUnsafe(startAtIso),
+      end_at: Option.none(),
+      location: Option.none(),
+      status: 'active',
+      created_by: TEST_ADMIN_MEMBER_ID,
+      training_type_name: Option.none(),
+      created_by_name: Option.some('Admin User'),
+      series_id: Option.none(),
+      series_modified: false,
+      discord_target_channel_id: Option.none(),
+      owner_group_id: Option.none(),
+      owner_group_name: Option.none(),
+      member_group_id: Option.none(),
+      member_group_name: Option.none(),
+      rsvp_lock_hours_before: lock,
+      ...extra,
+    });
+  };
+
+  const freeze = (iso: string = NOW) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(iso));
+  };
+
+  const getRsvps = (id: Event.EventId) =>
+    handler(
+      new Request(`${BASE}/${id}/rsvps`, { headers: { Authorization: 'Bearer user-token' } }),
+    );
+
+  const putRsvp = (id: Event.EventId, body: unknown) =>
+    handler(
+      new Request(`${BASE}/${id}/rsvp`, {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer user-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('case 1: canRsvp is FALSE inside the lock window (starts in 2h, locks 24h before)', async () => {
+    freeze();
+    seedTimed(LOCKED_EVENT, '2029-06-01T14:00:00.000Z', Option.some(24));
+
+    const response = await getRsvps(LOCKED_EVENT);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.canRsvp).toBe(false);
+  });
+
+  it('case 2: canRsvp is TRUE outside the lock window (starts in 48h, locks 24h before)', async () => {
+    freeze();
+    seedTimed(LOCKED_EVENT, '2029-06-03T12:00:00.000Z', Option.some(24));
+
+    const body = await (await getRsvps(LOCKED_EVENT)).json();
+    expect(body.canRsvp).toBe(true);
+  });
+
+  it('case 3: submitRsvp inside the window → 400 RsvpDeadlinePassed AND no row is written', async () => {
+    freeze();
+    seedTimed(LOCKED_EVENT, '2029-06-01T14:00:00.000Z', Option.some(24));
+
+    const response = await putRsvp(LOCKED_EVENT, { response: 'yes', message: null });
+    expect(response.status).toBe(400);
+    expect((await response.json())._tag).toBe('RsvpDeadlinePassed');
+    // The gate must refuse BEFORE the write, not merely report a status.
+    expect(rsvpsStore.get(`${LOCKED_EVENT}:${TEST_MEMBER_ID}`)).toBeUndefined();
+  });
+
+  it('case 4: NO REGRESSION — with no lock, an event starting in one minute still accepts an RSVP', async () => {
+    freeze();
+    seedTimed(LOCKED_EVENT, '2029-06-01T12:01:00.000Z', Option.none());
+
+    const response = await putRsvp(LOCKED_EVENT, { response: 'yes', message: null });
+    expect(response.status).toBe(204);
+  });
+
+  it('case 5: editing an existing note inside the window → 400 RsvpDeadlinePassed', async () => {
+    freeze();
+    // Open at first: answer, then move the start so the lock has bitten.
+    seedTimed(LOCKED_EVENT, '2029-06-03T12:00:00.000Z', Option.some(24));
+    expect((await putRsvp(LOCKED_EVENT, { response: 'yes', message: 'first' })).status).toBe(204);
+
+    seedTimed(LOCKED_EVENT, '2029-06-01T14:00:00.000Z', Option.some(24));
+    const edited = await putRsvp(LOCKED_EVENT, { response: 'yes', message: 'second' });
+    expect(edited.status).toBe(400);
+    const cleared = await putRsvp(LOCKED_EVENT, { response: 'yes', message: '' });
+    expect(cleared.status).toBe(400);
+    // The stored note is untouched by either refusal.
+    expect(rsvpsStore.get(`${LOCKED_EVENT}:${TEST_MEMBER_ID}`)?.message).toStrictEqual(
+      Option.some('first'),
+    );
+  });
+
+  it('case 6 [Q3]: locking retroactively keeps the stored answer — only canRsvp flips', async () => {
+    freeze();
+    seedTimed(LOCKED_EVENT, '2029-06-01T14:00:00.000Z', Option.none());
+    expect((await putRsvp(LOCKED_EVENT, { response: 'yes', message: 'see you' })).status).toBe(204);
+
+    const before = await (await getRsvps(LOCKED_EVENT)).json();
+    expect(before.canRsvp).toBe(true);
+    expect(before.myResponse).toBe('yes');
+
+    // Same event, the team now locks 24h before start — retroactively closed.
+    seedTimed(LOCKED_EVENT, '2029-06-01T14:00:00.000Z', Option.some(24));
+    const after = await (await getRsvps(LOCKED_EVENT)).json();
+    expect(after.canRsvp).toBe(false);
+    expect(after.myResponse).toBe('yes');
+    expect(after.myMessage).toBe('see you');
+    expect(after.yesCount).toBe(1);
+  });
+
+  it('case 8: rsvpClosesAt is Some(start_at - hours) when a lock applies and the member is invited', async () => {
+    freeze();
+    seedTimed(LOCKED_EVENT, '2029-06-03T12:00:00.000Z', Option.some(24));
+
+    const body = await (await getRsvps(LOCKED_EVENT)).json();
+    expect(body.canRsvp).toBe(true);
+    expect(body.rsvpClosesAt).toBeDefined();
+    expect(new Date(body.rsvpClosesAt).toISOString()).toBe('2029-06-02T12:00:00.000Z');
+  });
+
+  it('case 9: rsvpClosesAt is None for a member OUTSIDE member_group on a wide-open locked event', async () => {
+    // `canRsvp` is false here because they are not invited, NOT because time ran
+    // out. Sending the deadline would tell them "RSVPs closed at 12:00" while
+    // RSVPs are wide open for everyone in the group.
+    freeze();
+    seedTimed(GROUPED_EVENT, '2029-06-03T12:00:00.000Z', Option.some(24), {
+      member_group_id: Option.some('00000000-0000-0000-0000-0000000000b0'),
+    });
+
+    const body = await (await getRsvps(GROUPED_EVENT)).json();
+    expect(body.canRsvp).toBe(false);
+    expect(body.rsvpClosesAt ?? null).toBeNull();
+  });
+
+  it('case 10: rsvpClosesAt is None when the resolved lock is NULL', async () => {
+    freeze();
+    seedTimed(LOCKED_EVENT, '2029-06-03T12:00:00.000Z', Option.none());
+
+    const body = await (await getRsvps(LOCKED_EVENT)).json();
+    expect(body.canRsvp).toBe(true);
+    expect(body.rsvpClosesAt ?? null).toBeNull();
+  });
+});
+
+describe('RSVP lock — canRsvp agreement between HTTP getRsvps and RPC Event/GetRsvpCounts', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('case 7: both surfaces report canRsvp=false for the same locked event', async () => {
+    resetRpcStores();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2029-06-01T12:00:00.000Z'));
+
+    const eventId = '00000000-0000-0000-0000-0000000000a5' as Event.EventId;
+    const lockedFields = {
+      start_at: DateTime.makeUnsafe('2029-06-01T14:00:00.000Z'),
+      status: 'active' as Event.EventStatus,
+      rsvp_lock_hours_before: Option.some(24),
+    };
+
+    eventsStore.set(eventId, {
+      id: eventId,
+      team_id: TEST_TEAM_ID,
+      training_type_id: Option.none(),
+      event_type: 'training',
+      title: 'Locked Training',
+      description: Option.none(),
+      end_at: Option.none(),
+      location: Option.none(),
+      created_by: TEST_ADMIN_MEMBER_ID,
+      training_type_name: Option.none(),
+      created_by_name: Option.none(),
+      series_id: Option.none(),
+      series_modified: false,
+      discord_target_channel_id: Option.none(),
+      owner_group_id: Option.none(),
+      owner_group_name: Option.none(),
+      member_group_id: Option.none(),
+      member_group_name: Option.none(),
+      ...lockedFields,
+    });
+    rpcEventsStore.set(RPC_TEST_EVENT_ID, {
+      ...(rpcEventsStore.get(RPC_TEST_EVENT_ID) as RpcEventRecord),
+      ...lockedFields,
+    });
+
+    const httpBody = await (
+      await handler(
+        new Request(`${BASE}/${eventId}/rsvps`, {
+          headers: { Authorization: 'Bearer user-token' },
+        }),
+      )
+    ).json();
+
+    const getRsvpCountsRpc = Effect.scoped(
+      (RpcTest.makeClient(EventRpcGroup.EventRpcGroup) as Effect.Effect<any, never, any>).pipe(
+        Effect.flatMap(
+          (rpc: any) =>
+            rpc['Event/GetRsvpCounts']({ event_id: RPC_TEST_EVENT_ID }) as Effect.Effect<
+              EventRpcModels.RsvpCountsResult,
+              unknown,
+              never
+            >,
+        ),
+      ),
+    ).pipe(Effect.provide(RpcTestLayer)) as Effect.Effect<
+      EventRpcModels.RsvpCountsResult,
+      unknown,
+      never
+    >;
+    const rpcResult = await Effect.runPromise(getRsvpCountsRpc);
+
+    expect(httpBody.canRsvp).toBe(false);
+    expect(rpcResult.canRsvp).toBe(false);
   });
 });

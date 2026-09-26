@@ -192,6 +192,8 @@ let teamSettingsStore: {
   rsvp_reminders_enabled: boolean;
   rsvp_reminder_days_before: number;
   rsvp_reminder_days_before_overrides: Record<string, number>;
+  rsvp_lock_hours_before: Option.Option<number>;
+  rsvp_lock_hours_before_overrides: Record<string, number | null>;
   claim_request_days_before: number;
   rsvp_reminder_time: string;
   reminders_channel_id: Option.Option<string>;
@@ -213,6 +215,8 @@ const resetStores = () => {
     rsvp_reminders_enabled: true,
     rsvp_reminder_days_before: 1,
     rsvp_reminder_days_before_overrides: {},
+    rsvp_lock_hours_before: Option.none(),
+    rsvp_lock_hours_before_overrides: {},
     claim_request_days_before: 3,
     rsvp_reminder_time: '18:00',
     reminders_channel_id: Option.none(),
@@ -567,6 +571,8 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
         rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
         rsvp_reminder_days_before_overrides: teamSettingsStore.rsvp_reminder_days_before_overrides,
+        rsvp_lock_hours_before: teamSettingsStore.rsvp_lock_hours_before,
+        rsvp_lock_hours_before_overrides: teamSettingsStore.rsvp_lock_hours_before_overrides,
         claim_request_days_before: teamSettingsStore.claim_request_days_before,
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
@@ -600,6 +606,8 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
         rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
         rsvp_reminder_days_before_overrides: teamSettingsStore.rsvp_reminder_days_before_overrides,
+        rsvp_lock_hours_before: teamSettingsStore.rsvp_lock_hours_before,
+        rsvp_lock_hours_before_overrides: teamSettingsStore.rsvp_lock_hours_before_overrides,
         claim_request_days_before: teamSettingsStore.claim_request_days_before,
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
@@ -630,6 +638,8 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     min_players_threshold: number;
     rsvp_reminder_days_before?: number;
     rsvp_reminder_days_before_overrides?: Record<string, number>;
+    rsvp_lock_hours_before?: Option.Option<number>;
+    rsvp_lock_hours_before_overrides?: Record<string, number | null>;
     claim_request_days_before?: number;
     rsvp_reminder_time?: string;
     reminders_channel_id?: Option.Option<string>;
@@ -646,6 +656,11 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       rsvp_reminder_days_before_overrides:
         input.rsvp_reminder_days_before_overrides ??
         teamSettingsStore.rsvp_reminder_days_before_overrides,
+      rsvp_lock_hours_before:
+        input.rsvp_lock_hours_before ?? teamSettingsStore.rsvp_lock_hours_before,
+      rsvp_lock_hours_before_overrides:
+        input.rsvp_lock_hours_before_overrides ??
+        teamSettingsStore.rsvp_lock_hours_before_overrides,
       claim_request_days_before:
         input.claim_request_days_before ?? teamSettingsStore.claim_request_days_before,
       rsvp_reminder_time: input.rsvp_reminder_time ?? teamSettingsStore.rsvp_reminder_time,
@@ -676,6 +691,8 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     minPlayersThreshold: number;
     rsvpReminderDaysBefore?: number;
     rsvpReminderDaysBeforeOverrides?: Record<string, number>;
+    rsvpLockHoursBefore?: Option.Option<number>;
+    rsvpLockHoursBeforeOverrides?: Record<string, number | null>;
     claimRequestDaysBefore?: number;
     rsvpReminderTime?: string;
     remindersChannelId?: Option.Option<string>;
@@ -689,6 +706,10 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       teamSettingsStore.rsvp_reminder_days_before = input.rsvpReminderDaysBefore;
     if (input.rsvpReminderDaysBeforeOverrides !== undefined)
       teamSettingsStore.rsvp_reminder_days_before_overrides = input.rsvpReminderDaysBeforeOverrides;
+    if (input.rsvpLockHoursBefore !== undefined)
+      teamSettingsStore.rsvp_lock_hours_before = input.rsvpLockHoursBefore;
+    if (input.rsvpLockHoursBeforeOverrides !== undefined)
+      teamSettingsStore.rsvp_lock_hours_before_overrides = input.rsvpLockHoursBeforeOverrides;
     if (input.claimRequestDaysBefore !== undefined)
       teamSettingsStore.claim_request_days_before = input.claimRequestDaysBefore;
     if (input.rsvpReminderTime !== undefined)
@@ -707,6 +728,8 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
       rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
       rsvp_reminder_days_before_overrides: teamSettingsStore.rsvp_reminder_days_before_overrides,
+      rsvp_lock_hours_before: teamSettingsStore.rsvp_lock_hours_before,
+      rsvp_lock_hours_before_overrides: teamSettingsStore.rsvp_lock_hours_before_overrides,
       claim_request_days_before: teamSettingsStore.claim_request_days_before,
       rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
       reminders_channel_id: teamSettingsStore.reminders_channel_id,

@@ -41,6 +41,7 @@ const makeEntry = (
     event_type_color: Option.none(),
     start_date: Option.none(),
     end_date: Option.none(),
+    rsvp_closes_at: Option.none(),
     ...overrides,
   });
 

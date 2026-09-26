@@ -932,3 +932,169 @@ describe("Fix 3: updateFutureUnmodifiedInSeries with a bound tz = 'UTC' matches 
       }).pipe(Effect.provide(SeedLayer)),
   );
 });
+
+// Review finding (Must Fix): changing the RSVP lock used to dirty-mark NOTHING, so every
+// already-rendered personal card kept its stale — or entirely absent — `🔒 RSVP until` line
+// until something unrelated dirtied the event. The fix is a third tap in the same `.pipe(…)`
+// as the two timezone ones above, gated the same way: only when the lock configuration
+// actually CHANGED, so an unrelated save still does not touch every row of the team.
+describe('team-settings RSVP-lock change marks personal cards dirty', () => {
+  it.effect('a lock change dirties future active events only', () =>
+    Effect.gen(function* () {
+      const guildId = '330000000000000020' as Discord.Snowflake;
+      const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+      yield* TeamSettingsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.upsert({
+            teamId,
+            eventHorizonDays: 14,
+            minPlayersThreshold: 0,
+            timezone: 'Europe/Prague',
+          }),
+        ),
+      );
+
+      const futureId = yield* seedEvent(teamId, memberId, {
+        allDay: false,
+        anchored: false,
+        startAtIso: '2030-07-15T18:00:00Z',
+      });
+      const pastId = yield* seedEvent(teamId, memberId, {
+        allDay: false,
+        anchored: false,
+        startAtIso: '2020-07-15T18:00:00Z',
+      });
+      const cancelledId = yield* seedEvent(teamId, memberId, {
+        allDay: false,
+        anchored: false,
+        startAtIso: '2030-07-16T18:00:00Z',
+      });
+      yield* SqlClient.SqlClient.asEffect().pipe(
+        Effect.flatMap((sql) =>
+          sql.unsafe(`UPDATE events SET status = 'cancelled' WHERE id = '${cancelledId}'`),
+        ),
+      );
+
+      const response = yield* Effect.promise(() =>
+        patchSettings(teamId, { rsvpLockHoursBefore: 24 }),
+      );
+      expect(response.status).toBe(200);
+
+      expect(yield* readPersonalMessagesDirtyAt(futureId)).not.toBeNull();
+      expect(yield* readPersonalMessagesDirtyAt(pastId)).toBeNull();
+      expect(yield* readPersonalMessagesDirtyAt(cancelledId)).toBeNull();
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  // Second review round: the tap was first written with the timezone taps' population
+  // (`status = 'active' AND start_at >= now()`). That is right for THEM — they rewrite future
+  // series times and must leave a running event alone — but an all-day event flips to `'started'`
+  // at the same instant its `start_at` passes while staying visible and RSVP-able
+  // (`eventVisibility.ts`), so a lock set during a Fri–Sun tournament reached none of its cards.
+  // The population is `eventVisibleNow`, and this case is what tells the two apart.
+  it.effect('an IN-PROGRESS all-day event is dirtied; an in-progress TIMED one is not', () =>
+    Effect.gen(function* () {
+      const guildId = '330000000000000022' as Discord.Snowflake;
+      const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+      yield* TeamSettingsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.upsert({
+            teamId,
+            eventHorizonDays: 14,
+            minPlayersThreshold: 0,
+            timezone: 'Europe/Prague',
+          }),
+        ),
+      );
+
+      // Clock-derived, not a literal: the predicate under test reads SQL `now()`, so a fixed
+      // instant here would expire (AGENTS.md → "Date Fixtures On Now-Gated Paths Expire"). The
+      // shape is the reported one — a tournament that started yesterday and runs through
+      // tomorrow, so `start_at` is firmly in the past while the last local day is still ahead.
+      const tournamentId = yield* seedEvent(teamId, memberId, {
+        allDay: true,
+        anchored: true,
+        startAtIso: '2030-07-15T00:00:00Z',
+      });
+      const timedId = yield* seedEvent(teamId, memberId, {
+        allDay: false,
+        anchored: false,
+        startAtIso: '2030-07-15T18:00:00Z',
+      });
+      yield* SqlClient.SqlClient.asEffect().pipe(
+        Effect.flatMap((sql) =>
+          sql.unsafe(`
+            UPDATE events SET
+              status = 'started',
+              start_at = (date_trunc('day', now() AT TIME ZONE 'Europe/Prague')
+                            - INTERVAL '1 day') AT TIME ZONE 'Europe/Prague',
+              end_at   = (date_trunc('day', now() AT TIME ZONE 'Europe/Prague')
+                            + INTERVAL '1 day') AT TIME ZONE 'Europe/Prague'
+            WHERE id = '${tournamentId}'
+          `),
+        ),
+      );
+      // The control: a TIMED event that has already started is genuinely over for RSVP, so the
+      // relaxed predicate must not sweep it in too.
+      yield* SqlClient.SqlClient.asEffect().pipe(
+        Effect.flatMap((sql) =>
+          sql.unsafe(`
+            UPDATE events SET status = 'started', start_at = now() - INTERVAL '1 hour'
+            WHERE id = '${timedId}'
+          `),
+        ),
+      );
+
+      const response = yield* Effect.promise(() =>
+        patchSettings(teamId, { rsvpLockHoursBefore: 24 }),
+      );
+      expect(response.status).toBe(200);
+
+      expect(yield* readPersonalMessagesDirtyAt(tournamentId)).not.toBeNull();
+      expect(yield* readPersonalMessagesDirtyAt(timedId)).toBeNull();
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('a per-event-type OVERRIDE change dirties too, but an unrelated save does not', () =>
+    Effect.gen(function* () {
+      const guildId = '330000000000000021' as Discord.Snowflake;
+      const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+      yield* TeamSettingsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.upsert({
+            teamId,
+            eventHorizonDays: 14,
+            minPlayersThreshold: 0,
+            timezone: 'Europe/Prague',
+            rsvpLockHoursBefore: Option.some(24),
+          }),
+        ),
+      );
+
+      const eventId = yield* seedEvent(teamId, memberId, {
+        allDay: false,
+        anchored: false,
+        startAtIso: '2030-07-15T18:00:00Z',
+      });
+
+      // Unrelated save, and a re-send of the SAME lock value: neither is a change, so the
+      // row must stay clean. This is the gate that stops every settings save from taking a
+      // row lock on every future event of the team.
+      const noop = yield* Effect.promise(() =>
+        patchSettings(teamId, { minPlayersThreshold: 7, rsvpLockHoursBefore: 24 }),
+      );
+      expect(noop.status).toBe(200);
+      expect(yield* readPersonalMessagesDirtyAt(eventId)).toBeNull();
+
+      // Only the map moves — the scalar is unchanged — and that alone must dirty.
+      const changed = yield* Effect.promise(() =>
+        patchSettings(teamId, { rsvpLockHoursBeforeOverrides: { tournament: null } }),
+      );
+      expect(changed.status).toBe(200);
+      expect(yield* readPersonalMessagesDirtyAt(eventId)).not.toBeNull();
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});

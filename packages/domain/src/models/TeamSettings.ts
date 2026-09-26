@@ -19,6 +19,21 @@ export const RsvpReminderDaysBeforeOverrides = Schema.Record(
 );
 export type RsvpReminderDaysBeforeOverrides = typeof RsvpReminderDaysBeforeOverrides.Type;
 
+// Per-event-type overrides for how many hours before start RSVPs lock. Same partial-map shape as
+// `RsvpReminderDaysBeforeOverrides` above, and unrecognised keys are dropped on decode for the
+// same reason.
+//
+// The value is `NullOr`, not a bare `Int`, because three states are reachable and all three are
+// authorable: key absent = inherit `rsvpLockHoursBefore`, explicit `null` = no early lock for
+// this type (the all-day end-of-day grace stays), `0` = lock exactly at start.
+export const RsvpLockHoursBeforeOverrides = Schema.Record(
+  EventType,
+  Schema.optionalKey(
+    Schema.NullOr(Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 336 })))),
+  ),
+);
+export type RsvpLockHoursBeforeOverrides = typeof RsvpLockHoursBeforeOverrides.Type;
+
 export class TeamSettings extends Model.Class<TeamSettings>('TeamSettings')({
   team_id: TeamId,
   event_horizon_days: Schema.Int,
@@ -27,6 +42,8 @@ export class TeamSettings extends Model.Class<TeamSettings>('TeamSettings')({
   require_complete_profile: Schema.Boolean,
   rsvp_reminder_days_before: Schema.Int,
   rsvp_reminder_days_before_overrides: RsvpReminderDaysBeforeOverrides,
+  rsvp_lock_hours_before: Schema.OptionFromNullOr(Schema.Int),
+  rsvp_lock_hours_before_overrides: RsvpLockHoursBeforeOverrides,
   max_missed_rsvps: Schema.Int,
   rsvp_reminder_time: Schema.String,
   reminders_channel_id: Schema.OptionFromNullOr(Snowflake),

@@ -357,6 +357,7 @@ const buildEvent = (
     start_date: '2026-06-01',
     end_date: '2026-06-01',
     timezone: 'Europe/Prague',
+    rsvp_lock_hours_before: Option.none(),
   });
 
 const capEvents = Array.from({ length: 7 }, (_, i) =>

@@ -126,17 +126,48 @@ export const buildUpcomingEventEmbed = (params: {
       fields.push({ name: m.bot_embed_where({}, { locale }), value, inline: false }),
   });
 
+  const rsvpSummary = m.bot_embed_rsvp_summary(
+    {
+      yes: String(entry.yes_count),
+      coming_later: String(entry.coming_later_count),
+      maybe: String(entry.maybe_count),
+      no: String(entry.no_count),
+    },
+    { locale },
+  );
   fields.push({
     name: m.bot_embed_rsvps({}, { locale }),
-    value: m.bot_embed_rsvp_summary(
-      {
-        yes: String(entry.yes_count),
-        coming_later: String(entry.coming_later_count),
-        maybe: String(entry.maybe_count),
-        no: String(entry.no_count),
-      },
-      { locale },
-    ),
+    /* The deadline is APPENDED to this field's value rather than added as its own field,
+     * and the copy says "until", never "closes"/"closed". Both are load-bearing: Discord
+     * renders the `R` style client-side and live, per viewer, so this one static string
+     * reads "in 1 day" before the deadline and "20 hours ago" after it. That is why the
+     * feature needs no clock-driven re-render sweep — nothing dirty-marks an event when
+     * its deadline passes, and this line stays truthful anyway. Do NOT "improve" it into
+     * a tense-specific sentence.
+     *
+     * Limit, stated once: this makes the TIMESTAMP half of card staleness self-correcting
+     * only. The counts and the buttons on an un-re-rendered card are still frozen at last
+     * render. (Buttons stay live on a locked event by design — a press after the deadline
+     * is answered by `bot_rsvp_deadline_passed` at the six `RsvpDeadlinePassed` catch
+     * sites in `rsvp.ts` / `upcoming-rsvp.ts`.)
+     *
+     * `start_at - hours` is a real instant, so styles `f`/`R` are correct here and the
+     * `discordDateInstant` projection (which only date-only styles need) does not apply. */
+    /* `?? Option.none()` is load-bearing, not defensive styling. `rsvp_closes_at` is
+     * `OptionFromOptionalKey`, so a DECODED entry always carries an `Option` — but the bot
+     * suite builds `UpcomingEventForUserEntry`-shaped objects by hand and omits it, and
+     * `Option.match(undefined, …)` throws `Cannot read properties of undefined (reading
+     * '_tag')` rather than reading as "no deadline". Same reasoning as `?? Option.none()`
+     * in `server/src/utils/allDayRsvpWindow.ts#rsvpClosesAtOf` and the `!!event.all_day`
+     * truthy check above it. */
+    value: Option.match(entry.rsvp_closes_at ?? Option.none(), {
+      onNone: () => rsvpSummary,
+      onSome: (closesAt) =>
+        `${rsvpSummary}\n${m.bot_embed_rsvp_until(
+          { when: `${toDiscordTimestamp(closesAt, 'f')} · ${toDiscordTimestamp(closesAt, 'R')}` },
+          { locale },
+        )}`,
+    }),
   });
 
   if (yesAttendees.length > 0) {

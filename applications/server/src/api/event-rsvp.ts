@@ -19,7 +19,7 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
-import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
+import { eventRsvpOpen, rsvpClosesAtOf } from '~/utils/allDayRsvpWindow.js';
 import { requireCompleteProfile } from '~/utils/requireCompleteProfile.js';
 import {
   isLeavingRequiredNoteResponse,
@@ -77,6 +77,7 @@ const buildRsvpDetail = (
     ServiceMap.Service.Shape<typeof EventRsvpsRepository>['findRsvpByEventAndMember']
   >[1],
   canRsvp: boolean,
+  rsvpClosesAt: Option.Option<DateTime.Utc>,
   minPlayersThreshold: number,
 ) =>
   Effect.Do.pipe(
@@ -113,6 +114,7 @@ const buildRsvpDetail = (
           maybeCount: countFor(counts, 'maybe'),
           comingLaterCount: countFor(counts, 'coming_later'),
           canRsvp,
+          rsvpClosesAt,
           minPlayersThreshold,
         }),
     ),
@@ -156,7 +158,15 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                 rsvps,
                 eventId,
                 membership.id,
-                eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe()) && isGroupMember,
+                eventRsvpOpen(event, event.timezone, DateTime.nowUnsafe()) && isGroupMember,
+                // Sent whenever a lock APPLIES and the viewer is invited — NOT only when the
+                // deadline is why `canRsvp` is false. It is `Some` on an open event days out too
+                // (that is what renders "RSVP closes in 3 days"), which `test/EventRsvp.test.ts`
+                // case 8 pins. The one thing it encodes is invitation: a member outside the
+                // event's `member_group` must never be told "RSVPs closed at 18:00" — RSVPs are
+                // open for everyone else; they simply aren't invited. Narrowing a `Some` to "the
+                // deadline passed" is the CALLER's job, off `!canRsvp`.
+                isGroupMember ? rsvpClosesAtOf(event) : Option.none(),
                 Option.match(settings, {
                   onNone: () => 0,
                   onSome: (s) => s.min_players_threshold,
@@ -207,13 +217,13 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             // Cancelled stays `notFound` — the pre-existing vocabulary for this
             // surface — while every other closed case (an all-day event past its
             // last local day, or a timed event past its deadline) is
-            // `deadlinePassed` via `eventAcceptsRsvp`. Only the started + all-day
+            // `deadlinePassed` via `eventRsvpOpen`. Only the started + all-day
             // case newly succeeds here.
             Effect.tap(({ event }) =>
               event.status === 'cancelled' ? Effect.fail(notFound) : Effect.void,
             ),
             Effect.tap(({ event }) =>
-              !eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe())
+              !eventRsvpOpen(event, event.timezone, DateTime.nowUnsafe())
                 ? Effect.fail(deadlinePassed)
                 : Effect.void,
             ),

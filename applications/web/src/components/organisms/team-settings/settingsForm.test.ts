@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   findInvalidSettingsField,
   type SettingsFormValues,
+  settingsFormFrom,
   settingsRequestFrom,
 } from './settingsForm';
 import { NONE_VALUE } from './shared';
@@ -51,6 +52,16 @@ const BASE: SettingsFormValues = {
   reminderDaysBefore_meeting: '',
   reminderDaysBefore_social: '',
   reminderDaysBefore_other: '',
+  // RSVP lock (T6). TWO DIFFERENT BLANKS live in this card: blank in the
+  // team-wide scalar means OFF (no lock at all), blank in an override means
+  // INHERIT the scalar. Both are baseline-valid.
+  rsvpLockHoursBefore: '',
+  lockHoursBefore_training: '',
+  lockHoursBefore_match: '',
+  lockHoursBefore_tournament: '',
+  lockHoursBefore_meeting: '',
+  lockHoursBefore_social: '',
+  lockHoursBefore_other: '',
 };
 
 /**
@@ -90,6 +101,14 @@ const EDITED: SettingsFormValues = {
   reminderDaysBefore_meeting: '0',
   reminderDaysBefore_social: '5',
   reminderDaysBefore_other: '14',
+  rsvpLockHoursBefore: '24',
+  lockHoursBefore_training: '3',
+  lockHoursBefore_match: '6',
+  // 0 is a real value — "lock exactly at start" — not "unset".
+  lockHoursBefore_tournament: '0',
+  lockHoursBefore_meeting: '12',
+  lockHoursBefore_social: '48',
+  lockHoursBefore_other: '336',
 };
 
 const FIELDS = Object.keys(BASE) as ReadonlyArray<keyof SettingsFormValues>;
@@ -276,5 +295,179 @@ describe('rsvpReminderDaysBeforeOverrides payload', () => {
       settingsRequestFrom({ ...BASE, reminderDaysBefore_match: '0' })
         .rsvpReminderDaysBeforeOverrides,
     ).toStrictEqual(Option.some({ match: 0 }));
+  });
+});
+
+// ============================================================================
+// T6 — the RSVP lock in the settings form
+// ============================================================================
+//
+// Two different blanks live in one card:
+//   `rsvpLockHoursBefore: ''`     → OFF. There is no lock at all. Sent as Some(None).
+//   `lockHoursBefore_<type>: ''`  → INHERIT. The key is omitted from the map.
+// Getting those the same way round is how a save silently turns a team's lock off.
+
+describe('findInvalidSettingsField — rsvpLockHoursBefore', () => {
+  it('case 1: blank is VALID — the opposite of rsvpReminderDaysBefore, where blank is the bug', () => {
+    expect(findInvalidSettingsField({ ...BASE, rsvpLockHoursBefore: '' })).toBeUndefined();
+  });
+
+  it('case 2: 337 names its own field', () => {
+    expect(findInvalidSettingsField({ ...BASE, rsvpLockHoursBefore: '337' })).toBe(
+      'teamSettings_rsvpLockHoursBefore',
+    );
+    expect(findInvalidSettingsField({ ...BASE, rsvpLockHoursBefore: '-1' })).toBe(
+      'teamSettings_rsvpLockHoursBefore',
+    );
+  });
+
+  it('case 3: 0 and 336 are both valid', () => {
+    expect(findInvalidSettingsField({ ...BASE, rsvpLockHoursBefore: '0' })).toBeUndefined();
+    expect(findInvalidSettingsField({ ...BASE, rsvpLockHoursBefore: '336' })).toBeUndefined();
+  });
+
+  it("the 'off' sentinel is NOT valid in the team-wide scalar — blank already means off there", () => {
+    expect(findInvalidSettingsField({ ...BASE, rsvpLockHoursBefore: 'off' })).toBe(
+      'teamSettings_rsvpLockHoursBefore',
+    );
+  });
+
+  it('case 6: an out-of-range override names the overrides key, not the scalar', () => {
+    expect(findInvalidSettingsField({ ...BASE, lockHoursBefore_tournament: '400' })).toBe(
+      'teamSettings_rsvpLockHoursBeforeOverrides',
+    );
+    expect(findInvalidSettingsField({ ...BASE, lockHoursBefore_tournament: '-1' })).toBe(
+      'teamSettings_rsvpLockHoursBeforeOverrides',
+    );
+  });
+
+  it('an override accepts blank, the literal `off`, and 0..336 — and nothing else', () => {
+    expect(findInvalidSettingsField({ ...BASE, lockHoursBefore_match: '' })).toBeUndefined();
+    expect(findInvalidSettingsField({ ...BASE, lockHoursBefore_match: 'off' })).toBeUndefined();
+    expect(findInvalidSettingsField({ ...BASE, lockHoursBefore_match: '0' })).toBeUndefined();
+    expect(findInvalidSettingsField({ ...BASE, lockHoursBefore_match: '336' })).toBeUndefined();
+    // Case-insensitive, so a stored or hand-edited `Off` is not an unclearable
+    // validation error.
+    expect(findInvalidSettingsField({ ...BASE, lockHoursBefore_match: 'Off' })).toBeUndefined();
+    // `outside(NaN, 0, 336)` is TRUE, so every non-numeric string is rejected —
+    // including the sentinel. Matching 'off' EXPLICITLY is what lets it through;
+    // every typo next to it still fails.
+    expect(findInvalidSettingsField({ ...BASE, lockHoursBefore_match: 'offf' })).toBe(
+      'teamSettings_rsvpLockHoursBeforeOverrides',
+    );
+    expect(findInvalidSettingsField({ ...BASE, lockHoursBefore_match: 'nope' })).toBe(
+      'teamSettings_rsvpLockHoursBeforeOverrides',
+    );
+  });
+});
+
+describe('settingsRequestFrom — rsvpLockHoursBefore payload (nested Option)', () => {
+  it('case 1: a blank scalar sends Some(None) — present and cleared to off', () => {
+    expect(settingsRequestFrom({ ...BASE, rsvpLockHoursBefore: '' }).rsvpLockHoursBefore).toEqual(
+      Option.some(Option.none()),
+    );
+  });
+
+  it('case 3: `0` sends Some(Some(0)) — lock exactly at start, not "unset"', () => {
+    expect(settingsRequestFrom({ ...BASE, rsvpLockHoursBefore: '0' }).rsvpLockHoursBefore).toEqual(
+      Option.some(Option.some(0)),
+    );
+    expect(settingsRequestFrom({ ...BASE, rsvpLockHoursBefore: '24' }).rsvpLockHoursBefore).toEqual(
+      Option.some(Option.some(24)),
+    );
+  });
+
+  it('case 4: a blank override is OMITTED from the map (inherit), not sent as 0', () => {
+    expect(settingsRequestFrom(BASE).rsvpLockHoursBeforeOverrides).toStrictEqual(Option.some({}));
+  });
+
+  it('case 5: an override of `0` IS sent as 0 — the blank-vs-zero distinction', () => {
+    expect(
+      settingsRequestFrom({ ...BASE, lockHoursBefore_tournament: '0' })
+        .rsvpLockHoursBeforeOverrides,
+    ).toStrictEqual(Option.some({ tournament: 0 }));
+  });
+
+  it("the 'off' sentinel sends an explicit null for that type", () => {
+    expect(
+      settingsRequestFrom({ ...BASE, lockHoursBefore_tournament: 'off' })
+        .rsvpLockHoursBeforeOverrides,
+    ).toStrictEqual(Option.some({ tournament: null }));
+    // Same normalisation as the validator, or a value it accepted would be sent
+    // as `Number.parseInt('Off')` = NaN.
+    expect(
+      settingsRequestFrom({ ...BASE, lockHoursBefore_tournament: 'Off' })
+        .rsvpLockHoursBeforeOverrides,
+    ).toStrictEqual(Option.some({ tournament: null }));
+  });
+});
+
+describe('case 7 — a stored per-type `null` survives a save of an unrelated field', () => {
+  // `settingsRequestFrom` is called with `values` ALONE. If an explicit stored
+  // `null` were flattened to `''` on load it would be indistinguishable from
+  // key-absent at save time, and the very next save of any other setting on
+  // this page would silently flip that event type from OFF back to INHERIT —
+  // without the user ever touching the field. The `'off'` sentinel exists for
+  // exactly this round trip.
+  //
+  // Authoring it is `GeneralLimitsCard`'s per-row tri-state selector, covered in
+  // `GeneralLimitsCard.test.tsx`; this block covers the other half — that one
+  // which arrived from the API survives an unrelated save untouched.
+  const storedSettings = {
+    eventHorizonDays: 30,
+    minPlayersThreshold: 8,
+    rsvpRemindersEnabled: true,
+    requireCompleteProfile: false,
+    rsvpReminderDaysBefore: 2,
+    rsvpReminderDaysBeforeOverrides: {},
+    maxMissedRsvps: 3,
+    claimRequestDaysBefore: 5,
+    rsvpReminderTime: '18:00',
+    timezone: 'Europe/Prague',
+    remindersChannelId: Option.none(),
+    rulesQuizChannelId: Option.none(),
+    rulesQuizIntervalDays: 7,
+    rulesQuizTime: '18:00',
+    discordChannelLateRsvp: Option.none(),
+    discordArchiveCategoryId: Option.none(),
+    discordRosterCategoryId: Option.none(),
+    discordPersonalEventsCategoryId: Option.none(),
+    discordPersonalEventsGroupId: Option.none(),
+    discordPersonalEventsChannelFormat: 'events-{discord_id}',
+    discordChannelCleanupOnGroupDelete: 'nothing',
+    discordChannelCleanupOnRosterDeactivate: 'nothing',
+    createDiscordChannelOnGroup: false,
+    createDiscordChannelOnRoster: false,
+    discordRoleFormat: '{emoji} {name}',
+    discordChannelFormat: '{emoji}│{name}',
+    rsvpLockHoursBefore: Option.some(24),
+    rsvpLockHoursBeforeOverrides: { tournament: null, training: 3 },
+  };
+
+  it('loads an explicit null as the `off` sentinel, never as blank', () => {
+    const values = settingsFormFrom(storedSettings as never);
+    expect(values.lockHoursBefore_tournament).toBe('off');
+    expect(values.lockHoursBefore_training).toBe('3');
+    // Absent key → blank → inherit.
+    expect(values.lockHoursBefore_match).toBe('');
+    expect(values.rsvpLockHoursBefore).toBe('24');
+  });
+
+  it('re-sends the untouched null as null after editing something else entirely', () => {
+    const loaded = settingsFormFrom(storedSettings as never);
+    const afterUnrelatedEdit = { ...loaded, horizonDays: '45' };
+    const payload = settingsRequestFrom(afterUnrelatedEdit);
+    expect(payload.rsvpLockHoursBeforeOverrides).toStrictEqual(
+      Option.some({ tournament: null, training: 3 }),
+    );
+  });
+
+  it('loads a cleared team-wide lock as blank and re-sends it as Some(None)', () => {
+    const loaded = settingsFormFrom({
+      ...storedSettings,
+      rsvpLockHoursBefore: Option.none(),
+    } as never);
+    expect(loaded.rsvpLockHoursBefore).toBe('');
+    expect(settingsRequestFrom(loaded).rsvpLockHoursBefore).toEqual(Option.some(Option.none()));
   });
 });

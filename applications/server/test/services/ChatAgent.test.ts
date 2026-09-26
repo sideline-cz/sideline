@@ -202,6 +202,7 @@ const buildEvent = (overrides: EventOverrides = {}): EventWithDetails =>
     start_date: '2026-06-01',
     end_date: '2026-06-01',
     timezone: 'Europe/Prague',
+    rsvp_lock_hours_before: Option.none(),
   });
 
 interface TrainingTypeRow {

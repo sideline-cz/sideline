@@ -254,6 +254,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             end_date: Option.none(),
             event_type_name: Option.none(),
             event_type_color: Option.none(),
+            rsvp_closes_at: Option.none(),
           }),
       ),
       Effect.let(
@@ -340,6 +341,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             end_date: Option.none(),
             event_type_name: Option.none(),
             event_type_color: Option.none(),
+            rsvp_closes_at: Option.none(),
           }),
       ),
       Effect.tap(({ entry }) =>
@@ -393,6 +395,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
               end_date: Option.none(),
               event_type_name: Option.none(),
               event_type_color: Option.none(),
+              rsvp_closes_at: Option.none(),
             }),
         ),
         Effect.tap(({ entry }) =>

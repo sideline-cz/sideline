@@ -1,12 +1,13 @@
 import type { EventApi, EventRsvpApi } from '@sideline/domain';
 import { EventRsvp } from '@sideline/domain';
-import { type Effect, Option } from 'effect';
-import { Check, ChevronDown, CircleHelp, Clock, Loader2, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { DateTime, type Effect, Option } from 'effect';
+import { Check, ChevronDown, CircleHelp, Clock, Loader2, Lock, Play, X } from 'lucide-react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Separator } from '~/components/ui/separator';
 import { Textarea } from '~/components/ui/textarea';
+import { useFormatDate } from '~/hooks/useFormatDate';
 import type { ClientConfig } from '~/lib/client';
 import { type ApiClient, type ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
@@ -64,6 +65,150 @@ const RESPONSE_COUNT_LABEL_KEY: Record<RsvpResponse, string> = {
   maybe: 'rsvp_undecided',
   no: 'rsvp_notAttending',
 };
+
+/**
+ * The member's own stored answer, read-only, inside the locked notice.
+ *
+ * Without it a locked event hides the answer entirely (it only survives inside the collapsed
+ * "Responses" disclosure), and "RSVPs closed" alone reads as *your answer was lost*.
+ */
+function LockedAnswerRow({
+  response,
+  message,
+}: {
+  response: RsvpResponse | null;
+  message: string;
+}) {
+  if (response === null) {
+    return <p className='mt-2 text-sm text-muted-foreground'>{tr('rsvp_noAnswerLocked')}</p>;
+  }
+  const Icon = RESPONSE_ICON[response];
+  return (
+    <div className='mt-2 text-sm'>
+      <span className='block text-xs text-muted-foreground'>{tr('rsvp_yourAnswerLabel')}</span>
+      <span
+        className={`inline-flex items-center gap-1 font-medium ${RESPONSE_TEXT_CLASS[response]}`}
+      >
+        <Icon className='size-4' aria-hidden='true' />
+        {tr(RESPONSE_LABEL_KEY[response])}
+      </span>
+      {message !== '' && <span className='text-muted-foreground'> — “{message}”</span>}
+    </div>
+  );
+}
+
+const CLOSING_SOON_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Why the buttons are (or soon will be) gone. `canRsvp === false` has three distinct causes and
+ * they must not share copy:
+ *
+ * 1. the event has started — checked with the `!canRsvp` half, never as a bare
+ *    `status === 'started'`: an all-day event mid-event can still be RSVP-able and must fall
+ *    through to the open state;
+ * 2. the deadline passed — the server sends `rsvpClosesAt` whenever a lock applies AND the viewer
+ *    is in the event's `member_group` (`api/event-rsvp.ts:165`), regardless of whether it has
+ *    passed: it is `Some` on an open event three days out too, which is what branches 3/4 render.
+ *    Inside `!canRsvp && !started` a `Some` nonetheless *has* to be the deadline, because the
+ *    panel is only mounted for `active`/`started` events (`EventDetailPage.tsx:887`) and
+ *    `started` was taken by branch 1 — so there is no other cause left;
+ * 3. not invited (a member outside the event's group) — `rsvpClosesAt` is `None` by construction,
+ *    so it lands on the old generic sentence rather than being told a deadline it never had. An
+ *    old server mid-rollout omits the key and lands there too.
+ */
+function RsvpDeadlineNotice({
+  canRsvp,
+  started,
+  closesAt,
+  answer,
+}: {
+  canRsvp: boolean;
+  started: boolean;
+  closesAt: Option.Option<DateTime.Utc>;
+  answer: ReactNode;
+}) {
+  const { formatDateTime, formatRelative } = useFormatDate();
+  // Same zone as the start time on the same page (the browser's). Mixing team-zone and
+  // browser-zone timestamps in one panel is worse than either choice alone.
+  const deadline = Option.map(closesAt, DateTime.toDate);
+
+  // `formatRelative` and the `CLOSING_SOON_MS` comparison below both read `Date.now()` during
+  // render, so without this the sentence is frozen at mount: a page opened at 10:00 still reads
+  // "closes in 8 hours" at 18:05, and the under-24h escalation never fires on a page opened
+  // earlier. A minute is the finest granularity `formatRelative` prints — a per-second tick would
+  // re-render 60x for the same string — and there is no timer at all on the common case of an
+  // event with no lock.
+  const hasDeadline = Option.isSome(closesAt);
+  const [, setMinuteTick] = useState(0);
+  useEffect(() => {
+    if (!hasDeadline) return;
+    const id = setInterval(() => setMinuteTick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, [hasDeadline]);
+
+  if (!canRsvp) {
+    if (started) {
+      return (
+        <div className='rounded-lg border bg-muted/40 p-3 text-sm'>
+          <div className='flex items-start gap-2'>
+            <Play className='size-4 shrink-0 translate-y-0.5' aria-hidden='true' />
+            <div>
+              <p>{tr('rsvp_eventStarted')}</p>
+              {answer}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (Option.isSome(deadline)) {
+      return (
+        <div className='rounded-lg border bg-muted/40 p-3 text-sm'>
+          <div className='flex items-start gap-2'>
+            <Lock className='size-4 shrink-0 translate-y-0.5' aria-hidden='true' />
+            <div>
+              <p>{tr('rsvp_lockedBeforeStart', { when: formatDateTime(deadline.value) })}</p>
+              {answer}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return <p className='text-sm text-muted-foreground'>{tr('rsvp_deadlinePassed')}</p>;
+  }
+
+  if (Option.isNone(deadline)) return null;
+
+  // The deadline passed while this page sat open. `canRsvp` came from the server at load and does
+  // NOT refetch, so the open branch is still rendering — without this, the 60s tick turns the
+  // sentence into "RSVP closes 1 minute ago, at 18:00. After that you can't change your answer.",
+  // inside a warning Alert, above live buttons. A submit from here now fails `RsvpDeadlinePassed`,
+  // which is the honest outcome; this just stops the copy lying about it first.
+  const remaining = deadline.value.getTime() - Date.now();
+  if (remaining <= 0) {
+    return (
+      <Alert variant='warning' role='status' className='mb-4'>
+        <AlertDescription>{tr('rsvp_lockedJustNow')}</AlertDescription>
+      </Alert>
+    );
+  }
+
+  const sentence = tr('rsvp_closesAt', {
+    relative: formatRelative(deadline.value),
+    when: formatDateTime(deadline.value),
+  });
+  // One key, two wrappers: the `Alert` IS the escalation. `role='status'` and never `alert` —
+  // it is present on load, not an interruption.
+  return remaining <= CLOSING_SOON_MS ? (
+    <Alert variant='warning' role='status' className='mb-4'>
+      <AlertDescription>{sentence}</AlertDescription>
+    </Alert>
+  ) : (
+    <p className='mb-4 flex items-start gap-2 text-sm text-muted-foreground'>
+      <Clock className='size-4 shrink-0 translate-y-0.5' aria-hidden='true' />
+      {sentence}
+    </p>
+  );
+}
 
 export function EventRsvpPanel({
   eventDetail,
@@ -159,7 +304,14 @@ export function EventRsvpPanel({
     <div>
       <h2 className='text-lg font-semibold mb-4'>{tr('rsvp_title')}</h2>
 
-      {rsvpDetail.canRsvp ? (
+      <RsvpDeadlineNotice
+        canRsvp={rsvpDetail.canRsvp}
+        started={eventDetail.status === 'started'}
+        closesAt={rsvpDetail.rsvpClosesAt}
+        answer={<LockedAnswerRow response={currentResponse} message={savedMessage} />}
+      />
+
+      {rsvpDetail.canRsvp && (
         <div className='grid grid-cols-2 gap-2 sm:flex sm:flex-wrap'>
           {RESPONSES.map((response) => {
             const isActive = displayedResponse === response;
@@ -187,8 +339,6 @@ export function EventRsvpPanel({
             );
           })}
         </div>
-      ) : (
-        <p className='text-sm text-muted-foreground'>{tr('rsvp_deadlinePassed')}</p>
       )}
 
       {/* `flex-nowrap`: must stay on one line even at a 320px viewport — four short

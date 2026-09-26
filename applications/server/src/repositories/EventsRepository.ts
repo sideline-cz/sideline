@@ -20,6 +20,7 @@ import {
   eventNotVisibleNow,
   eventVisibleNow,
 } from '~/repositories/eventVisibility.js';
+import { resolvedLockHours } from '~/repositories/lockResolution.js';
 
 export class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithDetails')({
   id: Event.EventId,
@@ -73,6 +74,15 @@ export class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithD
   // Consumed by `allDayRsvpWindow.ts#eventAcceptsRsvp` so every RSVP call site
   // gets the team's timezone for free instead of a second lookup.
   timezone: Schema.String,
+  // The RSVP lock that applies to THIS event, already resolved in SQL from the
+  // team-wide value and the per-event-type override map
+  // (`repositories/lockResolution.ts`). `None` = no early lock, which is every
+  // team until a captain sets one. Same rule as `timezone` above:
+  // `EventWithDetails` is the `Result` of BOTH `findByIdWithDetails` and
+  // `findByTeamId`, so both queries MUST select it or the one that misses it
+  // fails schema decode entirely. Consumed by
+  // `allDayRsvpWindow.ts#rsvpClosesAtOf`/`#eventRsvpOpen`.
+  rsvp_lock_hours_before: Schema.OptionFromNullOr(Schema.Int),
 }) {}
 
 export class EventRow extends Schema.Class<EventRow>('EventRow')({
@@ -176,7 +186,8 @@ const make = Effect.gen(function* () {
                    (COALESCE(e.end_at, e.start_at)
                        AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
                        AS end_date,
-                   COALESCE(ts.timezone, 'Europe/Prague') AS timezone
+                   COALESCE(ts.timezone, 'Europe/Prague') AS timezone,
+                   ${sql.unsafe(resolvedLockHours('e', 'ts'))} AS rsvp_lock_hours_before
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN event_types ety ON ety.id = e.event_type_id
@@ -217,7 +228,8 @@ const make = Effect.gen(function* () {
                    (COALESCE(e.end_at, e.start_at)
                        AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
                        AS end_date,
-                   COALESCE(ts.timezone, 'Europe/Prague') AS timezone
+                   COALESCE(ts.timezone, 'Europe/Prague') AS timezone,
+                   ${sql.unsafe(resolvedLockHours('e', 'ts'))} AS rsvp_lock_hours_before
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN event_types ety ON ety.id = e.event_type_id

@@ -368,6 +368,13 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
             Effect.tap(({ existing }) =>
               existing.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
             ),
+            // `eventAcceptsRsvp`, NOT `eventRsvpOpen` — and that holds for all six
+            // sites in this file (`:323`, `:325`, this one, `:511`, `:514`, `:557`).
+            // The configurable RSVP deadline narrows the RSVP gate only; edit and
+            // cancel must stay available INSIDE the lock window, or a captain could
+            // not cancel a rained-off match three hours before kickoff. Swapping
+            // this call would break that with no type error and no other failing
+            // test — see the T3 block in `test/Event.test.ts`.
             Effect.tap(({ existing }) =>
               !eventAcceptsRsvp(existing, existing.timezone, DateTime.nowUnsafe())
                 ? Effect.fail(notActive)
