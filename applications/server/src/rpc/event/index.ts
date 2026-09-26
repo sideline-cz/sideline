@@ -37,13 +37,14 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { EventTypesRepository } from '~/repositories/EventTypesRepository.js';
 import { eventDayOrder, eventVisibleNow } from '~/repositories/eventVisibility.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { resolvedLockHours } from '~/repositories/lockResolution.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
-import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
+import { eventRsvpOpen, rsvpClosesAtOf } from '~/utils/allDayRsvpWindow.js';
 import { requireCompleteProfile } from '~/utils/requireCompleteProfile.js';
 import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 import {
@@ -97,7 +98,7 @@ const getRsvpCounts = (
         else if (c.response === 'maybe') maybeCount = c.count;
       }
       const canRsvp =
-        event !== undefined && eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe());
+        event !== undefined && eventRsvpOpen(event, event.timezone, DateTime.nowUnsafe());
       return new EventRpcModels.RsvpCountsResult({ yesCount, noCount, maybeCount, canRsvp });
     }),
   );
@@ -495,12 +496,15 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
             ),
           ),
           // This site used to reject EVERY non-'active' status. Now
-          // `!eventAcceptsRsvp(...)` is what stops a CANCELLED all-day event
+          // `!eventRsvpOpen(...)` is what stops a CANCELLED all-day event
           // from becoming RSVP-able here — the status guard inside
-          // `allDayStillRsvpable` is mandatory (plan §4.5(a)). The error
-          // vocabulary for this surface is unchanged (`RsvpDeadlinePassed`).
+          // `allDayStillRsvpable` is mandatory (plan §4.5(a)), and
+          // `eventRsvpOpen` still carries it, being a conjunction with
+          // `eventAcceptsRsvp`. It additionally enforces the team's
+          // configurable RSVP deadline. The error vocabulary for this surface
+          // is unchanged (`RsvpDeadlinePassed`).
           Effect.tap(({ event }) =>
-            !eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe())
+            !eventRsvpOpen(event, event.timezone, DateTime.nowUnsafe())
               ? Effect.fail(new EventRpcModels.RsvpDeadlinePassed())
               : Effect.void,
           ),
@@ -1012,6 +1016,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                 status: Schema.String,
                 start_date: Schema.String,
                 end_date: Schema.String,
+                rsvp_lock_hours_before: Schema.OptionFromNullOr(Schema.Int),
               }),
               execute: (input) => svc.sql`
                 SELECT
@@ -1037,7 +1042,8 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       AS start_date,
                   (COALESCE(e.end_at, e.start_at)
                       AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
-                      AS end_date
+                      AS end_date,
+                  ${svc.sql.unsafe(resolvedLockHours('e', 'ts'))} AS rsvp_lock_hours_before
                 FROM events e
                 LEFT JOIN event_rsvps er ON er.event_id = e.id
                 LEFT JOIN event_rsvps my_rsvp ON my_rsvp.event_id = e.id
@@ -1058,7 +1064,8 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                         AND gm.team_member_id = ${input.team_member_id}
                     )
                   )
-                GROUP BY e.id, my_rsvp.response, my_rsvp.message, ts.timezone
+                GROUP BY e.id, my_rsvp.response, my_rsvp.message, ts.timezone,
+                         ts.rsvp_lock_hours_before, ts.rsvp_lock_hours_before_overrides
                 ORDER BY ${svc.sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
                 LIMIT ${input.limit} OFFSET ${input.offset}
               `,
@@ -1147,6 +1154,11 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       status: row.status,
                       start_date: Option.some(row.start_date),
                       end_date: Option.some(row.end_date),
+                      // Computed in TYPESCRIPT, never in SQL: the `resolvedLockHours` fragment
+                      // in the query above resolves only WHICH number applies (see
+                      // `repositories/lockResolution.ts`); the arithmetic and every comparison
+                      // against `now` live in `utils/allDayRsvpWindow.ts`.
+                      rsvp_closes_at: rsvpClosesAtOf(row),
                       // ponytail: this raw inline query isn't one of task 3's six
                       // render-feeding `EventsRepository` queries and isn't joined to
                       // `event_types` — add the join here if this surface needs the name/color.

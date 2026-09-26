@@ -7,7 +7,7 @@ import { Separator } from '~/components/ui/separator';
 import { eventTypeLabels } from '~/lib/event-labels.js';
 import { tr } from '~/lib/translations.js';
 import {
-  REMINDER_OVERRIDE_EVENT_TYPES,
+  OVERRIDE_EVENT_TYPES,
   reminderOverrideField,
   type SettingsFormValues,
 } from './settingsForm';
@@ -138,7 +138,7 @@ export function RemindersCard({ form: { values, setField }, discordChannels }: R
               {tr('teamSettings_rsvpReminderDaysBeforeOverrides_help')}
             </p>
             <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
-              {REMINDER_OVERRIDE_EVENT_TYPES.map((eventType) => {
+              {OVERRIDE_EVENT_TYPES.map((eventType) => {
                 const field = reminderOverrideField(eventType);
                 return (
                   <div key={eventType}>

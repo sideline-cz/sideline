@@ -244,6 +244,18 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
    */
   start_date: Schema.OptionFromOptionalKey(Schema.String),
   end_date: Schema.OptionFromOptionalKey(Schema.String),
+  /**
+   * The instant RSVPs close for this event — `start_at` minus the team's configured lock, with
+   * the per-event-type override applied. `None` means no lock applies, which is every team
+   * until a captain sets one. Feeds the `🔒 RSVP until` line on the Discord card.
+   *
+   * `OptionFromOptionalKey`, same rolling-deploy rationale as `start_date` above. That
+   * tolerance is also the hazard: this class has TWO producers (`rpc/event/index.ts`'s
+   * `Event/GetUpcomingEventsForUser` and `rpc/guild/index.ts`'s
+   * `Guild/GetAllUpcomingEventsForUser`, which feeds the personal cards), and wiring only one
+   * of them fails NOTHING except `test/integration/rpc/UpcomingEventsLock.test.ts`.
+   */
+  rsvp_closes_at: Schema.OptionFromOptionalKey(Schemas.DateTimeFromIsoString),
   ...EventTypeRenderFields,
 }) {}
 

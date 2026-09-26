@@ -566,3 +566,167 @@ describe('TeamSettingsInfo discordEventsChannelId (transitional)', () => {
     expect(encoded.discordEventsChannelId).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// T4 — rsvpLockHoursBefore / rsvpLockHoursBeforeOverrides
+// ---------------------------------------------------------------------------
+//
+// The request field is a NESTED Option — `OptionFromOptional(OptionFromNullOr(Int))`
+// — exactly like `remindersChannelId`. Outer `None` = "the key was absent,
+// leave the stored value alone"; outer `Some(None)` = "the key was present and
+// null, clear the lock to off". Collapsing those two into one is what makes an
+// unrelated settings save silently turn a team's lock off.
+//
+// The override map has THREE reachable states per event type:
+//   key absent     → inherit the team-wide value
+//   explicit null  → no early lock for this type (all-day grace survives)
+//   0              → lock exactly at start
+describe('UpdateTeamSettingsRequest — rsvpLockHoursBefore (nested Option)', () => {
+  const decode = (input: Record<string, unknown>) =>
+    Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+      ...input,
+    });
+
+  it('case 1: 0 decodes to Some(Some(0)) — "lock exactly at start", not "unset"', () => {
+    const result = decode({ rsvpLockHoursBefore: 0 });
+    expect(Option.isSome(result.rsvpLockHoursBefore)).toBe(true);
+    const inner = Option.getOrThrow(result.rsvpLockHoursBefore);
+    expect(Option.isSome(inner)).toBe(true);
+    expect(Option.getOrThrow(inner)).toBe(0);
+  });
+
+  it('case 2: 336 (14 days, the ceiling) is accepted', () => {
+    const result = decode({ rsvpLockHoursBefore: 336 });
+    expect(Option.getOrThrow(Option.getOrThrow(result.rsvpLockHoursBefore))).toBe(336);
+  });
+
+  it('case 3: -1 and 337 are decode errors', () => {
+    expect(() => decode({ rsvpLockHoursBefore: -1 })).toThrow();
+    expect(() => decode({ rsvpLockHoursBefore: 337 })).toThrow();
+  });
+
+  it('case 4: explicit null decodes to Some(None) — present, and cleared to off', () => {
+    const result = decode({ rsvpLockHoursBefore: null });
+    expect(Option.isSome(result.rsvpLockHoursBefore)).toBe(true);
+    expect(Option.isNone(Option.getOrThrow(result.rsvpLockHoursBefore))).toBe(true);
+  });
+
+  it('case 5: an omitted key decodes to None — leave alone. DISTINCT from case 4', () => {
+    const result = decode({});
+    expect(Option.isNone(result.rsvpLockHoursBefore)).toBe(true);
+  });
+});
+
+describe('UpdateTeamSettingsRequest — rsvpLockHoursBeforeOverrides', () => {
+  const decode = (overrides: unknown) =>
+    Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+      rsvpLockHoursBeforeOverrides: overrides,
+    });
+
+  it('case 6: { tournament: 0, training: 3 } round-trips', () => {
+    const result = decode({ tournament: 0, training: 3 });
+    const map = Option.getOrThrow(result.rsvpLockHoursBeforeOverrides);
+    expect(map).toStrictEqual({ tournament: 0, training: 3 });
+    expect(
+      Schema.encodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)(result as never),
+    ).toMatchObject({ rsvpLockHoursBeforeOverrides: { tournament: 0, training: 3 } });
+  });
+
+  it('case 7: { tournament: null } round-trips as null — not dropped, not coerced to 0', () => {
+    // Per-type OFF. This is the only escape hatch that restores the all-day
+    // end-of-day grace for one event type while a team-wide lock applies to
+    // the rest (§1d mitigation 2).
+    const map = Option.getOrThrow(decode({ tournament: null }).rsvpLockHoursBeforeOverrides);
+    expect('tournament' in map).toBe(true);
+    expect(map.tournament).toBeNull();
+    expect(map.tournament).not.toBe(0);
+  });
+
+  it('case 8: { tournament: 400 } is a decode error', () => {
+    expect(() => decode({ tournament: 400 })).toThrow();
+    expect(() => decode({ tournament: -1 })).toThrow();
+  });
+
+  it('case 9: an unknown event-type key is DROPPED, not an error (Schema.Record literal keys)', () => {
+    const map = Option.getOrThrow(
+      decode({ not_an_event_type: 4, training: 2 }).rsvpLockHoursBeforeOverrides,
+    );
+    expect(map).toStrictEqual({ training: 2 });
+    expect('not_an_event_type' in map).toBe(false);
+  });
+
+  it('an omitted overrides key decodes to None — leave the stored map alone', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+    });
+    expect(Option.isNone(result.rsvpLockHoursBeforeOverrides)).toBe(true);
+  });
+});
+
+describe('TeamSettingsInfo — rsvpLockHoursBefore tolerance (the frozen-web-schema guarantee)', () => {
+  // `base` above deliberately carries NEITHER new key: the web bundles a frozen
+  // copy of this schema, so a newer bundle talking to an older server must
+  // still render the settings page instead of blanking it.
+  const base = {
+    teamId: '11111111-1111-1111-1111-111111111111',
+    eventHorizonDays: 30,
+    minPlayersThreshold: 5,
+    rsvpRemindersEnabled: true,
+    requireCompleteProfile: false,
+    rsvpReminderDaysBefore: 1,
+    maxMissedRsvps: 3,
+    claimRequestDaysBefore: 1,
+    rsvpReminderTime: '18:00',
+    remindersChannelId: null,
+    timezone: 'UTC',
+    discordChannelLateRsvp: null,
+    createDiscordChannelOnGroup: false,
+    createDiscordChannelOnRoster: false,
+    discordArchiveCategoryId: null,
+    discordRosterCategoryId: null,
+    discordPersonalEventsCategoryId: null,
+    discordPersonalEventsGroupId: null,
+    discordPersonalEventsChannelFormat: '{name}',
+    discordChannelCleanupOnGroupDelete: 'archive',
+    discordChannelCleanupOnRosterDeactivate: 'archive',
+    discordRoleFormat: '{name}',
+    discordChannelFormat: '{name}',
+  };
+
+  it('case 10: a payload missing BOTH keys decodes — scalar None, overrides {}', () => {
+    const decoded = Schema.decodeUnknownSync(TeamSettingsApi.TeamSettingsInfo)(base);
+    expect(Option.isNone(decoded.rsvpLockHoursBefore)).toBe(true);
+    expect(decoded.rsvpLockHoursBeforeOverrides).toStrictEqual({});
+  });
+
+  it('decodes an explicit null scalar to None and a present number to Some', () => {
+    expect(
+      Option.isNone(
+        Schema.decodeUnknownSync(TeamSettingsApi.TeamSettingsInfo)({
+          ...base,
+          rsvpLockHoursBefore: null,
+        }).rsvpLockHoursBefore,
+      ),
+    ).toBe(true);
+    expect(
+      Option.getOrThrow(
+        Schema.decodeUnknownSync(TeamSettingsApi.TeamSettingsInfo)({
+          ...base,
+          rsvpLockHoursBefore: 0,
+        }).rsvpLockHoursBefore,
+      ),
+    ).toBe(0);
+  });
+
+  it('carries a per-type null through the read schema as well', () => {
+    const decoded = Schema.decodeUnknownSync(TeamSettingsApi.TeamSettingsInfo)({
+      ...base,
+      rsvpLockHoursBefore: 24,
+      rsvpLockHoursBeforeOverrides: { tournament: null, training: 3 },
+    });
+    expect(decoded.rsvpLockHoursBeforeOverrides.tournament).toBeNull();
+    expect(decoded.rsvpLockHoursBeforeOverrides.training).toBe(3);
+  });
+});

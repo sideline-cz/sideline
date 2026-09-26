@@ -6,7 +6,10 @@ import { ChannelCleanupMode } from '~/models/ChannelSyncEvent.js';
 import { Snowflake } from '~/models/Discord.js';
 import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
-import { RsvpReminderDaysBeforeOverrides } from '~/models/TeamSettings.js';
+import {
+  RsvpLockHoursBeforeOverrides,
+  RsvpReminderDaysBeforeOverrides,
+} from '~/models/TeamSettings.js';
 
 const DiscordFormatString = Schema.String.pipe(
   Schema.check(
@@ -50,6 +53,21 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
   // Plain `//` and not JSDoc on purpose: the barrel codegen hoists a module's first JSDoc block
   // onto its `export * as` line in `index.ts`.
   rsvpReminderDaysBeforeOverrides: RsvpReminderDaysBeforeOverrides.pipe(
+    Schema.withDecodingDefaultKey(() => ({})),
+  ),
+  // Team-wide RSVP deadline: lock RSVPs this many hours before start. `None` = no early lock,
+  // which is every team until someone sets it. Tolerant decode for the same reason as
+  // `discordEventsChannelId` below — web bundles a FROZEN copy of this schema, so a new bundle
+  // served against a server that predates the column must not take the settings page down.
+  //
+  // Deliberately UNBOUNDED, unlike `UpdateTeamSettingsRequest`'s `0..336` and the column CHECK:
+  // this is the READ side, and a hand-edited or legacy row outside the range must still render
+  // the settings page rather than make it undecodable. The write path is where the range is
+  // enforced.
+  rsvpLockHoursBefore: Schema.OptionFromOptionalNullOr(Schema.Int, { onNoneEncoding: null }),
+  // Per-event-type overrides for the above; a type absent from the map inherits it. Tolerant
+  // decode (missing key -> `{}`) for the same reason.
+  rsvpLockHoursBeforeOverrides: RsvpLockHoursBeforeOverrides.pipe(
     Schema.withDecodingDefaultKey(() => ({})),
   ),
   maxMissedRsvps: Schema.Int,
@@ -107,6 +125,14 @@ export const UpdateTeamSettingsRequest = Schema.Struct({
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 14 }))),
   ),
   rsvpReminderDaysBeforeOverrides: Schema.OptionFromOptional(RsvpReminderDaysBeforeOverrides),
+  // Nested `Option`, matching `remindersChannelId` below: the outer `None` means "field absent,
+  // leave the stored value alone", the inner `None` means "clear it — no early lock".
+  rsvpLockHoursBefore: Schema.OptionFromOptional(
+    Schema.OptionFromNullOr(
+      Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 336 }))),
+    ),
+  ),
+  rsvpLockHoursBeforeOverrides: Schema.OptionFromOptional(RsvpLockHoursBeforeOverrides),
   maxMissedRsvps: Schema.OptionFromOptional(
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
   ),

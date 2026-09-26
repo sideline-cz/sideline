@@ -50,7 +50,24 @@ The key difference between **No** and silence: **No** tells your captain you got
 
 ## Changing your mind
 
-You can change your RSVP at any time until the event starts. Click a different button; the previous answer is overwritten. Captains see the change immediately.
+You can change your RSVP at any time until the event starts — or until your team's RSVP deadline, if one is set. Click a different button; the previous answer is overwritten. Captains see the change immediately.
+
+### RSVP deadlines
+
+By default RSVPs stay open right up to the moment an event starts. A team can close them earlier so the captain gets a settled headcount, from **Team settings → General**:
+
+| Setting | What it controls |
+|---|---|
+| **Close RSVPs before start (hours)** | How many hours before the start RSVPs stop accepting changes. Leave it blank to keep them open until the event starts. `0` closes them exactly at the start. |
+| **Per event type** | Optional per-event-type deadlines that override the team-wide value. Each row is **Inherit** (use the value above), **Hours** (a number of its own), or **Off** (no early deadline for that type). |
+
+Once the deadline passes you can still see the event and the answer you gave — you just can't change it. The event page and the Discord card both show the deadline before it arrives, so it should never be a surprise.
+
+<Aside type="caution" title="All-day events">
+  For an all-day event the deadline counts back from **midnight at the start of the first day**, not from the time people actually turn up. A weekend tournament with a team-wide 24-hour deadline therefore closes on Friday morning. If that is too early, set that event type to **Off** in the **Per event type** grid, or give it a smaller number of its own.
+
+  Note that `0` is not the same as **Off** here. With no deadline set, an all-day event stays open for answers right through its last day. Setting `0` closes it at midnight on the first day — earlier than the default, not later. **Off** is what keeps the original behaviour.
+</Aside>
 
 <Aside type="caution" title="After the event">
   Once the event has ended, RSVPs are locked for attendance records. If you need to mark yourself as present after the fact (e.g. you forgot to click), ask your captain to adjust it from the event page.

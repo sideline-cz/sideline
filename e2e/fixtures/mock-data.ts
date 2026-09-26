@@ -448,6 +448,8 @@ export const mockTeamSettings = {
   requireCompleteProfile: false,
   rsvpReminderDaysBefore: 1,
   rsvpReminderDaysBeforeOverrides: {},
+  rsvpLockHoursBefore: null,
+  rsvpLockHoursBeforeOverrides: {},
   maxMissedRsvps: 4,
   claimRequestDaysBefore: 3,
   rsvpReminderTime: '18:00',

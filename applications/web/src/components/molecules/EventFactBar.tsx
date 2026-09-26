@@ -31,8 +31,10 @@ const calendarDayDelta = (fromIsoDate: string, toIsoDate: string): number => {
 
 /**
  * Compact, full-width fact strip shown between the title and the hero image (plan: event detail
- * redesign). Deliberately does NOT show an RSVP deadline — no such field exists, and for timed
- * events it would equal `startAt` anyway.
+ * redesign). Deliberately does NOT show an RSVP deadline, even though `EventRsvpDetail` now
+ * carries `rsvpClosesAt`: a second timestamp up here reads as a second event time, which is the
+ * single most likely misread of the lock feature. The deadline lives in `EventRsvpPanel`, next to
+ * the buttons it governs.
  *
  * Never parses `formatEventDateRange`'s output — that helper returns four different shapes for
  * `end` depending on `sameDay`/`allDay` (`None`, same-day `HH:mm`, cross-day timed

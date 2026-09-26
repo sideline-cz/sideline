@@ -96,6 +96,8 @@ const baseSettings = {
   requireCompleteProfile: false,
   rsvpReminderDaysBefore: 2,
   rsvpReminderDaysBeforeOverrides: {},
+  rsvpLockHoursBefore: Option.none(),
+  rsvpLockHoursBeforeOverrides: {},
   maxMissedRsvps: 3,
   claimRequestDaysBefore: 5,
   rsvpReminderTime: '18:00',

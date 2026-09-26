@@ -42,3 +42,6 @@ HANDOVER.md
 
 # Agent work plans — working documents, never part of repo history
 .work-plans/
+
+# dev-loop handoff artifacts (plan, design, mockups, review) — session scratch, not product
+.dev-loop/

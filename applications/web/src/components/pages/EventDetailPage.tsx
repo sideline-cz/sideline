@@ -447,6 +447,12 @@ export function EventDetailPage({
         Effect.catchTag('EventRsvpProfileIncomplete', () =>
           Effect.fail(ClientError.make(tr('rsvp_profileIncomplete'))),
         ),
+        // A page held open across the RSVP deadline: the buttons are still on screen because
+        // nothing re-renders at the deadline, so the stale UI has to explain itself rather than
+        // fall through to the generic `rsvp_submitFailed`.
+        Effect.catchTag('RsvpDeadlinePassed', () =>
+          Effect.fail(ClientError.make(tr('rsvp_lockedJustNow'))),
+        ),
         Effect.mapError(() => ClientError.make(tr('rsvp_submitFailed'))),
         Effect.tap(() => Effect.sync(() => router.invalidate())),
       ),

@@ -1,6 +1,6 @@
 import { EventRpcModels, EventType } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
-import { DateTime, Option } from 'effect';
+import { DateTime, Option, Schema } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
 import { buildUpcomingEventEmbed } from '~/rest/events/buildUpcomingEventEmbed.js';
@@ -35,6 +35,9 @@ const makeEntry = (
     event_type_color: Option.none(),
     start_date: Option.none(),
     end_date: Option.none(),
+    // T8 — `OptionFromOptionalKey`, so `None` is both "no lock" and "an older
+    // server that never sent the key".
+    rsvp_closes_at: Option.none(),
     ...overrides,
   });
 
@@ -966,5 +969,121 @@ describe('buildUpcomingEventEmbed — Setting 1 (show_attendee_list): hidden vs 
     const maybeBtn = allButtons.find((b: any) => b.custom_id?.endsWith(':coming_later:v'));
     expect(maybeBtn).toBeDefined();
     expect(maybeBtn.custom_id.length).toBeLessThanOrEqual(100);
+  });
+});
+
+// ============================================================================
+// T8 — the `🔒 RSVP until` line on the personal card
+// ============================================================================
+//
+// It is APPENDED to the existing `📊 RSVPs` field value, not added as a new
+// field: the personal card is only re-rendered when something dirty-marks it,
+// and a deadline passing dirty-marks nothing. Discord renders `<t:…:R>`
+// client-side and live, so one static string reads "in 1 day" before the
+// deadline and "20 hours ago" after it — which is why the copy says "until"
+// rather than "closes"/"closed".
+//
+// Limit, stated once: this fixes the TIMESTAMP half of card staleness only.
+// The counts and the buttons on an un-re-rendered card are equally frozen.
+
+describe('buildUpcomingEventEmbed — rsvp_closes_at', () => {
+  const rsvpField = (entry: EventRpcModels.UpcomingEventForUserEntry) => {
+    const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+    const fields = embeds[0].fields as ReadonlyArray<{ name: string; value: string }>;
+    const field = fields.find((f) => f.name === m.bot_embed_rsvps({}, { locale: 'en' }));
+    return { field, fields };
+  };
+
+  it('case 1: a Some deadline appends both an `f` and an `R` timestamp, and adds NO new field', () => {
+    const closesAt = DateTime.makeUnsafe('2099-06-01T12:00:00Z');
+    const epoch = String(Math.floor(DateTime.toEpochMillis(closesAt) / 1000));
+
+    const withDeadline = rsvpField(makeEntry({ rsvp_closes_at: Option.some(closesAt) }));
+    const without = rsvpField(makeEntry({ rsvp_closes_at: Option.none() }));
+
+    expect(withDeadline.field?.value).toContain(`<t:${epoch}:f>`);
+    expect(withDeadline.field?.value).toContain(`<t:${epoch}:R>`);
+    // Appended to the SAME field, not a new one.
+    expect(withDeadline.fields.length).toBe(without.fields.length);
+    expect(withDeadline.field?.value.startsWith(without.field?.value ?? '')).toBe(true);
+  });
+
+  // Distinct from case 3 below, which covers a DECODED entry (key absent -> Option.none()).
+  // This is the HAND-BUILT entry: `rsvp_closes_at` is literally `undefined`, not an Option.
+  // `Option.match(undefined, ...)` throws `Cannot read properties of undefined (reading '_tag')`,
+  // so without the `?? Option.none()` coalesce in the renderer this does not merely render
+  // wrongly — it takes down every caller. It did: 20 tests across handleReconcile,
+  // reorderPersonalChannel and upcoming-rsvp died here, none of them about deadlines.
+  it('case 2a: an entry whose rsvp_closes_at is undefined renders as "no deadline", never throws', () => {
+    const entry = makeEntry({});
+    // biome-ignore lint/performance/noDelete: reproducing a hand-built fixture that omits the key
+    delete (entry as { rsvp_closes_at?: unknown }).rsvp_closes_at;
+
+    expect(() => rsvpField(entry)).not.toThrow();
+    expect(rsvpField(entry).field?.value).not.toContain('<t:');
+    expect(rsvpField(entry).field?.value).toBe(
+      rsvpField(makeEntry({ rsvp_closes_at: Option.none() })).field?.value,
+    );
+  });
+
+  it('case 2: a None deadline leaves the RSVPs field byte-identical to today', () => {
+    const { field } = rsvpField(makeEntry({ rsvp_closes_at: Option.none() }));
+    expect(field?.value).toBe(
+      m.bot_embed_rsvp_summary(
+        { yes: '0', coming_later: '0', maybe: '0', no: '0' },
+        { locale: 'en' },
+      ),
+    );
+    expect(field?.value).not.toContain('<t:');
+  });
+
+  it("case 3: an entry decoded from a payload with NO rsvp_closes_at key decodes to None and renders today's output", () => {
+    // The rolling-deploy guarantee: bot ahead of server.
+    const decoded = Schema.decodeUnknownSync(EventRpcModels.UpcomingEventForUserEntry)({
+      event_id: 'event-1',
+      team_id: 'team-1',
+      title: 'Training Session',
+      description: null,
+      image_url: null,
+      start_at: '2099-06-01T18:00:00.000Z',
+      end_at: null,
+      location: null,
+      location_url: null,
+      event_type: 'training',
+      yes_count: 0,
+      no_count: 0,
+      maybe_count: 0,
+      coming_later_count: 0,
+      my_response: null,
+      my_message: null,
+      all_day: false,
+      status: 'active',
+      event_type_name: null,
+      // `event_type_color`/`start_date`/`end_date`/`rsvp_closes_at` are all `OptionFromOptionalKey`: the key is
+      // ABSENT or a string, never `null`. Omitted here for that reason, not by oversight —
+      // an explicit `null` is a decode failure, which is exactly the old-server skew this
+      // case exists to prove does NOT happen.
+    });
+
+    expect(Option.isNone(decoded.rsvp_closes_at)).toBe(true);
+    expect(rsvpField(decoded).field?.value).not.toContain('<t:');
+  });
+
+  it('case 4: no two components share a custom_id, with or without a deadline (Discord 50035)', () => {
+    for (const rsvp_closes_at of [
+      Option.none(),
+      Option.some(DateTime.makeUnsafe('2099-06-01T12:00:00Z')),
+    ]) {
+      const { components } = buildUpcomingEventEmbed({
+        ...baseParams,
+        entry: makeEntry({ rsvp_closes_at }),
+      });
+      const ids = components
+        .flatMap((row) => row.components as ReadonlyArray<{ custom_id?: string }>)
+        .flatMap((c) => (c.custom_id === undefined ? [] : [c.custom_id]));
+      expect(new Set(ids).size).toBe(ids.length);
+      // 50035 also rejects the whole card for an id over 100 chars.
+      for (const id of ids) expect(id.length).toBeLessThanOrEqual(100);
+    }
   });
 });

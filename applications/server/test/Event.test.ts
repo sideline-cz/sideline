@@ -362,6 +362,10 @@ type EventRecord = {
   // (`EventsRepository.ts`) — consumed by `eventAcceptsRsvp`'s all-day branch
   // (`utils/allDayRsvpWindow.ts`, plan §14.5/S2's canEdit/canCancel gates).
   timezone: string;
+  // The resolved RSVP lock (T3). Optional: every fixture above leaves it
+  // undefined. `api/event.ts` must keep reading `eventAcceptsRsvp`, which does
+  // not look at this field at all — the whole point of T3 below.
+  rsvp_lock_hours_before?: Option.Option<number>;
 };
 
 // Mirrors the server-side `::date::text` projection (plan §11.2/§11.3), but this
@@ -2320,5 +2324,148 @@ describe('Events API', () => {
       );
       expect(cancelResponse.status).toBe(400);
     });
+  });
+});
+
+// ============================================================================
+// T3 — THE EDIT/CANCEL REGRESSION
+// ============================================================================
+//
+// The RSVP deadline splits the gate: the four RSVP sites move to
+// `eventRsvpOpen`, the six sites in `api/event.ts` (`:323`, `:325`, `:372`,
+// `:511`, `:514`, `:557`) keep `eventAcceptsRsvp`.
+//
+// Folding the lock into `eventAcceptsRsvp` instead would make an event
+// uneditable and uncancellable for the whole lock window — a captain could not
+// cancel a rained-off match three hours before kickoff — and it would do so
+// with NO type error and NO other failing test. This block is the only thing
+// standing in front of that.
+
+describe('T3 — an RSVP lock must never touch edit/cancel (`api/event.ts` keeps `eventAcceptsRsvp`)', () => {
+  const LOCKED_SOON = '00000000-0000-0000-0000-000000000070' as Event.EventId;
+  const STARTED_PAST = '00000000-0000-0000-0000-000000000071' as Event.EventId;
+  const LOCKED_MAXIMAL = '00000000-0000-0000-0000-000000000072' as Event.EventId;
+
+  const seed = (
+    id: Event.EventId,
+    startAt: DateTime.Utc,
+    lock: Option.Option<number>,
+    status: Event.EventStatus = 'active',
+  ) => {
+    eventsStore.set(id, {
+      id,
+      team_id: TEST_TEAM_ID,
+      training_type_id: Option.none(),
+      event_type: 'match',
+      event_type_id: Option.none(),
+      event_type_name: Option.none(),
+      event_type_color: Option.none(),
+      title: 'Lockable Match',
+      description: Option.none(),
+      image_url: Option.none(),
+      start_at: startAt,
+      end_at: Option.none(),
+      location: Option.none(),
+      location_url: Option.none(),
+      status,
+      all_day: false,
+      created_by: TEST_ADMIN_MEMBER_ID,
+      training_type_name: Option.none(),
+      created_by_name: Option.some('Admin User'),
+      series_id: Option.none(),
+      series_modified: false,
+      discord_target_channel_id: Option.none(),
+      owner_group_id: Option.none(),
+      member_group_id: Option.none(),
+      owner_group_name: Option.none(),
+      member_group_name: Option.none(),
+      start_date: toDateOnly(startAt),
+      end_date: toDateOnly(startAt),
+      timezone: 'Europe/Prague',
+      rsvp_lock_hours_before: lock,
+    });
+  };
+
+  const hoursFromNow = (hours: number): DateTime.Utc =>
+    DateTime.add(DateTime.nowUnsafe(), { hours });
+
+  const patch = (id: Event.EventId, title: string) =>
+    handler(
+      new Request(`${BASE}/${id}`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      }),
+    );
+
+  const get = (id: Event.EventId) =>
+    handler(new Request(`${BASE}/${id}`, { headers: { Authorization: 'Bearer admin-token' } }));
+
+  it('case 1: PATCH succeeds inside the lock window (starts in 3h, locks 24h before)', async () => {
+    seed(LOCKED_SOON, hoursFromNow(3), Option.some(24));
+
+    const response = await patch(LOCKED_SOON, 'Renamed inside the lock window');
+    expect(response.status).toBe(200);
+    expect((await response.json()).title).toBe('Renamed inside the lock window');
+  });
+
+  it('case 2: cancel succeeds inside the lock window — the rained-off match', async () => {
+    seed(LOCKED_SOON, hoursFromNow(3), Option.some(24));
+
+    const response = await handler(
+      new Request(`${BASE}/${LOCKED_SOON}/cancel`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    // 204, not 200 — this endpoint has no response body (see the S2 block above).
+    expect(response.status).toBe(204);
+  });
+
+  it('case 3: GET reports canEdit/canCancel true inside the lock window', async () => {
+    seed(LOCKED_SOON, hoursFromNow(3), Option.some(24));
+
+    const response = await get(LOCKED_SOON);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.status).toBe('active');
+    expect(body.canEdit).toBe(true);
+    expect(body.canCancel).toBe(true);
+  });
+
+  it('case 4: the PATCH RESPONSE BODY reports canEdit/canCancel true — `:511`/`:514`, a separate expression from `:323`/`:325`', async () => {
+    seed(LOCKED_SOON, hoursFromNow(3), Option.some(24));
+
+    const response = await patch(LOCKED_SOON, 'Still editable');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.canEdit).toBe(true);
+    expect(body.canCancel).toBe(true);
+  });
+
+  it('case 5 counter-case: with status PINNED to active and no lock, a started event is still uneditable', async () => {
+    // Pinning `status: 'active'` is what makes green mean "rejected because the
+    // start time passed", not "rejected because the fixture said 'started'" —
+    // `status` is hand-set in this harness and nothing flips it.
+    seed(STARTED_PAST, hoursFromNow(-1), Option.none(), 'active');
+
+    const getBody = await (await get(STARTED_PAST)).json();
+    expect(getBody.status).toBe('active');
+    expect(getBody.canEdit).toBe(false);
+    expect(getBody.canCancel).toBe(false);
+
+    const response = await patch(STARTED_PAST, 'Should not apply');
+    expect(response.status).toBe(400);
+    expect((await response.json())._tag).toBe('EventNotActive');
+  });
+
+  it('case 6 THE TIGHTEST STATEMENT: maximum lock (336h) + one minute to start → PATCH still 200', async () => {
+    // If anyone ever folds the deadline into `eventAcceptsRsvp`, this is the
+    // case that goes red first and loudest.
+    seed(LOCKED_MAXIMAL, hoursFromNow(0.0167), Option.some(336));
+
+    const response = await patch(LOCKED_MAXIMAL, 'Edited with one minute to go');
+    expect(response.status).toBe(200);
+    expect((await response.json()).title).toBe('Edited with one minute to go');
   });
 });

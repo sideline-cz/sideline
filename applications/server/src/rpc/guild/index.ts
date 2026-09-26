@@ -26,6 +26,7 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { eventDayOrder, eventVisibleNow } from '~/repositories/eventVisibility.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
+import { resolvedLockHours } from '~/repositories/lockResolution.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
 import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
@@ -35,6 +36,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { rsvpClosesAtOf } from '~/utils/allDayRsvpWindow.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 import { emitMemberGroupChannelRoles } from '~/utils/emitMemberGroupChannelRoles.js';
@@ -1590,6 +1592,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 status: Schema.String,
                 start_date: Schema.String,
                 end_date: Schema.String,
+                rsvp_lock_hours_before: Schema.OptionFromNullOr(Schema.Int),
               }),
               execute: (input) =>
                 deps.sql`
@@ -1616,7 +1619,8 @@ export const GuildsRpcLive = Effect.Do.pipe(
                         AS start_date,
                     (COALESCE(e.end_at, e.start_at)
                         AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
-                        AS end_date
+                        AS end_date,
+                    ${deps.sql.unsafe(resolvedLockHours('e', 'ts'))} AS rsvp_lock_hours_before
                   FROM events e
                   LEFT JOIN event_rsvps er ON er.event_id = e.id
                   LEFT JOIN event_rsvps my_rsvp ON my_rsvp.event_id = e.id
@@ -1637,7 +1641,8 @@ export const GuildsRpcLive = Effect.Do.pipe(
                           AND gm.team_member_id = ${input.team_member_id}
                       )
                     )
-                  GROUP BY e.id, my_rsvp.response, my_rsvp.message, ts.timezone
+                  GROUP BY e.id, my_rsvp.response, my_rsvp.message, ts.timezone,
+                           ts.rsvp_lock_hours_before, ts.rsvp_lock_hours_before_overrides
                   ORDER BY ${deps.sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
                 `,
             })({ team_id: team.id, team_member_id: member.id }).pipe(
@@ -1676,6 +1681,11 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       status: row.status,
                       start_date: Option.some(row.start_date),
                       end_date: Option.some(row.end_date),
+                      // Computed in TYPESCRIPT, never in SQL: the `resolvedLockHours` fragment
+                      // in the query above resolves only WHICH number applies (see
+                      // `repositories/lockResolution.ts`); the arithmetic and every comparison
+                      // against `now` live in `utils/allDayRsvpWindow.ts`.
+                      rsvp_closes_at: rsvpClosesAtOf(row),
                       // ponytail: this raw inline query isn't joined to `event_types` — add
                       // the join here if this surface needs the name/color.
                       event_type_name: Option.none(),

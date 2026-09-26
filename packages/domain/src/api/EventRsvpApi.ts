@@ -1,3 +1,4 @@
+import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
@@ -25,6 +26,13 @@ export class EventRsvpDetail extends Schema.Class<EventRsvpDetail>('EventRsvpDet
   maybeCount: Schema.Number,
   comingLaterCount: Schema.Number.pipe(Schema.withDecodingDefaultKey(() => 0)),
   canRsvp: Schema.Boolean,
+  // The instant RSVPs close, when a lock applies AND this member is actually invited. `None`
+  // both when no lock applies and when the viewer is outside the event's `member_group` — a
+  // member who is simply not invited must never be told "RSVPs closed at 18:00" while they are
+  // wide open for everyone else. `OptionFromOptionalKey`, matching `startDate`/`timezone` on
+  // `EventApi`, so an older server's payload degrades to today's UI rather than a decode
+  // failure: web bundles a FROZEN copy of this schema.
+  rsvpClosesAt: Schema.OptionFromOptionalKey(Schemas.DateTimeFromIsoString),
   minPlayersThreshold: Schema.Number,
 }) {}
 

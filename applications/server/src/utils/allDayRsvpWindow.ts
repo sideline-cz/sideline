@@ -19,6 +19,18 @@ import { DateTime, Option } from 'effect';
  * at a sub-second boundary the two may disagree for the duration of clock
  * skew. Acceptable: the consequence is one rejected RSVP with a correct error
  * message, retried by a second click.
+ *
+ * **The lock-step requirement covers `eventAcceptsRsvp` ONLY.** The configurable
+ * RSVP deadline added `eventRsvpOpen`/`rsvpClosesAtOf` at the bottom of this
+ * module, and they deliberately have NO SQL twin anywhere: a locked event is
+ * still VISIBLE, so `eventVisibleNow` and friends stay byte-identical. That is
+ * safe in the only direction that matters because `eventRsvpOpen` is
+ * `eventAcceptsRsvp && …` — strictly narrower, never wider, on either branch.
+ * SQL resolves only WHICH lock number applies (`repositories/lockResolution.ts`);
+ * every comparison against `now` lives in this module.
+ *
+ * The filename now undersells the module — it holds the general RSVP gate, not
+ * just the all-day window. Left alone: a rename is churn across six importers.
  */
 
 /**
@@ -98,3 +110,73 @@ export const eventAcceptsRsvp = (
     event.status === 'active' &&
     DateTime.isLessThanOrEqualTo(now, event.start_at)) ||
   allDayStillRsvpable(event, timezone, now);
+
+/**
+ * The instant RSVPs close, or `None` when this event has no lock configured.
+ *
+ * Pure ABSOLUTE arithmetic — no timezone, because `start_at` is already the
+ * event's start on both branches (an all-day event's `start_at` is team-local
+ * midnight of day 1 since the anchor move). A DST transition between
+ * `closesAt` and `start_at` therefore does not move the deadline: "24 hours
+ * before" means 24 hours, not "the same wall clock yesterday".
+ *
+ * Exported because FOUR surfaces render this instant (the web panel, the
+ * Discord card, and both upcoming-events producers) while `eventRsvpOpen`
+ * below enforces it. They must never disagree, so the subtraction exists
+ * exactly once — here.
+ *
+ * `rsvp_lock_hours_before` is optional on the STRUCTURAL type but not on the
+ * DB-decoded `EventWithDetails`: hand-built fixtures across the server suite
+ * omit it, and `undefined` must read as `Option.none()`. The `?? Option.none()`
+ * is load-bearing, not defensive styling — `Option.match(undefined, …)` throws.
+ * Same reasoning as the `!!event.all_day` truthy check two functions up.
+ */
+export const rsvpClosesAtOf = (event: {
+  readonly start_at: DateTime.Utc;
+  readonly rsvp_lock_hours_before?: Option.Option<number>;
+}): Option.Option<DateTime.Utc> =>
+  Option.map(event.rsvp_lock_hours_before ?? Option.none(), (hours) =>
+    DateTime.subtract(event.start_at, { hours }),
+  );
+
+/**
+ * The RSVP gate for the FOUR RSVP sites: `api/event-rsvp.ts`'s `getRsvps` and
+ * `submitRsvp`, and `rpc/event/index.ts`'s `Event/GetRsvpCounts` and
+ * `Event/SubmitRsvp`.
+ *
+ * **The gate SPLITS here, deliberately.** The six edit/cancel sites in
+ * `api/event.ts` (`canEdit`, `canCancel`, and the `updateEvent`/`cancelEvent`
+ * write guards) keep calling `eventAcceptsRsvp` — folding the lock into that
+ * shared function instead would make an event uneditable and uncancellable for
+ * the whole lock window, so a captain could not cancel a rained-off match
+ * three hours before kickoff. That failure has no type error and no other
+ * failing test; `test/Event.test.ts`'s T3 block is what stands in front of it.
+ *
+ * Strictly NARROWER than `eventAcceptsRsvp` by construction (it is a
+ * conjunction with it), so the lockstep requirement with `eventVisibility.ts`
+ * that the module header states is preserved: a locked event stays VISIBLE,
+ * and this gate can never be open where the visibility twin is shut. The
+ * reverse — visible but locked — is precisely what this feature means, which
+ * is why this half has NO SQL twin at any call site. SQL only ever resolves
+ * WHICH number applies (`repositories/lockResolution.ts`); every comparison
+ * against `now` happens here.
+ */
+export const eventRsvpOpen = (
+  event: {
+    readonly all_day: boolean;
+    readonly status: Event.EventStatus;
+    readonly start_at: DateTime.Utc;
+    readonly end_at: Option.Option<DateTime.Utc>;
+    readonly rsvp_lock_hours_before?: Option.Option<number>;
+  },
+  timezone: string,
+  now: DateTime.Utc,
+): boolean =>
+  eventAcceptsRsvp(event, timezone, now) &&
+  Option.match(rsvpClosesAtOf(event), {
+    onNone: () => true,
+    // Strict: at the advertised instant RSVPs are already closed. Unlike the
+    // `<=` in `eventAcceptsRsvp`'s timed branch, this condition has no SQL
+    // twin to match, so "before the deadline" is read literally.
+    onSome: (closesAt) => DateTime.isLessThan(now, closesAt),
+  });
