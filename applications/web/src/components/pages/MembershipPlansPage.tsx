@@ -104,12 +104,16 @@ function MembershipPlanFormDialog({
   const [pricePerTrainingStr, setPricePerTrainingStr] = React.useState(
     isEdit && plan ? formatMinorToMajor(plan.pricePerTrainingMinor, plan.currency) : '',
   );
+  const [freeTrainingsStr, setFreeTrainingsStr] = React.useState(
+    isEdit && plan && plan.freeTrainingsPerPeriod > 0 ? String(plan.freeTrainingsPerPeriod) : '',
+  );
   const [expiresAt, setExpiresAt] = React.useState(
     isEdit && plan && Option.isSome(plan.expiresAt) ? formatLocalDate(plan.expiresAt.value) : '',
   );
   const [nameError, setNameError] = React.useState('');
   const [priceError, setPriceError] = React.useState('');
   const [pricePerTrainingError, setPricePerTrainingError] = React.useState('');
+  const [freeTrainingsError, setFreeTrainingsError] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   // Reset when dialog opens/closes, mode changes, or the target plan changes.
@@ -121,6 +125,11 @@ function MembershipPlanFormDialog({
       setPricePerTrainingStr(
         isEdit && plan ? formatMinorToMajor(plan.pricePerTrainingMinor, plan.currency) : '',
       );
+      setFreeTrainingsStr(
+        isEdit && plan && plan.freeTrainingsPerPeriod > 0
+          ? String(plan.freeTrainingsPerPeriod)
+          : '',
+      );
       setExpiresAt(
         isEdit && plan && Option.isSome(plan.expiresAt)
           ? formatLocalDate(plan.expiresAt.value)
@@ -129,6 +138,7 @@ function MembershipPlanFormDialog({
       setNameError('');
       setPriceError('');
       setPricePerTrainingError('');
+      setFreeTrainingsError('');
       setIsSubmitting(false);
     }
   }, [open, isEdit, plan]);
@@ -172,6 +182,17 @@ function MembershipPlanFormDialog({
       hasError = true;
     }
 
+    // Blank means "no allowance" (0), same convention as the two amount fields above. The
+    // bounds mirror `FreeTrainingsPerPeriod` so the user sees a field error instead of
+    // `decodeSync` throwing past the try/catch below.
+    const freeTrainings = Number(freeTrainingsStr.trim() === '' ? '0' : freeTrainingsStr);
+    if (!Number.isInteger(freeTrainings) || freeTrainings < 0 || freeTrainings > 999) {
+      setFreeTrainingsError(tr('membershipPlan_freeTrainingsInvalid'));
+      hasError = true;
+    } else {
+      setFreeTrainingsError('');
+    }
+
     if (hasError) return;
 
     const payload: MembershipPlanApi.MembershipPlanRequest = {
@@ -181,6 +202,9 @@ function MembershipPlanFormDialog({
       priceMinor: Schema.decodeSync(Fee.AmountMinor)(priceMinor),
       currency: Schema.decodeSync(Fee.CurrencyCode)(currency),
       pricePerTrainingMinor: Schema.decodeSync(Fee.AmountMinor)(pricePerTrainingMinor),
+      freeTrainingsPerPeriod: Schema.decodeSync(MembershipPlan.FreeTrainingsPerPeriod)(
+        freeTrainings,
+      ),
       expiresAt: parseExpiresAtField(expiresAt),
     };
 
@@ -309,6 +333,28 @@ function MembershipPlanFormDialog({
             {pricePerTrainingError && (
               <p className='text-sm text-destructive'>{pricePerTrainingError}</p>
             )}
+          </div>
+
+          {/* Free trainings per period */}
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='membership-plan-free-trainings'>
+              {tr('membershipPlan_freeTrainings')}
+            </Label>
+            <Input
+              id='membership-plan-free-trainings'
+              type='number'
+              step='1'
+              min='0'
+              max='999'
+              inputMode='numeric'
+              value={freeTrainingsStr}
+              onChange={(e) => setFreeTrainingsStr(e.target.value)}
+              placeholder='0'
+            />
+            <p className='text-xs text-muted-foreground'>
+              {tr('membershipPlan_freeTrainingsHint')}
+            </p>
+            {freeTrainingsError && <p className='text-sm text-destructive'>{freeTrainingsError}</p>}
           </div>
 
           {/* Expires on */}
@@ -666,6 +712,13 @@ export function MembershipPlansPage({
             const perTrainingLabel = tr('membershipPlan_perTraining', {
               amount: formatMoney(plan.pricePerTrainingMinor, plan.currency, 'en'),
             });
+            // Only shown when there is one — an extra "0 free" on every plan is noise.
+            const freeTrainingsLabel =
+              plan.freeTrainingsPerPeriod > 0
+                ? ` · ${tr('membershipPlan_freeTrainingsSummary', {
+                    count: String(plan.freeTrainingsPerPeriod),
+                  })}`
+                : '';
             const expiresLabel = Option.isSome(plan.expiresAt)
               ? tr('membershipPlan_expiresOn', { date: formatLocalDate(plan.expiresAt.value) })
               : tr('membershipPlan_noExpiry');
@@ -687,7 +740,8 @@ export function MembershipPlansPage({
                     )}
                   </div>
                   <div className='text-xs text-muted-foreground'>
-                    {priceLabel} · {perTrainingLabel} · {expiresLabel}
+                    {priceLabel} · {perTrainingLabel}
+                    {freeTrainingsLabel} · {expiresLabel}
                   </div>
                 </div>
                 <div className='ml-auto flex flex-wrap items-center gap-1'>

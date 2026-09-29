@@ -79,6 +79,7 @@ const insertPlan = (
   overrides: Partial<{
     price_minor: number;
     price_per_training_minor: number;
+    free_trainings_per_period: number;
     currency: string;
   }> = {},
 ) =>
@@ -90,6 +91,7 @@ const insertPlan = (
         price_minor: (overrides.price_minor ?? 1000) as never,
         currency: (overrides.currency ?? 'CZK') as never,
         price_per_training_minor: (overrides.price_per_training_minor ?? 0) as never,
+        free_trainings_per_period: (overrides.free_trainings_per_period ?? 0) as never,
         expires_at: Option.none(),
       }),
     ),

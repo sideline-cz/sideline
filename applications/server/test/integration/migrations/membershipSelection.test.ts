@@ -49,6 +49,7 @@ const seedTeamMemberAndPlan = Effect.Do.pipe(
           price_minor: 1000 as never,
           currency: 'CZK' as never,
           price_per_training_minor: 0 as never,
+          free_trainings_per_period: 0 as never,
           expires_at: Option.none(),
         }),
       ),

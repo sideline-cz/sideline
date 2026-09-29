@@ -103,6 +103,9 @@ const setMembershipSelectionDeadlineImpl = vi.fn();
 // Slice 3 — the captain-side single-member write. Mocked for the same reason as the two
 // above: without it, changing a row's Select throws "not a function" instead of asserting.
 const assignMembershipPlanImpl = vi.fn();
+// The free-training allowance tests submit the edit form for real, so the PATCH writer needs a
+// mock too — same reason as the three above.
+const updateMembershipPlanImpl = vi.fn();
 
 vi.mock('~/lib/runtime', async () => {
   const { Effect: RealEffect } = await import('effect');
@@ -115,6 +118,7 @@ vi.mock('~/lib/runtime', async () => {
             setMembershipSelectionDeadline: (args: unknown) =>
               setMembershipSelectionDeadlineImpl(args),
             assignMembershipPlan: (args: unknown) => assignMembershipPlanImpl(args),
+            updateMembershipPlan: (args: unknown) => updateMembershipPlanImpl(args),
           },
         }),
     },
@@ -204,6 +208,7 @@ function plan(overrides: Record<string, unknown> = {}) {
     priceMinor: 50000,
     currency: 'CZK',
     pricePerTrainingMinor: 0,
+    freeTrainingsPerPeriod: 0,
     expiresAt: Option.none<never>(),
     isDefault: false,
     ...overrides,
@@ -470,6 +475,65 @@ describe('MembershipPlansPage — saving the selection deadline', () => {
       const expectedEpochMillis = new Date(2026, 8, 30, 23, 59, 59, 999).getTime();
       expect(Number(DateTime.toEpochMillis(args.payload.deadline.value))).toBe(expectedEpochMillis);
     }
+  });
+});
+
+// The free-training allowance (1793400000). The money math is a SQL function and is covered by
+// `trainingPeriodCharges.test.ts`; what only exists here is the form's own blank -> 0 convention
+// and the 0..999 bound, which mirrors `FreeTrainingsPerPeriod` so the user sees a field error
+// instead of `decodeSync` throwing past the submit handler.
+describe('MembershipPlansPage — free trainings field', () => {
+  it('a blank field submits 0, not NaN or undefined', async () => {
+    updateMembershipPlanImpl.mockReturnValueOnce(Effect.succeed(plan()));
+
+    renderPage({ plans: [PLAN_A] });
+    fireEvent.click(screen.getByLabelText(`Edit ${'Plan A'}`));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(updateMembershipPlanImpl).toHaveBeenCalledOnce();
+    });
+    const args = updateMembershipPlanImpl.mock.calls[0][0] as {
+      payload: { freeTrainingsPerPeriod: number };
+    };
+    expect(args.payload.freeTrainingsPerPeriod).toBe(0);
+  });
+
+  it('an entered allowance reaches the payload', async () => {
+    updateMembershipPlanImpl.mockReturnValueOnce(Effect.succeed(plan()));
+
+    renderPage({ plans: [PLAN_A] });
+    fireEvent.click(screen.getByLabelText(`Edit ${'Plan A'}`));
+    fireEvent.change(screen.getByLabelText('membershipPlan_freeTrainings'), {
+      target: { value: '4' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(updateMembershipPlanImpl).toHaveBeenCalledOnce();
+    });
+    const args = updateMembershipPlanImpl.mock.calls[0][0] as {
+      payload: { freeTrainingsPerPeriod: number };
+    };
+    expect(args.payload.freeTrainingsPerPeriod).toBe(4);
+  });
+
+  // The `max='999'` on the input is the guard that actually fires: native constraint validation
+  // refuses the submit before `handleSubmit` runs, so no payload is built and `decodeSync` is
+  // never handed a value `FreeTrainingsPerPeriod` would reject. `handleSubmit`'s own 0..999
+  // check stays as the belt for anything that reaches it another way; the DB CHECK and the
+  // schema are the real trust boundary.
+  it('an out-of-range allowance never reaches the API', async () => {
+    renderPage({ plans: [PLAN_A] });
+    fireEvent.click(screen.getByLabelText(`Edit ${'Plan A'}`));
+    fireEvent.change(screen.getByLabelText('membershipPlan_freeTrainings'), {
+      target: { value: '1000' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(updateMembershipPlanImpl).not.toHaveBeenCalled();
+    });
   });
 });
 
