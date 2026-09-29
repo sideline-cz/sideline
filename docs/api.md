@@ -7772,6 +7772,7 @@ Permissions deliberately follow the **finance**, not the **team**, boundary: lis
 | `priceMinor` | `number` | No | Price in minor units (e.g. cents) |
 | `currency` | `string` | No | ISO 4217 code |
 | `pricePerTrainingMinor` | `number` | No | Per-training price in minor units, for pay-per-training plans |
+| `freeTrainingsPerPeriod` | `number` | No | Trainings included at no charge PER BILLING PERIOD (the calendar month `training_period_start` defines), never a lifetime quota — the counter resets every month. `0` (the default, and the value every plan predating this field was backfilled with) means every attended training is billed. Tolerantly decoded: an old client omitting the key reads `0` |
 | `expiresAt` | `string \| null` (ISO datetime) | Yes | `null` means the plan never expires |
 | `isDefault` | `boolean` | No | Whether this is the team's current default plan |
 
@@ -7783,6 +7784,7 @@ Permissions deliberately follow the **finance**, not the **team**, boundary: lis
 | `priceMinor` | `number` | Yes | Price in minor units |
 | `currency` | `string` | Yes | ISO 4217 code |
 | `pricePerTrainingMinor` | `number` | Yes | Per-training price in minor units |
+| `freeTrainingsPerPeriod` | `number` | Yes | 0–999. Trainings included free each billing period. Accepted on a plan whose `pricePerTrainingMinor` is `0` and simply has no effect there — the charge engine's `price_per_training_minor > 0` gate already makes it a no-op, and rejecting it would break the legitimate "set the allowance, then set the price" edit order |
 | `expiresAt` | `string \| null` (ISO datetime) | Yes | `null` for a plan that never expires |
 
 `MembershipPlanAssignment` — one row per active member, only ever populated when the caller can manage (see `assignments` below):
@@ -8026,7 +8028,7 @@ Bulk "move everyone from plan A to plan B" (or from/to the team default). Requir
 | `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
 | `MembershipPlanNotFound` | 404 | `toMembershipPlanId` names a plan that does not exist, does not belong to `teamId`, or is archived. Only checked when the `UPDATE` affects zero rows and a target was specified — an unmatched **source** is not an error, it just moves nobody |
 
-A member already on the target plan is not re-counted: the `UPDATE`'s `WHERE` requires the current plan to differ from the target, so `movedCount` never inflates from a no-op match. This does not immediately change any in-progress training charges — `training_period_charges` recomputes lazily on the next attendance write in the current billing period; past periods are frozen. This is the same lazy-recompute behaviour that already applies to editing a plan's `pricePerTrainingMinor`.
+A member already on the target plan is not re-counted: the `UPDATE`'s `WHERE` requires the current plan to differ from the target, so `movedCount` never inflates from a no-op match. This does not immediately change any in-progress training charges — `training_period_charges` recomputes lazily on the next attendance write in the current billing period; past periods are frozen. Editing the PLAN itself is different: changing `pricePerTrainingMinor` or `freeTrainingsPerPeriod` fires `membership_plans_pricing_recompute_trg`, which recomputes the team's CURRENT period immediately (past periods stay frozen — `recompute_training_period_fees` returns early for them). Moving MEMBERS between plans still recomputes lazily, because that write lands on `team_members`, which has no such trigger.
 
 ---
 

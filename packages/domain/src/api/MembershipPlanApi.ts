@@ -3,7 +3,11 @@ import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import * as Fee from '~/models/Fee.js';
-import { MembershipPlanId, MembershipPlanName } from '~/models/MembershipPlan.js';
+import {
+  FreeTrainingsPerPeriod,
+  MembershipPlanId,
+  MembershipPlanName,
+} from '~/models/MembershipPlan.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
@@ -15,6 +19,10 @@ export class MembershipPlanInfo extends Schema.Class<MembershipPlanInfo>('Member
   priceMinor: Fee.AmountMinor,
   currency: Fee.CurrencyCode,
   pricePerTrainingMinor: Fee.AmountMinor,
+  // Trainings included at no charge PER BILLING PERIOD (the calendar month the charge engine
+  // already bills on), not a lifetime quota -- see 1793400000. Tolerant decode so an old web
+  // bundle and the e2e fixture, both of which predate this field, still decode.
+  freeTrainingsPerPeriod: FreeTrainingsPerPeriod.pipe(Schema.withDecodingDefaultKey(() => 0)),
   expiresAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   isDefault: Schema.Boolean,
 }) {}
@@ -69,6 +77,10 @@ export const MembershipPlanRequest = Schema.Struct({
   priceMinor: Fee.AmountMinor,
   currency: Fee.CurrencyCode,
   pricePerTrainingMinor: Fee.AmountMinor,
+  // Same tolerant decode as `MembershipPlanInfo.freeTrainingsPerPeriod`: an old web bundle
+  // submitting the full-replace payload without the key must not be rejected, and 0 (no
+  // allowance) is the only safe thing to read into it.
+  freeTrainingsPerPeriod: FreeTrainingsPerPeriod.pipe(Schema.withDecodingDefaultKey(() => 0)),
   expiresAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
 });
 export type MembershipPlanRequest = Schema.Schema.Type<typeof MembershipPlanRequest>;

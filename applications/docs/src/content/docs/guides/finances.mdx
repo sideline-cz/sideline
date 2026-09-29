@@ -162,11 +162,12 @@ Content-Type: application/json
   "priceMinor": 50000,
   "currency": "CZK",
   "pricePerTrainingMinor": 0,
+  "freeTrainingsPerPeriod": 0,
   "expiresAt": null
 }
 ```
 
-`name` can be `null` to render the built-in translated label instead of a custom name. The request returns `201 Created` with the full plan on success; `409 MembershipPlanNameAlreadyTaken` if another active plan in the team already uses that name (case-insensitive).
+`name` can be `null` to render the built-in translated label instead of a custom name. `freeTrainingsPerPeriod` (0–999) is how many trainings the plan includes free each calendar month — the allowance resets every month, and the per-training price applies from the next attended training on. The request returns `201 Created` with the full plan on success; `409 MembershipPlanNameAlreadyTaken` if another active plan in the team already uses that name (case-insensitive).
 
 #### Update a membership plan
 
@@ -179,9 +180,12 @@ Content-Type: application/json
   "priceMinor": 55000,
   "currency": "CZK",
   "pricePerTrainingMinor": 0,
+  "freeTrainingsPerPeriod": 0,
   "expiresAt": null
 }
 ```
+
+Changing `pricePerTrainingMinor` or `freeTrainingsPerPeriod` re-prices the CURRENT month's training fees straight away. Months that have already ended are never re-priced.
 
 This is a full replacement, not a partial patch — resend every field, including ones you aren't changing. Sending `name: null` clears a plan's stored name back to the built-in label.
 

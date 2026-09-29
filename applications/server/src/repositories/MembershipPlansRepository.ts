@@ -21,6 +21,7 @@ class MembershipPlanRow extends Schema.Class<MembershipPlanRow>('MembershipPlanR
   price_minor: Fee.AmountMinor,
   currency: Fee.CurrencyCode,
   price_per_training_minor: Fee.AmountMinor,
+  free_trainings_per_period: MembershipPlan.FreeTrainingsPerPeriod,
   // Driver returns a JS `Date` here, never an ISO string — `DateTimeFromDate`, NOT
   // `DateTimeFromIsoString` (that one belongs to the API-layer schema).
   expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
@@ -59,6 +60,7 @@ const InsertInput = Schema.Struct({
   price_minor: Fee.AmountMinor,
   currency: Fee.CurrencyCode,
   price_per_training_minor: Fee.AmountMinor,
+  free_trainings_per_period: MembershipPlan.FreeTrainingsPerPeriod,
   expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
 });
 
@@ -69,6 +71,7 @@ const UpdateInput = Schema.Struct({
   price_minor: Fee.AmountMinor,
   currency: Fee.CurrencyCode,
   price_per_training_minor: Fee.AmountMinor,
+  free_trainings_per_period: MembershipPlan.FreeTrainingsPerPeriod,
   expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
 });
 
@@ -104,9 +107,9 @@ const make = Effect.gen(function* () {
     Request: InsertInput,
     Result: MembershipPlanRow,
     execute: (input) => sql`
-      INSERT INTO membership_plans (team_id, name, price_minor, currency, price_per_training_minor, expires_at, is_default)
+      INSERT INTO membership_plans (team_id, name, price_minor, currency, price_per_training_minor, free_trainings_per_period, expires_at, is_default)
       SELECT ${input.team_id}, ${input.name}, ${input.price_minor}, ${input.currency},
-             ${input.price_per_training_minor}, ${input.expires_at},
+             ${input.price_per_training_minor}, ${input.free_trainings_per_period}, ${input.expires_at},
              NOT EXISTS (
                SELECT 1 FROM membership_plans
                WHERE team_id = ${input.team_id} AND archived_at IS NULL AND is_default
@@ -124,6 +127,7 @@ const make = Effect.gen(function* () {
         price_minor = ${input.price_minor},
         currency = ${input.currency},
         price_per_training_minor = ${input.price_per_training_minor},
+        free_trainings_per_period = ${input.free_trainings_per_period},
         expires_at = ${input.expires_at},
         updated_at = now()
       WHERE id = ${input.id} AND team_id = ${input.team_id} AND archived_at IS NULL
@@ -356,6 +360,7 @@ const make = Effect.gen(function* () {
     price_minor: Fee.AmountMinor;
     currency: Fee.CurrencyCode;
     price_per_training_minor: Fee.AmountMinor;
+    free_trainings_per_period: MembershipPlan.FreeTrainingsPerPeriod;
     expires_at: Option.Option<DateTime.Utc>;
   }) =>
     insertQuery(input).pipe(
@@ -373,6 +378,7 @@ const make = Effect.gen(function* () {
     price_minor: Fee.AmountMinor;
     currency: Fee.CurrencyCode;
     price_per_training_minor: Fee.AmountMinor;
+    free_trainings_per_period: MembershipPlan.FreeTrainingsPerPeriod;
     expires_at: Option.Option<DateTime.Utc>;
   }) =>
     updateQuery(input).pipe(

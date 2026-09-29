@@ -90,7 +90,12 @@ const defaultPlan = (teamId: Team.TeamId) =>
     }),
   );
 
-const setDefaultPlanPrice = (teamId: Team.TeamId, priceMinor: number, currency = 'CZK') =>
+const setDefaultPlanPrice = (
+  teamId: Team.TeamId,
+  priceMinor: number,
+  currency = 'CZK',
+  freeTrainings = 0,
+) =>
   Effect.gen(function* () {
     const plans = yield* MembershipPlansRepository.asEffect();
     const def = yield* defaultPlan(teamId);
@@ -101,11 +106,18 @@ const setDefaultPlanPrice = (teamId: Team.TeamId, priceMinor: number, currency =
       price_minor: def.price_minor,
       currency: currency as never,
       price_per_training_minor: priceMinor as never,
+      free_trainings_per_period: freeTrainings as never,
       expires_at: def.expires_at,
     });
   });
 
-const createPlan = (teamId: Team.TeamId, priceMinor: number, currency: string, name: string) =>
+const createPlan = (
+  teamId: Team.TeamId,
+  priceMinor: number,
+  currency: string,
+  name: string,
+  freeTrainings = 0,
+) =>
   MembershipPlansRepository.asEffect().pipe(
     Effect.andThen((repo) =>
       repo.insertMembershipPlan({
@@ -114,6 +126,7 @@ const createPlan = (teamId: Team.TeamId, priceMinor: number, currency: string, n
         price_minor: 0 as never,
         currency: currency as never,
         price_per_training_minor: priceMinor as never,
+        free_trainings_per_period: freeTrainings as never,
         expires_at: Option.none(),
       }),
     ),
@@ -1095,5 +1108,202 @@ describe('training_period_charges — cross-currency move of an ALREADY-PAID mem
         expect((yield* assignmentFor(eurFee.id, paid.id))?.amount_minor).toBe('16');
         expect((yield* assignmentFor(eurFee.id, unpaid.id))?.amount_minor).toBe('16');
       }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The per-period free-training allowance (1793400000)
+// ---------------------------------------------------------------------------
+
+// A third training instant, still inside the same UTC month as `NOW` and still before it, so
+// `confirmAttendance`'s `start_at <= now()` guard passes — same construction as
+// `TRAINING_START` / `TRAINING_START_2`.
+const TRAINING_START_3 = new Date(NOW.getTime() - 15 * 60 * 1000);
+
+describe('training_period_charges — free trainings per period', () => {
+  it.effect('an allowance BELOW the month’s attendance bills only the excess', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('allowance-partial');
+      const member = yield* addBilledMember(team.id, 'allowance-partial-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+
+      for (const startAt of [TRAINING_START, TRAINING_START_2, TRAINING_START_3]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+
+      const fees = yield* trainingFees(team.id);
+      expect(fees).toHaveLength(1);
+      const fee = fees[0];
+      if (fee === undefined) throw new Error('expected a fee row');
+      // 3 attended - 2 free = 1 billable x 100.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an allowance that COVERS the month produces no fee row at all', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('allowance-covers');
+      const member = yield* addBilledMember(team.id, 'allowance-covers-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 5);
+
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      // No empty `fees` shell either — shells are never deleted, so not creating one is the
+      // only way the treasurer's fee list stays clean for a month nobody owes anything in.
+      expect(yield* trainingFees(team.id)).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an allowance EXACTLY equal to attendance bills nothing (boundary)', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('allowance-exact');
+      const member = yield* addBilledMember(team.id, 'allowance-exact-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+
+      expect(yield* trainingFees(team.id)).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The point of `membership_plans_pricing_recompute_trg`: without it the captain sets an
+  // allowance and the month's fee does not move until the next attendance write.
+  it.effect('raising the allowance re-prices the OPEN period immediately', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('allowance-live');
+      const member = yield* addBilledMember(team.id, 'allowance-live-member');
+      yield* setDefaultPlanPrice(team.id, 100);
+
+      for (const startAt of [TRAINING_START, TRAINING_START_2, TRAINING_START_3]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+      const fees = yield* trainingFees(team.id);
+      const fee = fees[0];
+      if (fee === undefined) throw new Error('expected a fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('300');
+
+      // No attendance write here — the plan edit alone must move the money.
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // Falling to zero is the S4 path, reached through the plan edit rather than an un-tick.
+  it.effect('an allowance that swallows the whole charge PRUNES the unpaid assignment', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('allowance-prune');
+      const member = yield* addBilledMember(team.id, 'allowance-prune-member');
+      yield* setDefaultPlanPrice(team.id, 100);
+
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      const fees = yield* trainingFees(team.id);
+      const fee = fees[0];
+      if (fee === undefined) throw new Error('expected a fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 3);
+
+      expect(yield* assignmentFor(fee.id, member.id)).toBeUndefined();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The GREATEST(..., paid_minor) clamp still owns a member who ALREADY PAID. A late allowance
+  // must never leave amount_minor < paid_minor — FinancesOverviewPage subtracts them raw, so a
+  // single such row would understate the whole team's outstanding KPI.
+  it.effect('a late allowance cannot drop an already-PAID assignment below paid_minor', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('allowance-paid');
+      const member = yield* addBilledMember(team.id, 'allowance-paid-member');
+      yield* setDefaultPlanPrice(team.id, 100);
+
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      const fees = yield* trainingFees(team.id);
+      const fee = fees[0];
+      if (fee === undefined) throw new Error('expected a fee row');
+      const assignment = yield* assignmentFor(fee.id, member.id);
+      if (assignment === undefined) throw new Error('expected an assignment');
+
+      const payments = yield* PaymentsRepository.asEffect();
+      yield* payments.insert({
+        feeAssignmentId: assignment.id as never,
+        teamMemberId: member.id,
+        amountMinor: 100,
+        method: 'cash',
+        paidAt: DateTime.fromDateUnsafe(NOW),
+        note: Option.none(),
+        recordedByUserId: captain.user_id as never,
+      });
+
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 3);
+
+      const after = yield* assignmentFor(fee.id, member.id);
+      expect(after, 'a paid-against assignment is never pruned').toBeDefined();
+      expect(after?.amount_minor).toBe('100');
+      expect(after?.paid_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // Approved scope decision: the member's CURRENT plan applies to the WHOLE period, exactly as
+  // `price_per_training_minor` already does. No proration, no carry — `training_period_charges`
+  // resolves the plan at recompute time and has no record of what it was earlier in the month.
+  it.effect('switching plan mid-period applies the NEW allowance to the whole month', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('allowance-switch');
+      const member = yield* addBilledMember(team.id, 'allowance-switch-member');
+      yield* setDefaultPlanPrice(team.id, 100);
+
+      for (const startAt of [TRAINING_START, TRAINING_START_2, TRAINING_START_3]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+      const fees = yield* trainingFees(team.id);
+      const fee = fees[0];
+      if (fee === undefined) throw new Error('expected a fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('300');
+
+      // A second plan, same price and currency, but with an allowance.
+      const generous = yield* createPlan(team.id, 100, 'CZK', 'Generous', 2);
+      yield* selectPlanForMember(member.id, team.id, generous.id);
+
+      // The selection itself does not recompute (no trigger on team_members); the next
+      // attendance write does — and it must bill the whole month at the NEW allowance.
+      const extra = yield* createTraining(team.id, captain.id, TRAINING_START_3);
+      yield* confirm(extra, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      // 4 attended - 2 free = 2 billable x 100.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('200');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The allowance must not become a back door around the opt-in gate: a plan that charges
+  // nothing per training still produces no rows, allowance or not.
+  it.effect('an allowance on a free plan changes nothing', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('allowance-free-plan');
+      const member = yield* addBilledMember(team.id, 'allowance-free-plan-member');
+      yield* setDefaultPlanPrice(team.id, 0, 'CZK', 4);
+
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      expect(yield* trainingFees(team.id)).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
   );
 });
