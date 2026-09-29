@@ -738,16 +738,21 @@ runs will put two agents on one ticket.
 
 | Key | Value |
 |---|---|
-| `script` | `scripts/herdr-worktree.sh` |
-| `seed_paths` | `.env.local`, `.env.preview.local`, `.claude/settings.local.json` |
-| `install_cmd` | `pnpm install` |
+| `seed` | `.env.local`, `.env.preview.local`, `.claude/settings.local.json` |
+| `setup` | `direnv allow && pnpm install` |
 
-`seed_paths` is hand-maintained config a fresh checkout lacks; it mirrors `SEED_PATHS` in the
-script. The machine-generated gitignored dirs (`.local/`, `node_modules/`, `.direnv/`) are
-deliberately NOT seeded — `direnv allow` + `pnpm install` regenerate them, and copying
-`node_modules/` across worktrees produces stale native builds.
+`seed` is hand-maintained config a fresh checkout lacks. The machine-generated gitignored dirs
+(`.local/`, `node_modules/`, `.direnv/`) are deliberately NOT seeded — `setup` regenerates them,
+and copying `node_modules/` across worktrees produces stale native builds.
 
-Flags: `--no-install`, `--no-agent`, `--base <ref>`, `--prompt <text>`, `--label <text>`.
+**Both keys must be spelled exactly `seed` and `setup`.** The skill treats them as optional and
+skips seeding silently when it cannot find them, so a renamed key does not error — it launches an
+agent into a worktree with no `.env.local` and no `node_modules`, which fails later and
+confusingly. This section previously used `script`/`seed_paths`/`install_cmd`, from the 0.1.0
+contract, and was silently doing nothing.
+
+`scripts/herdr-worktree.sh` still exists and still works standalone, but the plugin no longer
+calls it — the skill issues the `herdr` commands itself.
 
 ## Sprint
 
