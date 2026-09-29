@@ -236,20 +236,36 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
             -- widest IANA offset. The upper bound is safe for the whole IANA range (-12..+14): an event
             -- whose TEAM-LOCAL period is before p_period_start has a UTC instant strictly below
             -- p_period_start + 1 day (worst case -12 puts local midnight at +12h UTC).
-            SELECT GREATEST(p.free_trainings_included - COUNT(*), 0) AS free_left
-            FROM events pe
-            JOIN event_attendance pea
-              ON pea.event_id = pe.id
-             AND pea.team_member_id = p.team_member_id
-             AND pea.confirmed_at IS NOT NULL
-             AND pea.present
-            WHERE pe.team_id = p_team_id
-              AND pe.event_type = 'training'
-              AND pe.status <> 'cancelled'
-              AND pe.start_at >= p.plan_anchor_at - INTERVAL '32 days'
-              AND pe.start_at <  (p_period_start + INTERVAL '1 day') AT TIME ZONE 'UTC'
-              AND training_period_start(pe.start_at, pe.team_id) >= p.plan_anchor_period
-              AND training_period_start(pe.start_at, pe.team_id) < p_period_start
+            --
+            -- The CASE is a COST guard, not a semantic one: with a 0 allowance the scan's answer is
+            -- provably GREATEST(0 - n, 0) = 0, and a scalar subquery inside CASE is only evaluated when
+            -- its branch is taken. That is the configuration of every plan shipped today, so the whole
+            -- history scan is skipped for them. Measured on PG17, 30 members x 3 years (534 trainings,
+            -- 16 020 attendance rows), allowance 0: 142 ms -> 3.5 ms per call, and a 20-member squad
+            -- confirm 8.3 s -> ~0.2 s -- all of it inside S1's team-wide fees mutex. Identical results
+            -- (same row count, same sum(amount_minor)). No assertion can observe cost, so this comment
+            -- is the pin: do NOT flatten the CASE back into a plain subquery.
+            --
+            -- p_team_id, not pe.team_id, in both training_period_start calls: the WHERE above pins
+            -- pe.team_id = p_team_id on every row, so they are the same value, but only the parameter
+            -- form lets the team_settings probe fold into a once-per-execution InitPlan instead of a
+            -- per-row correlated SubPlan.
+            SELECT CASE WHEN p.free_trainings_included = 0 THEN 0 ELSE (
+              SELECT GREATEST(p.free_trainings_included - COUNT(*), 0)
+              FROM events pe
+              JOIN event_attendance pea
+                ON pea.event_id = pe.id
+               AND pea.team_member_id = p.team_member_id
+               AND pea.confirmed_at IS NOT NULL
+               AND pea.present
+              WHERE pe.team_id = p_team_id
+                AND pe.event_type = 'training'
+                AND pe.status <> 'cancelled'
+                AND pe.start_at >= p.plan_anchor_at - INTERVAL '32 days'
+                AND pe.start_at <  (p_period_start + INTERVAL '1 day') AT TIME ZONE 'UTC'
+                AND training_period_start(pe.start_at, p_team_id) >= p.plan_anchor_period
+                AND training_period_start(pe.start_at, p_team_id) < p_period_start
+            ) END AS free_left
           ) f
           -- THIS is what stops a negative amount_minor: a member fully covered by their remaining allowance
           -- is not emitted at all. Dropping them rather than emitting a 0 row is also what stops S0
@@ -275,6 +291,23 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
           v_period DATE;
           v_now_period DATE;
         BEGIN
+          -- Nothing billing-relevant changed -- same shape as events_training_recompute below. Before
+          -- this migration a past-period attendance write early-returned inside
+          -- recompute_training_period_fees and cost nothing; now it also recomputes the CURRENT period
+          -- and takes the team-wide fees mutex, so a write that moves no money must not get that far.
+          -- The two paths this protects are both plain FK cascades, one row at a time:
+          -- event_attendance.confirmed_by is ON DELETE SET NULL (deleting a captain UPDATEs every row
+          -- they ever confirmed) and event_attendance.team_member_id is ON DELETE CASCADE (removing a
+          -- member DELETEs a season of rows inside the member-delete transaction). Only UPDATE is
+          -- filtered: INSERT and DELETE always change the counts.
+          IF TG_OP = 'UPDATE'
+             AND NEW.present IS NOT DISTINCT FROM OLD.present
+             AND NEW.confirmed_at IS NOT DISTINCT FROM OLD.confirmed_at
+             AND NEW.event_id IS NOT DISTINCT FROM OLD.event_id
+             AND NEW.team_member_id IS NOT DISTINCT FROM OLD.team_member_id THEN
+            RETURN NEW;
+          END IF;
+
           v_event_id := COALESCE(NEW.event_id, OLD.event_id);
           SELECT e.team_id, e.start_at INTO v_team_id, v_start_at
           FROM events e WHERE e.id = v_event_id;
@@ -293,11 +326,13 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
           -- A FUTURE-dated period is deliberately not covered -- its free_left can be stale until the next
           -- write, which is accepted.
           --
-          -- The confirmed_at disjunction keeps the cost off rows that cannot affect either count: a pre-tick
-          -- (confirmed_at IS NULL) and a present=false row contribute nothing. Without it, a captain
-          -- confirming a squad of 20 on a past training would fire 20 full current-period recomputes, each
-          -- calling training_period_charges three times (S0/S2/S3). OLD is in the disjunction because
-          -- UN-confirming is exactly the case that must move money.
+          -- The confirmed_at disjunction suppresses PRE-TICKS ONLY -- a row that is unconfirmed on both
+          -- sides contributes to neither count, so it cannot move money. It does NOT bound the cost of a
+          -- bulk confirm: confirmAttendance stamps confirmed_at, so all 20 rows of a squad confirmation
+          -- pass this test and each fires its own current-period recompute (three
+          -- training_period_charges calls, S0/S2/S3). It does not test present either, so a confirmed
+          -- present=false row also gets through. OLD is in the disjunction because UN-confirming is
+          -- exactly the case that must move money.
           --
           -- Side benefit, worth keeping: before this, a past-period attendance write took NO fees lock at
           -- all (it early-returned before S1), so it could commit mid-recompute of the current period and

@@ -185,7 +185,7 @@ Content-Type: application/json
 }
 ```
 
-Changing `pricePerTrainingMinor` or `freeTrainingsIncluded` re-prices the CURRENT month's training fees straight away. Months that have already ended are never re-priced. Setting an allowance on a plan that had none starts the member's free-training count from that moment — trainings attended before the edit do not use it up.
+Changing `pricePerTrainingMinor` or `freeTrainingsIncluded` re-prices the CURRENT month's training fees straight away. Months that have already ended are never re-priced. Setting an allowance on a plan that had none starts the member's free-training count from that moment — trainings attended earlier in the same calendar month are covered by the allowance in that month and still count against it from the next month on. A member who has already paid that month's training fee keeps the amount they paid, so the new allowance gives them nothing; set the allowance before the month's fees are paid.
 
 This is a full replacement, not a partial patch — resend every field, including ones you aren't changing. Sending `name: null` clears a plan's stored name back to the built-in label.
 
