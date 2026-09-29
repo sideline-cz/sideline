@@ -7756,9 +7756,9 @@ Reorders a team's active event types. Requires `team:manage`.
 
 **Source:** `packages/domain/src/api/MembershipPlanApi.ts`
 
-Slice 1 of "Setup memberships" — the per-team catalogue of membership tiers (pricing and lifecycle only). Every team is seeded with one default plan (`name: null`, renders the built-in translated label, zero price, `'CZK'`). A captain can add more plans, edit any plan's pricing, promote a different plan to be the team's default, and archive a plan that is no longer offered. Slice 2 lets a player pick which plan they want, with an optional per-team deadline after which selection closes (`selectMembershipPlan` / `setMembershipSelectionDeadline` below).
+Slice 1 of "Setup memberships" — the per-team catalogue of membership tiers (pricing and lifecycle only). Every team is seeded with one default plan (`name: null`, renders the built-in translated label, zero price, `'CZK'`). A captain can add more plans, edit any plan's pricing, promote a different plan to be the team's default, and archive a plan that is no longer offered. Slice 2 lets a player pick which plan they want, with an optional per-team deadline after which selection closes (`selectMembershipPlan` / `setMembershipSelectionDeadline` below). Slice 4 lets a manager assign or bulk-move members onto a plan directly — including after the selection deadline has passed (`assignMembershipPlan` / `reassignMembershipPlan` below).
 
-Permissions deliberately follow the **finance**, not the **team**, boundary: listing is membership-gated only (`canManage` in the response tells the caller whether they may mutate), while create/update/setDefault/delete/setMembershipSelectionDeadline all require `finance:manage_fees` — the same permission `fees` uses. This is not `team:manage`: pricing is a finance decision, and gating it on `team:manage` would lock out the Treasurer, the role that exists specifically to own money. By default Admin and Treasurer hold `finance:manage_fees`; a team that wants its Captain to manage plans grants the permission through the existing per-team role editor — no migration needed. `selectMembershipPlan` is the one exception: it is membership-gated only, since any member picks their own plan.
+Permissions deliberately follow the **finance**, not the **team**, boundary: listing is membership-gated only (`canManage` in the response tells the caller whether they may mutate), while create/update/setDefault/delete/setMembershipSelectionDeadline/assignMembershipPlan/reassignMembershipPlan all require `finance:manage_fees` — the same permission `fees` uses. This is not `team:manage`: pricing is a finance decision, and gating it on `team:manage` would lock out the Treasurer, the role that exists specifically to own money. By default Admin and Treasurer hold `finance:manage_fees`; a team that wants its Captain to manage plans grants the permission through the existing per-team role editor — no migration needed. **A Captain does not hold `finance:manage_fees` by default**, so cannot assign or bulk-move members even though it holds `member:view`. `selectMembershipPlan` is the one exception: it is membership-gated only, since any member picks their own plan.
 
 #### Schemas
 
@@ -7785,6 +7785,14 @@ Permissions deliberately follow the **finance**, not the **team**, boundary: lis
 | `pricePerTrainingMinor` | `number` | Yes | Per-training price in minor units |
 | `expiresAt` | `string \| null` (ISO datetime) | Yes | `null` for a plan that never expires |
 
+`MembershipPlanAssignment` — one row per active member, only ever populated when the caller can manage (see `assignments` below):
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `memberId` | `TeamMemberId` | No | The member's `team_members` row id |
+| `displayName` | `string` | No | Server-resolved display name (name, else Discord nickname/display name, else username) — same resolver as the roster page |
+| `membershipPlanId` | `MembershipPlanId \| null` | Yes | The member's own RAW chosen/assigned plan; `null` means never picked/assigned — NOT "on the default plan", same raw-not-resolved stance as `selectedPlanId` above |
+
 ---
 
 #### `GET /teams/:teamId/membership-plans`
@@ -7807,6 +7815,7 @@ Lists a team's active (non-archived) plans, the team's default plan first, then 
 | `plans` | `MembershipPlanInfo[]` | Active plans only, default plan first |
 | `selectedPlanId` | `MembershipPlanId \| null` | The caller's own RAW chosen plan (`team_members.membership_plan_id`); `null`/absent means never picked one, NOT "on the default plan" — the web resolves the effective plan from `plans` itself |
 | `selectionDeadline` | `string \| null` (ISO datetime) | The team's `membership_selection_deadline`; `null`/absent means selection is always open |
+| `assignments` | `MembershipPlanAssignment[]` | Who is on which plan, one row per active member. **Empty unless `canManage`** — privileged data, so a non-manager always sees `[]` regardless of the team's actual roster. Absent on the wire decodes to `[]` too (forward-compat default) |
 
 **Errors:**
 
@@ -7950,6 +7959,74 @@ Slice 2 of "Setup memberships". The caller picks which plan they're on. Self-ser
 | `MembershipSelectionClosed` | 409 | The team's `membership_selection_deadline` has passed |
 
 Every real precondition (membership, team match, active membership row, deadline, plan tenancy/archived) lives in one atomic `UPDATE ... WHERE` in `MembershipPlansRepository.selectMembershipPlan` — never a preceding read-then-check. On zero rows affected, the handler re-reads the caller's own selection once to choose between `404` and `409`; this classification is best-effort under concurrency (a captain changing the deadline between the write and the re-read can pick the less-precise error), but it can never produce a wrong write.
+
+---
+
+#### `PUT /teams/:teamId/members/:memberId/membership-plan`
+
+Slice 4 of "Setup memberships". The manager-side sibling of `selectMembershipPlan` — a Treasurer or Admin sets (or clears) another member's plan directly. Requires `finance:manage_fees`. Deliberately **bypasses `membership_selection_deadline`**: the deadline binds members, not managers, and fixing stragglers after the lock is the point of this endpoint.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | The member being assigned |
+
+**Request Body:** `AssignMembershipPlanRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `membershipPlanId` | `MembershipPlanId \| null` | Yes | The plan to assign; `null` clears the member back to the team default |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `MembershipPlanNotFound` | 404 | The plan does not exist/does not belong to `teamId`/is archived, OR the member does not exist/is inactive/belongs to another team — one 404 covers both, there is no deadline to distinguish them and both mean "reload the page" |
+
+Every precondition lives in one atomic `UPDATE ... WHERE` — same shape as `selectMembershipPlan`, minus the deadline clause. No re-read.
+
+---
+
+#### `POST /teams/:teamId/membership-plan-reassign`
+
+Bulk "move everyone from plan A to plan B" (or from/to the team default). Requires `finance:manage_fees`. One atomic `UPDATE`, not a client-side loop over individual `assignMembershipPlan` calls — a partial failure partway through a loop would leave a half-moved team with no record of which half moved. Flat path, not nested under `/membership-plans/...`, for the same reason as `membership-selection-deadline` above: both plan ids live in the payload, where either may be `null`, which a path segment cannot express.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `ReassignMembershipPlanRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fromMembershipPlanId` | `MembershipPlanId \| null` | Yes | Source plan. `null` matches members who never picked/were never assigned one (matched with `IS NOT DISTINCT FROM`, so it actually matches `NULL` rows) — a DIFFERENT population from the default plan's own id. May name an **archived** plan; sweeping members off an archived plan is the most valuable bulk case there is |
+| `toMembershipPlanId` | `MembershipPlanId \| null` | Yes | Target plan. `null` clears every matched member back to the team default. Must be an active (non-archived) plan otherwise |
+
+**Response:** `200 OK` — `ReassignMembershipPlanResponse`
+
+| Field | Type | Description |
+|---|---|---|
+| `movedCount` | `number` | Number of members actually moved. `0` is a legitimate success (e.g. nobody matched the source) — it is never itself an error |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `MembershipPlanNotFound` | 404 | `toMembershipPlanId` names a plan that does not exist, does not belong to `teamId`, or is archived. Only checked when the `UPDATE` affects zero rows and a target was specified — an unmatched **source** is not an error, it just moves nobody |
+
+A member already on the target plan is not re-counted: the `UPDATE`'s `WHERE` requires the current plan to differ from the target, so `movedCount` never inflates from a no-op match. This does not immediately change any in-progress training charges — `training_period_charges` recomputes lazily on the next attendance write in the current billing period; past periods are frozen. This is the same lazy-recompute behaviour that already applies to editing a plan's `pricePerTrainingMinor`.
 
 ---
 

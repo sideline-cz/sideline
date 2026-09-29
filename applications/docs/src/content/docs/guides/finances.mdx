@@ -37,6 +37,7 @@ Finance permissions follow a treasurer-style split across four built-in roles. B
 | View balance summary (Income / Expenses / Net) | Yes | Yes | Yes | No |
 | Create, edit, or archive fees | Yes | No | Yes | No |
 | View, create, edit, set default, or archive membership plans | Yes | No | Yes | No |
+| Assign a member to a membership plan, or move members between plans | Yes | No | Yes | No |
 | Assign fees to members | Yes | No | Yes | No |
 | Record or void payments | Yes | No | Yes | No |
 | Settle a member's balance / add credit | Yes | No | Yes | No |
@@ -56,7 +57,7 @@ Several Finance features are planned for follow-up releases:
 - **Monthly recurrence** — auto-generating monthly charges from a fee definition.
 - **Self-report "I've paid"** — a Discord interaction for members to notify captains of unrecorded payments.
 - **Expense receipts** — attaching an image or document URL to an expense record.
-- **Membership plan assignment** — letting a player choose or be assigned one of the team's membership plans, and enforcing a plan's per-training price and expiry date. Today, membership plans are pricing and lifecycle only — see [Membership plans](#membership-plans) below.
+- **Membership plan charging** — enforcing a plan's per-training price and expiry date. Today, members can choose a plan (or be assigned one by a Treasurer/Admin), but nothing bills against it yet — see [Membership plans](#membership-plans) below.
 </Aside>
 
 ## Finance overview page
@@ -118,8 +119,24 @@ Every team starts with one free, unnamed default plan — it's shown with a **De
 - **Make a plan the default** — promotes it and automatically demotes the team's current default. A team always has exactly one default plan.
 - **Archive a plan** — hides it from the list. A plan can't be archived while it's the team's default; make another plan the default first.
 
-<Aside type="caution" title="Pricing and lifecycle only, for now">
-  This release only lets you define and price membership plans. Nothing yet assigns a plan to a member, and the per-training price and expiry date fields are stored for reference only — no player selection, charging, or expiry enforcement happens today.
+Below the plan list, a member can [choose their own plan](#choosing-your-own-plan). If you hold `finance:manage_fees` (Admin or Treasurer), you also see a **Member assignments** section for setting or overriding any member's plan directly.
+
+<Aside type="caution" title="Pricing and charging are still separate">
+  The per-training price and expiry date fields are stored for reference only — no charging or expiry enforcement happens today. See [Assigning members to a plan](#assigning-members-to-a-plan) below.
+</Aside>
+
+### Choosing your own plan
+
+Any team member can pick which plan they're on from the same **Membership plans** page — click **Choose** on the plan you want. If the team has set a selection deadline, it's shown on the page and every **Choose** button is disabled once it passes. A member who never chooses stays on the team's current default plan.
+
+### Assigning members to a plan
+
+If you hold `finance:manage_fees` (Admin or Treasurer by default — **not** Captain), a **Member assignments** section appears below the plan list, showing every active member with a plan selector next to their name. Use the search box to find a member, then pick their plan from the dropdown — or **Use team default** to clear their assignment back to the default. This works even after the team's selection deadline has passed: the deadline only stops members changing their own choice, not a Treasurer or Admin fixing one for them.
+
+To move a whole group of members at once, click **Move all members**. Choose a source (an existing plan, "no plan chosen" for members who never picked, or an archived plan that still has members on it) and a target plan, then confirm — every matching member moves in one action, and the dialog tells you how many. A bulk move can overwrite plans members chose themselves, so it warns you before you confirm; it also warns if the source and target plans use different currencies, since a member who already paid this month can end up with open charges in both currencies. An archived plan can be a source but never a target.
+
+<Aside type="note" title="This month's charges catch up, not instantly">
+  Moving a member — individually or in bulk — doesn't change their charges for the current billing period right away. Charges are recalculated the next time attendance changes in that period; if nothing else happens in the current period, the old charge stands until then. Past periods are never affected.
 </Aside>
 
 ### Membership plan API (for automation)
@@ -183,6 +200,33 @@ DELETE /api/teams/{teamId}/membership-plans/{membershipPlanId}
 ```
 
 Archives (never hard-deletes) the plan. Returns `409 MembershipPlanIsDefault` if this is the team's current default plan — promote another plan first.
+
+#### Assign a member to a plan
+
+```http
+PUT /api/teams/{teamId}/members/{memberId}/membership-plan
+Content-Type: application/json
+
+{
+  "membershipPlanId": "..."
+}
+```
+
+Sets the given member's plan. Send `membershipPlanId: null` to clear them back to the team default. Requires `finance:manage_fees`; ignores the team's selection deadline. Returns `204 No Content`, or `404 MembershipPlanNotFound` if the plan or the member doesn't resolve (bad id, wrong team, archived plan, inactive member).
+
+#### Move members between plans in bulk
+
+```http
+POST /api/teams/{teamId}/membership-plan-reassign
+Content-Type: application/json
+
+{
+  "fromMembershipPlanId": "...",
+  "toMembershipPlanId": "..."
+}
+```
+
+Moves every member currently on `fromMembershipPlanId` to `toMembershipPlanId`. Either field can be `null`: `null` for `from` targets members who never picked/were never assigned a plan; `null` for `to` clears matched members back to the team default. `toMembershipPlanId` must name an active plan if not `null` — archived plans are a valid source but not a valid target. Returns `200 OK` with `{ "movedCount": number }`; `0` is a normal response, not an error. Returns `404 MembershipPlanNotFound` only when `toMembershipPlanId` itself doesn't resolve.
 
 ## Connecting a bank account (Fio)
 

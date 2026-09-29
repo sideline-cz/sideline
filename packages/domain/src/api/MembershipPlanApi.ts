@@ -5,6 +5,7 @@ import { AuthMiddleware } from '~/api/Auth.js';
 import * as Fee from '~/models/Fee.js';
 import { MembershipPlanId, MembershipPlanName } from '~/models/MembershipPlan.js';
 import { TeamId } from '~/models/Team.js';
+import { TeamMemberId } from '~/models/TeamMember.js';
 
 export class MembershipPlanInfo extends Schema.Class<MembershipPlanInfo>('MembershipPlanInfo')({
   membershipPlanId: MembershipPlanId,
@@ -16,6 +17,17 @@ export class MembershipPlanInfo extends Schema.Class<MembershipPlanInfo>('Member
   pricePerTrainingMinor: Fee.AmountMinor,
   expiresAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   isDefault: Schema.Boolean,
+}) {}
+
+export class MembershipPlanAssignment extends Schema.Class<MembershipPlanAssignment>(
+  'MembershipPlanAssignment',
+)({
+  memberId: TeamMemberId,
+  displayName: Schema.String,
+  // `None` = never picked — the member falls back to the team default. Same raw-not-resolved
+  // stance as `selectedPlanId` below: the caller already holds `plans` and resolves the
+  // effective plan from it.
+  membershipPlanId: Schema.OptionFromNullOr(MembershipPlanId),
 }) {}
 
 export class MembershipPlanListResponse extends Schema.Class<MembershipPlanListResponse>(
@@ -35,6 +47,11 @@ export class MembershipPlanListResponse extends Schema.Class<MembershipPlanListR
   selectionDeadline: Schema.OptionFromOptionalNullOr(Schemas.DateTimeFromIsoString, {
     onNoneEncoding: null,
   }),
+  // Who is on which plan — privileged data, so it is EMPTY unless `canManage`. The `[]`
+  // decoding default is load-bearing in both directions: the e2e fixture omits the key, and a
+  // server rollback must still decode. `[]` is also the only safe default — a peer that does
+  // not know about this field must render NO roster, never a phantom one.
+  assignments: Schema.Array(MembershipPlanAssignment).pipe(Schema.withDecodingDefaultKey(() => [])),
 }) {}
 
 // Payloads are Schema.Struct, never Schema.Class — a Schema.Class payload fails client-side
@@ -69,6 +86,36 @@ export const SetSelectionDeadlineRequest = Schema.Struct({
 });
 export type SetSelectionDeadlineRequest = Schema.Schema.Type<typeof SetSelectionDeadlineRequest>;
 
+// Captain-side counterpart of `SelectMembershipPlanRequest`. `None` clears the assignment (the
+// member falls back to the team default) — hence `OptionFromNullOr` and not
+// `OptionFromOptional`: `null` is an explicit "clear it", never "don't touch".
+export const AssignMembershipPlanRequest = Schema.Struct({
+  membershipPlanId: Schema.OptionFromNullOr(MembershipPlanId),
+});
+export type AssignMembershipPlanRequest = Schema.Schema.Type<typeof AssignMembershipPlanRequest>;
+
+// Bulk move: every member on plan A lands on plan B. `from` `None` = the members who never
+// picked (matched with `IS NOT DISTINCT FROM`, so NULLs actually match) — a DIFFERENT set from
+// the default plan's own id, which is a real plan with a real id. `to` `None` = clear to the
+// team default, symmetric with `AssignMembershipPlanRequest`.
+export const ReassignMembershipPlanRequest = Schema.Struct({
+  fromMembershipPlanId: Schema.OptionFromNullOr(MembershipPlanId),
+  toMembershipPlanId: Schema.OptionFromNullOr(MembershipPlanId),
+});
+export type ReassignMembershipPlanRequest = Schema.Schema.Type<
+  typeof ReassignMembershipPlanRequest
+>;
+
+// 200 with a count, not 204: the dialog's own count is advisory (a concurrent single assign can
+// change the set), so the UI toasts the number the server actually moved. `movedCount: 0` is a
+// success — a no-op sweep is legitimate; the 404 is reserved for an invalid TARGET.
+export const ReassignMembershipPlanResponse = Schema.Struct({
+  movedCount: Schema.Int,
+});
+export type ReassignMembershipPlanResponse = Schema.Schema.Type<
+  typeof ReassignMembershipPlanResponse
+>;
+
 export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()(
   'MembershipPlanForbidden',
   {},
@@ -91,8 +138,8 @@ export class MembershipPlanIsDefault extends Schema.TaggedErrorClass<MembershipP
 ) {}
 
 // The team's `membership_selection_deadline` has passed — the member's own SELECT/PUT is
-// rejected. A captain can still change anyone's plan via a later slice; this slice has no such
-// endpoint.
+// rejected. It is raised by `selectMembershipPlan` ONLY: the deadline binds members, not
+// managers, so `assignMembershipPlan` / `reassignMembershipPlan` deliberately do not list it.
 export class MembershipSelectionClosed extends Schema.TaggedErrorClass<MembershipSelectionClosed>()(
   'MembershipSelectionClosed',
   {},
@@ -190,4 +237,44 @@ export class MembershipPlanApiGroup extends HttpApiGroup.make('membershipPlan')
         params: { teamId: TeamId },
       },
     ).middleware(AuthMiddleware),
+  )
+  .add(
+    // The captain-side sibling of `selectMembershipPlan`. Deliberately NO
+    // `MembershipSelectionClosed` — the deadline binds members, not the treasurer; fixing
+    // stragglers AFTER the lock is the entire point of this screen.
+    //
+    // ponytail: a single 404 covers both "plan bad/archived/foreign" and "member
+    // gone/inactive/wrong team". There is no deadline to tell them apart, both mean "reload the
+    // page", and classifying costs a query. Split with a `findMemberSelection` re-read if the UI
+    // ever needs distinct copy.
+    HttpApiEndpoint.put(
+      'assignMembershipPlan',
+      '/teams/:teamId/members/:memberId/membership-plan',
+      {
+        success: Schema.Void.pipe(HttpApiSchema.status(204)),
+        error: [
+          Forbidden.pipe(HttpApiSchema.status(403)),
+          MembershipPlanNotFound.pipe(HttpApiSchema.status(404)),
+        ],
+        payload: AssignMembershipPlanRequest,
+        params: { teamId: TeamId, memberId: TeamMemberId },
+      },
+    ).middleware(AuthMiddleware),
+  )
+  .add(
+    // FLAT path, deliberately NOT under `/membership-plans/...` — same dodge as
+    // `setMembershipSelectionDeadline` above, which was flattened to avoid the
+    // `:membershipPlanId` param segment. Both plan ids live in the payload, where either may be
+    // `None`, which a path segment cannot express anyway.
+    //
+    // Same deliberate omission of `MembershipSelectionClosed` as `assignMembershipPlan`.
+    HttpApiEndpoint.post('reassignMembershipPlan', '/teams/:teamId/membership-plan-reassign', {
+      success: ReassignMembershipPlanResponse,
+      error: [
+        Forbidden.pipe(HttpApiSchema.status(403)),
+        MembershipPlanNotFound.pipe(HttpApiSchema.status(404)),
+      ],
+      payload: ReassignMembershipPlanRequest,
+      params: { teamId: TeamId },
+    }).middleware(AuthMiddleware),
   ) {}

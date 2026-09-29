@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-29 — New: managers can assign members to a membership plan directly
+
+Admins and Treasurers can now set or clear any member's membership plan from **Team → Finances → Membership plans**, instead of waiting for the member to pick one themselves. A new **Move all members** action moves everyone from one plan (or "no plan chosen") to another in a single confirmation — useful for retiring an old plan.
+
+- Both actions work even after the team's selection deadline has passed — the deadline only blocks members changing their own choice.
+- An archived plan can be a source for a bulk move (sweeping stragglers off a retired plan) but never a target.
+- Moving a member doesn't change their charges for the current month immediately — this catches up the next time attendance is recorded for that period, same as editing a plan's price already behaves.
+- Not available to Captains — this follows the same `finance:manage_fees` permission as the rest of membership-plan management (Admin and Treasurer by default).
+- API integrators: new `PUT /teams/:teamId/members/:memberId/membership-plan` and `POST /teams/:teamId/membership-plan-reassign` endpoints; `MembershipPlanListResponse` gains an `assignments` field (populated only for callers who can manage plans). See the [Finances guide](/guides/finances/#assigning-members-to-a-plan) and the internal API reference.
+
 ## 2026-09-25 — New: players can top up their own credit with a standing QR code
 
 Any member can now open **My Payments** and find a **"Top up your credit"** card — a standing payment QR code for their own account with no fixed amount and no due date, so it can be scanned to send any amount at any time. It pays off any fees the member already owes first (oldest due first); anything left over becomes credit.

@@ -1,9 +1,16 @@
-import { Auth, type MembershipPlan, MembershipPlanApi, type Team } from '@sideline/domain';
+import {
+  Auth,
+  DisplayName,
+  type MembershipPlan,
+  MembershipPlanApi,
+  type Team,
+} from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Array, DateTime, Effect, Layer, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
+import type { PlanAssignmentRow } from '~/repositories/MembershipPlansRepository.js';
 import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 
@@ -33,6 +40,30 @@ export const toMembershipPlanInfo = (
     pricePerTrainingMinor: row.price_per_training_minor,
     expiresAt: row.expires_at,
     isDefault: row.is_default,
+  });
+
+// The explicit `new` is REQUIRED for correctness — `Schema.Class` is nominal, so a repo row
+// type-checks here but dies at encode. `scripts/check-rpc-encoding.mjs` does NOT catch this one:
+// it only resolves an endpoint's `success:` value, and a `Schema.Class` nested in a FIELD (here,
+// `MembershipPlanListResponse.assignments`) is invisible to it. The real guard is the API
+// integration test that reads `displayName` off the encoded JSON.
+//
+// `pickDisplayName` is the ONE display-name resolver (same call shape as `api/roster.ts`'s
+// `toRosterPlayer`) — it skips blank strings, which a SQL `COALESCE` would not, which is why the
+// repository returns the raw parts instead of resolving them.
+const toAssignment = (row: PlanAssignmentRow): MembershipPlanApi.MembershipPlanAssignment =>
+  new MembershipPlanApi.MembershipPlanAssignment({
+    memberId: row.member_id,
+    displayName: Option.getOrElse(
+      DisplayName.pickDisplayName({
+        name: row.name,
+        nickname: row.discord_nickname,
+        displayName: row.discord_display_name,
+        username: Option.some(row.username),
+      }),
+      () => row.username,
+    ),
+    membershipPlanId: row.membership_plan_id,
   });
 
 const forbidden = new MembershipPlanApi.Forbidden();
@@ -67,14 +98,30 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               Effect.bind('selection', ({ membership }) =>
                 plans.findMemberSelection(membership.id, teamId),
               ),
-              Effect.map(({ list, canManage, selection }) =>
+              // THE PRIVACY BOUNDARY. Every member of the team hits this endpoint; only
+              // Admin/Treasurer may see who is on which fee tier, so the roster is `[]` for
+              // everyone else. `finance:manage_fees` and nothing weaker — `finance:view` is held
+              // by every Captain AND Treasurer (`Role.ts:68,81`). This ternary is also why the
+              // extra query does not run for the other 99% of callers.
+              Effect.bind('assignments', ({ canManage }) =>
+                canManage ? plans.findPlanAssignments(teamId) : Effect.succeed([]),
+              ),
+              Effect.map(({ list, canManage, selection, assignments }) =>
                 Option.match(selection, {
+                  // A real branch, not dead code: the member was deactivated between
+                  // `requireMembership` above and this read — `findMemberSelectionQuery` filters
+                  // `tm.active` (same race as the `findOneOption` note six lines up). NOT a
+                  // global admin: this handler gates on `requireMembership`, which has no
+                  // global-admin branch and already failed with 403. `assignments` belongs in
+                  // BOTH arms — the Type side of the field is required, only the wire key is
+                  // optional.
                   onNone: () =>
                     new MembershipPlanApi.MembershipPlanListResponse({
                       canManage,
                       plans: Array.map(list, toMembershipPlanInfo),
                       selectedPlanId: Option.none(),
                       selectionDeadline: Option.none(),
+                      assignments: Array.map(assignments, toAssignment),
                     }),
                   onSome: (row) =>
                     new MembershipPlanApi.MembershipPlanListResponse({
@@ -82,6 +129,7 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                       plans: Array.map(list, toMembershipPlanInfo),
                       selectedPlanId: row.membership_plan_id,
                       selectionDeadline: row.membership_selection_deadline,
+                      assignments: Array.map(assignments, toAssignment),
                     }),
                 }),
               ),
@@ -309,6 +357,86 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                         ),
                       )
                     : Effect.void,
+              ),
+            ),
+          )
+          // The captain-side sibling of `selectMembershipPlan` above. `requireMembership`, NEVER
+          // `requireReadAccess` — the latter mints a `GLOBAL_ADMIN_SENTINEL_ID` membership with
+          // no real `team_members` row (see the comment on `selectMembershipPlan`), and this
+          // handler's permission check must run against a real membership.
+          //
+          // No deadline check: the deadline binds members, not the treasurer (§B.2).
+          .handle('assignMembershipPlan', ({ params: { teamId, memberId }, payload }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'finance:manage_fees', forbidden),
+              ),
+              Effect.bind('rowsAffected', () =>
+                plans.assignMembershipPlan({
+                  member_id: memberId,
+                  team_id: teamId,
+                  plan_id: payload.membershipPlanId,
+                }),
+              ),
+              // 0 rows IS the Atomic Conditional UPDATE's combined guard result. ONE 404 covers
+              // both "plan bad/archived/foreign" and "member gone/inactive/wrong team" — unlike
+              // `selectMembershipPlan` there is no deadline to tell apart, both mean "reload the
+              // page", and classifying would cost a query. Deliberately NO re-read.
+              Effect.flatMap(({ rowsAffected }) =>
+                rowsAffected === 0 ? Effect.fail(notFound) : Effect.void,
+              ),
+            ),
+          )
+          // Bulk move, same gate. Unlike the single assign above this one DOES classify its 0
+          // rows, because here 0 has two causes a caller must tell apart: "nobody matched the
+          // source" (a legitimate success, §B.8) and "the target is archived/foreign" (404).
+          .handle('reassignMembershipPlan', ({ params: { teamId }, payload }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'finance:manage_fees', forbidden),
+              ),
+              Effect.bind('rowsAffected', () =>
+                plans.reassignMembershipPlan({
+                  team_id: teamId,
+                  from_plan_id: payload.fromMembershipPlanId,
+                  to_plan_id: payload.toMembershipPlanId,
+                }),
+              ),
+              // The real guard stays in the SQL; this re-read only chooses the reply. A `None`
+              // target has no plan to validate, so it can only ever be the no-op. Its TOCTOU (a
+              // concurrent archive turning a legitimate 200/0 into a 404) is accepted — same
+              // best-effort stance as `deleteMembershipPlan`: no wrong write, no leak,
+              // team-scoped.
+              Effect.flatMap(
+                ({
+                  rowsAffected,
+                }): Effect.Effect<
+                  MembershipPlanApi.ReassignMembershipPlanResponse,
+                  MembershipPlanApi.MembershipPlanNotFound
+                > =>
+                  rowsAffected > 0
+                    ? Effect.succeed({ movedCount: rowsAffected })
+                    : Option.match(payload.toMembershipPlanId, {
+                        onNone: () => Effect.succeed({ movedCount: 0 }),
+                        onSome: (targetId) =>
+                          plans
+                            .findMembershipPlanByIdScoped(targetId, teamId)
+                            .pipe(
+                              Effect.flatMap((found) =>
+                                Option.isNone(found)
+                                  ? Effect.fail(notFound)
+                                  : Effect.succeed({ movedCount: 0 }),
+                              ),
+                            ),
+                      }),
               ),
             ),
           )

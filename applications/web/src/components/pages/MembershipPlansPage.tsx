@@ -2,6 +2,7 @@ import { Fee, MembershipPlan, type MembershipPlanApi, Team } from '@sideline/dom
 import { Link, useRouter } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import React from 'react';
+import { DEFAULT_SENTINEL, MoveMembersDialog } from '~/components/organisms/MoveMembersDialog.js';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import {
@@ -352,6 +353,8 @@ interface MembershipPlansPageProps {
   plans: ReadonlyArray<MembershipPlanApi.MembershipPlanInfo>;
   selectedPlanId: Option.Option<MembershipPlan.MembershipPlanId>;
   selectionDeadline: Option.Option<DateTime.Utc>;
+  /** Empty for non-managers by construction — the server only fills this under `finance:manage_fees`. */
+  assignments: ReadonlyArray<MembershipPlanApi.MembershipPlanAssignment>;
 }
 
 export function MembershipPlansPage({
@@ -360,6 +363,7 @@ export function MembershipPlansPage({
   plans,
   selectedPlanId,
   selectionDeadline,
+  assignments,
 }: MembershipPlansPageProps) {
   const run = useRun();
   const router = useRouter();
@@ -393,6 +397,10 @@ export function MembershipPlansPage({
     );
   }, [selectionDeadline]);
   const [isSavingDeadline, setIsSavingDeadline] = React.useState(false);
+
+  const [memberSearch, setMemberSearch] = React.useState('');
+  const [moveOpen, setMoveOpen] = React.useState(false);
+  const [savingMemberId, setSavingMemberId] = React.useState<string | null>(null);
 
   const editTargetRef = React.useRef<MembershipPlanApi.MembershipPlanInfo | null>(null);
   if (editTarget !== null) editTargetRef.current = editTarget;
@@ -493,6 +501,47 @@ export function MembershipPlansPage({
       router.invalidate();
     }
   }, [teamIdBranded, run, router]);
+
+  // The manager-side sibling of `handleChoose`, minus the deadline branch: the selection
+  // deadline binds members, not a treasurer fixing stragglers after the lock (plan §B.2), so
+  // the endpoint cannot return `MembershipSelectionClosed` at all.
+  const handleAssign = React.useCallback(
+    async (memberId: MembershipPlanApi.MembershipPlanAssignment['memberId'], value: string) => {
+      setSavingMemberId(memberId);
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.membershipPlan.assignMembershipPlan({
+            params: { teamId: teamIdBranded, memberId },
+            // The sentinel and an id that is no longer in `plans` both collapse to `None` —
+            // "no real choice on record", which is exactly what the server stores.
+            payload: {
+              membershipPlanId: Option.fromNullishOr(
+                plans.find((p) => p.membershipPlanId === value)?.membershipPlanId,
+              ),
+            },
+          }),
+        ),
+        Effect.tapError(() => Effect.sync(() => router.invalidate())),
+        Effect.mapError(() => ClientError.make(tr('membershipPlan_assign_failed'))),
+        run({ success: tr('membershipPlan_assign_saved') }),
+      );
+      setSavingMemberId(null);
+      if (Option.isSome(result)) {
+        // Refetch rather than patch local state: `assignments` also feeds `MoveMembersDialog`'s
+        // per-option counts, and a local-only patch makes the number the treasurer confirms a
+        // bulk move against stale. Same one query every sibling handler on this page pays.
+        router.invalidate();
+      }
+    },
+    [teamIdBranded, plans, run, router],
+  );
+
+  const visibleAssignments = React.useMemo(() => {
+    const needle = memberSearch.trim().toLowerCase();
+    return [...assignments]
+      .filter((a) => a.displayName.toLowerCase().includes(needle))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }, [assignments, memberSearch]);
 
   const handleArchive = React.useCallback(
     async (plan: MembershipPlanApi.MembershipPlanInfo) => {
@@ -693,6 +742,100 @@ export function MembershipPlansPage({
             );
           })}
         </div>
+      )}
+
+      {/* Member assignments — gated on `canManage` ALONE, never on `assignments.length > 0`:
+          the empty state is what makes a server rollback or a repo regression look broken
+          instead of silently absent. `assignments` is `[]` for non-managers by construction. */}
+      {canManage && (
+        <section className='mt-10'>
+          <div className='flex flex-wrap items-center justify-between gap-3 mb-2'>
+            <h2 className='text-lg font-semibold'>{tr('membershipPlan_assign_sectionTitle')}</h2>
+            <Button type='button' variant='outline' onClick={() => setMoveOpen(true)}>
+              {tr('membershipPlan_bulk_button')}
+            </Button>
+          </div>
+          <p className='text-sm text-muted-foreground mb-3'>{tr('membershipPlan_assign_hint')}</p>
+          <Input
+            className='mb-3'
+            value={memberSearch}
+            placeholder={tr('membershipPlan_assign_searchPlaceholder')}
+            onChange={(e) => setMemberSearch(e.target.value)}
+          />
+
+          {assignments.length === 0 ? (
+            <p className='text-sm text-muted-foreground'>{tr('membershipPlan_assign_empty')}</p>
+          ) : (
+            // ponytail: renders one Radix Select per active member, unbounded. Add a "type to
+            // search before we render rows" gate above ~200 members if a big club complains.
+            <div className='flex flex-col gap-2'>
+              {visibleAssignments.map((a) => {
+                // An archived plan is not in `plans`, so the stored id would select nothing and
+                // the control would render blank. Falling back to the sentinel is also how the
+                // member is actually BILLED — `training_period_charges` drops an archived plan
+                // back to the team default. "No real choice on record" renders as the default.
+                const stored = Option.getOrUndefined(a.membershipPlanId);
+                const isOrphan =
+                  stored !== undefined && !plans.some((p) => p.membershipPlanId === stored);
+                const active = isOrphan || stored === undefined ? DEFAULT_SENTINEL : stored;
+                return (
+                  <div
+                    key={a.memberId}
+                    className='flex flex-wrap items-center gap-3 rounded-lg border p-3'
+                  >
+                    <span className='min-w-0 flex-1 basis-40 truncate'>
+                      {a.displayName}
+                      {/* The select reads "use team default" for them — that IS how they are
+                          billed — but the bulk dialog buckets them under their real orphan id,
+                          not under "no plan chosen". Without this marker the two surfaces of
+                          this screen silently disagree about the same member. */}
+                      {isOrphan && (
+                        <span className='ml-2 text-xs text-muted-foreground'>
+                          {tr('membershipPlan_bulk_archivedSource')}
+                        </span>
+                      )}
+                    </span>
+                    {/* NOT disabled by `isSelectionClosed` — the deadline binds members, not a
+                        manager fixing stragglers after the lock (plan §B.2). */}
+                    <Select
+                      value={active}
+                      disabled={savingMemberId === a.memberId}
+                      onValueChange={(v) => handleAssign(a.memberId, v)}
+                    >
+                      <SelectTrigger
+                        className='w-56'
+                        aria-label={tr('membershipPlan_assign_selectAria', {
+                          name: a.displayName,
+                        })}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={DEFAULT_SENTINEL}>
+                          {tr('membershipPlan_assign_useDefault')}
+                        </SelectItem>
+                        {plans.map((plan) => (
+                          <SelectItem key={plan.membershipPlanId} value={plan.membershipPlanId}>
+                            {planDisplayName(plan)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <MoveMembersDialog
+            teamId={teamIdBranded}
+            plans={plans}
+            assignments={assignments}
+            open={moveOpen}
+            onOpenChange={setMoveOpen}
+            onMoved={handleSaved}
+          />
+        </section>
       )}
 
       {/* Create dialog */}

@@ -733,3 +733,586 @@ describe('MembershipPlansRepository.setSelectionDeadline', () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 });
+
+// ---------------------------------------------------------------------------
+// Slice 3 ("Add CRUD for managing membership assigned members") — `assignMembershipPlan`,
+// `reassignMembershipPlan` and `findPlanAssignments` (plan Task 2).
+//
+// The helpers below are deliberately explicit about the input shape: they are the only place
+// this suite pins the repository signatures, so a rename (`plan_id` → `planId`) or a widening
+// (`from_plan_id` off `Option`) has to go red here.
+// ---------------------------------------------------------------------------
+
+const assignMembershipPlan = (input: {
+  member_id: TeamMember.TeamMemberId;
+  team_id: Team.TeamId;
+  plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
+}) =>
+  MembershipPlansRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.assignMembershipPlan(input)),
+  );
+
+const reassignMembershipPlan = (input: {
+  team_id: Team.TeamId;
+  from_plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
+  to_plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
+}) =>
+  MembershipPlansRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.reassignMembershipPlan(input)),
+  );
+
+const findPlanAssignments = (teamId: Team.TeamId) =>
+  MembershipPlansRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.findPlanAssignments(teamId)),
+  );
+
+describe('MembershipPlansRepository.assignMembershipPlan', () => {
+  it.effect('assigns a plan to ANOTHER member: 1 row, the column holds that plan id', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('assign1');
+      const member = yield* addMember(team.id, 'a1');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+
+      const rowsAffected = yield* assignMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: Option.some(planB.id),
+      });
+
+      expect(rowsAffected).toBe(1);
+      expect(yield* getMemberColumn(member.id)).toBe(planB.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('plan_id None clears the column back to NULL: 1 row, column null', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('assign2');
+      const member = yield* addMember(team.id, 'a2');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: planB.id,
+      });
+
+      const rowsAffected = yield* assignMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: Option.none(),
+      });
+
+      expect(rowsAffected).toBe(1);
+      expect(yield* getMemberColumn(member.id)).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // §B.2 — THE divergence. The deadline binds MEMBERS, not the treasurer. Both calls live in
+  // one test on purpose: asserting only the 1 would stay green if the deadline clause were
+  // copied into the manager UPDATE and the self-service one silently dropped.
+  it.effect(
+    'BYPASSES a passed deadline: the manager assign writes 1 row while selectMembershipPlan ' +
+      'under the same deadline writes 0',
+    () =>
+      Effect.gen(function* () {
+        const team = yield* seedTeam('assign3');
+        const member = yield* addMember(team.id, 'a3');
+        const planB = yield* insertPlan(team.id, 'Plan B');
+        yield* setSelectionDeadline(
+          team.id,
+          Option.some(DateTime.subtract(DateTime.nowUnsafe(), { days: 1 })),
+        );
+
+        const selfService = yield* selectMembershipPlan({
+          member_id: member.id,
+          team_id: team.id,
+          plan_id: planB.id,
+        });
+        expect(selfService, 'the member themselves is still locked out').toBe(0);
+
+        const rowsAffected = yield* assignMembershipPlan({
+          member_id: member.id,
+          team_id: team.id,
+          plan_id: Option.some(planB.id),
+        });
+
+        expect(rowsAffected, 'the manager is not').toBe(1);
+        expect(yield* getMemberColumn(member.id)).toBe(planB.id);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('refuses an ARCHIVED plan: 0 rows, column unchanged (§B.7)', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('assign4');
+      const member = yield* addMember(team.id, 'a4');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      yield* archivePlan(planB.id, team.id);
+
+      const rowsAffected = yield* assignMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: Option.some(planB.id),
+      });
+
+      expect(rowsAffected).toBe(0);
+      expect(yield* getMemberColumn(member.id)).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('refuses an INACTIVE member: 0 rows', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('assign5');
+      const member = yield* addMember(team.id, 'a5');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      yield* setMemberActive(member.id, false);
+
+      const rowsAffected = yield* assignMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: Option.some(planB.id),
+      });
+
+      expect(rowsAffected).toBe(0);
+      expect(yield* getMemberColumn(member.id)).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("refuses a member of ANOTHER team: 0 rows, that member's column unchanged", () =>
+    Effect.gen(function* () {
+      const teamA = yield* seedTeam('assign6a');
+      const teamB = yield* seedTeam('assign6b');
+      const memberB = yield* addMember(teamB.id, 'a6');
+      const planA = yield* insertPlan(teamA.id, 'Plan A');
+
+      const rowsAffected = yield* assignMembershipPlan({
+        member_id: memberB.id,
+        team_id: teamA.id,
+        plan_id: Option.some(planA.id),
+      });
+
+      expect(rowsAffected).toBe(0);
+      expect(yield* getMemberColumn(memberB.id)).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The case the `plan_id === null` short-circuit gets wrong: an implementation that writes
+  // `(${input.plan_id === null} OR EXISTS (...))` correctly still needs the `tm.active` and
+  // `tm.team_id` guards OUTSIDE that disjunct, or a clear becomes unguarded.
+  it.effect('clearing to NULL still requires an ACTIVE, in-team member: 0 rows', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('assign7');
+      const member = yield* addMember(team.id, 'a7');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      yield* selectMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: planB.id,
+      });
+      yield* setMemberActive(member.id, false);
+
+      const rowsAffected = yield* assignMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: Option.none(),
+      });
+
+      expect(rowsAffected).toBe(0);
+      expect(
+        yield* getMemberColumn(member.id),
+        "the inactive member's stale selection must survive",
+      ).toBe(planB.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+describe('MembershipPlansRepository.reassignMembershipPlan', () => {
+  it.effect('moves every member on A onto B and leaves everyone else alone', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('bulk1');
+      const planA = yield* insertPlan(team.id, 'Plan A');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      const onA1 = yield* addMember(team.id, 'b1-a1');
+      const onA2 = yield* addMember(team.id, 'b1-a2');
+      const onA3 = yield* addMember(team.id, 'b1-a3');
+      const onB = yield* addMember(team.id, 'b1-b');
+      const neverPicked = yield* addMember(team.id, 'b1-none');
+      for (const m of [onA1, onA2, onA3]) {
+        yield* selectMembershipPlan({ member_id: m.id, team_id: team.id, plan_id: planA.id });
+      }
+      yield* selectMembershipPlan({ member_id: onB.id, team_id: team.id, plan_id: planB.id });
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.some(planA.id),
+        to_plan_id: Option.some(planB.id),
+      });
+
+      expect(moved).toBe(3);
+      expect(yield* getMemberColumn(onA1.id)).toBe(planB.id);
+      expect(yield* getMemberColumn(onA2.id)).toBe(planB.id);
+      expect(yield* getMemberColumn(onA3.id)).toBe(planB.id);
+      expect(yield* getMemberColumn(onB.id)).toBe(planB.id);
+      expect(yield* getMemberColumn(neverPicked.id)).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // §B.5 — THE MOST IMPORTANT TEST IN THIS BLOCK. Written with `=` instead of
+  // `IS NOT DISTINCT FROM`, the implementation matches ZERO rows here and returns a cheerful
+  // `0`, which the handler reports as a legitimate no-op success (§B.8). Nothing else — not
+  // the API tests' status codes, not the UI — catches that.
+  it.effect(
+    'NULL source: from None sweeps the members who NEVER picked onto B. FAILS if the SQL ' +
+      'compares the source with `=` instead of `IS NOT DISTINCT FROM`',
+    () =>
+      Effect.gen(function* () {
+        const team = yield* seedTeam('bulk2');
+        const planB = yield* insertPlan(team.id, 'Plan B');
+        const neverPicked1 = yield* addMember(team.id, 'b2-n1');
+        const neverPicked2 = yield* addMember(team.id, 'b2-n2');
+
+        const moved = yield* reassignMembershipPlan({
+          team_id: team.id,
+          from_plan_id: Option.none(),
+          to_plan_id: Option.some(planB.id),
+        });
+
+        expect(moved).toBe(2);
+        expect(yield* getMemberColumn(neverPicked1.id)).toBe(planB.id);
+        expect(yield* getMemberColumn(neverPicked2.id)).toBe(planB.id);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // §B.5 "three source populations, not two". Guards against a later "helpful"
+  // `COALESCE(tm.membership_plan_id, (SELECT id ... WHERE is_default))`, which would double
+  // every default-sourced move's blast radius.
+  it.effect(
+    "the DEFAULT plan's own id as source does NOT sweep the never-picked (NULL) members",
+    () =>
+      Effect.gen(function* () {
+        const team = yield* seedTeam('bulk3');
+        const seededDefault = yield* getSeededDefault(team.id);
+        const defaultId = seededDefault?.id as MembershipPlan.MembershipPlanId;
+        const planB = yield* insertPlan(team.id, 'Plan B');
+        const onDefault1 = yield* addMember(team.id, 'b3-d1');
+        const onDefault2 = yield* addMember(team.id, 'b3-d2');
+        const neverPicked1 = yield* addMember(team.id, 'b3-n1');
+        const neverPicked2 = yield* addMember(team.id, 'b3-n2');
+        for (const m of [onDefault1, onDefault2]) {
+          yield* selectMembershipPlan({ member_id: m.id, team_id: team.id, plan_id: defaultId });
+        }
+
+        const moved = yield* reassignMembershipPlan({
+          team_id: team.id,
+          from_plan_id: Option.some(defaultId),
+          to_plan_id: Option.some(planB.id),
+        });
+
+        expect(moved, 'only the two EXPLICIT picks of the default plan move').toBe(2);
+        expect(yield* getMemberColumn(onDefault1.id)).toBe(planB.id);
+        expect(yield* getMemberColumn(onDefault2.id)).toBe(planB.id);
+        expect(yield* getMemberColumn(neverPicked1.id)).toBeNull();
+        expect(yield* getMemberColumn(neverPicked2.id)).toBeNull();
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('to None clears every member on A back to the team default (NULL)', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('bulk4');
+      const planA = yield* insertPlan(team.id, 'Plan A');
+      const onA1 = yield* addMember(team.id, 'b4-a1');
+      const onA2 = yield* addMember(team.id, 'b4-a2');
+      for (const m of [onA1, onA2]) {
+        yield* selectMembershipPlan({ member_id: m.id, team_id: team.id, plan_id: planA.id });
+      }
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.some(planA.id),
+        to_plan_id: Option.none(),
+      });
+
+      expect(moved).toBe(2);
+      expect(yield* getMemberColumn(onA1.id)).toBeNull();
+      expect(yield* getMemberColumn(onA2.id)).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // Pins `IS DISTINCT FROM ${to}`. Postgres counts a same-value UPDATE as an affected row, so
+  // without that guard this returns 3 and the UI toasts a phantom move.
+  it.effect('source == target returns 0 and changes nothing', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('bulk5');
+      const planA = yield* insertPlan(team.id, 'Plan A');
+      const members = [
+        yield* addMember(team.id, 'b5-1'),
+        yield* addMember(team.id, 'b5-2'),
+        yield* addMember(team.id, 'b5-3'),
+      ];
+      for (const m of members) {
+        yield* selectMembershipPlan({ member_id: m.id, team_id: team.id, plan_id: planA.id });
+      }
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.some(planA.id),
+        to_plan_id: Option.some(planA.id),
+      });
+
+      expect(moved).toBe(0);
+      for (const m of members) {
+        expect(yield* getMemberColumn(m.id)).toBe(planA.id);
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // None == None is the same guard on the other side of the NULL boundary: `IS DISTINCT FROM
+  // NULL` must be false for a NULL column, so a "default -> default" sweep is also 0.
+  it.effect('source None == target None returns 0', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('bulk5b');
+      const neverPicked = yield* addMember(team.id, 'b5b-n');
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.none(),
+        to_plan_id: Option.none(),
+      });
+
+      expect(moved).toBe(0);
+      expect(yield* getMemberColumn(neverPicked.id)).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // §B.5 — an ARCHIVED SOURCE is the whole point: those members silently fall back to the
+  // default when billed, and sweeping them onto a real plan is the most valuable bulk case.
+  // The SQL therefore carries NO predicate on the source plan at all.
+  it.effect('an ARCHIVED source plan is allowed: its members still move onto B', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('bulk6');
+      const planA = yield* insertPlan(team.id, 'Plan A');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      const onA1 = yield* addMember(team.id, 'b6-1');
+      const onA2 = yield* addMember(team.id, 'b6-2');
+      for (const m of [onA1, onA2]) {
+        yield* selectMembershipPlan({ member_id: m.id, team_id: team.id, plan_id: planA.id });
+      }
+      yield* archivePlan(planA.id, team.id);
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.some(planA.id),
+        to_plan_id: Option.some(planB.id),
+      });
+
+      expect(moved).toBe(2);
+      expect(yield* getMemberColumn(onA1.id)).toBe(planB.id);
+      expect(yield* getMemberColumn(onA2.id)).toBe(planB.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an ARCHIVED TARGET is refused: 0 rows, every column unchanged (§B.7)', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('bulk7');
+      const planA = yield* insertPlan(team.id, 'Plan A');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      const onA1 = yield* addMember(team.id, 'b7-1');
+      const onA2 = yield* addMember(team.id, 'b7-2');
+      for (const m of [onA1, onA2]) {
+        yield* selectMembershipPlan({ member_id: m.id, team_id: team.id, plan_id: planA.id });
+      }
+      yield* archivePlan(planB.id, team.id);
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.some(planA.id),
+        to_plan_id: Option.some(planB.id),
+      });
+
+      expect(moved).toBe(0);
+      expect(yield* getMemberColumn(onA1.id)).toBe(planA.id);
+      expect(yield* getMemberColumn(onA2.id)).toBe(planA.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("a FOREIGN team's plan as TARGET is refused: 0 rows, columns unchanged", () =>
+    Effect.gen(function* () {
+      const teamA = yield* seedTeam('bulk8a');
+      const teamB = yield* seedTeam('bulk8b');
+      const planA = yield* insertPlan(teamA.id, 'Plan A');
+      const foreignPlan = yield* insertPlan(teamB.id, 'Foreign plan');
+      const member = yield* addMember(teamA.id, 'b8');
+      yield* selectMembershipPlan({ member_id: member.id, team_id: teamA.id, plan_id: planA.id });
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: teamA.id,
+        from_plan_id: Option.some(planA.id),
+        to_plan_id: Option.some(foreignPlan.id),
+      });
+
+      expect(moved).toBe(0);
+      expect(yield* getMemberColumn(member.id)).toBe(planA.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("TENANCY: another team's members on the same-named plans are never touched", () =>
+    Effect.gen(function* () {
+      const teamA = yield* seedTeam('bulk9a');
+      const teamB = yield* seedTeam('bulk9b');
+      const planA1 = yield* insertPlan(teamA.id, 'Plan A');
+      const planA2 = yield* insertPlan(teamA.id, 'Plan B');
+      const planB1 = yield* insertPlan(teamB.id, 'Plan A');
+      const memberA = yield* addMember(teamA.id, 'b9-a');
+      const memberB = yield* addMember(teamB.id, 'b9-b');
+      yield* selectMembershipPlan({ member_id: memberA.id, team_id: teamA.id, plan_id: planA1.id });
+      yield* selectMembershipPlan({ member_id: memberB.id, team_id: teamB.id, plan_id: planB1.id });
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: teamA.id,
+        from_plan_id: Option.some(planA1.id),
+        to_plan_id: Option.some(planA2.id),
+      });
+
+      expect(moved).toBe(1);
+      expect(yield* getMemberColumn(memberA.id)).toBe(planA2.id);
+      expect(yield* getMemberColumn(memberB.id)).toBe(planB1.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The source is deliberately unvalidated (§B.5). That is safe only because `tm.team_id`
+  // scopes every counted row — a foreign uuid must therefore move nobody, never leak a count.
+  it.effect("a FOREIGN team's plan id as SOURCE moves nobody: 0 rows", () =>
+    Effect.gen(function* () {
+      const teamA = yield* seedTeam('bulk10a');
+      const teamB = yield* seedTeam('bulk10b');
+      const planTarget = yield* insertPlan(teamA.id, 'Target');
+      const foreignPlan = yield* insertPlan(teamB.id, 'Foreign plan');
+      const memberB = yield* addMember(teamB.id, 'b10-b');
+      yield* selectMembershipPlan({
+        member_id: memberB.id,
+        team_id: teamB.id,
+        plan_id: foreignPlan.id,
+      });
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: teamA.id,
+        from_plan_id: Option.some(foreignPlan.id),
+        to_plan_id: Option.some(planTarget.id),
+      });
+
+      expect(moved).toBe(0);
+      expect(yield* getMemberColumn(memberB.id)).toBe(foreignPlan.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('INACTIVE members on the source plan are not moved: 1 of 2 moves', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('bulk11');
+      const planA = yield* insertPlan(team.id, 'Plan A');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      const active = yield* addMember(team.id, 'b11-active');
+      const inactive = yield* addMember(team.id, 'b11-inactive');
+      for (const m of [active, inactive]) {
+        yield* selectMembershipPlan({ member_id: m.id, team_id: team.id, plan_id: planA.id });
+      }
+      yield* setMemberActive(inactive.id, false);
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.some(planA.id),
+        to_plan_id: Option.some(planB.id),
+      });
+
+      expect(moved).toBe(1);
+      expect(yield* getMemberColumn(active.id)).toBe(planB.id);
+      expect(yield* getMemberColumn(inactive.id)).toBe(planA.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('no match returns 0, never a failure (§B.8 — a no-op sweep is a success)', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('bulk12');
+      const planA = yield* insertPlan(team.id, 'Plan A');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+
+      const result = yield* reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.some(planA.id),
+        to_plan_id: Option.some(planB.id),
+      }).pipe(Effect.result);
+
+      expect(result._tag).toBe('Success');
+      if (result._tag === 'Success') {
+        expect(result.success).toBe(0);
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('BYPASSES a passed deadline (§B.2): the bulk move still lands', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam('bulk13');
+      const planA = yield* insertPlan(team.id, 'Plan A');
+      const planB = yield* insertPlan(team.id, 'Plan B');
+      const member = yield* addMember(team.id, 'b13');
+      yield* selectMembershipPlan({ member_id: member.id, team_id: team.id, plan_id: planA.id });
+      yield* setSelectionDeadline(
+        team.id,
+        Option.some(DateTime.subtract(DateTime.nowUnsafe(), { days: 1 })),
+      );
+
+      const moved = yield* reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.some(planA.id),
+        to_plan_id: Option.some(planB.id),
+      });
+
+      expect(moved).toBe(1);
+      expect(yield* getMemberColumn(member.id)).toBe(planB.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+describe('MembershipPlansRepository.findPlanAssignments', () => {
+  // One query, one shape — active members of THIS team only, with the raw FK as an Option.
+  it.effect(
+    'returns every ACTIVE member of the team and only that team; a never-picked member reads ' +
+      'back None, a member on B reads back Some(B) and a member on an ARCHIVED plan still ' +
+      'reads back that plan id',
+    () =>
+      Effect.gen(function* () {
+        const team = yield* seedTeam('assignments1');
+        const otherTeam = yield* seedTeam('assignments2');
+        const planB = yield* insertPlan(team.id, 'Plan B');
+        const planC = yield* insertPlan(team.id, 'Plan C');
+        const neverPicked = yield* addMember(team.id, 'pa-none');
+        const onB = yield* addMember(team.id, 'pa-b');
+        const onArchived = yield* addMember(team.id, 'pa-archived');
+        const inactive = yield* addMember(team.id, 'pa-inactive');
+        const foreign = yield* addMember(otherTeam.id, 'pa-foreign');
+        yield* selectMembershipPlan({ member_id: onB.id, team_id: team.id, plan_id: planB.id });
+        yield* selectMembershipPlan({
+          member_id: onArchived.id,
+          team_id: team.id,
+          plan_id: planC.id,
+        });
+        // The archived-plan row is the ONLY input to the dialog's "sweep everyone off the plan we
+        // retired" option. A `LEFT JOIN membership_plans ... AND archived_at IS NULL` added here
+        // later would make that option unreachable and nothing else in the stack would go red.
+        yield* archivePlan(planC.id, team.id);
+        yield* setMemberActive(inactive.id, false);
+
+        const rows = yield* findPlanAssignments(team.id);
+
+        const ids = rows.map((r) => r.member_id);
+        expect(ids).toContain(neverPicked.id);
+        expect(ids).toContain(onB.id);
+        expect(ids, 'a member on an archived plan is still rostered').toContain(onArchived.id);
+        expect(ids, 'inactive members are excluded').not.toContain(inactive.id);
+        expect(ids, "another team's members are never returned").not.toContain(foreign.id);
+
+        const planIdOf = (memberId: TeamMember.TeamMemberId) =>
+          rows.find((r) => r.member_id === memberId)?.membership_plan_id;
+        expect(planIdOf(neverPicked.id)).toEqual(Option.none());
+        expect(planIdOf(onB.id)).toEqual(Option.some(planB.id));
+        expect(planIdOf(onArchived.id)).toEqual(Option.some(planC.id));
+      }).pipe(Effect.provide(TestLayer)),
+  );
+});

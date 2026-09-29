@@ -40,6 +40,19 @@ class MemberSelectionRow extends Schema.Class<MemberSelectionRow>('MemberSelecti
   membership_selection_deadline: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
 }) {}
 
+// RAW name parts, never a resolved string: `DisplayName.pickDisplayName` is the one resolver and
+// it lives in the API layer (`api/roster.ts`). It also skips BLANK strings, which `COALESCE`
+// does not — resolving here would quietly disagree with every other display name in the app.
+export class PlanAssignmentRow extends Schema.Class<PlanAssignmentRow>('PlanAssignmentRow')({
+  member_id: TeamMember.TeamMemberId,
+  // `None` = never picked — falls back to the team default, same as `MemberSelectionRow`.
+  membership_plan_id: Schema.OptionFromNullOr(MembershipPlan.MembershipPlanId),
+  name: Schema.OptionFromNullOr(Schema.String),
+  discord_nickname: Schema.OptionFromNullOr(Schema.String),
+  discord_display_name: Schema.OptionFromNullOr(Schema.String),
+  username: Schema.String,
+}) {}
+
 const InsertInput = Schema.Struct({
   team_id: Team.TeamId,
   name: Schema.OptionFromNullOr(MembershipPlan.MembershipPlanName),
@@ -236,6 +249,101 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // Slice 3 — who is on which plan, for the manager-side roster. `ORDER BY tm.id` is for
+  // STABILITY only: without any ORDER BY Postgres guarantees no order and the list reshuffles
+  // between loads. Deliberately NOT `ORDER BY COALESCE(u.name, ...)` — `pickDisplayName` skips
+  // blank strings and `COALESCE` skips only NULL, so a member with `name = ''` would sort under
+  // `''` while rendering as their Discord nickname. The client filters on the RESOLVED
+  // `displayName`, so the sort key and the filter key must be the same one — both live there.
+  const findPlanAssignmentsQuery = SqlSchema.findAll({
+    Request: Team.TeamId,
+    Result: PlanAssignmentRow,
+    execute: (teamId) => sql`
+      SELECT tm.id AS member_id, tm.membership_plan_id,
+             u.name, u.discord_nickname, u.discord_display_name, u.username
+      FROM team_members tm
+      JOIN users u ON u.id = tm.user_id
+      WHERE tm.team_id = ${teamId} AND tm.active
+      ORDER BY tm.id
+    `,
+  });
+
+  // The captain-side sibling of `selectMembershipPlanQuery`. Atomic Conditional UPDATE
+  // (AGENTS.md): every guard lives in this one UPDATE's own WHERE. `mp.team_id = tm.team_id` is
+  // the tenancy boundary — the row itself, same as `selectMembershipPlanQuery`.
+  //
+  // THE DEADLINE `EXISTS` IS ABSENT ON PURPOSE (§B.2). The deadline stops MEMBERS churning after
+  // the captain locks selection; fixing stragglers after that lock is the entire point of this
+  // path. Do not restore it here — `selectMembershipPlanQuery` above is the one that keeps it.
+  //
+  // `execute` receives the ENCODED request, so `plan_id` is `string | null`, NOT an `Option` —
+  // hence the plain `=== null` comparison and the direct interpolation (precedent:
+  // `setSelectionDeadlineQuery` above). The `=== null` disjunct is the "clear to the team
+  // default" case: there is no plan to validate, but the member guards still apply.
+  // `team_members` has no `updated_at` column — none is set here.
+  const assignMembershipPlanQuery = SqlSchema.findAll({
+    Request: Schema.Struct({
+      member_id: TeamMember.TeamMemberId,
+      team_id: Team.TeamId,
+      plan_id: Schema.OptionFromNullOr(MembershipPlan.MembershipPlanId),
+    }),
+    Result: Schema.Struct({ id: TeamMember.TeamMemberId }),
+    execute: (input) => sql`
+      UPDATE team_members tm
+      SET membership_plan_id = ${input.plan_id}
+      WHERE tm.id = ${input.member_id} AND tm.team_id = ${input.team_id} AND tm.active
+        AND (${input.plan_id === null} OR EXISTS (
+          SELECT 1 FROM membership_plans mp
+          WHERE mp.id = ${input.plan_id} AND mp.team_id = tm.team_id AND mp.archived_at IS NULL
+        ))
+      RETURNING tm.id
+    `,
+  });
+
+  // Bulk move (§B.5): every active member on plan A lands on plan B. ONE statement, no loop, no
+  // read-then-write — a client-side loop has no atomicity and leaves a half-moved team.
+  //
+  // `IS NOT DISTINCT FROM ${from}`, NEVER `=`: `= NULL` matches zero rows, which would make the
+  // sweep of never-picked members (the `None` source) quietly report a cheerful 0.
+  //
+  // `IS DISTINCT FROM ${to}` is what keeps `movedCount` HONEST. Postgres counts a same-value
+  // UPDATE as an affected row, so without it a source == target request reports N moved while
+  // changing nothing. This guard — not a client-side check — is why no `source === target`
+  // special case exists anywhere else in the stack.
+  //
+  // The SOURCE is deliberately unvalidated: no `archived_at`, no existence check. An archived
+  // source is the POINT (its members silently fall back to the default when billed, so sweeping
+  // them onto a real plan is the most valuable bulk case there is); an unmatched source yields 0
+  // rows, a legitimate success (§B.8). Not a cross-tenant probe either — `tm.team_id` scopes
+  // every counted row, so an arbitrary `from` uuid can only ever report this team's own members.
+  //
+  // The archived-TARGET `EXISTS` takes NO LOCK under READ COMMITTED: a concurrent archive
+  // committing inside this statement's window can still land members on a just-archived plan.
+  // That outcome is indistinguishable from "assign, then archive", which no design prevents —
+  // no `FOR SHARE` (it would add a `membership_plans` lock leg no other path takes).
+  //
+  // Same absent deadline clause and same encoded-request interpolation as the query above.
+  const reassignMembershipPlanQuery = SqlSchema.findAll({
+    Request: Schema.Struct({
+      team_id: Team.TeamId,
+      from_plan_id: Schema.OptionFromNullOr(MembershipPlan.MembershipPlanId),
+      to_plan_id: Schema.OptionFromNullOr(MembershipPlan.MembershipPlanId),
+    }),
+    Result: Schema.Struct({ id: TeamMember.TeamMemberId }),
+    execute: (input) => sql`
+      UPDATE team_members tm
+      SET membership_plan_id = ${input.to_plan_id}
+      WHERE tm.team_id = ${input.team_id} AND tm.active
+        AND tm.membership_plan_id IS NOT DISTINCT FROM ${input.from_plan_id}
+        AND tm.membership_plan_id IS DISTINCT FROM ${input.to_plan_id}
+        AND (${input.to_plan_id === null} OR EXISTS (
+          SELECT 1 FROM membership_plans mp
+          WHERE mp.id = ${input.to_plan_id} AND mp.team_id = tm.team_id AND mp.archived_at IS NULL
+        ))
+      RETURNING tm.id
+    `,
+  });
+
   const findMembershipPlansByTeamId = (teamId: Team.TeamId) =>
     findByTeamIdQuery(teamId).pipe(catchSqlErrors);
 
@@ -321,6 +429,29 @@ const make = Effect.gen(function* () {
   const setSelectionDeadline = (teamId: Team.TeamId, deadline: Option.Option<DateTime.Utc>) =>
     setSelectionDeadlineQuery({ team_id: teamId, deadline }).pipe(catchSqlErrors);
 
+  const findPlanAssignments = (teamId: Team.TeamId) =>
+    findPlanAssignmentsQuery(teamId).pipe(catchSqlErrors);
+
+  const assignMembershipPlan = (input: {
+    member_id: TeamMember.TeamMemberId;
+    team_id: Team.TeamId;
+    plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
+  }) =>
+    assignMembershipPlanQuery(input).pipe(
+      Effect.map((rows) => rows.length),
+      catchSqlErrors,
+    );
+
+  const reassignMembershipPlan = (input: {
+    team_id: Team.TeamId;
+    from_plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
+    to_plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
+  }) =>
+    reassignMembershipPlanQuery(input).pipe(
+      Effect.map((rows) => rows.length),
+      catchSqlErrors,
+    );
+
   return {
     findMembershipPlansByTeamId,
     findMembershipPlanByIdScoped,
@@ -331,6 +462,9 @@ const make = Effect.gen(function* () {
     findMemberSelection,
     selectMembershipPlan,
     setSelectionDeadline,
+    findPlanAssignments,
+    assignMembershipPlan,
+    reassignMembershipPlan,
   };
 });
 
