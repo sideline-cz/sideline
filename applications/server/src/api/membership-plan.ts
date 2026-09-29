@@ -148,6 +148,9 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'finance:manage_fees', forbidden),
               ),
+              // `free_trainings_included` is the raw `Option` — no `getOrElse` here. INSERT
+              // COALESCEs a `None` to 0 (no stored value to keep on a create); UPDATE COALESCEs
+              // it to the existing column. See `MembershipPlansRepository.updateQuery`.
               Effect.bind('created', () =>
                 plans.insertMembershipPlan({
                   team_id: teamId,

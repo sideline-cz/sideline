@@ -119,7 +119,7 @@ const setDefaultPlanPrice = (
       price_minor: def.price_minor,
       currency: currency as never,
       price_per_training_minor: priceMinor as never,
-      free_trainings_included: freeTrainings as never,
+      free_trainings_included: Option.some(freeTrainings as never),
       expires_at: def.expires_at,
     });
   });
@@ -139,7 +139,7 @@ const createPlan = (
         price_minor: 0 as never,
         currency: currency as never,
         price_per_training_minor: priceMinor as never,
-        free_trainings_included: freeTrainings as never,
+        free_trainings_included: Option.some(freeTrainings as never),
         expires_at: Option.none(),
       }),
     ),
@@ -1547,7 +1547,7 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
 
       const fees = yield* trainingFees(team.id);
       expect(fees).toHaveLength(1);
-      expect(fees[0]?.id).toBe(before.id);
+      expect(feeForPeriod(fees, PERIOD_START)?.id).toBe(before.id);
       const after = yield* assignmentFor(before.id, member.id);
       expect(after?.id).toBe(assignmentBefore?.id);
       expect(after?.amount_minor).toBe('200');

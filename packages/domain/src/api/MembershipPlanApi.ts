@@ -79,11 +79,15 @@ export const MembershipPlanRequest = Schema.Struct({
   currency: Fee.CurrencyCode,
   pricePerTrainingMinor: Fee.AmountMinor,
   // The all-time allowance, counted from `membership_plans.free_trainings_anchor_at` -- included
-  // once for the life of the membership, not per billing period. REQUIRED, unlike the read side:
-  // this payload is a full-row overwrite, so an old bundle sending the pre-rename key would
-  // silently write allowance 0, re-price the open month, and then hand out a fresh allowance when
-  // the manager fixes it. A loud 400 during the deploy window is the correct trade.
-  freeTrainingsIncluded: FreeTrainingsIncluded,
+  // once for the life of the membership, not per billing period. OPTIONAL KEY, absent = KEEP THE
+  // STORED VALUE (`applications/server/AGENTS.md` rule 5): web deploys LAST, so a new server
+  // serves old bundles that omit this key for the whole rollout -- a required field 400s every
+  // one of their saves. Absent must NOT mean 0 either, or a full-row overwrite from such a bundle
+  // silently zeroes the allowance. The repository implements "keep" by COALESCEing THE PARAMETER
+  // against the column; on CREATE there is no stored value, so absent COALESCEs to 0.
+  // Deliberately asymmetric with `MembershipPlanInfo.freeTrainingsIncluded`, which keeps a
+  // `withDecodingDefaultKey(() => 0)` -- on the READ side 0 is the safe direction.
+  freeTrainingsIncluded: Schema.OptionFromOptional(FreeTrainingsIncluded),
   expiresAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
 });
 export type MembershipPlanRequest = Schema.Schema.Type<typeof MembershipPlanRequest>;

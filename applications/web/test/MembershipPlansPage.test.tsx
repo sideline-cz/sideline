@@ -501,9 +501,12 @@ describe('MembershipPlansPage — free trainings field', () => {
       expect(updateMembershipPlanImpl).toHaveBeenCalledOnce();
     });
     const args = updateMembershipPlanImpl.mock.calls[0][0] as {
-      payload: { freeTrainingsIncluded: number };
+      payload: { freeTrainingsIncluded: Option.Option<number> };
     };
-    expect(args.payload.freeTrainingsIncluded).toBe(0);
+    // `Some`, always: the key is optional on the wire only so an OLD bundle gets "keep the stored
+    // value" instead of a 400 (`applications/server/AGENTS.md` rule 5). This bundle knows the
+    // field, so it must never send `None` — that would silently discard the captain's edit.
+    expect(Option.getOrNull(args.payload.freeTrainingsIncluded)).toBe(0);
   });
 
   it('an entered allowance reaches the payload', async () => {
@@ -520,9 +523,12 @@ describe('MembershipPlansPage — free trainings field', () => {
       expect(updateMembershipPlanImpl).toHaveBeenCalledOnce();
     });
     const args = updateMembershipPlanImpl.mock.calls[0][0] as {
-      payload: { freeTrainingsIncluded: number };
+      payload: { freeTrainingsIncluded: Option.Option<number> };
     };
-    expect(args.payload.freeTrainingsIncluded).toBe(4);
+    // `Some`, always: the key is optional on the wire only so an OLD bundle gets "keep the stored
+    // value" instead of a 400 (`applications/server/AGENTS.md` rule 5). This bundle knows the
+    // field, so it must never send `None` — that would silently discard the captain's edit.
+    expect(Option.getOrNull(args.payload.freeTrainingsIncluded)).toBe(4);
   });
 
   // The `max='999'` on the input is the guard that actually fires: native constraint validation

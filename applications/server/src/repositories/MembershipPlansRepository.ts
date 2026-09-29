@@ -54,13 +54,17 @@ export class PlanAssignmentRow extends Schema.Class<PlanAssignmentRow>('PlanAssi
   username: Schema.String,
 }) {}
 
+// `free_trainings_included` is an `Option` end to end (see `MembershipPlanApi` rule 5): `None`
+// means the caller's bundle predates the field. `OptionFromNullOr` here, not `OptionFromOptional`
+// -- `execute` receives the ENCODED request, and an encoded `None` must arrive as an explicit
+// `null` so the SQL can `COALESCE` it.
 const InsertInput = Schema.Struct({
   team_id: Team.TeamId,
   name: Schema.OptionFromNullOr(MembershipPlan.MembershipPlanName),
   price_minor: Fee.AmountMinor,
   currency: Fee.CurrencyCode,
   price_per_training_minor: Fee.AmountMinor,
-  free_trainings_included: MembershipPlan.FreeTrainingsIncluded,
+  free_trainings_included: Schema.OptionFromNullOr(MembershipPlan.FreeTrainingsIncluded),
   expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
 });
 
@@ -71,7 +75,7 @@ const UpdateInput = Schema.Struct({
   price_minor: Fee.AmountMinor,
   currency: Fee.CurrencyCode,
   price_per_training_minor: Fee.AmountMinor,
-  free_trainings_included: MembershipPlan.FreeTrainingsIncluded,
+  free_trainings_included: Schema.OptionFromNullOr(MembershipPlan.FreeTrainingsIncluded),
   expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
 });
 
@@ -109,7 +113,7 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       INSERT INTO membership_plans (team_id, name, price_minor, currency, price_per_training_minor, free_trainings_included, expires_at, is_default)
       SELECT ${input.team_id}, ${input.name}, ${input.price_minor}, ${input.currency},
-             ${input.price_per_training_minor}, ${input.free_trainings_included}, ${input.expires_at},
+             ${input.price_per_training_minor}, COALESCE(${input.free_trainings_included}::int, 0), ${input.expires_at},
              NOT EXISTS (
                SELECT 1 FROM membership_plans
                WHERE team_id = ${input.team_id} AND archived_at IS NULL AND is_default
@@ -118,6 +122,16 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // `free_trainings_included = COALESCE(<param>, free_trainings_included)` is rule 5's "absent =
+  // keep the stored value" (AGENTS.md → Wire-value projection & effective-value guards). It
+  // COALESCEs THE PARAMETER against the column, never `EXCLUDED`. `execute` receives the ENCODED
+  // request, so the field is `number | null`, not an `Option` — precedent: `setSelectionDeadlineQuery`
+  // below. The `::int` cast is required: the `sql` template emits an untyped placeholder.
+  //
+  // The re-stamp trigger (`membership_plans_stamp_free_trainings_anchor_trg`, 1793500000) fires
+  // only `WHEN (OLD.free_trainings_included = 0 AND NEW.free_trainings_included > 0)`. A `null`
+  // parameter writes the stored value straight back, so OLD = NEW and the anchor is left alone —
+  // an old bundle's save can never re-open the allowance.
   const updateQuery = SqlSchema.findOne({
     Request: UpdateInput,
     Result: MembershipPlanRow,
@@ -127,7 +141,7 @@ const make = Effect.gen(function* () {
         price_minor = ${input.price_minor},
         currency = ${input.currency},
         price_per_training_minor = ${input.price_per_training_minor},
-        free_trainings_included = ${input.free_trainings_included},
+        free_trainings_included = COALESCE(${input.free_trainings_included}::int, free_trainings_included),
         expires_at = ${input.expires_at},
         updated_at = now()
       WHERE id = ${input.id} AND team_id = ${input.team_id} AND archived_at IS NULL
@@ -360,7 +374,7 @@ const make = Effect.gen(function* () {
     price_minor: Fee.AmountMinor;
     currency: Fee.CurrencyCode;
     price_per_training_minor: Fee.AmountMinor;
-    free_trainings_included: MembershipPlan.FreeTrainingsIncluded;
+    free_trainings_included: Option.Option<MembershipPlan.FreeTrainingsIncluded>;
     expires_at: Option.Option<DateTime.Utc>;
   }) =>
     insertQuery(input).pipe(
@@ -378,7 +392,7 @@ const make = Effect.gen(function* () {
     price_minor: Fee.AmountMinor;
     currency: Fee.CurrencyCode;
     price_per_training_minor: Fee.AmountMinor;
-    free_trainings_included: MembershipPlan.FreeTrainingsIncluded;
+    free_trainings_included: Option.Option<MembershipPlan.FreeTrainingsIncluded>;
     expires_at: Option.Option<DateTime.Utc>;
   }) =>
     updateQuery(input).pipe(

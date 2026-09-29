@@ -200,7 +200,11 @@ function MembershipPlanFormDialog({
       priceMinor: Schema.decodeSync(Fee.AmountMinor)(priceMinor),
       currency: Schema.decodeSync(Fee.CurrencyCode)(currency),
       pricePerTrainingMinor: Schema.decodeSync(Fee.AmountMinor)(pricePerTrainingMinor),
-      freeTrainingsIncluded: Schema.decodeSync(MembershipPlan.FreeTrainingsIncluded)(freeTrainings),
+      // Always `Some` — the key is optional on the wire only so that an OLD bundle, which does
+      // not know the field, gets "keep the stored value" instead of a 400. This bundle knows it.
+      freeTrainingsIncluded: Option.some(
+        Schema.decodeSync(MembershipPlan.FreeTrainingsIncluded)(freeTrainings),
+      ),
       expiresAt: parseExpiresAtField(expiresAt),
     };
 

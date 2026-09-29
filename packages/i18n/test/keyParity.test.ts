@@ -58,7 +58,7 @@ describe('i18n message catalogue — key parity between cs.json and en.json', ()
     const cs = readJson('../messages/cs.json');
     const en = readJson('../messages/en.json');
 
-    const forbidden = ['month', '/month', 'měsíc', 'měsíčně', 'obnov'];
+    const forbidden = ['month', 'měsíc', 'měsíčně', 'obnov'];
     const keys = [
       'membershipPlan_freeTrainings',
       'membershipPlan_freeTrainingsHint',
@@ -70,7 +70,10 @@ describe('i18n message catalogue — key parity between cs.json and en.json', ()
       ['cs', cs],
     ] as const) {
       for (const key of keys) {
-        const value = (catalogue[key] ?? '').toLowerCase();
+        // Existence FIRST: without it a dropped or renamed key reads `''`, which contains none of
+        // the needles, and the whole guard passes green on missing copy.
+        expect(Object.hasOwn(catalogue, key), `${locale}.json is missing ${key}`).toBe(true);
+        const value = catalogue[key].toLowerCase();
         for (const needle of forbidden) {
           expect(value, `${locale}.json ${key} must not say "${needle}"`).not.toContain(needle);
         }
