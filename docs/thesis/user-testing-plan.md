@@ -461,6 +461,30 @@ The first RSVP attempt is blocked with a clear, non-technical explanation and a 
 
 ---
 
+### Task O — Move a Teammate to a Different Membership Plan, Then Sweep an Archived One
+
+**Description:**
+A teammate signed up under the wrong membership tier. You want to fix it directly, and then simulate retiring an old plan by moving everyone still on it onto a current one in a single action.
+
+**Steps:**
+1. Navigate to **Team → Finances → Membership plans**.
+2. Find the "Member assignments" section and locate the teammate in question (use the search box).
+3. Change their plan using the per-row selector and confirm the change is saved.
+4. Open **Move all members**, choose an existing plan as the source and a different one as the target, and review the member count and currency shown on each option.
+5. Confirm the move and check the toast reporting how many members actually moved.
+
+**Expected Result:**
+The individual teammate's plan updates immediately. The bulk dialog clearly shows how many members will be affected before the participant confirms, and reports the actual count moved afterwards.
+
+**Success Criteria:**
+- Participant locates the "Member assignments" section without assistance.
+- Participant changes one member's plan without error.
+- Participant understands, before confirming, roughly how many members the bulk move will affect.
+
+**Notes for facilitator:** This task requires a Treasurer or Admin test account — a Captain account cannot see this section (`finance:manage_fees` is not part of the default Captain permission set), which is itself worth noting if a participant expects otherwise. Also watch whether the participant notices the billing-notice line in the bulk dialog explaining that this month's charges catch up lazily rather than instantly; whether that reads as reassuring or confusing is a useful qualitative note.
+
+---
+
 ## 6. Data Collection Methods
 
 ### 6.1 Quantitative Measures

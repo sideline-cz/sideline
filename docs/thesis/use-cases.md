@@ -175,6 +175,7 @@ flowchart LR
         UC_RESOLVE_QUEUE["Resolve a Bank Transaction in the Matching Queue"]
         UC_EXPORT_BANK["Export Bank Movements for Grant Audit"]
         UC_MANAGE_MEMBERSHIP_PLANS["View / Create / Update / Archive Membership Plans\nrequires: finance:manage_fees"]
+        UC_ASSIGN_MEMBERSHIP_PLAN["Assign / Bulk-Move Members Between Membership Plans\nrequires: finance:manage_fees"]
     end
 
     UA --> UC_LOGIN
@@ -241,6 +242,7 @@ flowchart LR
     TR --> UC_RESOLVE_QUEUE
     TR --> UC_EXPORT_BANK
     TR --> UC_MANAGE_MEMBERSHIP_PLANS
+    TR --> UC_ASSIGN_MEMBERSHIP_PLAN
     CP --> UC_ASSIGN_VS
 
     AD --> UC_VIEW_EVENTS
@@ -262,6 +264,7 @@ flowchart LR
     AD --> UC_RESOLVE_QUEUE
     AD --> UC_EXPORT_BANK
     AD --> UC_MANAGE_MEMBERSHIP_PLANS
+    AD --> UC_ASSIGN_MEMBERSHIP_PLAN
     AD --> UC_CARPOOL_POST
     AD --> UC_CARPOOL_ADD_CAR
     AD --> UC_CARPOOL_ASSIGN_SEAT
@@ -1336,6 +1339,20 @@ The following structured descriptions cover the most significant use cases in th
 | **Alternate Flow B** | The plan id names another team's plan or an archived plan: the `UPDATE` matches no row and the server returns `404 MembershipPlanNotFound`. |
 | **Postcondition** | The member's chosen plan is recorded. A member who never chooses keeps `membership_plan_id IS NULL` and is treated as being on the team's current default — a computed fallback, so they follow the default if a captain later promotes a different plan. |
 | **Notes** | Slice 2 of "Setup memberships". The endpoint takes no member id — the caller's own membership resolves it, so there is nothing to forge. The deadline is a single instant on `teams`, set by a `finance:manage_fees` holder via `PUT /teams/:teamId/membership-selection-deadline` (null clears it). Choosing a plan still charges nothing: the price and per-training price are recorded, not billed, until a later slice. |
+
+---
+
+### UC-44: Assign or Bulk-Move Members Between Membership Plans (Treasurer/Admin)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Treasurer or Admin (holders of `finance:manage_fees`) |
+| **Precondition** | The actor is authenticated and holds `finance:manage_fees`. **A Captain cannot perform this use case** — Captain holds `member:view` but not `finance:manage_fees` by default, the same gate as UC-42. |
+| **Main Flow** | 1. The actor opens **Team → Membership Plans** and calls `GET /teams/:teamId/membership-plans`; because `canManage` is true, the response's `assignments` array is populated (one row per active member: `memberId`, resolved `displayName`, raw `membershipPlanId`) instead of empty. 2. The page renders a "Member assignments" section: one row per member with a plan `<Select>` (search box to filter by name). 3. The actor picks a different plan for one member; the web app calls `PUT /teams/:teamId/members/:memberId/membership-plan` with the new plan id, or `null` to clear back to the team default. 4. The server writes `team_members.membership_plan_id` in one atomic conditional `UPDATE` and returns `204`. |
+| **Alternate Flow A — Bulk move** | The actor clicks **Move all members**, opening a dialog with a "Move from" and "Move to" select (each plan option shows its member count and currency; the "from" list also offers one synthetic entry per archived plan still holding members). The actor picks a source and target and confirms; the web app calls `POST /teams/:teamId/membership-plan-reassign` with `fromMembershipPlanId`/`toMembershipPlanId`. The server runs one atomic `UPDATE` matching every member on the source (`IS NOT DISTINCT FROM`, so a `null` source correctly matches never-picked members) whose current plan differs from the target, and returns `{ movedCount }`. The dialog warns that a bulk move can overwrite members' own choices and that this month's training charges will not reflect the move until the next attendance write in that period. |
+| **Alternate Flow B** | The target plan (single assign or bulk) names another team's plan or an archived plan: the write matches no row and the server returns `404 MembershipPlanNotFound`. A bulk move whose source matches nobody returns `200` with `movedCount: 0` — a legitimate no-op, not an error. |
+| **Postcondition** | The assigned member(s)' `membership_plan_id` is updated (or cleared to `NULL`, i.e. the team default). No charge is recomputed at write time. |
+| **Notes** | Slice 4 of "Setup memberships" — the manager-side counterpart of UC-43. Deliberately **bypasses `membership_selection_deadline`**: the deadline binds members, not managers, and fixing stragglers after the lock is the entire point of this use case. An archived plan is a legal bulk **source** (sweeping members off a retired plan is the most valuable case) but never a legal **target**. Neither endpoint recomputes billing: `training_period_charges` reads the FK live but lazily, only on the next attendance write in the *current* period — already-closed months are frozen, and this is the same behaviour `updateMembershipPlan`'s price edits already have. |
 
 ---
 
