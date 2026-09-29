@@ -913,3 +913,182 @@ describe('training_period_charges — concurrency', () => {
       ).pipe(Effect.provide(TestLayer)),
   );
 });
+
+// ---------------------------------------------------------------------------
+// 16. CHARACTERISATION — cross-currency reassignment of an ALREADY-PAID member
+//
+// Not a regression test for the "manage assigned members" story: this is PRE-EXISTING engine
+// behaviour (`updateMembershipPlan`'s full-replace already rewrites a plan's `currency`), and
+// nothing in these three tests asserts a bug. They are here because §B.5's bulk endpoint turns
+// it from a per-member accident into one click for N members, and A.1 got the mechanics wrong
+// on the first pass — the corrected reading is pinned here so the next reader does not have to
+// re-derive it from the plpgsql.
+//
+// The mechanics, in two lines of the migration:
+//   S3 clamps the stale row to GREATEST(COALESCE(charge, 0), paid_minor) = paid_minor, NOT 0
+//     (`1793200000_training_period_fees.ts:229`);
+//   S4 then refuses to delete it — its guard is `amount_minor = 0 AND paid_minor = 0 AND NOT
+//     EXISTS (... payments ...)` (`:244-246`), and a paid row fails all three.
+// ---------------------------------------------------------------------------
+
+describe('training_period_charges — cross-currency move of an ALREADY-PAID member', () => {
+  it.effect(
+    'leaves TWO open assignments in TWO currencies for the same attendance, and the finance ' +
+      'overview reports the member under both',
+    () =>
+      Effect.gen(function* () {
+        const { team, captain } = yield* seedTeam('xcur-paid');
+        const member = yield* addBilledMember(team.id, 'xcur-paid-member');
+        yield* setDefaultPlanPrice(team.id, 100, 'CZK');
+
+        const t1 = yield* createTraining(team.id, captain.id, TRAINING_START);
+        yield* confirm(t1, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+        const czkFee = (yield* trainingFees(team.id))[0];
+        if (czkFee === undefined) throw new Error('expected a CZK fee');
+        const czkAssignment = yield* assignmentFor(czkFee.id, member.id);
+        if (czkAssignment === undefined) throw new Error('expected a CZK assignment');
+        expect(czkAssignment.amount_minor).toBe('100');
+
+        // The member pays their CZK charge in full — this is the ONLY thing that makes the
+        // stale row survive the sweep below.
+        const payments = yield* PaymentsRepository.asEffect();
+        yield* payments.insert({
+          feeAssignmentId: czkAssignment.id as never,
+          teamMemberId: member.id,
+          amountMinor: 100,
+          method: 'cash',
+          paidAt: DateTime.fromDateUnsafe(NOW),
+          note: Option.none(),
+          recordedByUserId: captain.user_id as never,
+        });
+
+        // The reassignment itself — a raw FK write, exactly the shape `reassignMembershipPlan`
+        // performs. It fires NO trigger of its own (A.1): nothing happens until the next
+        // attendance write lands in the period.
+        const eurPlan = yield* createPlan(team.id, 8, 'EUR', 'Euro plan');
+        yield* setMemberPlanRaw(member.id, eurPlan.id);
+
+        const t2 = yield* createTraining(team.id, captain.id, TRAINING_START_2);
+        yield* confirm(t2, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+        const stale = yield* assignmentFor(czkFee.id, member.id);
+        expect(stale, 'S4 cannot delete a row with paid_minor > 0').toBeDefined();
+        expect(stale?.amount_minor, 'S3 clamps it to paid_minor, never to 0').toBe('100');
+        expect(stale?.paid_minor).toBe('100');
+        expect(stale?.stored_status).toBe('active');
+
+        const eurFee = (yield* trainingFees(team.id)).find((f) => f.currency === 'EUR');
+        if (eurFee === undefined) throw new Error('expected a EUR fee');
+        const fresh = yield* assignmentFor(eurFee.id, member.id);
+        expect(fresh, 'the EUR side re-prices the WHOLE month').toBeDefined();
+        expect(fresh?.amount_minor).toBe('16');
+        expect(fresh?.paid_minor).toBe('0');
+
+        // What a treasurer actually sees: the same two trainings, billed twice, in two
+        // currencies — one settled, one outstanding.
+        const overview = yield* FinanceOverviewRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.overviewByTeam(team.id)),
+        );
+        const memberRows = overview.filter((r) => r.teamMemberId === member.id);
+        expect(memberRows.map((r) => r.currency).sort()).toEqual(['CZK', 'EUR']);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The control on the CURRENCY axis: a paid member moved between two plans of the SAME
+  // currency lands on ONE assignment, re-priced for the whole month. Without this, the test
+  // above reads as "moving a paid member always double-bills", which is false and sends the
+  // next reader after the wrong fix.
+  it.effect('a SAME-currency move of a paid member leaves exactly ONE assignment, re-priced', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('samecur-paid');
+      const member = yield* addBilledMember(team.id, 'samecur-paid-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK');
+
+      const t1 = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(t1, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      const czkFee = (yield* trainingFees(team.id))[0];
+      if (czkFee === undefined) throw new Error('expected a CZK fee');
+      const assignment = yield* assignmentFor(czkFee.id, member.id);
+      if (assignment === undefined) throw new Error('expected a CZK assignment');
+
+      const payments = yield* PaymentsRepository.asEffect();
+      yield* payments.insert({
+        feeAssignmentId: assignment.id as never,
+        teamMemberId: member.id,
+        amountMinor: 100,
+        method: 'cash',
+        paidAt: DateTime.fromDateUnsafe(NOW),
+        note: Option.none(),
+        recordedByUserId: captain.user_id as never,
+      });
+
+      const premium = yield* createPlan(team.id, 250, 'CZK', 'Premium');
+      yield* setMemberPlanRaw(member.id, premium.id);
+
+      const t2 = yield* createTraining(team.id, captain.id, TRAINING_START_2);
+      yield* confirm(t2, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      expect(yield* trainingFees(team.id), 'one currency, one fee row').toHaveLength(1);
+      const after = yield* assignmentFor(czkFee.id, member.id);
+      expect(after?.amount_minor, 'both trainings at the NEW price').toBe('500');
+      expect(after?.paid_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The control on the PAYMENT axis, in the shape bulk actually produces: ONE sweep moving
+  // TWO members, one paid and one not. Both branches of S4's guard run inside the same
+  // recompute, so the outcome is visibly asymmetric — the paid member keeps a stale CZK row,
+  // the unpaid one does not.
+  it.effect(
+    'one bulk sweep, two members: only the PAID one keeps a stale assignment in the old currency',
+    () =>
+      Effect.gen(function* () {
+        const { team, captain } = yield* seedTeam('bulk-xcur');
+        const paid = yield* addBilledMember(team.id, 'bulk-xcur-paid');
+        const unpaid = yield* addBilledMember(team.id, 'bulk-xcur-unpaid');
+        yield* setDefaultPlanPrice(team.id, 100, 'CZK');
+
+        const t1 = yield* createTraining(team.id, captain.id, TRAINING_START);
+        yield* confirm(t1, team.id, captain.id, [
+          { team_member_id: paid.id, present: true },
+          { team_member_id: unpaid.id, present: true },
+        ]);
+
+        const czkFee = (yield* trainingFees(team.id))[0];
+        if (czkFee === undefined) throw new Error('expected a CZK fee');
+        const paidAssignment = yield* assignmentFor(czkFee.id, paid.id);
+        if (paidAssignment === undefined) throw new Error('expected a CZK assignment');
+        const payments = yield* PaymentsRepository.asEffect();
+        yield* payments.insert({
+          feeAssignmentId: paidAssignment.id as never,
+          teamMemberId: paid.id,
+          amountMinor: 100,
+          method: 'cash',
+          paidAt: DateTime.fromDateUnsafe(NOW),
+          note: Option.none(),
+          recordedByUserId: captain.user_id as never,
+        });
+
+        // The bulk move: both members, one statement, one new currency.
+        const eurPlan = yield* createPlan(team.id, 8, 'EUR', 'Euro plan');
+        yield* setMemberPlanRaw(paid.id, eurPlan.id);
+        yield* setMemberPlanRaw(unpaid.id, eurPlan.id);
+
+        const t2 = yield* createTraining(team.id, captain.id, TRAINING_START_2);
+        yield* confirm(t2, team.id, captain.id, [
+          { team_member_id: paid.id, present: true },
+          { team_member_id: unpaid.id, present: true },
+        ]);
+
+        expect(yield* assignmentFor(czkFee.id, paid.id), 'paid -> survives').toBeDefined();
+        expect(yield* assignmentFor(czkFee.id, unpaid.id), 'unpaid -> pruned').toBeUndefined();
+
+        const eurFee = (yield* trainingFees(team.id)).find((f) => f.currency === 'EUR');
+        if (eurFee === undefined) throw new Error('expected a EUR fee');
+        expect((yield* assignmentFor(eurFee.id, paid.id))?.amount_minor).toBe('16');
+        expect((yield* assignmentFor(eurFee.id, unpaid.id))?.amount_minor).toBe('16');
+      }).pipe(Effect.provide(TestLayer)),
+  );
+});

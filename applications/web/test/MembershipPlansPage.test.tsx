@@ -8,7 +8,7 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DateTime, Effect, Option } from 'effect';
-import type React from 'react';
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +51,15 @@ vi.mock('~/lib/translations.js', () => ({
       membershipPlan_deadlineSaved: 'Deadline saved.',
       membershipPlan_deadlineCleared: 'Deadline cleared.',
       membershipPlan_deadlineSaveFailed: 'Failed to save deadline.',
+      // Slice 3 — the member-assignment section (plan Task 5).
+      membershipPlan_assign_sectionTitle: 'Member assignments',
+      membershipPlan_assign_hint: 'Assign a plan to any member, deadline or not.',
+      membershipPlan_assign_empty: 'No active members to assign.',
+      membershipPlan_assign_searchPlaceholder: 'Search members',
+      membershipPlan_assign_useDefault: 'Use team default',
+      membershipPlan_assign_saved: 'Assignment saved.',
+      membershipPlan_assign_failed: 'Failed to save the assignment.',
+      membershipPlan_bulk_button: 'Move all members',
     };
     if (key === 'membershipPlan_perTraining') {
       return `${String(params?.amount)} per training`;
@@ -70,6 +79,9 @@ vi.mock('~/lib/translations.js', () => ({
     if (key === 'membershipPlan_chooseAria') {
       return `Choose ${String(params?.name)}`;
     }
+    if (key === 'membershipPlan_assign_selectAria') {
+      return `Membership plan for ${String(params?.name)}`;
+    }
     if (key === 'membershipPlan_deadlineNotice') {
       return `You can change your plan until ${String(params?.date)} ${String(params?.time)}.`;
     }
@@ -88,6 +100,9 @@ vi.mock('~/lib/translations.js', () => ({
 // stays out of the mocked API surface entirely.
 const selectMembershipPlanImpl = vi.fn();
 const setMembershipSelectionDeadlineImpl = vi.fn();
+// Slice 3 — the captain-side single-member write. Mocked for the same reason as the two
+// above: without it, changing a row's Select throws "not a function" instead of asserting.
+const assignMembershipPlanImpl = vi.fn();
 
 vi.mock('~/lib/runtime', async () => {
   const { Effect: RealEffect } = await import('effect');
@@ -99,6 +114,7 @@ vi.mock('~/lib/runtime', async () => {
             selectMembershipPlan: (args: unknown) => selectMembershipPlanImpl(args),
             setMembershipSelectionDeadline: (args: unknown) =>
               setMembershipSelectionDeadlineImpl(args),
+            assignMembershipPlan: (args: unknown) => assignMembershipPlanImpl(args),
           },
         }),
     },
@@ -116,6 +132,59 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
     <a {...props}>{children}</a>
   ),
+}));
+
+// Radix's shadcn `Select` renders through a Portal and needs pointer-capture/scroll APIs jsdom
+// does not implement — the same reason `test/setup.ts` mocks the (also Portal-based)
+// dropdown-menu primitive globally. Same local mock as `EventTypePicker.test.tsx`, so what is
+// under test is the PAGE's own logic (which option is selected, what onValueChange receives),
+// never Radix's positioning internals. It also covers the currency Select inside the plan form
+// dialog, which no test in this file interacts with.
+const SelectCtx = React.createContext<{ onValueChange?: (v: string) => void }>({});
+
+vi.mock('~/components/ui/select', () => ({
+  Select: ({
+    value,
+    onValueChange,
+    disabled,
+    children,
+  }: React.PropsWithChildren<{
+    value?: string;
+    onValueChange?: (v: string) => void;
+    disabled?: boolean;
+  }>) => (
+    <SelectCtx.Provider value={{ onValueChange }}>
+      <div data-testid='select-root' data-value={value} data-disabled={String(!!disabled)}>
+        {children}
+      </div>
+    </SelectCtx.Provider>
+  ),
+  SelectTrigger: ({ children, ...rest }: React.PropsWithChildren<Record<string, unknown>>) => (
+    <div {...rest}>{children}</div>
+  ),
+  SelectValue: () => null,
+  SelectContent: ({ children }: React.PropsWithChildren<Record<string, unknown>>) => (
+    <div>{children}</div>
+  ),
+  SelectItem: ({
+    value,
+    disabled,
+    children,
+  }: React.PropsWithChildren<{ value: string; disabled?: boolean }>) => {
+    const { onValueChange } = React.useContext(SelectCtx);
+    return (
+      <button
+        type='button'
+        role='option'
+        data-value={value}
+        disabled={disabled}
+        aria-disabled={disabled}
+        onClick={() => onValueChange?.(value)}
+      >
+        {children}
+      </button>
+    );
+  },
 }));
 
 // Dynamic import AFTER mocks
@@ -141,6 +210,17 @@ function plan(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
+// Slice 3 — one row of the member-assignment section. `membershipPlanId` is the RAW FK:
+// `None` = never picked (falls back to the team default), never "on the default plan".
+function assignment(overrides: Record<string, unknown> = {}) {
+  return {
+    memberId: 'member-1',
+    displayName: 'Alice',
+    membershipPlanId: Option.none<string>(),
+    ...overrides,
+  } as any;
+}
+
 // Every render call goes through here so the two Slice 2 props (required, no default in the
 // component) don't have to be repeated at every call site — only the cases that care about them
 // override them.
@@ -152,6 +232,7 @@ function renderPage(overrides: Record<string, unknown> = {}) {
       plans={[]}
       selectedPlanId={Option.none()}
       selectionDeadline={Option.none()}
+      assignments={[]}
       {...overrides}
     />,
   );
@@ -389,5 +470,200 @@ describe('MembershipPlansPage — saving the selection deadline', () => {
       const expectedEpochMillis = new Date(2026, 8, 30, 23, 59, 59, 999).getTime();
       expect(Number(DateTime.toEpochMillis(args.payload.deadline.value))).toBe(expectedEpochMillis);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice 3 ("Add CRUD for managing membership assigned members") — the member-assignment
+// section. TDD: written BEFORE the section exists. Every test below FAILS until
+// `MembershipPlansPage` takes the `assignments` prop and renders the section (plan Task 4.1-4.7).
+//
+// Assumed contract:
+//   - new required prop `assignments: ReadonlyArray<MembershipPlanApi.MembershipPlanAssignment>`
+//   - the section renders iff `canManage` — with an EMPTY STATE when `assignments` is `[]`,
+//     never nothing (a repo regression or a rollback must look broken, not absent)
+//   - one row per assignment, filtered by the search input and sorted by `displayName`
+//   - each row's `<Select>` carries `aria-label` = tr('membershipPlan_assign_selectAria', {name})
+//     and `value` = the plan id, or DEFAULT_SENTINEL ('__default__') for `None`
+//   - the selects are NOT disabled by a passed deadline (§B.2)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_SENTINEL = '__default__';
+
+/** The row `<Select>` for one member — the mock renders `Select` as a div carrying `data-value`
+ * and its items as `role="option"` buttons, so the row is found by its aria-labelled trigger. */
+function assignmentRow(displayName: string) {
+  const trigger = screen.getByLabelText(`Membership plan for ${displayName}`);
+  const root = trigger.closest('[data-testid="select-root"]');
+  if (root === null) throw new Error(`no select root for ${displayName}`);
+  return root;
+}
+
+describe('MembershipPlansPage — member assignments section', () => {
+  it('does NOT render the section when canManage is false, even with a non-empty assignments', () => {
+    renderPage({
+      canManage: false,
+      plans: [PLAN_A, PLAN_B],
+      assignments: [assignment({ memberId: 'member-1', displayName: 'Alice' })],
+    });
+
+    expect(screen.queryByText('Member assignments')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Membership plan for Alice')).not.toBeInTheDocument();
+  });
+
+  // Gated on `canManage` ALONE, not `canManage && assignments.length > 0` — the latter makes
+  // the whole feature vanish silently on a repo regression or a server rollback instead of
+  // showing an empty list.
+  it('renders the section and its EMPTY STATE — not nothing — when assignments is []', () => {
+    renderPage({ canManage: true, plans: [PLAN_A, PLAN_B], assignments: [] });
+
+    expect(screen.getByText('Member assignments')).toBeInTheDocument();
+    expect(screen.getByText('No active members to assign.')).toBeInTheDocument();
+  });
+
+  it('renders one row per assignment, sorted by displayName', () => {
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      assignments: [
+        assignment({ memberId: 'member-2', displayName: 'Zoe' }),
+        assignment({ memberId: 'member-1', displayName: 'Alice' }),
+        assignment({ memberId: 'member-3', displayName: 'Milan' }),
+      ],
+    });
+
+    const labels = screen
+      .getAllByLabelText(/^Membership plan for /)
+      .map((el) => el.getAttribute('aria-label'));
+    expect(labels).toEqual([
+      'Membership plan for Alice',
+      'Membership plan for Milan',
+      'Membership plan for Zoe',
+    ]);
+  });
+
+  it('membershipPlanId None selects "use default"; Some(plan-b) selects Plan B', () => {
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      assignments: [
+        assignment({ memberId: 'member-1', displayName: 'Alice', membershipPlanId: Option.none() }),
+        assignment({
+          memberId: 'member-2',
+          displayName: 'Bob',
+          membershipPlanId: Option.some('plan-b'),
+        }),
+      ],
+    });
+
+    expect(assignmentRow('Alice').getAttribute('data-value')).toBe(DEFAULT_SENTINEL);
+    expect(assignmentRow('Bob').getAttribute('data-value')).toBe('plan-b');
+  });
+
+  it('choosing a plan calls assignMembershipPlan once with Option.some(planId) for that member', async () => {
+    assignMembershipPlanImpl.mockReturnValueOnce(Effect.succeed(undefined));
+
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      assignments: [
+        assignment({ memberId: 'member-2', displayName: 'Bob', membershipPlanId: Option.none() }),
+      ],
+    });
+
+    const option = assignmentRow('Bob').querySelector('[data-value="plan-b"]');
+    if (option === null) throw new Error('no Plan B option');
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      expect(assignMembershipPlanImpl).toHaveBeenCalledOnce();
+    });
+    const args = assignMembershipPlanImpl.mock.calls[0][0] as {
+      params: { memberId: string };
+      payload: { membershipPlanId: Option.Option<string> };
+    };
+    expect(args.params.memberId).toBe('member-2');
+    expect(Option.isSome(args.payload.membershipPlanId)).toBe(true);
+    if (Option.isSome(args.payload.membershipPlanId)) {
+      expect(args.payload.membershipPlanId.value).toBe('plan-b');
+    }
+  });
+
+  it('choosing "use default" sends Option.none(), not the sentinel string', async () => {
+    assignMembershipPlanImpl.mockReturnValueOnce(Effect.succeed(undefined));
+
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      assignments: [
+        assignment({
+          memberId: 'member-2',
+          displayName: 'Bob',
+          membershipPlanId: Option.some('plan-b'),
+        }),
+      ],
+    });
+
+    const option = assignmentRow('Bob').querySelector(`[data-value="${DEFAULT_SENTINEL}"]`);
+    if (option === null) throw new Error('no "use default" option');
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      expect(assignMembershipPlanImpl).toHaveBeenCalledOnce();
+    });
+    const args = assignMembershipPlanImpl.mock.calls[0][0] as {
+      payload: { membershipPlanId: Option.Option<string> };
+    };
+    expect(Option.isNone(args.payload.membershipPlanId)).toBe(true);
+  });
+
+  // §B.2 AT THE UI. The contrast in the SAME test is the point: the member-facing Choose
+  // buttons go grey under a passed deadline while the manager's selects do not. Asserting only
+  // "the select is enabled" would stay green if the deadline stopped disabling anything at all.
+  it('a PASSED deadline disables the Choose buttons but leaves the assignment selects enabled', () => {
+    const past = DateTime.makeUnsafe('2020-01-01T00:00:00Z');
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      selectionDeadline: Option.some(past),
+      assignments: [assignment({ memberId: 'member-1', displayName: 'Alice' })],
+    });
+
+    for (const button of screen.getAllByRole('button', { name: /^Choose / })) {
+      expect(button).toBeDisabled();
+    }
+    expect(assignmentRow('Alice').getAttribute('data-disabled')).toBe('false');
+  });
+
+  it('the search input filters the rows by display name', () => {
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      assignments: [
+        assignment({ memberId: 'member-1', displayName: 'Alice' }),
+        assignment({ memberId: 'member-2', displayName: 'Bob' }),
+      ],
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Search members'), {
+      target: { value: 'ali' },
+    });
+
+    expect(screen.getByLabelText('Membership plan for Alice')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Membership plan for Bob')).not.toBeInTheDocument();
+  });
+
+  // A member whose stored plan was archived: `plans` holds ACTIVE rows only, so the id is not
+  // in the list. The row must render the "use default" sentinel (that is how they are BILLED —
+  // `training_period_charges` falls back to the default for an archived plan), never a blank
+  // select. The bulk dialog still offers their real orphan id as a SOURCE; both are correct
+  // for their own job.
+  it('a member whose stored plan is not in `plans` renders "use default", not a blank select', () => {
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      assignments: [
+        assignment({
+          memberId: 'member-1',
+          displayName: 'Alice',
+          membershipPlanId: Option.some('plan-archived'),
+        }),
+      ],
+    });
+
+    expect(assignmentRow('Alice').getAttribute('data-value')).toBe(DEFAULT_SENTINEL);
   });
 });

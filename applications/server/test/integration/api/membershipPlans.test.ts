@@ -902,3 +902,599 @@ describe('PUT /teams/:teamId/membership-selection-deadline', () => {
     expect(reopenedAttempt.status).toBe(204);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Slice 3 ("Add CRUD for managing membership assigned members") — TDD: written
+// BEFORE the handlers exist. Every test below FAILS until `api/membership-plan.ts`
+// gains the `assignMembershipPlan` / `reassignMembershipPlan` handlers and the
+// `assignments` field on `listMembershipPlans` (plan Task 3).
+// ---------------------------------------------------------------------------
+
+/** A second, ordinary member of the fixture's team — the one the actor assigns plans TO. */
+const seedSecondMember = (teamId: Team.TeamId, username: string) =>
+  runSeeded(
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser(username)),
+      Effect.bind('memberId', ({ userId }) => addTeamMember(teamId, userId)),
+    ),
+  );
+
+/** Sets the users table's profile `name` column directly — `upsertFromDiscord` has no slot
+ * for it, and `pickDisplayName` prefers it over every Discord field. */
+const setUserProfileName = (userId: User.UserId, name: string) =>
+  runSeeded(
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.andThen((sql) => sql`UPDATE users SET name = ${name} WHERE id = ${userId}`),
+    ),
+  );
+
+const setMemberActiveRaw = (memberId: TeamMember.TeamMemberId, active: boolean) =>
+  runSeeded(
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.andThen(
+        (sql) => sql`UPDATE team_members SET active = ${active} WHERE id = ${memberId}`,
+      ),
+    ),
+  );
+
+const setMemberPlanRaw = (memberId: TeamMember.TeamMemberId, planId: string | null) =>
+  runSeeded(
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.andThen(
+        (sql) => sql`UPDATE team_members SET membership_plan_id = ${planId} WHERE id = ${memberId}`,
+      ),
+    ),
+  );
+
+/** PUT /teams/:teamId/members/:memberId/membership-plan — mirrors `selectPlan` above. */
+const assignPlan = (
+  teamId: Team.TeamId,
+  token: string,
+  memberId: TeamMember.TeamMemberId,
+  membershipPlanId: string | null,
+) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/members/${memberId}/membership-plan`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ membershipPlanId }),
+    }),
+  );
+
+/** POST /teams/:teamId/membership-plan-reassign — the FLAT bulk path (§B.5). */
+const reassignPlans = (
+  teamId: Team.TeamId,
+  token: string,
+  fromMembershipPlanId: string | null,
+  toMembershipPlanId: string | null,
+) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/membership-plan-reassign`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromMembershipPlanId, toMembershipPlanId }),
+    }),
+  );
+
+/** Creates a second, non-default plan on the team via the real POST route. */
+const createPlanViaApi = (teamId: Team.TeamId, token: string, name: string) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/membership-plans`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...basicPayload, name }),
+    }),
+  ).then(asJson);
+
+const archivePlanViaApi = (teamId: Team.TeamId, token: string, planId: string) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/membership-plans/${planId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  );
+
+// The realistic permission drift for this feature is `finance:manage_fees` -> `finance:view`.
+// Every Captain AND every Treasurer holds `finance:view` (`Role.ts:68,81`), so a fixture with
+// ONLY `finance:view` (plus the roster reads a Captain also has) is the one that actually
+// catches the regression — `seedFixture([])` stays green through it.
+const NEAR_MISS_PERMISSIONS = ['finance:view', 'roster:view', 'member:view'] as const;
+
+describe('PUT /teams/:teamId/members/:memberId/membership-plan', () => {
+  it('a finance:manage_fees holder assigns ANOTHER member onto a plan -> 204, column written', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-assign-target-1');
+    const created = await createPlanViaApi(fixture.team.id, 'actor-token', 'Adult membership');
+
+    const response = await assignPlan(
+      fixture.team.id,
+      'actor-token',
+      target.memberId,
+      created.membershipPlanId,
+    );
+
+    expect(response.status).toBe(204);
+    expect(await getMemberColumn(target.memberId)).toBe(created.membershipPlanId);
+  });
+
+  it('{ membershipPlanId: null } clears the assignment -> 204, column null', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-assign-target-2');
+    const [seeded] = await getPlanRows(fixture.team.id);
+    await setMemberPlanRaw(target.memberId, seeded?.id ?? null);
+
+    const response = await assignPlan(fixture.team.id, 'actor-token', target.memberId, null);
+
+    expect(response.status).toBe(204);
+    expect(await getMemberColumn(target.memberId)).toBeNull();
+  });
+
+  it('finance:view + roster:view + member:view -> 403, column unchanged (§B.3 drift guard)', async () => {
+    const fixture = await seedFixture([...NEAR_MISS_PERMISSIONS]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-assign-target-3');
+    const [seeded] = await getPlanRows(fixture.team.id);
+
+    const response = await assignPlan(
+      fixture.team.id,
+      'actor-token',
+      target.memberId,
+      seeded?.id ?? null,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await getMemberColumn(target.memberId)).toBeNull();
+  });
+
+  it('team:manage alone -> 403 (pins §B.3: the gate is finance:manage_fees, not team:manage)', async () => {
+    const fixture = await seedFixture(['team:manage']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-assign-target-4');
+    const [seeded] = await getPlanRows(fixture.team.id);
+
+    const response = await assignPlan(
+      fixture.team.id,
+      'actor-token',
+      target.memberId,
+      seeded?.id ?? null,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await getMemberColumn(target.memberId)).toBeNull();
+  });
+
+  it('member:edit alone -> 403 (this did NOT ride on the roster gate)', async () => {
+    const fixture = await seedFixture(['member:edit', 'member:view']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-assign-target-5');
+    const [seeded] = await getPlanRows(fixture.team.id);
+
+    const response = await assignPlan(
+      fixture.team.id,
+      'actor-token',
+      target.memberId,
+      seeded?.id ?? null,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await getMemberColumn(target.memberId)).toBeNull();
+  });
+
+  it('a non-member of the team -> 403 MembershipPlanForbidden', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    const outsiderUserId = await runSeeded(createUser('mp-assign-outsider'));
+    sessionsStore.set('outsider-token', outsiderUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-assign-target-6');
+    const [seeded] = await getPlanRows(fixture.team.id);
+
+    const response = await assignPlan(
+      fixture.team.id,
+      'outsider-token',
+      target.memberId,
+      seeded?.id ?? null,
+    );
+
+    expect(response.status).toBe(403);
+    const body = await asJson(response);
+    expect(body._tag).toBe('MembershipPlanForbidden');
+  });
+
+  it('an ARCHIVED plan id -> 404 MembershipPlanNotFound, column unchanged', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-assign-target-7');
+    const created = await createPlanViaApi(fixture.team.id, 'actor-token', 'Soon archived');
+    await archivePlanViaApi(fixture.team.id, 'actor-token', created.membershipPlanId);
+
+    const response = await assignPlan(
+      fixture.team.id,
+      'actor-token',
+      target.memberId,
+      created.membershipPlanId,
+    );
+
+    expect(response.status).toBe(404);
+    const body = await asJson(response);
+    expect(body._tag).toBe('MembershipPlanNotFound');
+    expect(await getMemberColumn(target.memberId)).toBeNull();
+  });
+
+  it('an unknown memberId -> 404 MembershipPlanNotFound (the single-404 ceiling)', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+
+    const response = await assignPlan(
+      fixture.team.id,
+      'actor-token',
+      '00000000-0000-0000-0000-000000000000' as TeamMember.TeamMemberId,
+      seeded?.id ?? null,
+    );
+
+    expect(response.status).toBe(404);
+    const body = await asJson(response);
+    expect(body._tag).toBe('MembershipPlanNotFound');
+  });
+
+  // THE WHOLE OF §B.2, in one test. Two calls, one passed deadline: the manager writes, the
+  // member is refused. Splitting these into two tests would let a regression that copies the
+  // deadline EXISTS clause into the manager UPDATE pass one and fail the other in isolation.
+  it(
+    'after the deadline has passed: the manager assign returns 204 while the same member ' +
+      'own PUT /me/membership-plan returns 409 MembershipSelectionClosed',
+    async () => {
+      const fixture = await seedFixture(['finance:manage_fees']);
+      sessionsStore.set('actor-token', fixture.actorUserId);
+      const target = await seedSecondMember(fixture.team.id, 'mp-assign-deadline');
+      sessionsStore.set('target-token', target.userId);
+      const [seeded] = await getPlanRows(fixture.team.id);
+      const created = await createPlanViaApi(fixture.team.id, 'actor-token', 'Adult membership');
+      await setDeadline(fixture.team.id, 'actor-token', '2020-01-01T00:00:00.000Z');
+
+      const selfService = await selectPlan(fixture.team.id, 'target-token', seeded?.id);
+      expect(selfService.status, 'the deadline binds the MEMBER').toBe(409);
+      expect((await asJson(selfService))._tag).toBe('MembershipSelectionClosed');
+
+      const managerAssign = await assignPlan(
+        fixture.team.id,
+        'actor-token',
+        target.memberId,
+        created.membershipPlanId,
+      );
+
+      expect(managerAssign.status, 'the deadline does NOT bind the treasurer').toBe(204);
+      expect(await getMemberColumn(target.memberId)).toBe(created.membershipPlanId);
+    },
+  );
+});
+
+describe('POST /teams/:teamId/membership-plan-reassign', () => {
+  it('a finance:manage_fees holder moves 2 members A -> B: 200, movedCount 2, both columns B', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const m1 = await seedSecondMember(fixture.team.id, 'mp-bulk-1a');
+    const m2 = await seedSecondMember(fixture.team.id, 'mp-bulk-1b');
+    const planA = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan A');
+    const planB = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan B');
+    await setMemberPlanRaw(m1.memberId, planA.membershipPlanId);
+    await setMemberPlanRaw(m2.memberId, planA.membershipPlanId);
+
+    const response = await reassignPlans(
+      fixture.team.id,
+      'actor-token',
+      planA.membershipPlanId,
+      planB.membershipPlanId,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await asJson(response);
+    expect(body.movedCount).toBe(2);
+    expect(await getMemberColumn(m1.memberId)).toBe(planB.membershipPlanId);
+    expect(await getMemberColumn(m2.memberId)).toBe(planB.membershipPlanId);
+  });
+
+  it('finance:view + roster:view + member:view -> 403, nothing moved (§B.3 drift guard)', async () => {
+    const manager = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('manager-token', manager.actorUserId);
+    const planA = await createPlanViaApi(manager.team.id, 'manager-token', 'Plan A');
+    const planB = await createPlanViaApi(manager.team.id, 'manager-token', 'Plan B');
+    const victim = await seedSecondMember(manager.team.id, 'mp-bulk-2-victim');
+    await setMemberPlanRaw(victim.memberId, planA.membershipPlanId);
+    const nearMissUserId = await runSeeded(createUser('mp-bulk-2-nearmiss'));
+    const nearMissMemberId = await runSeeded(addTeamMember(manager.team.id, nearMissUserId));
+    const nearMissRoleId = await runSeeded(
+      createRoleWithPermissions(manager.team.id, 'Near miss', [...NEAR_MISS_PERMISSIONS]),
+    );
+    await runSeeded(assignRoleDirect(nearMissMemberId, nearMissRoleId));
+    sessionsStore.set('nearmiss-token', nearMissUserId);
+
+    const response = await reassignPlans(
+      manager.team.id,
+      'nearmiss-token',
+      planA.membershipPlanId,
+      planB.membershipPlanId,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await getMemberColumn(victim.memberId)).toBe(planA.membershipPlanId);
+  });
+
+  it('team:manage alone -> 403 (pins §B.3)', async () => {
+    const fixture = await seedFixture(['team:manage']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+
+    const response = await reassignPlans(fixture.team.id, 'actor-token', null, seeded?.id ?? null);
+
+    expect(response.status).toBe(403);
+  });
+
+  it('an ARCHIVED target -> 404 MembershipPlanNotFound, every column unchanged (§B.7)', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const member = await seedSecondMember(fixture.team.id, 'mp-bulk-3');
+    const planA = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan A');
+    const planB = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan B');
+    await setMemberPlanRaw(member.memberId, planA.membershipPlanId);
+    await archivePlanViaApi(fixture.team.id, 'actor-token', planB.membershipPlanId);
+
+    const response = await reassignPlans(
+      fixture.team.id,
+      'actor-token',
+      planA.membershipPlanId,
+      planB.membershipPlanId,
+    );
+
+    expect(response.status).toBe(404);
+    expect((await asJson(response))._tag).toBe('MembershipPlanNotFound');
+    expect(await getMemberColumn(member.memberId)).toBe(planA.membershipPlanId);
+  });
+
+  it("another team's plan id as target -> 404 MembershipPlanNotFound", async () => {
+    const fixtureA = await seedFixture(['finance:manage_fees']);
+    const fixtureB = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-a-token', fixtureA.actorUserId);
+    const [planOfB] = await getPlanRows(fixtureB.team.id);
+
+    const response = await reassignPlans(
+      fixtureA.team.id,
+      'actor-a-token',
+      null,
+      planOfB?.id ?? null,
+    );
+
+    expect(response.status).toBe(404);
+    expect((await asJson(response))._tag).toBe('MembershipPlanNotFound');
+  });
+
+  // §B.5's NULL source, through the wire. `fromMembershipPlanId: null` must decode to `None`
+  // and match the never-picked members with `IS NOT DISTINCT FROM`.
+  it('fromMembershipPlanId null sweeps the NEVER-PICKED members onto B -> 200', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const m1 = await seedSecondMember(fixture.team.id, 'mp-bulk-null-1');
+    const m2 = await seedSecondMember(fixture.team.id, 'mp-bulk-null-2');
+    const planB = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan B');
+
+    const response = await reassignPlans(
+      fixture.team.id,
+      'actor-token',
+      null,
+      planB.membershipPlanId,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await asJson(response);
+    // The actor themselves has never picked either, so all three move.
+    expect(body.movedCount).toBe(3);
+    expect(await getMemberColumn(m1.memberId)).toBe(planB.membershipPlanId);
+    expect(await getMemberColumn(m2.memberId)).toBe(planB.membershipPlanId);
+  });
+
+  it('toMembershipPlanId null clears every member on A back to the default -> 200, columns null', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const m1 = await seedSecondMember(fixture.team.id, 'mp-bulk-clear-1');
+    const planA = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan A');
+    await setMemberPlanRaw(m1.memberId, planA.membershipPlanId);
+
+    const response = await reassignPlans(
+      fixture.team.id,
+      'actor-token',
+      planA.membershipPlanId,
+      null,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await asJson(response)).movedCount).toBe(1);
+    expect(await getMemberColumn(m1.memberId)).toBeNull();
+  });
+
+  // §B.8 — `movedCount: 0` is a SUCCESS, never a 404. The target here is valid and active, so
+  // the handler's 0-row classification re-read must take the `Some -> movedCount 0` branch.
+  it('no match -> 200 with movedCount 0, NOT 404', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const planA = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan A');
+    const planB = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan B');
+
+    const response = await reassignPlans(
+      fixture.team.id,
+      'actor-token',
+      planA.membershipPlanId,
+      planB.membershipPlanId,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await asJson(response)).movedCount).toBe(0);
+  });
+
+  it('an ARCHIVED source is allowed: its members are swept onto B -> 200 (§B.5)', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const member = await seedSecondMember(fixture.team.id, 'mp-bulk-archsrc');
+    const planA = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan A');
+    const planB = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan B');
+    await setMemberPlanRaw(member.memberId, planA.membershipPlanId);
+    await archivePlanViaApi(fixture.team.id, 'actor-token', planA.membershipPlanId);
+
+    const response = await reassignPlans(
+      fixture.team.id,
+      'actor-token',
+      planA.membershipPlanId,
+      planB.membershipPlanId,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await asJson(response)).movedCount).toBe(1);
+    expect(await getMemberColumn(member.memberId)).toBe(planB.membershipPlanId);
+  });
+
+  it('a passed deadline does not block the bulk move -> 200 (§B.2)', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const member = await seedSecondMember(fixture.team.id, 'mp-bulk-deadline');
+    const planA = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan A');
+    const planB = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan B');
+    await setMemberPlanRaw(member.memberId, planA.membershipPlanId);
+    await setDeadline(fixture.team.id, 'actor-token', '2020-01-01T00:00:00.000Z');
+
+    const response = await reassignPlans(
+      fixture.team.id,
+      'actor-token',
+      planA.membershipPlanId,
+      planB.membershipPlanId,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await asJson(response)).movedCount).toBe(1);
+    expect(await getMemberColumn(member.memberId)).toBe(planB.membershipPlanId);
+  });
+
+  it("TENANCY: a manager of team A cannot move team B's members", async () => {
+    const fixtureA = await seedFixture(['finance:manage_fees']);
+    const fixtureB = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-a-token', fixtureA.actorUserId);
+    sessionsStore.set('actor-b-token', fixtureB.actorUserId);
+    const targetA = await createPlanViaApi(fixtureA.team.id, 'actor-a-token', 'Target A');
+    const memberA = await seedSecondMember(fixtureA.team.id, 'mp-bulk-tenancy-a');
+    const memberB = await seedSecondMember(fixtureB.team.id, 'mp-bulk-tenancy-b');
+
+    const response = await reassignPlans(
+      fixtureA.team.id,
+      'actor-a-token',
+      null,
+      targetA.membershipPlanId,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await asJson(response);
+    // Team A's actor + memberA — team B's never-picked members must not be counted.
+    expect(body.movedCount).toBe(2);
+    expect(await getMemberColumn(memberA.memberId)).toBe(targetA.membershipPlanId);
+    expect(await getMemberColumn(memberB.memberId)).toBeNull();
+    expect(await getMemberColumn(fixtureB.actorMemberId)).toBeNull();
+  });
+
+  it('movedCount is the ACTUAL affected count, not the intent: a deactivated member is excluded', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const m1 = await seedSecondMember(fixture.team.id, 'mp-bulk-count-1');
+    const m2 = await seedSecondMember(fixture.team.id, 'mp-bulk-count-2');
+    const m3 = await seedSecondMember(fixture.team.id, 'mp-bulk-count-3');
+    const planA = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan A');
+    const planB = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan B');
+    for (const m of [m1, m2, m3]) await setMemberPlanRaw(m.memberId, planA.membershipPlanId);
+    await setMemberActiveRaw(m3.memberId, false);
+
+    const response = await reassignPlans(
+      fixture.team.id,
+      'actor-token',
+      planA.membershipPlanId,
+      planB.membershipPlanId,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await asJson(response)).movedCount).toBe(2);
+    expect(await getMemberColumn(m3.memberId)).toBe(planA.membershipPlanId);
+  });
+});
+
+describe('GET /teams/:teamId/membership-plans — the assignments roster', () => {
+  // THE ENCODE GUARD for `MembershipPlanAssignment`. `check-rpc-encoding.mjs` only resolves an
+  // endpoint's `success:` value and unwraps at most one `Schema.Array(` — a `Schema.Class`
+  // nested in a FIELD is invisible to it (A.5). A length-only assertion never touches the
+  // encoded row either; reading `displayName` off the JSON is what proves the handler built a
+  // real `new MembershipPlanApi.MembershipPlanAssignment({...})` and that it encodes.
+  it('a manager sees one entry per active member, with the RESOLVED displayName encoded', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-roster-named');
+    await setUserProfileName(target.userId, 'Jana Nováková');
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+
+    expect(body.assignments).toHaveLength(2);
+    const entry = body.assignments.find(
+      (a: { memberId: string }) => a.memberId === target.memberId,
+    );
+    expect(entry).toBeDefined();
+    expect(entry.displayName).toBe('Jana Nováková');
+    expect(entry.membershipPlanId, 'never picked -> null on the wire').toBeNull();
+  });
+
+  it('displayName falls back to username when the user has no profile name', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-roster-nameless');
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+
+    const entry = body.assignments.find(
+      (a: { memberId: string }) => a.memberId === target.memberId,
+    );
+    expect(entry.displayName).toBe('mp-roster-nameless');
+  });
+
+  // THE PRIVACY BOUNDARY (§B.3). `finance:view` is held by every Captain AND every Treasurer
+  // (`Role.ts:68,81`), so this — not a zero-permission fixture — is the test that stays red
+  // through a `finance:manage_fees` -> `finance:view` regression.
+  it('a finance:view + roster:view + member:view holder sees assignments: []', async () => {
+    const fixture = await seedFixture([...NEAR_MISS_PERMISSIONS]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    await seedSecondMember(fixture.team.id, 'mp-roster-private');
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+
+    expect(body.canManage).toBe(false);
+    expect(body.assignments).toEqual([]);
+  });
+
+  it("the two reads agree: a captain-assigned plan shows in assignments AND as that member's own selectedPlanId", async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const target = await seedSecondMember(fixture.team.id, 'mp-roster-agree');
+    sessionsStore.set('target-token', target.userId);
+    const created = await createPlanViaApi(fixture.team.id, 'actor-token', 'Adult membership');
+
+    const assignResponse = await assignPlan(
+      fixture.team.id,
+      'actor-token',
+      target.memberId,
+      created.membershipPlanId,
+    );
+    expect(assignResponse.status).toBe(204);
+
+    const managerBody = await listResponseBody(fixture.team.id, 'actor-token');
+    const entry = managerBody.assignments.find(
+      (a: { memberId: string }) => a.memberId === target.memberId,
+    );
+    expect(entry.membershipPlanId).toBe(created.membershipPlanId);
+
+    const memberBody = await listResponseBody(fixture.team.id, 'target-token');
+    expect(memberBody.selectedPlanId).toBe(created.membershipPlanId);
+    expect(memberBody.assignments, 'the member is not a manager').toEqual([]);
+  });
+});

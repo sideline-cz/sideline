@@ -32,6 +32,7 @@ function MembershipPlansRoute() {
       plans={response?.plans ?? []}
       selectedPlanId={response?.selectedPlanId ?? Option.none()}
       selectionDeadline={response?.selectionDeadline ?? Option.none()}
+      assignments={response?.assignments ?? []}
     />
   );
 }
