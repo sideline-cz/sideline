@@ -191,11 +191,16 @@ const getPlanRows = (teamId: Team.TeamId) =>
     ),
   );
 
+// `freeTrainingsIncluded` is REQUIRED on the request schema -- unlike the response schema, it
+// carries no decoding default on purpose (1793500000). This payload is a FULL-ROW overwrite, so
+// tolerating a missing key would silently write allowance 0, re-price the open month at 0 and
+// then hand out a fresh allowance on the manager's correction. Omitting it here is a 400.
 const basicPayload = {
   name: 'Adult membership',
   priceMinor: 50000,
   currency: 'CZK',
   pricePerTrainingMinor: 0,
+  freeTrainingsIncluded: 0,
   expiresAt: null,
 };
 
