@@ -208,7 +208,7 @@ function plan(overrides: Record<string, unknown> = {}) {
     priceMinor: 50000,
     currency: 'CZK',
     pricePerTrainingMinor: 0,
-    freeTrainingsPerPeriod: 0,
+    freeTrainingsIncluded: 0,
     expiresAt: Option.none<never>(),
     isDefault: false,
     ...overrides,
@@ -478,10 +478,17 @@ describe('MembershipPlansPage — saving the selection deadline', () => {
   });
 });
 
-// The free-training allowance (1793400000). The money math is a SQL function and is covered by
-// `trainingPeriodCharges.test.ts`; what only exists here is the form's own blank -> 0 convention
-// and the 0..999 bound, which mirrors `FreeTrainingsPerPeriod` so the user sees a field error
-// instead of `decodeSync` throwing past the submit handler.
+// The free-training allowance — now an ALL-TIME allowance, not a per-period one. The money math
+// is a SQL function and lives entirely in `trainingPeriodCharges.test.ts`; what only exists here
+// is the form's own blank -> 0 convention and the 0..999 bound, which mirrors
+// `FreeTrainingsIncluded` so the user sees a field error instead of `decodeSync` throwing past the
+// submit handler.
+//
+// NO COPY ASSERTION BELONGS IN THIS FILE. `~/lib/translations.js` is mocked above with a hardcoded
+// key -> string map, so `en.json` is never loaded and any assertion about the rendered wording
+// asserts against test-local fiction — it would stay green with `"{count} free/month"` still in
+// the catalogue. The per-month copy guard lives in `packages/i18n/test/keyParity.test.ts`, where
+// the real message files are read.
 describe('MembershipPlansPage — free trainings field', () => {
   it('a blank field submits 0, not NaN or undefined', async () => {
     updateMembershipPlanImpl.mockReturnValueOnce(Effect.succeed(plan()));
@@ -494,9 +501,9 @@ describe('MembershipPlansPage — free trainings field', () => {
       expect(updateMembershipPlanImpl).toHaveBeenCalledOnce();
     });
     const args = updateMembershipPlanImpl.mock.calls[0][0] as {
-      payload: { freeTrainingsPerPeriod: number };
+      payload: { freeTrainingsIncluded: number };
     };
-    expect(args.payload.freeTrainingsPerPeriod).toBe(0);
+    expect(args.payload.freeTrainingsIncluded).toBe(0);
   });
 
   it('an entered allowance reaches the payload', async () => {
@@ -513,14 +520,14 @@ describe('MembershipPlansPage — free trainings field', () => {
       expect(updateMembershipPlanImpl).toHaveBeenCalledOnce();
     });
     const args = updateMembershipPlanImpl.mock.calls[0][0] as {
-      payload: { freeTrainingsPerPeriod: number };
+      payload: { freeTrainingsIncluded: number };
     };
-    expect(args.payload.freeTrainingsPerPeriod).toBe(4);
+    expect(args.payload.freeTrainingsIncluded).toBe(4);
   });
 
   // The `max='999'` on the input is the guard that actually fires: native constraint validation
   // refuses the submit before `handleSubmit` runs, so no payload is built and `decodeSync` is
-  // never handed a value `FreeTrainingsPerPeriod` would reject. `handleSubmit`'s own 0..999
+  // never handed a value `FreeTrainingsIncluded` would reject. `handleSubmit`'s own 0..999
   // check stays as the belt for anything that reaches it another way; the DB CHECK and the
   // schema are the real trust boundary.
   it('an out-of-range allowance never reaches the API', async () => {

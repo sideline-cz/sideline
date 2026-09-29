@@ -2,6 +2,10 @@ import { Effect } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 
 /**
+ * SUPERSEDED by 1793500000: the allowance became ALL-TIME. The "needs a consumption ledger"
+ * argument below was resolved by re-deriving prior consumption from attendance, not by storing
+ * state; the anchor is membership_plans.free_trainings_anchor_at.
+ *
  * A membership plan may include N trainings at no charge. The allowance is PER BILLING PERIOD
  * (the same calendar month `training_period_start` already defines), never a lifetime quota: a
  * lifetime quota would need a consumption ledger recording which attendance rows burned it,

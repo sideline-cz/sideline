@@ -4,7 +4,7 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/ht
 import { AuthMiddleware } from '~/api/Auth.js';
 import * as Fee from '~/models/Fee.js';
 import {
-  FreeTrainingsPerPeriod,
+  FreeTrainingsIncluded,
   MembershipPlanId,
   MembershipPlanName,
 } from '~/models/MembershipPlan.js';
@@ -19,10 +19,11 @@ export class MembershipPlanInfo extends Schema.Class<MembershipPlanInfo>('Member
   priceMinor: Fee.AmountMinor,
   currency: Fee.CurrencyCode,
   pricePerTrainingMinor: Fee.AmountMinor,
-  // Trainings included at no charge PER BILLING PERIOD (the calendar month the charge engine
-  // already bills on), not a lifetime quota -- see 1793400000. Tolerant decode so an old web
-  // bundle and the e2e fixture, both of which predate this field, still decode.
-  freeTrainingsPerPeriod: FreeTrainingsPerPeriod.pipe(Schema.withDecodingDefaultKey(() => 0)),
+  // Trainings included at no charge IN TOTAL: an all-time allowance consumed once, counted from
+  // `membership_plans.free_trainings_anchor_at`, never reset per billing period. Tolerant decode
+  // so an old web bundle and the e2e fixture, both of which predate this field, still decode --
+  // on this READ side 0 (no allowance) is the safe direction.
+  freeTrainingsIncluded: FreeTrainingsIncluded.pipe(Schema.withDecodingDefaultKey(() => 0)),
   expiresAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   isDefault: Schema.Boolean,
 }) {}
@@ -77,10 +78,12 @@ export const MembershipPlanRequest = Schema.Struct({
   priceMinor: Fee.AmountMinor,
   currency: Fee.CurrencyCode,
   pricePerTrainingMinor: Fee.AmountMinor,
-  // Same tolerant decode as `MembershipPlanInfo.freeTrainingsPerPeriod`: an old web bundle
-  // submitting the full-replace payload without the key must not be rejected, and 0 (no
-  // allowance) is the only safe thing to read into it.
-  freeTrainingsPerPeriod: FreeTrainingsPerPeriod.pipe(Schema.withDecodingDefaultKey(() => 0)),
+  // The all-time allowance, counted from `membership_plans.free_trainings_anchor_at` -- included
+  // once for the life of the membership, not per billing period. REQUIRED, unlike the read side:
+  // this payload is a full-row overwrite, so an old bundle sending the pre-rename key would
+  // silently write allowance 0, re-price the open month, and then hand out a fresh allowance when
+  // the manager fixes it. A loud 400 during the deploy window is the correct trade.
+  freeTrainingsIncluded: FreeTrainingsIncluded,
   expiresAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
 });
 export type MembershipPlanRequest = Schema.Schema.Type<typeof MembershipPlanRequest>;

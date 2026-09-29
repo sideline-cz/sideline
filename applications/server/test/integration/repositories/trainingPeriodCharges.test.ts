@@ -10,8 +10,10 @@
 // so `EventAttendanceRepository.confirmAttendance`'s `start_at <= now()` guard always passes,
 // and land in the SAME UTC calendar month as `NOW` — every team in this file has no
 // `team_settings` row, so `training_period_start` falls back to UTC (pinned by
-// `trainingPeriodFees.test.ts`'s own fallback test). `PAST_MONTH_START` is the one deliberate
-// exception, for the period-close test.
+// `trainingPeriodFees.test.ts`'s own fallback test). The `PAST_MONTH_*` and `NEXT_MONTH_*`
+// fixtures are the deliberate exceptions, for the period-close test and for the ALL-TIME
+// allowance cases at the bottom of this file — every one of them is UTC-constructed and derived
+// from `NOW`, never from a fresh `new Date()`.
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Team, TeamMember } from '@sideline/domain';
@@ -60,6 +62,17 @@ const EXPECTED_PERIOD_NAME = `${PERIOD_START.getUTCFullYear()}-${String(
 ).padStart(2, '0')}`;
 // A date safely inside the PREVIOUS calendar month — used only by the period-close test.
 const PAST_MONTH_START = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 1, 15, 12));
+// Two more trainings in the PREVIOUS calendar month. Both sit on day 15, strictly BEFORE the
+// day-16 anchor instant below, so the anchor-month regression case has room: the whole point of
+// that case is past attendance in the SAME period as the anchor but EARLIER than the stamp.
+const PAST_MONTH_START_2 = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 1, 15, 18));
+const PAST_MONTH_START_3 = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 1, 15, 20));
+// The mid-past-month anchor INSTANT for the period-alignment regression case.
+const PAST_MONTH_MID = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 1, 16, 0));
+// Two months back — the ordinary "this plan has existed for a while" anchor.
+const OLD_ANCHOR = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 2, 1));
+// Inside the NEXT period, for the reschedule-into-the-future case.
+const NEXT_MONTH_MID = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() + 1, 10, 12));
 
 // ---------------------------------------------------------------------------
 // Seeding helpers
@@ -106,7 +119,7 @@ const setDefaultPlanPrice = (
       price_minor: def.price_minor,
       currency: currency as never,
       price_per_training_minor: priceMinor as never,
-      free_trainings_per_period: freeTrainings as never,
+      free_trainings_included: freeTrainings as never,
       expires_at: def.expires_at,
     });
   });
@@ -126,7 +139,7 @@ const createPlan = (
         price_minor: 0 as never,
         currency: currency as never,
         price_per_training_minor: priceMinor as never,
-        free_trainings_per_period: freeTrainings as never,
+        free_trainings_included: freeTrainings as never,
         expires_at: Option.none(),
       }),
     ),
@@ -150,6 +163,35 @@ const setMemberPlanRaw = (memberId: TeamMember.TeamMemberId, planId: string) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen(
       (sql) => sql`UPDATE team_members SET membership_plan_id = ${planId} WHERE id = ${memberId}`,
+    ),
+  );
+
+/** Writes `membership_plans.free_trainings_anchor_at` directly. Takes an ABSOLUTE Date, never a
+ * month count — the period-alignment case needs a mid-month instant. Raw SQL on purpose: the
+ * column has no application writer at all, which is the point of choosing it. It does NOT touch
+ * `created_at`; `created_at` is no longer the anchor.
+ *
+ * ORDERING TRAP, the single most likely way these tests silently lie:
+ *  - `setDefaultPlanPrice(..., allowance)` moves the allowance 0 -> N, which fires the BEFORE
+ *    trigger and stamps the anchor to `now()`. So ALWAYS call this AFTER setting the allowance.
+ *  - this call fires NEITHER trigger (BEFORE watches `free_trainings_included`, AFTER watches the
+ *    two pricing columns), so it performs NO recompute. Every anchor change must be followed by an
+ *    attendance write, or an explicit `recomputePeriod`, before asserting. */
+const setPlanAnchor = (planId: string, at: Date) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) =>
+        sql`UPDATE membership_plans SET free_trainings_anchor_at = ${at} WHERE id = ${planId}`,
+    ),
+  );
+
+/** Forces a recompute with no attendance write. */
+const recomputePeriod = (teamId: Team.TeamId, periodStart: Date) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql`
+        SELECT recompute_training_period_fees(${teamId}, ${periodStart.toISOString().slice(0, 10)}::date)
+      `,
     ),
   );
 
@@ -212,6 +254,12 @@ const trainingFees = (teamId: Team.TeamId) =>
       `,
     ),
   );
+
+/** `trainingFees` orders by `currency` ONLY, so the moment a case touches two periods the array
+ * holds two same-currency rows in an unspecified order. Select by period, never by index — and in
+ * a multi-period case never assert `toHaveLength(1)` either. */
+const feeForPeriod = (fees: ReadonlyArray<TrainingFeeRow>, periodStart: Date) =>
+  fees.find((f) => f.period_start === periodStart.toISOString().slice(0, 10));
 
 interface AssignmentRow {
   readonly id: string;
@@ -1120,7 +1168,7 @@ describe('training_period_charges — cross-currency move of an ALREADY-PAID mem
 // `TRAINING_START` / `TRAINING_START_2`.
 const TRAINING_START_3 = new Date(NOW.getTime() - 15 * 60 * 1000);
 
-describe('training_period_charges — free trainings per period', () => {
+describe('training_period_charges — free trainings included (all-time)', () => {
   it.effect('an allowance BELOW the month’s attendance bills only the excess', () =>
     Effect.gen(function* () {
       const { team, captain } = yield* seedTeam('allowance-partial');
@@ -1304,6 +1352,485 @@ describe('training_period_charges — free trainings per period', () => {
       yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
 
       expect(yield* trainingFees(team.id)).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 21. The ALL-TIME allowance
+// ---------------------------------------------------------------------------
+//
+// Everything above this line uses CURRENT-month attendance only, where `prior` is empty and the
+// old per-period semantics and the new all-time ones agree exactly. The cases below are the ones
+// that do NOT agree, and each comment says whether the case DISCRIMINATES (it goes red against a
+// per-period implementation) or is only a REGRESSION NET (it would pass under both).
+
+describe('training_period_charges — the ALL-TIME allowance across periods', () => {
+  // THE ACCEPTANCE TEST, and a DISCRIMINATOR: under the old per-period formula the current month
+  // sees a fresh allowance of 2 against 2 attended and produces NO FEE AT ALL, so this single case
+  // is what makes the fix provable.
+  it.effect('an allowance consumed in a PAST period is NOT refreshed in the current one', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('alltime-consumed');
+      const member = yield* addBilledMember(team.id, 'alltime-consumed-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      // Anchor AFTER the allowance — setting it 0 -> 2 just stamped the anchor to now().
+      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+
+      const fees = yield* trainingFees(team.id);
+      expect(fees, 'a past period is never billed, so exactly one fee row').toHaveLength(1);
+      const fee = feeForPeriod(fees, PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      // prior 2 => free_left 0 => both current trainings chargeable.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('200');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // DISCRIMINATOR: the old formula gives no fee (2 attended vs a fresh allowance of 3).
+  it.effect('a PARTIALLY consumed allowance carries its remainder forward', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('alltime-partial');
+      const member = yield* addBilledMember(team.id, 'alltime-partial-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 3);
+      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+
+      const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      // prior 2 => free_left 1 => 2 attended, 1 chargeable.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // DISCRIMINATOR, and the ONLY case that fails against an INSTANT-aligned `prior` lower bound.
+  // The anchor is stamped at day 16 of the past month; both past attendances are on day 15, i.e.
+  // strictly BEFORE the anchor instant but in the SAME period as it. `prior` compares
+  // training_period_start on both sides, so they count. With an instant floor they would fall out
+  // of `prior` while still being covered by their own month's pass — four free trainings on a
+  // two-training allowance.
+  it.effect('an allowance burned earlier in the ANCHOR MONTH does not come back', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('alltime-anchor-month');
+      const member = yield* addBilledMember(team.id, 'alltime-anchor-month-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, PAST_MONTH_MID);
+
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+
+      const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      // prior 2 (the anchor's own month counts IN FULL) => free_left 0 => 2 chargeable.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('200');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // DISCRIMINATOR at the third step (old formula: 3 attended vs a fresh 3 => still no fee). The
+  // two `[]` assertions are also the no-empty-shell pin: shells are never deleted, so NOT creating
+  // one is the entire job of the `WHERE attended > free_left` drop.
+  it.effect('a member crossing the allowance MID-period', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('alltime-crossing');
+      const member = yield* addBilledMember(team.id, 'alltime-crossing-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 3);
+      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+
+      const past = yield* createTraining(team.id, captain.id, PAST_MONTH_START);
+      yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      // free_left is 2 from here on.
+      const first = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(first, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      expect(yield* trainingFees(team.id), 'no shell on the first free training').toEqual([]);
+
+      const second = yield* createTraining(team.id, captain.id, TRAINING_START_2);
+      yield* confirm(second, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      expect(yield* trainingFees(team.id), 'no shell on the last free training').toEqual([]);
+
+      const third = yield* createTraining(team.id, captain.id, TRAINING_START_3);
+      yield* confirm(third, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      const fees = yield* trainingFees(team.id);
+      expect(fees).toHaveLength(1);
+      const fee = feeForPeriod(fees, PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // REGRESSION NET for the fee SHAPE (exactly one row, no past-period row), sized so that it also
+  // discriminates: at 3 past + 2 current against an allowance of 4 the old per-period formula
+  // still gives no fee. Do not soften the numbers — a larger allowance with fewer attendances
+  // would pass under BOTH semantics and this case would stop proving anything.
+  it.effect('the all-time sum across both periods is what is charged', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('alltime-sum');
+      const member = yield* addBilledMember(team.id, 'alltime-sum-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 4);
+      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2, PAST_MONTH_START_3]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+
+      const fees = yield* trainingFees(team.id);
+      expect(fees).toHaveLength(1);
+      const fee = feeForPeriod(fees, PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      // prior 3 => free_left 1 => 2 attended, 1 chargeable.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // REGRESSION NET, NOT idempotency evidence — say so rather than overclaiming.
+  // `training_period_charges` contains no `now()` and no state, so a double recompute is
+  // deterministic for ANY implementation of it; this only goes red if someone writes state into
+  // the function or makes the recompute churn ids.
+  it.effect('recomputing the same period twice changes nothing', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('alltime-stable');
+      const member = yield* addBilledMember(team.id, 'alltime-stable-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+      const before = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+      if (before === undefined) throw new Error('expected a CURRENT-period fee row');
+      const assignmentBefore = yield* assignmentFor(before.id, member.id);
+
+      yield* recomputePeriod(team.id, PERIOD_START);
+      yield* recomputePeriod(team.id, PERIOD_START);
+
+      const fees = yield* trainingFees(team.id);
+      expect(fees).toHaveLength(1);
+      expect(fees[0]?.id).toBe(before.id);
+      const after = yield* assignmentFor(before.id, member.id);
+      expect(after?.id).toBe(assignmentBefore?.id);
+      expect(after?.amount_minor).toBe('200');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // DISCRIMINATES a `created_at` anchor (which would give '300' — the seeded default plan predates
+  // every training, so `prior` would be 2 and nobody would ever get the allowance) from the anchor
+  // COLUMN. It does NOT discriminate a full revert to per-period semantics, which lands on the
+  // same '100' — do not count this among the cases that prove the fix.
+  it.effect('setting an allowance on the seeded default plan anchors at the EDIT', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('alltime-edit-anchor');
+      const member = yield* addBilledMember(team.id, 'alltime-edit-anchor-member');
+
+      // Attendance BEFORE the manager sets anything. No price yet, so no fee either.
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+
+      // No setPlanAnchor here on purpose: this edit is what stamps it.
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+
+      for (const startAt of [TRAINING_START, TRAINING_START_2, TRAINING_START_3]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+
+      const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      // The anchor's period IS the current period, so prior 0 => free_left 2 => 1 chargeable.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // DISCRIMINATOR against the rejected PER-MEMBER anchor (D2): with the anchor stamped at plan
+  // SELECTION, moving to B would reset `prior` to 0 and produce no fee — the farming hole, reachable
+  // by any member through the self-service `selectMembershipPlan`. Plan-level and equally old means
+  // the burned 2 still count.
+  it.effect('switching to an EQUALLY OLD plan does not grant a fresh allowance', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('alltime-switch-old');
+      const member = yield* addBilledMember(team.id, 'alltime-switch-old-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+
+      const planB = yield* createPlan(team.id, 100, 'CZK', 'Older B', 2);
+      yield* setPlanAnchor(planB.id, OLD_ANCHOR);
+
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+
+      yield* selectPlanForMember(member.id, team.id, planB.id);
+
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      // free_left is 0 under B too.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 22. D5 — a past-period change moves the CURRENT period
+// ---------------------------------------------------------------------------
+
+/** Builds the shared starting state for the D5 and paid-clamp cases:
+ *  allowance 2 at 100/training, anchored two months back, 3 CURRENT-month attendances (=> '100'),
+ *  then 2 PAST-month attendances confirmed afterwards with NO current-period write following
+ *  them — which is what makes the current period's move attributable to the past-period write
+ *  alone. Ends at '300'. */
+const pastCorrectionState = (username: string) =>
+  Effect.gen(function* () {
+    const { team, captain } = yield* seedTeam(username);
+    const member = yield* addBilledMember(team.id, `${username}-member`);
+    yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+    yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+
+    const currentTrainings: EventRow[] = [];
+    for (const startAt of [TRAINING_START, TRAINING_START_2, TRAINING_START_3]) {
+      const training = yield* createTraining(team.id, captain.id, startAt);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      currentTrainings.push(training);
+    }
+    const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+    if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+    expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+
+    const pastTraining1 = yield* createTraining(team.id, captain.id, PAST_MONTH_START);
+    yield* confirm(pastTraining1, team.id, captain.id, [
+      { team_member_id: member.id, present: true },
+    ]);
+    const pastTraining2 = yield* createTraining(team.id, captain.id, PAST_MONTH_START_2);
+    yield* confirm(pastTraining2, team.id, captain.id, [
+      { team_member_id: member.id, present: true },
+    ]);
+
+    return { team, captain, member, fee, currentTrainings, pastTraining1, pastTraining2 };
+  });
+
+describe('training_period_charges — a past-period change moves the CURRENT period (D5)', () => {
+  // DISCRIMINATOR for the `event_attendance_training_recompute` half of D5: without the second,
+  // current-period `recompute_training_period_fees` call the past-period write early-returns and
+  // this stays at '100'.
+  it.effect('confirming attendance on a PAST training re-prices the OPEN period', () =>
+    Effect.gen(function* () {
+      const { team, member, fee } = yield* pastCorrectionState('d5-confirm');
+
+      // prior 2 => free_left 0 => all 3 current trainings chargeable.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('300');
+      const fees = yield* trainingFees(team.id);
+      expect(fees, 'a past period is still never billed').toHaveLength(1);
+      expect(feeForPeriod(fees, PERIOD_START)?.id).toBe(fee.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // DISCRIMINATOR for the `events_training_recompute` half of D5 — the UN-charge direction, where
+  // `free_left` goes UP. Without it the amount stays at '300'.
+  it.effect('cancelling a PAST training gives the allowance back to the OPEN period', () =>
+    Effect.gen(function* () {
+      const { member, fee, pastTraining2 } = yield* pastCorrectionState('d5-cancel');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('300');
+
+      const events = yield* EventsRepository.asEffect();
+      yield* events.cancelEvent(pastTraining2.id);
+
+      // prior 1 => free_left 1 => 3 attended, 2 chargeable.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('200');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // DISCRIMINATOR, and the ONLY case in the suite that runs the recompute loop across a FUTURE
+  // period — i.e. the exact path the rejected "handle old/new, then append the current period
+  // last" ordering got wrong. Ascending is the only total order available there, so this case is
+  // the regression net for the 40P01 it would deadlock on. The next-period row is also new
+  // behaviour: under per-period semantics 1 attended against an allowance of 2 produced no row.
+  //
+  // TWO fees rows — select by period, never by index.
+  it.effect('moving a past training into the FUTURE re-prices BOTH the open and next period', () =>
+    Effect.gen(function* () {
+      const { team, member, fee, pastTraining2 } = yield* pastCorrectionState('d5-future');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('300');
+
+      // A RESCHEDULE of an already-confirmed event, not a confirmation of a future one —
+      // `confirmAttendance`'s `start_at <= now()` guard would refuse the latter.
+      const events = yield* EventsRepository.asEffect();
+      yield* events.updateEvent({
+        id: pastTraining2.id,
+        title: pastTraining2.title,
+        eventType: 'training',
+        trainingTypeId: Option.none(),
+        description: Option.none(),
+        startAt: DateTime.fromDateUnsafe(NEXT_MONTH_MID),
+        endAt: Option.none(),
+        location: Option.none(),
+      });
+
+      const fees = yield* trainingFees(team.id);
+      expect(fees).toHaveLength(2);
+
+      const openFee = feeForPeriod(fees, PERIOD_START);
+      if (openFee === undefined) throw new Error('expected a CURRENT-period fee row');
+      // past prior drops to 1 => free_left 1 => 3 attended, 2 chargeable.
+      expect((yield* assignmentFor(openFee.id, member.id))?.amount_minor).toBe('200');
+
+      const nextFee = feeForPeriod(fees, NEXT_PERIOD_START);
+      if (nextFee === undefined) throw new Error('expected a NEXT-period fee row');
+      // The moved event's attendance rows travel with it: 1 attended next period, prior = the past
+      // month's 1 + the current month's 3 = 4 => free_left 0 => 1 chargeable.
+      expect((yield* assignmentFor(nextFee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // REGRESSION NET, and explicitly NOT a test of the `confirmed_at` guard in
+  // `event_attendance_training_recompute`. An unconfirmed row contributes to neither `in_period`
+  // nor `prior`, so this passes with or WITHOUT that guard — the guard's only effect is COST (it
+  // keeps a captain's 20-member pre-tick off 20 full current-period recomputes), which no amount
+  // assertion can observe. The one observable difference is lock acquisition, and testing that
+  // needs a two-session `secondTestPgClient` variant; write it only if the guard is questioned.
+  it.effect('a pre-tick on a past training moves no money', () =>
+    Effect.gen(function* () {
+      const { team, captain, member, fee } = yield* pastCorrectionState('d5-pretick');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('300');
+
+      const extraPast = yield* createTraining(team.id, captain.id, PAST_MONTH_START_3);
+      // Raw SQL: `confirmAttendance` always stamps `confirmed_at`, so a pre-tick is unreachable
+      // through the repository.
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      yield* sql`
+        INSERT INTO event_attendance (event_id, team_member_id, present, confirmed_at)
+        VALUES (${extraPast.id}, ${member.id}, true, NULL)
+      `;
+
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('300');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 23. The paid clamp on an ALL-TIME un-charge
+// ---------------------------------------------------------------------------
+
+describe('training_period_charges — the paid clamp on an ALL-TIME un-charge', () => {
+  // `free_left` going UP is new in this PR: under per-period semantics a past-period change could
+  // not move the current period at all, so this un-charge path did not exist. S3's
+  // `GREATEST(COALESCE(c.amount_minor, 0), l.paid_minor)` is the only thing between it and
+  // `amount_minor < paid_minor`, which `FinancesOverviewPage` subtracts raw and would use to
+  // understate the whole team's outstanding KPI.
+  it.effect('a past-period correction cannot drop an assignment below paid_minor', () =>
+    Effect.gen(function* () {
+      const { team, captain, member, fee, pastTraining1, pastTraining2 } =
+        yield* pastCorrectionState('clamp-paid');
+      const assignment = yield* assignmentFor(fee.id, member.id);
+      if (assignment === undefined) throw new Error('expected an assignment');
+      expect(assignment.amount_minor).toBe('300');
+
+      const payments = yield* PaymentsRepository.asEffect();
+      yield* payments.insert({
+        feeAssignmentId: assignment.id as never,
+        teamMemberId: member.id,
+        amountMinor: 300,
+        method: 'cash',
+        paidAt: DateTime.fromDateUnsafe(NOW),
+        note: Option.none(),
+        recordedByUserId: captain.user_id as never,
+      });
+
+      // Both past trainings gone => prior 0 => free_left 2 => 3 attended, 1 chargeable = 100.
+      const events = yield* EventsRepository.asEffect();
+      yield* events.cancelEvent(pastTraining1.id);
+      yield* events.cancelEvent(pastTraining2.id);
+
+      const after = yield* assignmentFor(fee.id, member.id);
+      expect(after, 'a paid-against assignment is never pruned').toBeDefined();
+      expect(after?.amount_minor, 'clamped to paid_minor, not recomputed down to 100').toBe('300');
+      expect(after?.id, 'the same assignment row, not a churned one').toBe(assignment.id);
+      expect(after?.paid_minor).toBe('300');
+      expect(yield* trainingFees(team.id)).toHaveLength(1);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // S4's `paid_minor = 0` + `NOT EXISTS payments` prune guards. Deleting this assignment would
+  // 23503 against `payments.fee_assignment_id`'s ON DELETE RESTRICT.
+  it.effect('a partly-paid assignment that recomputes to 0 is NOT pruned', () =>
+    Effect.gen(function* () {
+      const { captain, member, fee, currentTrainings, pastTraining1, pastTraining2 } =
+        yield* pastCorrectionState('clamp-zero');
+      const assignment = yield* assignmentFor(fee.id, member.id);
+      if (assignment === undefined) throw new Error('expected an assignment');
+      expect(assignment.amount_minor).toBe('300');
+
+      const payments = yield* PaymentsRepository.asEffect();
+      yield* payments.insert({
+        feeAssignmentId: assignment.id as never,
+        teamMemberId: member.id,
+        amountMinor: 100,
+        method: 'cash',
+        paidAt: DateTime.fromDateUnsafe(NOW),
+        note: Option.none(),
+        recordedByUserId: captain.user_id as never,
+      });
+
+      const events = yield* EventsRepository.asEffect();
+      yield* events.cancelEvent(pastTraining1.id);
+      yield* events.cancelEvent(pastTraining2.id);
+      // prior 0 => free_left 2, and 2 attended is not > 2 => the member drops out of the function
+      // entirely and S3's LEFT JOIN zeroes the assignment.
+      const dropped = currentTrainings[0];
+      if (dropped === undefined) throw new Error('expected a current training');
+      yield* events.cancelEvent(dropped.id);
+
+      const after = yield* assignmentFor(fee.id, member.id);
+      expect(after, 'a partly-paid assignment is never pruned').toBeDefined();
+      expect(after?.amount_minor).toBe('100');
+      expect(after?.paid_minor).toBe('100');
     }).pipe(Effect.provide(TestLayer)),
   );
 });

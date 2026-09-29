@@ -45,4 +45,36 @@ describe('i18n message catalogue — key parity between cs.json and en.json', ()
       expect(Object.hasOwn(en, key)).toBe(true);
     }
   });
+
+  // The free-training allowance is ALL-TIME: N trainings included once, never reset per billing
+  // period. This guard lives here rather than in `MembershipPlansPage.test.tsx` because that file
+  // mocks `~/lib/translations.js` with a hardcoded key -> string map — a copy assertion there can
+  // never fail, whatever the catalogue actually says.
+  //
+  // `obnov` is in the list deliberately: it is the substring that catches a half-revert of the old
+  // Czech `Každý měsíc se počítadlo obnoví.` The shipped cs hint says `Počítadlo se nenuluje.` for
+  // exactly that reason. Read this list and the shipped strings together before changing either.
+  it('the free-training copy carries no per-month wording', () => {
+    const cs = readJson('../messages/cs.json');
+    const en = readJson('../messages/en.json');
+
+    const forbidden = ['month', '/month', 'měsíc', 'měsíčně', 'obnov'];
+    const keys = [
+      'membershipPlan_freeTrainings',
+      'membershipPlan_freeTrainingsHint',
+      'membershipPlan_freeTrainingsSummary',
+    ];
+
+    for (const [locale, catalogue] of [
+      ['en', en],
+      ['cs', cs],
+    ] as const) {
+      for (const key of keys) {
+        const value = (catalogue[key] ?? '').toLowerCase();
+        for (const needle of forbidden) {
+          expect(value, `${locale}.json ${key} must not say "${needle}"`).not.toContain(needle);
+        }
+      }
+    }
+  });
 });
