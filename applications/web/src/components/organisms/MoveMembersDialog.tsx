@@ -1,5 +1,5 @@
-import { type MembershipPlan, type MembershipPlanApi, Team } from '@sideline/domain';
-import { Effect, Option, Schema } from 'effect';
+import type { MembershipPlan, MembershipPlanApi, Team } from '@sideline/domain';
+import { Effect, Option } from 'effect';
 import React from 'react';
 import { toast } from 'sonner';
 import { Button } from '~/components/ui/button';
@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '~/components/ui/dialog';
+import { Label } from '~/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -33,7 +34,7 @@ interface MoveOption {
 }
 
 interface MoveMembersDialogProps {
-  readonly teamId: string;
+  readonly teamId: Team.TeamId;
   /** ACTIVE plans only — an archived plan is a legal SOURCE but never a target (plan §B.7). */
   readonly plans: ReadonlyArray<MembershipPlanApi.MembershipPlanInfo>;
   readonly assignments: ReadonlyArray<MembershipPlanApi.MembershipPlanAssignment>;
@@ -62,11 +63,20 @@ export function MoveMembersDialog({
   onMoved,
 }: MoveMembersDialogProps) {
   const run = useRun();
-  const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
 
   const [source, setSource] = React.useState<PlanKey>(DEFAULT_SENTINEL);
   const [target, setTarget] = React.useState<PlanKey>(DEFAULT_SENTINEL);
   const [moving, setMoving] = React.useState(false);
+
+  // This component stays MOUNTED across open/close, so without this the highest-value use —
+  // sweeping an archived plan — leaves `source` holding an id that is no longer in
+  // `sourceOptions` (nobody is on it any more), and reopening shows a blank trigger.
+  React.useEffect(() => {
+    if (open) {
+      setSource(DEFAULT_SENTINEL);
+      setTarget(DEFAULT_SENTINEL);
+    }
+  }, [open]);
 
   const countOf = React.useCallback(
     (key: PlanKey) => assignments.filter((a) => keyOf(a) === key).length,
@@ -84,11 +94,23 @@ export function MoveMembersDialog({
     [countOf],
   );
 
+  // The currency every member with no ACTIVE plan of their own is billed at — the never-picked
+  // crowd and anyone left on an archived plan both fall back to the team default
+  // (`1793200000_training_period_fees.ts:113-130`).
+  const defaultCurrency = plans.find((p) => p.isDefault)?.currency;
+
   const targetOptions: ReadonlyArray<MoveOption> = React.useMemo(
     () => [
       {
         key: DEFAULT_SENTINEL,
-        label: withCount(tr('membershipPlan_bulk_defaultOption'), DEFAULT_SENTINEL),
+        // Suffixed like the plan options: without it this is the one entry in the list whose
+        // currency is invisible, and it is the most-picked source there is.
+        label: withCount(
+          defaultCurrency === undefined
+            ? tr('membershipPlan_bulk_defaultOption')
+            : `${tr('membershipPlan_bulk_defaultOption')} · ${defaultCurrency}`,
+          DEFAULT_SENTINEL,
+        ),
       },
       ...plans.map((plan) => ({
         key: plan.membershipPlanId,
@@ -98,7 +120,7 @@ export function MoveMembersDialog({
         ),
       })),
     ],
-    [plans, withCount],
+    [defaultCurrency, plans, withCount],
   );
 
   // `plans` holds active rows only, so a member sitting on an archived plan is invisible to the
@@ -119,9 +141,12 @@ export function MoveMembersDialog({
     ];
     return [
       ...targetOptions,
+      // The archived plan's NAME is not on the wire — `findMembershipPlansByTeamId` filters
+      // `archived_at IS NULL` — so two archived plans would otherwise render as two identical
+      // "Archived plan" rows. The id prefix is the only disambiguator available here.
       ...orphanIds.map((id) => ({
         key: id,
-        label: withCount(tr('membershipPlan_bulk_archivedSource'), id),
+        label: withCount(`${tr('membershipPlan_bulk_archivedSource')} ${id.slice(0, 8)}`, id),
       })),
     ];
   }, [assignments, plans, targetOptions, withCount]);
@@ -131,15 +156,24 @@ export function MoveMembersDialog({
   // disables Confirm through the ordinary count rule — there is no separate equality check.
   const affected = assignments.filter((a) => keyOf(a) === source && keyOf(a) !== target).length;
 
-  const sourcePlan = plans.find((p) => p.membershipPlanId === source);
-  const targetPlan = plans.find((p) => p.membershipPlanId === target);
+  // `plans` holds ACTIVE rows only, so a direct lookup misses for the sentinel AND for an
+  // archived orphan id — and those are the three shapes that matter: never-picked → plan,
+  // archived → plan, plan → clear-to-default. All three genuinely change currency, because
+  // the charge query bills both populations at the TEAM DEFAULT plan's currency
+  // (`1793200000_training_period_fees.ts:113-130`). A direct-lookup-only check is therefore
+  // silent for the single most likely use of this dialog.
+  const currencyOf = (key: PlanKey): string | undefined =>
+    plans.find((p) => p.membershipPlanId === key)?.currency ?? defaultCurrency;
+  const sourceCurrency = currencyOf(source);
+  const targetCurrency = currencyOf(target);
   const crossesCurrency =
-    sourcePlan !== undefined &&
-    targetPlan !== undefined &&
-    sourcePlan.currency !== targetPlan.currency;
-  // Only an ACTIVE plan as source means "these people picked this themselves". The sentinel is
-  // the never-picked crowd, and an archived source is a plan they can no longer see.
-  const overwritesChoices = sourcePlan !== undefined && affected > 0;
+    sourceCurrency !== undefined &&
+    targetCurrency !== undefined &&
+    sourceCurrency !== targetCurrency;
+  // Deliberately NOT routed through `currencyOf`'s default fallback: only an ACTIVE plan as
+  // source means "these people picked this themselves". The sentinel is the never-picked
+  // crowd, and an archived source is a plan they can no longer see.
+  const overwritesChoices = plans.some((p) => p.membershipPlanId === source) && affected > 0;
 
   const pick = (options: ReadonlyArray<MoveOption>, value: string): PlanKey =>
     options.find((o) => o.key === value)?.key ?? DEFAULT_SENTINEL;
@@ -149,7 +183,7 @@ export function MoveMembersDialog({
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.membershipPlan.reassignMembershipPlan({
-          params: { teamId: teamIdBranded },
+          params: { teamId },
           payload: {
             fromMembershipPlanId: source === DEFAULT_SENTINEL ? Option.none() : Option.some(source),
             toMembershipPlanId: target === DEFAULT_SENTINEL ? Option.none() : Option.some(target),
@@ -179,31 +213,46 @@ export function MoveMembersDialog({
         </DialogHeader>
 
         <div className='flex flex-col gap-3'>
-          <Select value={source} onValueChange={(v) => setSource(pick(sourceOptions, v))}>
-            <SelectTrigger aria-label={tr('membershipPlan_bulk_fromLabel')}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {sourceOptions.map((option) => (
-                <SelectItem key={option.key} value={option.key}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Visible labels, not just `aria-label` — two unlabelled dropdowns stacked in a
+              dialog body read as one control to a sighted user, and picking the wrong one here
+              moves the wrong people. */}
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='membership-bulk-source'>{tr('membershipPlan_bulk_fromLabel')}</Label>
+            <Select value={source} onValueChange={(v) => setSource(pick(sourceOptions, v))}>
+              <SelectTrigger
+                id='membership-bulk-source'
+                aria-label={tr('membershipPlan_bulk_fromLabel')}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sourceOptions.map((option) => (
+                  <SelectItem key={option.key} value={option.key}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-          <Select value={target} onValueChange={(v) => setTarget(pick(targetOptions, v))}>
-            <SelectTrigger aria-label={tr('membershipPlan_bulk_toLabel')}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {targetOptions.map((option) => (
-                <SelectItem key={option.key} value={option.key}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='membership-bulk-target'>{tr('membershipPlan_bulk_toLabel')}</Label>
+            <Select value={target} onValueChange={(v) => setTarget(pick(targetOptions, v))}>
+              <SelectTrigger
+                id='membership-bulk-target'
+                aria-label={tr('membershipPlan_bulk_toLabel')}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {targetOptions.map((option) => (
+                  <SelectItem key={option.key} value={option.key}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <p className='text-sm font-medium'>
             {tr('membershipPlan_bulk_affected', { count: affected })}

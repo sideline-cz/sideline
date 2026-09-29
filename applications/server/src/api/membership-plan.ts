@@ -108,9 +108,13 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               ),
               Effect.map(({ list, canManage, selection, assignments }) =>
                 Option.match(selection, {
-                  // A real branch, not dead code: `findMemberSelection` returns `None` for a
-                  // global admin with no `team_members` row. `assignments` belongs in BOTH arms
-                  // — the Type side of the field is required, only the wire key is optional.
+                  // A real branch, not dead code: the member was deactivated between
+                  // `requireMembership` above and this read — `findMemberSelectionQuery` filters
+                  // `tm.active` (same race as the `findOneOption` note six lines up). NOT a
+                  // global admin: this handler gates on `requireMembership`, which has no
+                  // global-admin branch and already failed with 403. `assignments` belongs in
+                  // BOTH arms — the Type side of the field is required, only the wire key is
+                  // optional.
                   onNone: () =>
                     new MembershipPlanApi.MembershipPlanListResponse({
                       canManage,

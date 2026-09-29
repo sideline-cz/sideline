@@ -401,14 +401,6 @@ export function MembershipPlansPage({
   const [memberSearch, setMemberSearch] = React.useState('');
   const [moveOpen, setMoveOpen] = React.useState(false);
   const [savingMemberId, setSavingMemberId] = React.useState<string | null>(null);
-  // A single-row assign updates LOCAL state instead of `router.invalidate()` — precedent
-  // `members.index.tsx`'s `handleMembersAssigned`. Invalidating would refetch every member row
-  // on every one-row change. An override always equals what the server was just told, so a
-  // stale one can only ever mask a *concurrent* manager's edit; the bulk move clears the map
-  // because there `router.invalidate()` really is the cheaper refresh.
-  const [assignOverrides, setAssignOverrides] = React.useState<ReadonlyMap<string, string>>(
-    new Map(),
-  );
 
   const editTargetRef = React.useRef<MembershipPlanApi.MembershipPlanInfo | null>(null);
   if (editTarget !== null) editTargetRef.current = editTarget;
@@ -535,16 +527,14 @@ export function MembershipPlansPage({
       );
       setSavingMemberId(null);
       if (Option.isSome(result)) {
-        setAssignOverrides((prev) => new Map(prev).set(memberId, value));
+        // Refetch rather than patch local state: `assignments` also feeds `MoveMembersDialog`'s
+        // per-option counts, and a local-only patch makes the number the treasurer confirms a
+        // bulk move against stale. Same one query every sibling handler on this page pays.
+        router.invalidate();
       }
     },
     [teamIdBranded, plans, run, router],
   );
-
-  const handleMoved = React.useCallback(() => {
-    setAssignOverrides(new Map());
-    router.invalidate();
-  }, [router]);
 
   const visibleAssignments = React.useMemo(() => {
     const needle = memberSearch.trim().toLowerCase();
@@ -785,20 +775,30 @@ export function MembershipPlansPage({
                 // member is actually BILLED — `training_period_charges` drops an archived plan
                 // back to the team default. "No real choice on record" renders as the default.
                 const stored = Option.getOrUndefined(a.membershipPlanId);
-                const active =
-                  stored !== undefined && plans.some((p) => p.membershipPlanId === stored)
-                    ? stored
-                    : DEFAULT_SENTINEL;
+                const isOrphan =
+                  stored !== undefined && !plans.some((p) => p.membershipPlanId === stored);
+                const active = isOrphan || stored === undefined ? DEFAULT_SENTINEL : stored;
                 return (
                   <div
                     key={a.memberId}
                     className='flex flex-wrap items-center gap-3 rounded-lg border p-3'
                   >
-                    <span className='min-w-0 flex-1 basis-40 truncate'>{a.displayName}</span>
+                    <span className='min-w-0 flex-1 basis-40 truncate'>
+                      {a.displayName}
+                      {/* The select reads "use team default" for them — that IS how they are
+                          billed — but the bulk dialog buckets them under their real orphan id,
+                          not under "no plan chosen". Without this marker the two surfaces of
+                          this screen silently disagree about the same member. */}
+                      {isOrphan && (
+                        <span className='ml-2 text-xs text-muted-foreground'>
+                          {tr('membershipPlan_bulk_archivedSource')}
+                        </span>
+                      )}
+                    </span>
                     {/* NOT disabled by `isSelectionClosed` — the deadline binds members, not a
                         manager fixing stragglers after the lock (plan §B.2). */}
                     <Select
-                      value={assignOverrides.get(a.memberId) ?? active}
+                      value={active}
                       disabled={savingMemberId === a.memberId}
                       onValueChange={(v) => handleAssign(a.memberId, v)}
                     >
@@ -828,12 +828,12 @@ export function MembershipPlansPage({
           )}
 
           <MoveMembersDialog
-            teamId={teamId}
+            teamId={teamIdBranded}
             plans={plans}
             assignments={assignments}
             open={moveOpen}
             onOpenChange={setMoveOpen}
-            onMoved={handleMoved}
+            onMoved={handleSaved}
           />
         </section>
       )}

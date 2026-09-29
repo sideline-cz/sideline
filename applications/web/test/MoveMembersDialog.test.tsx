@@ -353,6 +353,36 @@ describe('MoveMembersDialog — warnings', () => {
     expect(screen.queryByText(/different currencies/)).not.toBeInTheDocument();
   });
 
+  // The single most likely use of this dialog — "sweep everyone who never picked onto the new
+  // plan" — is also the one with NO direct plan row to read a currency off: `plans` holds active
+  // rows only, so `find(p => p.membershipPlanId === '__default__')` is `undefined`. But the
+  // never-picked crowd IS billed, at the TEAM DEFAULT plan's currency
+  // (`1793200000_training_period_fees.ts:113-130`), so this move genuinely crosses currencies
+  // and must warn. Same hole covers the archived source and the clear-to-default target.
+  it('warns for the three shapes with no direct plan row: never-picked → plan, archived → plan, plan → clear-to-default', () => {
+    renderDialog();
+
+    // never-picked (CZK by the team default) → EUR plan
+    pick(sourceSelect(), DEFAULT_SENTINEL);
+    pick(targetSelect(), 'plan-eur');
+    expect(screen.getByText(/different currencies/), 'never-picked → EUR').toBeInTheDocument();
+
+    // archived source (CZK by the team default) → EUR plan
+    pick(sourceSelect(), 'plan-archived');
+    expect(screen.getByText(/different currencies/), 'archived → EUR').toBeInTheDocument();
+
+    // EUR plan → "clear to team default", which bills at the default plan's CZK
+    pick(sourceSelect(), 'plan-eur');
+    pick(targetSelect(), DEFAULT_SENTINEL);
+    expect(screen.getByText(/different currencies/), 'EUR → team default').toBeInTheDocument();
+
+    // ...and still silent when the fallback resolves to the SAME currency, so the assertions
+    // above cannot pass by warning unconditionally.
+    pick(sourceSelect(), DEFAULT_SENTINEL);
+    pick(targetSelect(), 'plan-b');
+    expect(screen.queryByText(/different currencies/), 'CZK → CZK').not.toBeInTheDocument();
+  });
+
   // §B.2: a bulk move silently overwrites explicit member choices. Within ONE source, every
   // member being moved picked that plan themselves — which is exactly why the "Team default"
   // (never picked) source must NOT show it.

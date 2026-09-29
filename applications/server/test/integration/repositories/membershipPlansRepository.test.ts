@@ -735,26 +735,12 @@ describe('MembershipPlansRepository.setSelectionDeadline', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Slice 3 ("Add CRUD for managing membership assigned members") — TDD: written
-// BEFORE the repository functions exist. Every test in this section FAILS until
-// `MembershipPlansRepository` gains `assignMembershipPlan`, `reassignMembershipPlan`
-// and `findPlanAssignments` (plan Task 2).
+// Slice 3 ("Add CRUD for managing membership assigned members") — `assignMembershipPlan`,
+// `reassignMembershipPlan` and `findPlanAssignments` (plan Task 2).
 //
-// Assumed contract (plan §C Task 2.3/2.4/2.6):
-//   assignMembershipPlan(input: {
-//     member_id: TeamMemberId; team_id: TeamId;
-//     plan_id: Option<MembershipPlanId>;          // None = clear to the team default
-//   }): Effect<number>                            // rows affected
-//
-//   reassignMembershipPlan(input: {
-//     team_id: TeamId;
-//     from_plan_id: Option<MembershipPlanId>;     // None = the never-picked (NULL) set
-//     to_plan_id: Option<MembershipPlanId>;       // None = clear to the team default
-//   }): Effect<number>                            // rows actually moved
-//
-//   findPlanAssignments(teamId: TeamId): Effect<ReadonlyArray<PlanAssignmentRow>>
-//     PlanAssignmentRow = { member_id, membership_plan_id: Option<...>, name, discord_nickname,
-//                           discord_display_name, username }   (raw name parts, NOT resolved)
+// The helpers below are deliberately explicit about the input shape: they are the only place
+// this suite pins the repository signatures, so a rename (`plan_id` → `planId`) or a widening
+// (`from_plan_id` off `Option`) has to go red here.
 // ---------------------------------------------------------------------------
 
 const assignMembershipPlan = (input: {
@@ -763,7 +749,7 @@ const assignMembershipPlan = (input: {
   plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
 }) =>
   MembershipPlansRepository.asEffect().pipe(
-    Effect.andThen((repo) => (repo as any).assignMembershipPlan(input) as Effect.Effect<number>),
+    Effect.andThen((repo) => repo.assignMembershipPlan(input)),
   );
 
 const reassignMembershipPlan = (input: {
@@ -772,21 +758,12 @@ const reassignMembershipPlan = (input: {
   to_plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
 }) =>
   MembershipPlansRepository.asEffect().pipe(
-    Effect.andThen((repo) => (repo as any).reassignMembershipPlan(input) as Effect.Effect<number>),
+    Effect.andThen((repo) => repo.reassignMembershipPlan(input)),
   );
 
 const findPlanAssignments = (teamId: Team.TeamId) =>
   MembershipPlansRepository.asEffect().pipe(
-    Effect.andThen(
-      (repo) =>
-        (repo as any).findPlanAssignments(teamId) as Effect.Effect<
-          ReadonlyArray<{
-            member_id: TeamMember.TeamMemberId;
-            membership_plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
-            username: string;
-          }>
-        >,
-    ),
+    Effect.andThen((repo) => repo.findPlanAssignments(teamId)),
   );
 
 describe('MembershipPlansRepository.assignMembershipPlan', () => {
@@ -1297,17 +1274,29 @@ describe('MembershipPlansRepository.findPlanAssignments', () => {
   // One query, one shape — active members of THIS team only, with the raw FK as an Option.
   it.effect(
     'returns every ACTIVE member of the team and only that team; a never-picked member reads ' +
-      'back None and a member on B reads back Some(B)',
+      'back None, a member on B reads back Some(B) and a member on an ARCHIVED plan still ' +
+      'reads back that plan id',
     () =>
       Effect.gen(function* () {
         const team = yield* seedTeam('assignments1');
         const otherTeam = yield* seedTeam('assignments2');
         const planB = yield* insertPlan(team.id, 'Plan B');
+        const planC = yield* insertPlan(team.id, 'Plan C');
         const neverPicked = yield* addMember(team.id, 'pa-none');
         const onB = yield* addMember(team.id, 'pa-b');
+        const onArchived = yield* addMember(team.id, 'pa-archived');
         const inactive = yield* addMember(team.id, 'pa-inactive');
         const foreign = yield* addMember(otherTeam.id, 'pa-foreign');
         yield* selectMembershipPlan({ member_id: onB.id, team_id: team.id, plan_id: planB.id });
+        yield* selectMembershipPlan({
+          member_id: onArchived.id,
+          team_id: team.id,
+          plan_id: planC.id,
+        });
+        // The archived-plan row is the ONLY input to the dialog's "sweep everyone off the plan we
+        // retired" option. A `LEFT JOIN membership_plans ... AND archived_at IS NULL` added here
+        // later would make that option unreachable and nothing else in the stack would go red.
+        yield* archivePlan(planC.id, team.id);
         yield* setMemberActive(inactive.id, false);
 
         const rows = yield* findPlanAssignments(team.id);
@@ -1315,16 +1304,15 @@ describe('MembershipPlansRepository.findPlanAssignments', () => {
         const ids = rows.map((r) => r.member_id);
         expect(ids).toContain(neverPicked.id);
         expect(ids).toContain(onB.id);
+        expect(ids, 'a member on an archived plan is still rostered').toContain(onArchived.id);
         expect(ids, 'inactive members are excluded').not.toContain(inactive.id);
         expect(ids, "another team's members are never returned").not.toContain(foreign.id);
 
-        const neverPickedRow = rows.find((r) => r.member_id === neverPicked.id);
-        const onBRow = rows.find((r) => r.member_id === onB.id);
-        expect(Option.isNone(neverPickedRow?.membership_plan_id as never)).toBe(true);
-        expect(Option.isSome(onBRow?.membership_plan_id as never)).toBe(true);
-        if (onBRow !== undefined && Option.isSome(onBRow.membership_plan_id)) {
-          expect(onBRow.membership_plan_id.value).toBe(planB.id);
-        }
+        const planIdOf = (memberId: TeamMember.TeamMemberId) =>
+          rows.find((r) => r.member_id === memberId)?.membership_plan_id;
+        expect(planIdOf(neverPicked.id)).toEqual(Option.none());
+        expect(planIdOf(onB.id)).toEqual(Option.some(planB.id));
+        expect(planIdOf(onArchived.id)).toEqual(Option.some(planC.id));
       }).pipe(Effect.provide(TestLayer)),
   );
 });

@@ -918,11 +918,16 @@ describe('training_period_charges — concurrency', () => {
 // 16. CHARACTERISATION — cross-currency reassignment of an ALREADY-PAID member
 //
 // Not a regression test for the "manage assigned members" story: this is PRE-EXISTING engine
-// behaviour (`updateMembershipPlan`'s full-replace already rewrites a plan's `currency`), and
-// nothing in these three tests asserts a bug. They are here because §B.5's bulk endpoint turns
-// it from a per-member accident into one click for N members, and A.1 got the mechanics wrong
-// on the first pass — the corrected reading is pinned here so the next reader does not have to
-// re-derive it from the plpgsql.
+// behaviour (`updateMembershipPlan`'s full-replace already rewrites a plan's `currency`). They
+// are here because §B.5's bulk endpoint turns it from a per-member accident into one click for
+// N members, and A.1 got the mechanics wrong on the first pass — the corrected reading is
+// pinned here so the next reader does not have to re-derive it from the plpgsql.
+//
+// THESE PIN TODAY'S BEHAVIOUR, NOT DESIRED BEHAVIOUR. The first test's two-currency outcome is
+// the bug §D's deferred `team_members.membership_plan_id` trigger is meant to fix. When that
+// lands these go red BY DESIGN — rewrite them to the new expectation, do not read the failure
+// as a regression. The two control tests (same currency, unpaid) stay: without them the first
+// test reads as "moving a paid member always double-bills", which is false.
 //
 // The mechanics, in two lines of the migration:
 //   S3 clamps the stale row to GREATEST(COALESCE(charge, 0), paid_minor) = paid_minor, NOT 0
