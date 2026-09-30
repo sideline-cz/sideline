@@ -30,7 +30,7 @@ The bot is built with **dfx**, an Effect-native Discord framework. It connects t
 
 ## Slash Commands
 
-Eleven top-level commands are registered globally: `/carpool`, `/complete`, `/event`, `/finance`, `/info`, `/makanicko`, `/poll`, `/sudo`, `/summarize`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands. `/event` has three sub-commands: `create`, `list`, and `refresh`.
+Twelve top-level commands are registered globally: `/carpool`, `/complete`, `/event`, `/finance`, `/info`, `/makanicko`, `/membership`, `/poll`, `/sudo`, `/summarize`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands. `/event` has three sub-commands: `create`, `list`, and `refresh`.
 
 ### /carpool
 
@@ -65,6 +65,43 @@ Eleven top-level commands are registered globally: `/carpool`, `/complete`, `/ev
 **Source files:**
 - `applications/bot/src/commands/carpool/index.ts`
 - `applications/bot/src/commands/carpool/handler.ts`
+
+---
+
+### /membership
+
+**Description:** Post the membership plan board in the current channel, so members can pick which plan they are on without leaving Discord.
+
+**Czech command name:** `clenstvi`
+
+**Options:** none.
+
+**Permission required:** `finance:manage_fees` (Admin and Treasurer by default), checked at runtime from the `can_manage` flag on `Membership/GetMembershipSelection`. The command carries **no** `default_member_permissions` — a Discord-native gate would hide it from a treasurer who holds no Discord server permission (`applications/bot/AGENTS.md` → Admin-Gating, option C).
+
+**Constraints:**
+- `dm_permission: false`
+
+**Flow:**
+
+1. A treasurer invokes `/membership` (or `/clenstvi`) in the channel where the board should live.
+2. The handler returns a deferred ephemeral acknowledgement and forks a background fiber.
+3. The fiber calls `Membership/GetMembershipSelection` and refuses with `bot_membership_err_not_manager` when `can_manage` is false.
+4. On success the bot posts a public `buildMembershipBoard` message: one embed field per active plan (price, per-training price, free-training allowance, and a "team default" marker), the selection deadline if the team has one, and two buttons — **Pick your plan** and **My plan**.
+5. The ephemeral reply is updated with a localised "board posted" confirmation.
+
+**Buttons:** the board's two custom_ids are the constants `membership-open` and `membership-mine`. No plan id appears on the public message — per-plan buttons (`mp:{planId}`) exist only on the per-user ephemeral picker, which is what keeps a team with many plans from tripping Discord's duplicate-`custom_id` error `50035` (see "Membership selection buttons" below).
+
+**Errors from `Membership/GetMembershipSelection`:**
+
+| Error tag | User-visible message |
+|-----------|----------------------|
+| `MembershipGuildNotFound` | Team not found for this Discord server |
+| `MembershipNotMember` | Not a member of this team |
+
+**Source files:**
+- `applications/bot/src/commands/membership/index.ts`
+- `applications/bot/src/commands/membership/handler.ts`
+- `applications/bot/src/rest/membership/buildMembershipBoard.ts`
 
 ---
 
@@ -1526,6 +1563,42 @@ Appears on the permanent audit embed posted to the system channel when a team ad
 
 ---
 
+### Membership selection buttons — `membership-open`, `membership-mine`, `mp:{planId}`
+
+**Custom ID patterns:** two constants on the public board, plus one per-plan id on the ephemeral picker.
+
+**Why the split.** Discord rejects an ENTIRE message with error `50035` when two of its components share a `custom_id`, and caps each id at 100 characters. The board therefore carries no plan-derived id at all: it has exactly the two constants. Per-plan buttons live only on the per-user ephemeral, where `mp:` + a 36-character plan UUID is 39 characters and uniqueness follows from the primary key. `buildMembershipViews.test.ts` renders twelve plans and asserts both properties.
+
+**`membership-open` (public board, PRIMARY):**
+
+1. Defers ephemerally and forks.
+2. Calls `Membership/GetMembershipSelection`.
+3. **Repaints the board it was clicked on**, from `interaction.message`. This is why no message id is stored anywhere: the button lives ON the board, so its interaction carries the board's own channel and message, and any click refreshes a board that went stale through a plan rename, reprice or archive — for everyone, not just the clicker. Best effort; a failure here never costs the member their picker.
+4. Replies with `buildMembershipPickView`: the member's current plan plus one button per plan, 4 per row, the chosen one PRIMARY, all disabled once the deadline has passed.
+
+Disabled on the board itself when the team has no plans or the selection deadline has passed.
+
+**`membership-mine` (public board, SECONDARY):** the same RPC, rendered read-only — current plan, no buttons. Never disabled: a member may always look up what they are on, deadline or not.
+
+**`mp:{planId}` (ephemeral picker):** responds `DEFERRED_UPDATE_MESSAGE` (type 6) and edits the ephemeral in place — legal because no plan button opens a modal. Calls `Membership/SelectMembershipPlan` and re-renders the picker from the view it returns, so the highlighted plan can never disagree with what was stored.
+
+**Errors:**
+
+| Error tag | User-visible message |
+|-----------|----------------------|
+| `MembershipGuildNotFound` | This only works in a Discord server |
+| `MembershipNotMember` | Not a member of this team |
+| `MembershipSelectionLocked` | Selection is closed — ask a team admin |
+| `MembershipPlanUnavailable` | That plan is no longer available; open the board again |
+
+**The deadline is enforced in the server's UPDATE, never in the bot.** A board sitting in scrollback still shows enabled buttons to anyone who has not clicked since the deadline passed; the write is refused all the same, and the member gets the "closed" message. This is the same guard the HTTP `PUT /teams/:teamId/me/membership-plan` path uses, so the two surfaces cannot drift.
+
+**Source files:**
+- `applications/bot/src/interactions/membership.ts`
+- `applications/bot/src/rest/membership/buildMembershipPickView.ts`
+
+---
+
 ### Profile Verify Button — `profile-verify`
 
 The single, stateless entry point into the profile-completion modal for every non-`/complete` surface: the blocked-action ephemerals (see "Profile-Completeness Gate" above), the welcome message's verify field, and the pinned card in the `#start-here` verification channel.
@@ -2149,6 +2222,13 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 |--------|---------|
 | `BotInfo/ReportBotInfo` | Called at bot startup to report the running bot version to the server; payload: `{ version: string }`. Forked as a daemon fiber with a 5-second timeout so it does not block startup. |
 | `BotInfo/GetServerVersion` | Called by the `/info` slash command handler to retrieve the server's running version string. |
+
+### Membership group (`Membership/`)
+
+| Method | Purpose |
+|--------|---------|
+| `Membership/GetMembershipSelection` | Resolve the team from the guild and the member from the Discord user, then return the active plan list, the member's own raw selection, the team's selection deadline, and a `can_manage` flag (`finance:manage_fees`). Backs `/membership`, both board buttons, and the post-write re-render. |
+| `Membership/SelectMembershipPlan` | Record the member's chosen plan and return the same view back. Wraps the SAME repository call as the HTTP `selectMembershipPlan` handler, whose atomic conditional UPDATE holds the deadline and plan-validity guards; a zero-row result is re-read once only to choose between `MembershipNotMember`, `MembershipSelectionLocked` and `MembershipPlanUnavailable`. |
 
 ### Guild group (`Guild/`)
 

@@ -617,6 +617,8 @@ export * as GuildRpcModels from './rpc/guild/GuildRpcModels.js';
  * `InviteAcceptancesRepository.findPending` for the current query.
  */
 export * as InviteRpcGroup from './rpc/invite/InviteRpcGroup.js';
+export * as MembershipRpcGroup from './rpc/membership/MembershipRpcGroup.js';
+export * as MembershipRpcModels from './rpc/membership/MembershipRpcModels.js';
 export * as PersonalEventsRpcGroup from './rpc/personalEvents/PersonalEventsRpcGroup.js';
 export * as PollRpcGroup from './rpc/poll/PollRpcGroup.js';
 export * as PollRpcModels from './rpc/poll/PollRpcModels.js';
