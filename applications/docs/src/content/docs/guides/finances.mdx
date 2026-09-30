@@ -119,7 +119,7 @@ Every team starts with one free, unnamed default plan — it's shown with a **De
 - **Make a plan the default** — promotes it and automatically demotes the team's current default. A team always has exactly one default plan.
 - **Archive a plan** — hides it from the list. A plan can't be archived while it's the team's default; make another plan the default first.
 
-Below the plan list, a member can [choose their own plan](#choosing-your-own-plan). If you hold `finance:manage_fees` (Admin or Treasurer), you also see a **Member assignments** section for setting or overriding any member's plan directly.
+Below the plan list, a member can [choose their own plan](#choosing-your-own-plan) — or do it [from Discord](#choosing-your-plan-in-discord). If you hold `finance:manage_fees` (Admin or Treasurer), you also see a **Member assignments** section for setting or overriding any member's plan directly.
 
 <Aside type="caution" title="Pricing and charging are still separate">
   The per-training price and expiry date fields are stored for reference only — no charging or expiry enforcement happens today. See [Assigning members to a plan](#assigning-members-to-a-plan) below.
@@ -128,6 +128,23 @@ Below the plan list, a member can [choose their own plan](#choosing-your-own-pla
 ### Choosing your own plan
 
 Any team member can pick which plan they're on from the same **Membership plans** page — click **Choose** on the plan you want. If the team has set a selection deadline, it's shown on the page and every **Choose** button is disabled once it passes. A member who never chooses stays on the team's current default plan.
+
+### Choosing your plan in Discord
+
+Members don't have to open the web app at all. An Admin or Treasurer runs **`/membership`** (Czech: `/clenstvi`) in a Discord channel, and the bot posts a board listing every plan with its monthly price, per-training price and any included free trainings, plus the selection deadline if the team has one.
+
+The board has two buttons:
+
+- **Pick your plan** — opens a private message only you can see, showing the plan you're on and one button per plan. Tap a plan to switch; the message updates in place.
+- **My plan** — shows the plan you're on without changing anything. This one always works, deadline or not.
+
+The deadline applies exactly as it does on the web: once it passes, the buttons stop accepting changes and the bot tells you to ask an admin. A Treasurer can still reassign anyone from the web app.
+
+Post the board once and leave it — clicking **Pick your plan** refreshes it, so a board that was posted before you renamed, repriced or archived a plan catches up on its own.
+
+<Aside type="note" title="Who can post the board">
+  `/membership` needs the `finance:manage_fees` permission (Admin or Treasurer). Everyone else sees the command but gets a short "only admins and treasurers can post this" reply — the buttons on a posted board, though, are for every member.
+</Aside>
 
 ### Assigning members to a plan
 

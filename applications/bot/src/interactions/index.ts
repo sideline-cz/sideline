@@ -33,6 +33,11 @@ import { EventCreateAutocomplete } from './event-create-autocomplete.js';
 import { EventTypeAutocomplete } from './event-type-autocomplete.js';
 import { MakanickoLogAutocomplete } from './makanicko-log-autocomplete.js';
 import {
+  MembershipMineButtonReg,
+  MembershipOpenButtonReg,
+  MembershipPlanButtonReg,
+} from './membership.js';
+import {
   PollAddButtonReg,
   PollAddModalReg,
   PollCloseButtonReg,
@@ -111,4 +116,7 @@ export const interactionBuilder = Ix.builder
   .add(SudoLeaveButtonReg)
   .add(ProfileCompleteModal)
   .add(ProfileVerifyButton)
-  .add(ReportModal);
+  .add(ReportModal)
+  .add(MembershipOpenButtonReg)
+  .add(MembershipMineButtonReg)
+  .add(MembershipPlanButtonReg);

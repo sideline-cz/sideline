@@ -5,6 +5,7 @@ import { EventCommand } from '~/commands/event/index.js';
 import { FinanceCommand } from '~/commands/finance/index.js';
 import { InfoCommand } from '~/commands/info/index.js';
 import { MakanickoCommand } from '~/commands/makanicko/index.js';
+import { MembershipCommand } from '~/commands/membership/index.js';
 import { PollCommand } from '~/commands/poll/index.js';
 import { ReportCommand } from '~/commands/report/index.js';
 import { RulesCommand } from '~/commands/rules/index.js';
@@ -26,4 +27,5 @@ export const commandBuilder = Ix.builder
   .add(RulesCommand)
   .add(SudoCommand)
   .add(CompleteCommand)
-  .add(ReportCommand);
+  .add(ReportCommand)
+  .add(MembershipCommand);
