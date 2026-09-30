@@ -221,17 +221,21 @@ describe('membership_plans_pricing_recompute_trg', () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  // The WHEN clause is the whole safety argument for this trigger: it must fire on the two
-  // columns `training_period_charges` reads and on NOTHING else, or renaming a plan or moving
-  // its expiry would take the team-wide `fees` lock that `recompute_training_period_fees` takes.
+  // The WHEN clause is the whole safety argument for this trigger: it must fire on every column
+  // that changes what a member is charged and on NOTHING else, or renaming a plan or moving its
+  // expiry would take the team-wide `fees` lock that `recompute_training_period_fees` takes.
+  //
+  // 1793600000 widened it from two columns to five. `currency` keys the fees shell; an ARCHIVED
+  // plan resolves to the team default, so archiving re-prices everyone on it; and a member with
+  // `membership_plan_id IS NULL` is billed by whichever plan carries `is_default`, so moving that
+  // flag re-prices all of them at once.
   //
   // DISCRIMINATOR, twice over. `pg_trigger.tgqual` is a node tree, so the WHEN clause is supposed
   // to FOLLOW the column rename with no re-issue; if it did not, this assertion is what catches
-  // it and the migration must re-issue the trigger. And the `free_trainings_anchor_at` exclusion
-  // pins the "the AFTER trigger must not watch the anchor" argument: watching it would make a
-  // non-money column take the team-wide fees mutex, and would fire off a value the BEFORE trigger
-  // just wrote in the same statement.
-  it.effect('fires only on the two columns that feed the charge', () =>
+  // it. And the `free_trainings_anchor_at` exclusion pins the "the AFTER trigger must not watch
+  // the anchor" argument: watching it would make a non-money column take the team-wide fees
+  // mutex, and would fire off a value the BEFORE trigger just wrote in the same statement.
+  it.effect('fires on every column that feeds the charge, and no other', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient.asEffect();
       const rows = yield* sql<{ definition: string }>`
@@ -243,10 +247,14 @@ describe('membership_plans_pricing_recompute_trg', () => {
       const definition = rows[0]?.definition ?? '';
       expect(definition).toContain('price_per_training_minor');
       expect(definition).toContain('free_trainings_included');
+      expect(definition).toContain('currency');
+      expect(definition).toContain('archived_at');
+      expect(definition).toContain('is_default');
       expect(definition).not.toContain('free_trainings_per_period');
       expect(definition).not.toContain('free_trainings_anchor_at');
+      // Expiry enforcement is a separate concern that must end the WHOLE plan at once, never just
+      // its billing — so it stays out of the money path.
       expect(definition).not.toContain('expires_at');
-      expect(definition).not.toContain('archived_at');
     }).pipe(Effect.provide(TestLayer)),
   );
 
