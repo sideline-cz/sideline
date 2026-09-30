@@ -158,7 +158,10 @@ const selectPlanForMember = (
 
 /** Bypasses `selectMembershipPlan`'s own-team scoping — the only way to point
  * `membership_plan_id` at ANOTHER team's plan, which nothing in the schema itself forbids
- * (see `1792900000_membership_selection.ts`'s own comment). */
+ * (see `1792900000_membership_selection.ts`'s own comment).
+ *
+ * This DOES fire `team_members_plan_recompute_trg` (1793600000), same as every real writer —
+ * the statement-level trigger watches the column, not the caller. */
 const setMemberPlanRaw = (memberId: TeamMember.TeamMemberId, planId: string) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen(
@@ -174,9 +177,10 @@ const setMemberPlanRaw = (memberId: TeamMember.TeamMemberId, planId: string) =>
  * ORDERING TRAP, the single most likely way these tests silently lie:
  *  - `setDefaultPlanPrice(..., allowance)` moves the allowance 0 -> N, which fires the BEFORE
  *    trigger and stamps the anchor to `now()`. So ALWAYS call this AFTER setting the allowance.
- *  - this call fires NEITHER trigger (BEFORE watches `free_trainings_included`, AFTER watches the
- *    two pricing columns), so it performs NO recompute. Every anchor change must be followed by an
- *    attendance write, or an explicit `recomputePeriod`, before asserting. */
+ *  - this call fires NEITHER trigger (BEFORE watches `free_trainings_included`; AFTER watches the
+ *    five money columns, and the anchor is deliberately not one of them), so it performs NO
+ *    recompute. Every anchor change must be followed by an attendance write, or an explicit
+ *    `recomputePeriod`, before asserting. */
 const setPlanAnchor = (planId: string, at: Date) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen(
@@ -1030,8 +1034,10 @@ describe('training_period_charges — cross-currency move of an ALREADY-PAID mem
         });
 
         // The reassignment itself — a raw FK write, exactly the shape `reassignMembershipPlan`
-        // performs. It fires NO trigger of its own (A.1): nothing happens until the next
-        // attendance write lands in the period.
+        // performs. Since 1793600000 it fires `team_members_plan_recompute_trg` and re-prices the
+        // open period on the spot; the attendance write below then recomputes the same period
+        // again, from scratch, to the same answer. The cross-currency outcome asserted here is
+        // the trigger's doing OR the attendance write's — idempotence means it cannot matter.
         const eurPlan = yield* createPlan(team.id, 8, 'EUR', 'Euro plan');
         yield* setMemberPlanRaw(member.id, eurPlan.id);
 
@@ -1330,8 +1336,8 @@ describe('training_period_charges — free trainings included (all-time)', () =>
       const generous = yield* createPlan(team.id, 100, 'CZK', 'Generous', 2);
       yield* selectPlanForMember(member.id, team.id, generous.id);
 
-      // The selection itself does not recompute (no trigger on team_members); the next
-      // attendance write does — and it must bill the whole month at the NEW allowance.
+      // The selection recomputes on its own since 1793600000 (3 attended - 2 free = 100); the
+      // attendance write below then re-prices the WHOLE month at the new allowance, from scratch.
       const extra = yield* createTraining(team.id, captain.id, TRAINING_START_3);
       yield* confirm(extra, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
 
@@ -1831,6 +1837,235 @@ describe('training_period_charges — the paid clamp on an ALL-TIME un-charge', 
       expect(after, 'a partly-paid assignment is never pruned').toBeDefined();
       expect(after?.amount_minor).toBe('100');
       expect(after?.paid_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 1793600000 — a plan change re-prices the OPEN period on its own
+// ---------------------------------------------------------------------------
+
+// Every case below deliberately performs NO attendance write after the plan change. That is the
+// whole bug: `training_period_charges` reads `tm.membership_plan_id` live, so the amounts were
+// always correct the moment anything recomputed — nothing ever did. A treasurer moved members,
+// saw the outstanding amounts unchanged, and concluded the feature was broken.
+//
+// The STATEMENT-level shape of the trigger is pinned in
+// `test/integration/migrations/recomputeFeesOnPlanChange.test.ts`; it is not observable from
+// here, because a per-row trigger produces the same amounts, just N times more expensively.
+describe('team_members_plan_recompute_trg — a plan change re-prices the open period', () => {
+  /** A team with a priced default plan, one member already billed for one training, and a
+   * pricier plan sitting unused. Returns everything a plan-change case needs to assert against. */
+  const billedMemberAndSpareplan = (username: string) =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam(username);
+      const member = yield* addBilledMember(team.id, `${username}-member`);
+      yield* setDefaultPlanPrice(team.id, 100);
+      const premium = yield* createPlan(team.id, 250, 'CZK', 'Premium');
+
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      const fee = (yield* trainingFees(team.id))[0];
+      if (fee === undefined) throw new Error('expected a CZK fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+
+      return { team, captain, member, premium, fee };
+    });
+
+  it.effect('a captain assigning a member re-prices them immediately', () =>
+    Effect.gen(function* () {
+      const { team, member, premium, fee } = yield* billedMemberAndSpareplan('assign-live');
+      const plans = yield* MembershipPlansRepository.asEffect();
+
+      const moved = yield* plans.assignMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: Option.some(premium.id),
+      });
+      expect(moved).toBe(1);
+
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('250');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a member self-selecting a plan re-prices them immediately', () =>
+    Effect.gen(function* () {
+      const { team, member, premium, fee } = yield* billedMemberAndSpareplan('select-live');
+
+      yield* selectPlanForMember(member.id, team.id, premium.id);
+
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('250');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The statement that moves the most money in one go, and the reason the trigger is
+  // statement-level. `from_plan_id: None` is the sweep of never-picked members, which is the
+  // most valuable bulk case there is (§B.5) — and the one a naive `= NULL` predicate misses.
+  it.effect('ONE bulk sweep re-prices every member it moves', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('bulk-live');
+      const a = yield* addBilledMember(team.id, 'bulk-live-a');
+      const b = yield* addBilledMember(team.id, 'bulk-live-b');
+      yield* setDefaultPlanPrice(team.id, 100);
+      const premium = yield* createPlan(team.id, 250, 'CZK', 'Premium');
+
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [
+        { team_member_id: a.id, present: true },
+        { team_member_id: b.id, present: true },
+      ]);
+      const fee = (yield* trainingFees(team.id))[0];
+      if (fee === undefined) throw new Error('expected a CZK fee row');
+
+      const plans = yield* MembershipPlansRepository.asEffect();
+      const moved = yield* plans.reassignMembershipPlan({
+        team_id: team.id,
+        from_plan_id: Option.none(),
+        to_plan_id: Option.some(premium.id),
+      });
+      // Three, not two: `seedTeam`'s captain is an active member on no plan, so the
+      // never-picked sweep takes them along. They have no attendance, so no assignment.
+      expect(moved, 'the whole never-picked set, one statement').toBe(3);
+
+      expect((yield* assignmentFor(fee.id, a.id))?.amount_minor).toBe('250');
+      expect((yield* assignmentFor(fee.id, b.id))?.amount_minor).toBe('250');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // The reverse direction, and the one an `IS NOT NULL` filter would silently drop: clearing a
+  // member back to the team default is a plan change like any other.
+  it.effect('clearing a member back to the team default re-prices them', () =>
+    Effect.gen(function* () {
+      const { team, member, premium, fee } = yield* billedMemberAndSpareplan('clear-live');
+      const plans = yield* MembershipPlansRepository.asEffect();
+
+      yield* plans.assignMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: Option.some(premium.id),
+      });
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('250');
+
+      yield* plans.assignMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: Option.none(),
+      });
+
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // A settled month must stay settled. The trigger only ever names
+  // `training_period_start(now())`, and `recompute_training_period_fees` early-returns on a past
+  // period on top of that — this pins both, by the absence of a past-period fee shell (shells are
+  // never deleted, so one appearing here would be permanent).
+  it.effect('a plan change never opens a CLOSED period', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('closed-period-live');
+      const member = yield* addBilledMember(team.id, 'closed-period-live-member');
+      yield* setDefaultPlanPrice(team.id, 100);
+      const premium = yield* createPlan(team.id, 250, 'CZK', 'Premium');
+
+      const past = yield* createTraining(team.id, captain.id, PAST_MONTH_START);
+      yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      const current = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(current, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      const plans = yield* MembershipPlansRepository.asEffect();
+      yield* plans.assignMembershipPlan({
+        member_id: member.id,
+        team_id: team.id,
+        plan_id: Option.some(premium.id),
+      });
+
+      const fees = yield* trainingFees(team.id);
+      expect(fees, 'the closed month is still never billed').toHaveLength(1);
+      const fee = feeForPeriod(fees, PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('250');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 1793600000 — the three money columns the pricing trigger used to ignore
+// ---------------------------------------------------------------------------
+
+// `membership_plans_pricing_recompute_trg` shipped watching `price_per_training_minor` and
+// `free_trainings_included` only. These three columns move exactly the same money and were
+// silently outside it — same lag, same treasurer complaint. As above, NO attendance write
+// follows any of them.
+describe('membership_plans_pricing_recompute_trg — the widened WHEN clause', () => {
+  const billedMember = (username: string, priceMinor = 100) =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam(username);
+      const member = yield* addBilledMember(team.id, `${username}-member`);
+      yield* setDefaultPlanPrice(team.id, priceMinor);
+
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      return { team, captain, member };
+    });
+
+  // The charge is emitted in the PLAN's currency and `fees` shells are keyed per currency, so a
+  // currency edit moves the member to a different shell entirely.
+  it.effect('changing a plan’s CURRENCY re-prices the open period', () =>
+    Effect.gen(function* () {
+      const { team, member } = yield* billedMember('currency-live');
+
+      yield* setDefaultPlanPrice(team.id, 100, 'EUR');
+
+      const eurFee = (yield* trainingFees(team.id)).find((f) => f.currency === 'EUR');
+      if (eurFee === undefined) throw new Error('expected a EUR fee row');
+      expect((yield* assignmentFor(eurFee.id, member.id))?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // `training_period_charges` resolves an ARCHIVED plan to the team default, so archiving
+  // re-prices everyone still on it. `deleteMembershipPlan` archives — nothing hard-deletes a
+  // plan — which makes this the ordinary way a plan stops applying.
+  it.effect('ARCHIVING a plan re-prices the members who were on it', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('archive-live');
+      const member = yield* addBilledMember(team.id, 'archive-live-member');
+      yield* setDefaultPlanPrice(team.id, 100);
+      const premium = yield* createPlan(team.id, 250, 'CZK', 'Premium');
+      yield* selectPlanForMember(member.id, team.id, premium.id);
+
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      const fee = (yield* trainingFees(team.id))[0];
+      if (fee === undefined) throw new Error('expected a CZK fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('250');
+
+      const plans = yield* MembershipPlansRepository.asEffect();
+      yield* plans.archiveMembershipPlan(premium.id as never, team.id);
+
+      expect(
+        (yield* assignmentFor(fee.id, member.id))?.amount_minor,
+        'falls back to the team default',
+      ).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // A member with `membership_plan_id IS NULL` is billed by whichever plan carries `is_default`,
+  // so moving the flag re-prices every one of them at once — the widest blast radius of the three.
+  // `setDefaultMembershipPlan` runs its clear and its mark in ONE transaction, so the transient
+  // zero-default state (in which the member resolves to no plan at all) is never observable here.
+  it.effect('moving the DEFAULT flag re-prices the members on no plan', () =>
+    Effect.gen(function* () {
+      const { team, member } = yield* billedMember('default-flag-live');
+      const premium = yield* createPlan(team.id, 250, 'CZK', 'Premium');
+      const fee = (yield* trainingFees(team.id))[0];
+      if (fee === undefined) throw new Error('expected a CZK fee row');
+
+      const plans = yield* MembershipPlansRepository.asEffect();
+      expect(yield* plans.setDefaultMembershipPlan(premium.id as never, team.id)).toBe(1);
+
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('250');
     }).pipe(Effect.provide(TestLayer)),
   );
 });
