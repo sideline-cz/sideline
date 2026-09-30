@@ -105,7 +105,7 @@ function MembershipPlanFormDialog({
     isEdit && plan ? formatMinorToMajor(plan.pricePerTrainingMinor, plan.currency) : '',
   );
   const [freeTrainingsStr, setFreeTrainingsStr] = React.useState(
-    isEdit && plan && plan.freeTrainingsPerPeriod > 0 ? String(plan.freeTrainingsPerPeriod) : '',
+    isEdit && plan && plan.freeTrainingsIncluded > 0 ? String(plan.freeTrainingsIncluded) : '',
   );
   const [expiresAt, setExpiresAt] = React.useState(
     isEdit && plan && Option.isSome(plan.expiresAt) ? formatLocalDate(plan.expiresAt.value) : '',
@@ -126,9 +126,7 @@ function MembershipPlanFormDialog({
         isEdit && plan ? formatMinorToMajor(plan.pricePerTrainingMinor, plan.currency) : '',
       );
       setFreeTrainingsStr(
-        isEdit && plan && plan.freeTrainingsPerPeriod > 0
-          ? String(plan.freeTrainingsPerPeriod)
-          : '',
+        isEdit && plan && plan.freeTrainingsIncluded > 0 ? String(plan.freeTrainingsIncluded) : '',
       );
       setExpiresAt(
         isEdit && plan && Option.isSome(plan.expiresAt)
@@ -183,7 +181,7 @@ function MembershipPlanFormDialog({
     }
 
     // Blank means "no allowance" (0), same convention as the two amount fields above. The
-    // bounds mirror `FreeTrainingsPerPeriod` so the user sees a field error instead of
+    // bounds mirror `FreeTrainingsIncluded` so the user sees a field error instead of
     // `decodeSync` throwing past the try/catch below.
     const freeTrainings = Number(freeTrainingsStr.trim() === '' ? '0' : freeTrainingsStr);
     if (!Number.isInteger(freeTrainings) || freeTrainings < 0 || freeTrainings > 999) {
@@ -202,8 +200,10 @@ function MembershipPlanFormDialog({
       priceMinor: Schema.decodeSync(Fee.AmountMinor)(priceMinor),
       currency: Schema.decodeSync(Fee.CurrencyCode)(currency),
       pricePerTrainingMinor: Schema.decodeSync(Fee.AmountMinor)(pricePerTrainingMinor),
-      freeTrainingsPerPeriod: Schema.decodeSync(MembershipPlan.FreeTrainingsPerPeriod)(
-        freeTrainings,
+      // Always `Some` — the key is optional on the wire only so that an OLD bundle, which does
+      // not know the field, gets "keep the stored value" instead of a 400. This bundle knows it.
+      freeTrainingsIncluded: Option.some(
+        Schema.decodeSync(MembershipPlan.FreeTrainingsIncluded)(freeTrainings),
       ),
       expiresAt: parseExpiresAtField(expiresAt),
     };
@@ -714,9 +714,9 @@ export function MembershipPlansPage({
             });
             // Only shown when there is one — an extra "0 free" on every plan is noise.
             const freeTrainingsLabel =
-              plan.freeTrainingsPerPeriod > 0
+              plan.freeTrainingsIncluded > 0
                 ? ` · ${tr('membershipPlan_freeTrainingsSummary', {
-                    count: String(plan.freeTrainingsPerPeriod),
+                    count: String(plan.freeTrainingsIncluded),
                   })}`
                 : '';
             const expiresLabel = Option.isSome(plan.expiresAt)

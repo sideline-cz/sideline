@@ -21,7 +21,7 @@ type MembershipPlanRowLike = {
   readonly price_minor: MembershipPlanApi.MembershipPlanInfo['priceMinor'];
   readonly currency: MembershipPlanApi.MembershipPlanInfo['currency'];
   readonly price_per_training_minor: MembershipPlanApi.MembershipPlanInfo['pricePerTrainingMinor'];
-  readonly free_trainings_per_period: MembershipPlanApi.MembershipPlanInfo['freeTrainingsPerPeriod'];
+  readonly free_trainings_included: MembershipPlanApi.MembershipPlanInfo['freeTrainingsIncluded'];
   readonly expires_at: MembershipPlanApi.MembershipPlanInfo['expiresAt'];
   readonly is_default: boolean;
 };
@@ -39,7 +39,7 @@ export const toMembershipPlanInfo = (
     priceMinor: row.price_minor,
     currency: row.currency,
     pricePerTrainingMinor: row.price_per_training_minor,
-    freeTrainingsPerPeriod: row.free_trainings_per_period,
+    freeTrainingsIncluded: row.free_trainings_included,
     expiresAt: row.expires_at,
     isDefault: row.is_default,
   });
@@ -148,6 +148,9 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'finance:manage_fees', forbidden),
               ),
+              // `free_trainings_included` is the raw `Option` — no `getOrElse` here. INSERT
+              // COALESCEs a `None` to 0 (no stored value to keep on a create); UPDATE COALESCEs
+              // it to the existing column. See `MembershipPlansRepository.updateQuery`.
               Effect.bind('created', () =>
                 plans.insertMembershipPlan({
                   team_id: teamId,
@@ -155,7 +158,7 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                   price_minor: payload.priceMinor,
                   currency: payload.currency,
                   price_per_training_minor: payload.pricePerTrainingMinor,
-                  free_trainings_per_period: payload.freeTrainingsPerPeriod,
+                  free_trainings_included: payload.freeTrainingsIncluded,
                   expires_at: payload.expiresAt,
                 }),
               ),
@@ -196,7 +199,7 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                   price_minor: payload.priceMinor,
                   currency: payload.currency,
                   price_per_training_minor: payload.pricePerTrainingMinor,
-                  free_trainings_per_period: payload.freeTrainingsPerPeriod,
+                  free_trainings_included: payload.freeTrainingsIncluded,
                   expires_at: payload.expiresAt,
                 }),
               ),

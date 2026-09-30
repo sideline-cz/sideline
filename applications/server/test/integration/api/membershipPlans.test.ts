@@ -191,11 +191,32 @@ const getPlanRows = (teamId: Team.TeamId) =>
     ),
   );
 
+/** The allowance columns, which `getPlanRows` deliberately does not carry — `free_trainings_anchor_at`
+ * is only ever asserted by the re-stamp cases below. */
+const getPlanAllowance = (planId: string) =>
+  runSeeded(
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.andThen(
+        (sql) => sql<{ free_trainings_included: number; free_trainings_anchor_at: Date }>`
+          SELECT free_trainings_included, free_trainings_anchor_at
+          FROM membership_plans WHERE id = ${planId}
+        `,
+      ),
+      Effect.map((rows) => rows[0]),
+    ),
+  );
+
+// `freeTrainingsIncluded` is an OPTIONAL KEY on the request schema (`applications/server/AGENTS.md`
+// rule 5): web deploys LAST, so old bundles omit it for the whole rollout and a required field
+// would 400 every one of their saves. Absent means KEEP THE STORED VALUE on an update (0 on a
+// create) -- see the two cases in section 6 below. It is spelled out here because every other case
+// in this file wants a known, explicit value.
 const basicPayload = {
   name: 'Adult membership',
   priceMinor: 50000,
   currency: 'CZK',
   pricePerTrainingMinor: 0,
+  freeTrainingsIncluded: 0,
   expiresAt: null,
 };
 
@@ -354,6 +375,29 @@ describe('POST /teams/:teamId/membership-plans', () => {
     expect(body.expiresAt).toBeNull();
   });
 
+  // The INSERT half of rule 5's optional key: there is no stored value to keep on a create, so
+  // `COALESCE(<param>::int, 0)` in `insertQuery` is what an absent key must land on. NOT NULL on
+  // the column means a regression here is a 500, not a silent 0 — but the assertion pins the
+  // VALUE, which is the part an `EXCLUDED`-style mistake would get wrong.
+  it('a create that OMITS freeTrainingsIncluded stores 0', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const { freeTrainingsIncluded: _omitted, ...withoutAllowance } = basicPayload;
+
+    const response = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/membership-plans`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(withoutAllowance),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    const body = await asJson(response);
+    expect(body.freeTrainingsIncluded).toBe(0);
+    expect((await getPlanAllowance(body.membershipPlanId))?.free_trainings_included).toBe(0);
+  });
+
   it('round-trips an expiresAt Some value', async () => {
     const fixture = await seedFixture(['finance:manage_fees']);
     sessionsStore.set('actor-token', fixture.actorUserId);
@@ -459,6 +503,103 @@ describe('PATCH /teams/:teamId/membership-plans/:membershipPlanId — full repla
 
     const [after] = await getPlanRows(fixture.team.id);
     expect(after?.name).toBeNull();
+  });
+
+  // THE POINT OF RULE 5 (`applications/server/AGENTS.md` → Wire-value projection & effective-value
+  // guards). Web deploys LAST, so for the whole rollout window a new server is serving old bundles
+  // that do not know `freeTrainingsIncluded` and omit it from this FULL-ROW overwrite. Two ways to
+  // get this wrong, both of which this case fails on:
+  //   - a plain required field  -> 400 on every save from those bundles;
+  //   - `withDecodingDefaultKey(() => 0)` (or COALESCEing `EXCLUDED`) -> the allowance is silently
+  //     zeroed, and the manager's correction then re-stamps a FRESH anchor, handing out the
+  //     allowance a second time.
+  // Hence the anchor assertion alongside the value one: `free_trainings_anchor_at` must not move.
+  it('an update that OMITS freeTrainingsIncluded keeps the stored allowance and the anchor', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+
+    const created = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/membership-plans`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(basicPayload),
+      }),
+    ).then(asJson);
+    const atCreate = await getPlanAllowance(created.membershipPlanId);
+
+    // 0 -> 2 is the one transition that re-stamps the anchor. Doing it here is what makes the
+    // assertion below meaningful: an unmoved anchor only proves something once it HAS moved.
+    const raised = await handler(
+      new Request(
+        `http://localhost/teams/${fixture.team.id}/membership-plans/${created.membershipPlanId}`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...basicPayload, freeTrainingsIncluded: 2 }),
+        },
+      ),
+    ).then(asJson);
+    expect(raised.freeTrainingsIncluded).toBe(2);
+    const afterRaise = await getPlanAllowance(created.membershipPlanId);
+    expect(afterRaise?.free_trainings_anchor_at.getTime()).toBeGreaterThan(
+      atCreate?.free_trainings_anchor_at.getTime() ?? 0,
+    );
+
+    // The old bundle's save: every key it knows, nothing it does not.
+    const { freeTrainingsIncluded: _omitted, ...withoutAllowance } = basicPayload;
+    const updateResponse = await handler(
+      new Request(
+        `http://localhost/teams/${fixture.team.id}/membership-plans/${created.membershipPlanId}`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...withoutAllowance, priceMinor: 12300 }),
+        },
+      ),
+    );
+
+    expect(updateResponse.status).toBe(200);
+    const updated = await asJson(updateResponse);
+    expect(updated.priceMinor).toBe(12300);
+    expect(updated.freeTrainingsIncluded).toBe(2);
+
+    const stored = await getPlanAllowance(created.membershipPlanId);
+    expect(stored?.free_trainings_included).toBe(2);
+    // COALESCE writes the SAME value back, so OLD = NEW = 2 and
+    // `membership_plans_stamp_free_trainings_anchor_trg`'s
+    // `WHEN (OLD.free_trainings_included = 0 AND NEW.free_trainings_included > 0)` is false.
+    expect(stored?.free_trainings_anchor_at.getTime()).toBe(
+      afterRaise?.free_trainings_anchor_at.getTime(),
+    );
+  });
+
+  it('an update that SENDS freeTrainingsIncluded still overwrites the stored allowance', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+
+    const created = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/membership-plans`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...basicPayload, freeTrainingsIncluded: 4 }),
+      }),
+    ).then(asJson);
+    expect(created.freeTrainingsIncluded).toBe(4);
+
+    const updateResponse = await handler(
+      new Request(
+        `http://localhost/teams/${fixture.team.id}/membership-plans/${created.membershipPlanId}`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...basicPayload, freeTrainingsIncluded: 0 }),
+        },
+      ),
+    );
+
+    expect(updateResponse.status).toBe(200);
+    expect((await asJson(updateResponse)).freeTrainingsIncluded).toBe(0);
+    expect((await getPlanAllowance(created.membershipPlanId))?.free_trainings_included).toBe(0);
   });
 });
 
