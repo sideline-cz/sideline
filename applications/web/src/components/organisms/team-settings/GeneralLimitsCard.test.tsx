@@ -32,6 +32,7 @@ const storedSettings = (over: Record<string, unknown> = {}) => ({
   rsvpRemindersEnabled: true,
   requireCompleteProfile: false,
   autoAssignVariableSymbols: false,
+  autoApplyCreditEnabled: false,
   rsvpReminderDaysBefore: 2,
   rsvpReminderDaysBeforeOverrides: {},
   maxMissedRsvps: 3,

@@ -27,6 +27,7 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
+import { MemberCreditsRepository } from '~/repositories/MemberCreditsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentReminderSyncEventsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
@@ -40,6 +41,7 @@ import {
 } from '~/repositories/WeeklySummaryRepository.js';
 import { AgeCheckCron } from '~/services/AgeCheckCron.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { AutoApplyCreditCron } from '~/services/AutoApplyCreditCron.js';
 import { BankSyncPoller } from '~/services/BankSyncPoller.js';
 import { BankTokenExpiryCron } from '~/services/BankTokenExpiryCron.js';
 import { CoachingStatusCron } from '~/services/CoachingStatusCron.js';
@@ -216,6 +218,15 @@ const ClaimRequestCronEffect = TrainingClaimRequestCron.asEffect().pipe(
   ),
 );
 
+// Its own connection, like every other cron here: the sweep calls settle, which runs a
+// transaction holding member_credit_accounts and fee_assignments locks, and sharing a pool with
+// the request path would let a slow sweep starve it.
+const AutoApplyCreditCronEffect = AutoApplyCreditCron.asEffect().pipe(
+  Effect.provide(
+    MemberCreditsRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
 const CoachingStatusRepositoriesLive = Layer.mergeAll(
   EventsRepository.Default,
   EventSyncEventsRepository.Default,
@@ -308,6 +319,7 @@ Effect.Do.pipe(
         RulesQuizCronEffect,
         PaymentReminderCronEffect,
         ClaimRequestCronEffect,
+        AutoApplyCreditCronEffect,
         CoachingStatusCronEffect,
         InviteAcceptanceSweepCronEffect,
         EmailSummarizerCronEffect,

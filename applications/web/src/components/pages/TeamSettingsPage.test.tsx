@@ -66,6 +66,7 @@ const baseSettings = {
   rsvpRemindersEnabled: true,
   requireCompleteProfile: false,
   autoAssignVariableSymbols: false,
+  autoApplyCreditEnabled: false,
   rsvpReminderDaysBefore: 2,
   rsvpReminderDaysBeforeOverrides: {},
   rsvpLockHoursBefore: Option.none(),

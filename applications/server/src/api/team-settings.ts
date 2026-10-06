@@ -95,6 +95,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordEventsChannelId: Option.none(),
                     requireCompleteProfile: false,
                     autoAssignVariableSymbols: false,
+                    autoApplyCreditEnabled: false,
                   }),
                 onSome: (s) =>
                   new TeamSettingsApi.TeamSettingsInfo({
@@ -130,6 +131,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordEventsChannelId: s.discord_events_channel_id,
                     requireCompleteProfile: s.require_complete_profile,
                     autoAssignVariableSymbols: s.auto_assign_variable_symbols,
+                    autoApplyCreditEnabled: Option.isSome(s.auto_apply_credit_by_user_id),
                   }),
               }),
             ),
@@ -165,7 +167,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   lockFingerprint(s.rsvp_lock_hours_before, s.rsvp_lock_hours_before_overrides),
               }),
             ),
-            Effect.bind('result', ({ existing, oldLock, oldTz }) =>
+            Effect.bind('result', ({ currentUser, existing, oldLock, oldTz }) =>
               SqlClient.SqlClient.asEffect().pipe(
                 Effect.flatMap((sql) =>
                   sql
@@ -267,6 +269,16 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                               payload.autoAssignVariableSymbols,
                               () => false,
                             ),
+                            // The boolean the client sends is PROJECTED onto a user id: enabling
+                            // stamps whoever flipped it, because every payments row the sweep
+                            // writes needs a recorder and a cron has no caller of its own.
+                            // Disabling clears it, which is what turns the feature off.
+                            autoApplyCreditByUserId: Option.getOrElse(
+                              payload.autoApplyCreditEnabled,
+                              () => false,
+                            )
+                              ? Option.some(currentUser.id)
+                              : Option.none(),
                           }),
                         onSome: (s) =>
                           settings.upsert({
@@ -403,6 +415,14 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                               payload.autoAssignVariableSymbols,
                               () => s.auto_assign_variable_symbols,
                             ),
+                            // Absent field leaves the stored id (and therefore the recorder)
+                            // exactly as it was; present-and-true RE-STAMPS the current caller, so
+                            // the name on future rows is whoever last affirmed the setting.
+                            autoApplyCreditByUserId: Option.match(payload.autoApplyCreditEnabled, {
+                              onNone: () => s.auto_apply_credit_by_user_id,
+                              onSome: (enabled) =>
+                                enabled ? Option.some(currentUser.id) : Option.none<string>(),
+                            }),
                           }),
                       }).pipe(
                         // Timezone change re-anchors this team's all-day events —
@@ -561,6 +581,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   discordEventsChannelId: result.discord_events_channel_id,
                   requireCompleteProfile: result.require_complete_profile,
                   autoAssignVariableSymbols: result.auto_assign_variable_symbols,
+                  autoApplyCreditEnabled: Option.isSome(result.auto_apply_credit_by_user_id),
                 }),
             ),
             Effect.catchTag(

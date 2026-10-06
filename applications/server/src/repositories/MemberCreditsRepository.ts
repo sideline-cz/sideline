@@ -11,14 +11,14 @@
  * `FOR UPDATE` that would pull `team_members` into the lock order.
  */
 import {
-  type Auth,
+  Auth,
   Fee,
   FeeAssignment,
   FinanceApi,
   MemberCredit,
   Payment,
   SettlementPlan,
-  type Team,
+  Team,
   TeamMember,
 } from '@sideline/domain';
 import * as Schemas from '@sideline/effect-lib/Schemas';
@@ -514,7 +514,104 @@ export const make = (options: MemberCreditsRepositoryOptions = {}) =>
           catchSqlErrors,
         );
 
-      return { settle, voidDeposit, listAccountsByMember, listDepositsByMember };
+      /**
+       * Every (member, currency) the auto-apply sweep should settle this tick, for teams that
+       * opted in (`team_settings.auto_apply_credit_by_user_id IS NOT NULL` -- the column is both
+       * the flag and the user every resulting payment is recorded under). Read-only: no `FOR UPDATE`, deliberately absent from the lock-order table.
+       * `settle` re-reads all of it under its own locks and fails `SettlementStale` if anything
+       * moved in between, which is the sweep's cue to skip and try again next tick.
+       *
+       * The outstanding sum MIRRORS `settle`'s own `lockAssignments` predicate clause for
+       * clause — base tables (never `fee_assignment_status_v`), `f.archived_at IS NULL`,
+       * `fa.stored_status = 'active'`, `fa.amount_minor > fa.paid_minor`. A single clause of
+       * drift makes `expectedOutstandingMinor` disagree with what `settle` computes and the
+       * sweep 409s on every tick forever, writing nothing and logging nothing alarming.
+       *
+       * THE TRAINING GATE (the whole reason this is a bespoke query rather than "every member
+       * with a balance"). `recompute_training_period_fees` revises `fee_assignments.amount_minor`
+       * on every attendance, plan or price change until the period is over, and its S3 clamp is
+       * `GREATEST(charge, paid_minor)` -- so credit applied to a still-open training fee that
+       * later recomputes DOWNWARD freezes that fee at the inflated amount it was already paid.
+       * Nothing is corrupted (the clamp is what guarantees that) but the member has over-applied
+       * credit against a fee that shrank, and unwinding it means a treasurer voiding the credit
+       * payment by hand.
+       *
+       * So wait for the period to close. Once `p_period_start < training_period_start(now())`
+       * the recompute early-returns (migration 1793200000) and the amount can never move again,
+       * which turns the whole hazard from "tolerated" into "unreachable". The predicate is
+       * lifted verbatim from `FeeAssignmentsRepository`'s `assigned_candidates` branch, which
+       * withholds the assignment DM from an open-period training fee for precisely this reason.
+       *
+       * The gate is per MEMBER, not per assignment: skipping just the training row and settling
+       * the rest is not expressible, because `settle` derives its own candidate set and the
+       * stale check reconciles against the FULL outstanding total. One open training fee
+       * therefore parks a member's whole auto-apply until the month turns. Deliberate -- a
+       * treasurer who wants it sooner still has Settle, which is unchanged.
+       * NOTE: never use backticks in this comment - the whole query is a template literal.
+       */
+      const findAutoApplyCandidates = () =>
+        sql<{
+          readonly team_id: string;
+          readonly team_member_id: string;
+          readonly currency: string;
+          readonly balance_minor: string;
+          readonly outstanding_minor: string;
+          readonly recorded_by_user_id: string;
+        }>`
+          SELECT tm.team_id::text                      AS team_id,
+                 fa.team_member_id::text               AS team_member_id,
+                 f.currency                            AS currency,
+                 a.balance_minor::text                 AS balance_minor,
+                 SUM(fa.amount_minor - fa.paid_minor)::text AS outstanding_minor,
+                 ts.auto_apply_credit_by_user_id::text  AS recorded_by_user_id
+            FROM fee_assignments fa
+            JOIN fees f           ON f.id = fa.fee_id
+            JOIN team_members tm  ON tm.id = fa.team_member_id AND tm.team_id = f.team_id
+            JOIN team_settings ts ON ts.team_id = tm.team_id
+            JOIN member_credit_accounts a
+              ON a.team_member_id = fa.team_member_id AND a.currency = f.currency
+           WHERE ts.auto_apply_credit_by_user_id IS NOT NULL
+             AND a.balance_minor > 0
+             AND f.archived_at IS NULL
+             AND fa.stored_status = 'active'
+             AND fa.amount_minor > fa.paid_minor
+             AND NOT EXISTS (
+               SELECT 1
+                 FROM fee_assignments fa2
+                 JOIN fees f2 ON f2.id = fa2.fee_id
+                WHERE fa2.team_member_id = fa.team_member_id
+                  AND f2.team_id         = f.team_id
+                  AND f2.currency        = f.currency
+                  AND f2.archived_at IS NULL
+                  AND fa2.stored_status  = 'active'
+                  AND fa2.amount_minor   > fa2.paid_minor
+                  AND f2.kind            = 'training'
+                  AND (f2.period_start + INTERVAL '1 month')::timestamptz > now()
+             )
+           GROUP BY tm.team_id, fa.team_member_id, f.currency, a.balance_minor,
+                    ts.auto_apply_credit_by_user_id
+           ORDER BY fa.team_member_id ASC, f.currency ASC
+        `.pipe(
+          Effect.map((rows) =>
+            rows.map((row) => ({
+              teamId: Schema.decodeSync(Team.TeamId)(row.team_id),
+              teamMemberId: Schema.decodeSync(TeamMember.TeamMemberId)(row.team_member_id),
+              currency: Schema.decodeSync(Fee.CurrencyCode)(row.currency),
+              balanceMinor: Number(row.balance_minor),
+              outstandingMinor: Number(row.outstanding_minor),
+              recordedByUserId: Schema.decodeSync(Auth.UserId)(row.recorded_by_user_id),
+            })),
+          ),
+          catchSqlErrors,
+        );
+
+      return {
+        settle,
+        voidDeposit,
+        listAccountsByMember,
+        listDepositsByMember,
+        findAutoApplyCandidates,
+      };
     }),
   );
 

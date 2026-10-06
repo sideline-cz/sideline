@@ -194,6 +194,23 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
   own('team_invites', 'users', ['created_by'], authorship),
   own('team_members', 'users', ['user_id'], pseudonymised),
   own('team_onboarding_tokens', 'users', ['created_by', 'consumed_by'], authorship, ['token_hash']),
+  // Same shape as `bank_sync_config` above, and for the same reason: the only tie to a person is
+  // who last saved the setting.
+  skip(
+    'team_settings',
+    'users',
+    ['auto_apply_credit_by_user_id'],
+    "The club's configuration — reminder schedules, Discord channel ids, timezone. None of it " +
+      'is personal data ABOUT this person; the single user reference records who turned ' +
+      'automatic credit application on, so that the payments it writes have a recorder.',
+    {
+      kind: 'keep',
+      reason:
+        "Team-level configuration; deleting it would reset every one of the team's settings. " +
+        'The reference is a plain FK and is dropped to NULL when `users` goes (ON DELETE SET ' +
+        'NULL), which also turns the automatic credit sweep off for that team.',
+    },
+  ),
   own('teams', 'users', ['created_by'], authorship),
   own('translation_overrides', 'users', ['updated_by'], authorship),
 

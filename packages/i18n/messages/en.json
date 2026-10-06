@@ -2853,6 +2853,8 @@
   "teamGen_warningUnevenTeamSizes": "Teams have uneven sizes due to an odd number of players.",
   "teamSettings_autoAssignVariableSymbols": "Assign variable symbols automatically",
   "teamSettings_autoAssignVariableSymbols_help": "New members get the next free symbol the moment they join. Existing members without one are untouched — use “Assign variable symbols” for those.",
+  "teamSettings_autoApplyCreditEnabled": "Use member credit automatically",
+  "teamSettings_autoApplyCreditEnabled_help": "Credit a member holds is put towards their unpaid fees on its own, oldest due date first — the same allocation Settle would make. Training fees wait until their month is over, because the amount is still being recalculated until then.",
   "teamSettings_achievementChannel": "Achievement channel",
   "teamSettings_achievementChannelDisabled": "None — don't post achievements",
   "teamSettings_achievementChannelHelp": "Discord channel where members are notified when they earn an achievement. Select 'None' to stop posting achievement notifications.",
