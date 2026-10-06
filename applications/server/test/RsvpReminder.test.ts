@@ -595,6 +595,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         discord_role_format: '{emoji} {name}',
         discord_channel_format: '{emoji}│{name}',
         require_complete_profile: false,
+        auto_assign_variable_symbols: false,
       }),
     ),
   findByTeamId: () =>
@@ -630,6 +631,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         discord_role_format: '{emoji} {name}',
         discord_channel_format: '{emoji}│{name}',
         require_complete_profile: false,
+        auto_assign_variable_symbols: false,
       }),
     ),
   upsertSettings: (input: {
@@ -684,6 +686,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       discord_role_format: '{emoji} {name}',
       discord_channel_format: '{emoji}│{name}',
       require_complete_profile: false,
+      auto_assign_variable_symbols: false,
     }),
   upsert: (input: {
     teamId: string;
@@ -752,6 +755,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       discord_role_format: '{emoji} {name}',
       discord_channel_format: '{emoji}│{name}',
       require_complete_profile: false,
+      auto_assign_variable_symbols: false,
     });
   },
   getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),

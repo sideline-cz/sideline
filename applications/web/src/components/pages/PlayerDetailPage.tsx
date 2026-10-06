@@ -122,6 +122,9 @@ interface PlayerDetailPageProps {
    * attempt. Rendered as a field-level message (never a toast, since it names another member and
    * a toast would vanish before that name was read). */
   variableSymbolConflict?: { holderMemberId: string; holderName: string | null } | null;
+  /** Fetches the next free `{year}{seq3}` symbol for this team, or `null` if there is none to
+   * offer. Fills the field but does NOT save — the treasurer still reviews and submits. */
+  onSuggestVariableSymbol?: () => Promise<string | null>;
   onAssignRole: (roleId: string) => Promise<void>;
   onUnassignRole: (roleId: string) => Promise<void>;
   onAddToRoster: (rosterId: string) => Promise<void>;
@@ -171,6 +174,7 @@ export function PlayerDetailPage({
   onRefresh,
   onSave,
   variableSymbolConflict,
+  onSuggestVariableSymbol,
   onAssignRole,
   onUnassignRole,
   onAddToRoster,
@@ -185,6 +189,7 @@ export function PlayerDetailPage({
 }: PlayerDetailPageProps) {
   const { formatDate } = useFormatDate();
   const isInactive = !player.active;
+  const [suggestingVs, setSuggestingVs] = React.useState(false);
 
   // Every group in the team the viewer knows about (their own groups + everything they could
   // still add the member to) — the only source of `name -> groupId` this page has for building
@@ -338,7 +343,26 @@ export function PlayerDetailPage({
                             }
                           />
                         </FormControl>
-                        <p className='text-xs text-muted-foreground'>{tr('members_vs_help')}</p>
+                        <div className='flex items-center justify-between gap-2'>
+                          <p className='text-xs text-muted-foreground'>{tr('members_vs_help')}</p>
+                          {onSuggestVariableSymbol ? (
+                            <Button
+                              type='button'
+                              variant='ghost'
+                              size='sm'
+                              disabled={suggestingVs}
+                              onClick={async () => {
+                                setSuggestingVs(true);
+                                const next = await onSuggestVariableSymbol();
+                                setSuggestingVs(false);
+                                if (next === null) return;
+                                form.setValue('variableSymbol', next, { shouldDirty: true });
+                              }}
+                            >
+                              {tr('members_vs_suggest')}
+                            </Button>
+                          ) : null}
+                        </div>
                         {variableSymbolConflict ? (
                           <p id='variable-symbol-conflict' className='text-sm text-destructive'>
                             {tr('members_vs_duplicate', {

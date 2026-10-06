@@ -31,6 +31,7 @@ const storedSettings = (over: Record<string, unknown> = {}) => ({
   minPlayersThreshold: 8,
   rsvpRemindersEnabled: true,
   requireCompleteProfile: false,
+  autoAssignVariableSymbols: false,
   rsvpReminderDaysBefore: 2,
   rsvpReminderDaysBeforeOverrides: {},
   maxMissedRsvps: 3,

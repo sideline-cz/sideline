@@ -64,6 +64,7 @@ export type SettingsFormValues = {
   minPlayersThreshold: string;
   rsvpRemindersEnabled: boolean;
   requireCompleteProfile: boolean;
+  autoAssignVariableSymbols: boolean;
   rsvpReminderDaysBefore: string;
   maxMissedRsvps: string;
   claimRequestDaysBefore: string;
@@ -131,6 +132,7 @@ export const settingsFormFrom = (
   minPlayersThreshold: String(settings.minPlayersThreshold),
   rsvpRemindersEnabled: settings.rsvpRemindersEnabled,
   requireCompleteProfile: settings.requireCompleteProfile,
+  autoAssignVariableSymbols: settings.autoAssignVariableSymbols,
   rsvpReminderDaysBefore: String(settings.rsvpReminderDaysBefore),
   maxMissedRsvps: String(settings.maxMissedRsvps),
   claimRequestDaysBefore: String(settings.claimRequestDaysBefore),
@@ -284,6 +286,7 @@ export const settingsRequestFrom = (
   minPlayersThreshold: Option.some(Number.parseInt(values.minPlayersThreshold, 10)),
   rsvpRemindersEnabled: Option.some(values.rsvpRemindersEnabled),
   requireCompleteProfile: Option.some(values.requireCompleteProfile),
+  autoAssignVariableSymbols: Option.some(values.autoAssignVariableSymbols),
   rsvpReminderDaysBefore: Option.some(Number.parseInt(values.rsvpReminderDaysBefore, 10)),
   maxMissedRsvps: Option.some(Number.parseInt(values.maxMissedRsvps, 10)),
   claimRequestDaysBefore: Option.some(Number(values.claimRequestDaysBefore)),

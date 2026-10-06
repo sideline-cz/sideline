@@ -398,6 +398,21 @@ function MemberDetailRoute() {
     router.invalidate();
   }, [router]);
 
+  // Reuses the bulk dialog's generator rather than a second "next free symbol" rule — the two
+  // must never disagree about what `{year}{seq3}` means. The endpoint only proposes for members
+  // who have NO symbol yet, so prefer this member's own entry and fall back to the first
+  // proposal, which is free by construction. `null` means it had nothing to offer.
+  const handleSuggestVariableSymbol = React.useCallback(async (): Promise<string | null> => {
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) => api.bankSync.suggestVariableSymbols({ params: { teamId } })),
+      Effect.mapError(() => ClientError.make(tr('members_saveFailed'))),
+      run({}),
+    );
+    if (Option.isNone(result)) return null;
+    const mine = result.value.find((s) => s.memberId === memberIdRaw);
+    return (mine ?? result.value[0])?.suggestedVariableSymbol ?? null;
+  }, [teamId, memberIdRaw, run]);
+
   return (
     <PlayerDetailPage
       teamId={teamIdRaw}
@@ -422,6 +437,7 @@ function MemberDetailRoute() {
       onRefresh={handleRefresh}
       onSave={handleSave}
       variableSymbolConflict={vsConflict}
+      onSuggestVariableSymbol={handleSuggestVariableSymbol}
       onAssignRole={handleAssignRole}
       onUnassignRole={handleUnassignRole}
       onAddToRoster={handleAddToRoster}

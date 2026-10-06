@@ -52,7 +52,9 @@ const twoMembersOneHolding = (tag: string, heldVs: string) =>
 const expectConflict = (result: { readonly _tag: string }, holderMemberId: string) => {
   expect(result._tag).toBe('Failure');
   const failure = (
-    result as { readonly failure: { _tag: string; holderMemberId: string; holderName: unknown } }
+    result as unknown as {
+      readonly failure: { _tag: string; holderMemberId: string; holderName: unknown };
+    }
   ).failure;
   expect(failure._tag).toBe('VariableSymbolConflict');
   expect(failure.holderMemberId).toBe(holderMemberId);

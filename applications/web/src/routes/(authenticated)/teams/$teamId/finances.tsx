@@ -147,7 +147,7 @@ function FinancesRoute() {
   const frozenSettleRow = settleRow ?? settleRowRef.current;
   const activeSettleRow = frozenSettleRow
     ? (rows.find(
-        (r) =>
+        (r: MemberOverviewRow) =>
           r.teamMemberId === frozenSettleRow.teamMemberId &&
           r.currency === frozenSettleRow.currency,
       ) ?? frozenSettleRow)
@@ -167,12 +167,12 @@ function FinancesRoute() {
     if (!activeSettleRow) return [];
     return assignments
       .filter(
-        (a) =>
+        (a: FeeAssignmentView) =>
           a.teamMemberId === activeSettleRow.teamMemberId &&
           a.currency === activeSettleRow.currency &&
           (a.status === 'pending' || a.status === 'partial' || a.status === 'overdue'),
       )
-      .map((a) => ({
+      .map((a: FeeAssignmentView) => ({
         assignmentId: a.assignmentId,
         feeId: a.feeId,
         feeName: a.feeName,

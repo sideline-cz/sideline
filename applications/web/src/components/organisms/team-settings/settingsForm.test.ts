@@ -45,6 +45,7 @@ const BASE: SettingsFormValues = {
   roleFormat: '{emoji} {name}',
   channelFormat: '{emoji}│{name}',
   requireCompleteProfile: false,
+  autoAssignVariableSymbols: false,
   // Blank = no override, so the whole feature is off in the baseline.
   reminderDaysBefore_training: '',
   reminderDaysBefore_match: '',
@@ -95,6 +96,7 @@ const EDITED: SettingsFormValues = {
   roleFormat: '{name}',
   channelFormat: '{name}',
   requireCompleteProfile: true,
+  autoAssignVariableSymbols: true,
   reminderDaysBefore_training: '1',
   reminderDaysBefore_match: '2',
   reminderDaysBefore_tournament: '7',
@@ -418,6 +420,7 @@ describe('case 7 — a stored per-type `null` survives a save of an unrelated fi
     minPlayersThreshold: 8,
     rsvpRemindersEnabled: true,
     requireCompleteProfile: false,
+    autoAssignVariableSymbols: false,
     rsvpReminderDaysBefore: 2,
     rsvpReminderDaysBeforeOverrides: {},
     maxMissedRsvps: 3,
