@@ -544,40 +544,53 @@ const make = Effect.gen(function* () {
   // index (`uq_team_members_team_variable_symbol`) can raise. Order matters: the unique-violation
   // catch must run BEFORE `catchSqlErrors`, which would otherwise turn the raw `SqlError` into an
   // untyped defect and mask the conflict.
+  //
+  // The UPDATE is wrapped in its OWN `withTransaction` so the holder lookup below can run. Callers
+  // may already be inside a transaction (`assignVariableSymbols` loops over the whole batch in
+  // one), and Postgres aborts a transaction the moment a statement raises — the recovery SELECT
+  // would then be rejected with `current transaction is aborted` and 500 instead of 409. Nested,
+  // this emits SAVEPOINT / ROLLBACK TO SAVEPOINT, which un-aborts the outer transaction before the
+  // lookup. Un-nested it is a plain BEGIN/ROLLBACK around one UPDATE, so both call sites behave
+  // identically.
   const setVariableSymbol = (
     memberId: TeamMember.TeamMemberId,
     teamId: Team.TeamId,
     variableSymbol: Option.Option<string>,
   ) =>
-    updateVariableSymbolQuery({ member_id: memberId, variable_symbol: variableSymbol }).pipe(
-      SqlErrors.catchUniqueViolationOn(
-        VARIABLE_SYMBOL_UNIQUE_CONSTRAINT,
-        () => new VsConflictMarker(),
-      ),
-      catchSqlErrors,
-      Effect.catchTag('VsConflictMarker', () =>
-        findByTeamAndVariableSymbol(teamId, variableSymbol).pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () =>
-                Effect.fail(
-                  new VariableSymbolConflict({
-                    holderMemberId: memberId,
-                    holderName: Option.none(),
-                  }),
-                ),
-              onSome: (holder) =>
-                Effect.fail(
-                  new VariableSymbolConflict({
-                    holderMemberId: holder.member_id,
-                    holderName: holder.name,
-                  }),
-                ),
-            }),
+    sql
+      .withTransaction(
+        updateVariableSymbolQuery({ member_id: memberId, variable_symbol: variableSymbol }).pipe(
+          SqlErrors.catchUniqueViolationOn(
+            VARIABLE_SYMBOL_UNIQUE_CONSTRAINT,
+            () => new VsConflictMarker(),
           ),
         ),
-      ),
-    );
+      )
+      .pipe(
+        catchSqlErrors,
+        Effect.catchTag('VsConflictMarker', () =>
+          findByTeamAndVariableSymbol(teamId, variableSymbol).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.fail(
+                    new VariableSymbolConflict({
+                      holderMemberId: memberId,
+                      holderName: Option.none(),
+                    }),
+                  ),
+                onSome: (holder) =>
+                  Effect.fail(
+                    new VariableSymbolConflict({
+                      holderMemberId: holder.member_id,
+                      holderName: holder.name,
+                    }),
+                  ),
+              }),
+            ),
+          ),
+        ),
+      );
 
   // Last-active-manager guard consulted by `deactivateMemberAndCascade` — built on
   // `effectiveRolesFrom` (see that file's header) rather than a second hand-rolled

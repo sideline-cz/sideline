@@ -2179,6 +2179,7 @@
   "members_unsavedChanges": "{count} unsaved change(s)",
   "members_viewMembers": "View Members",
   "members_vs_assignBody": "We'll fill in symbols for {count} members who don't have one. Nobody else is affected.",
+  "members_vs_assignConflict": "{member} already has one of these symbols — nothing was assigned. Close and reopen to refresh the list.",
   "members_vs_assignConfirm": "Assign",
   "members_vs_assignNote": "Symbols can be changed later for each member individually.",
   "members_vs_assignSuccess": "Variable symbols assigned.",
