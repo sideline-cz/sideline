@@ -155,10 +155,105 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // `team_settings.auto_assign_variable_symbols`. Read with a LEFT JOIN from `teams` so a team
+  // that has never written a settings row still answers `false` rather than no row at all.
+  const autoAssignVariableSymbolsEnabledQuery = SqlSchema.findOne({
+    Request: Team.TeamId,
+    Result: Schema.Struct({ enabled: Schema.Boolean }),
+    execute: (teamId) => sql`
+      SELECT COALESCE(ts.auto_assign_variable_symbols, false) AS enabled
+      FROM teams t
+      LEFT JOIN team_settings ts ON ts.team_id = t.id
+      WHERE t.id = ${teamId}
+    `,
+  });
+
+  // Picks the lowest free `{year}{seq3}` and writes it in ONE statement, so there is no
+  // read-then-write gap to lose inside a single connection. The NOT EXISTS compares through the
+  // same `NULLIF(ltrim(...,'0'),'')` the unique index uses — raw string equality would hand out
+  // `2026001` to a team that already has `02026001`.
+  //
+  // `lpad(s::text, 3, '0')` reproduces `String(seq).padStart(3, '0')` exactly, including rolling
+  // to four digits past 999, so on-join symbols and the bulk dialog's suggestions stay the same
+  // scheme.
+  //
+  // `tm.variable_symbol IS NULL` makes this a no-op for a member who already has one.
+  //
+  // ponytail: the candidate scan is a 9999-row generate_series per assignment. Fine for club
+  // rosters; if a team ever outgrows that, carry a per-team counter instead of rescanning.
+  const autoAssignVariableSymbolQuery = SqlSchema.void({
+    Request: Schema.Struct({
+      member_id: TeamMember.TeamMemberId,
+      team_id: Team.TeamId,
+      year: Schema.String,
+    }),
+    execute: (input) => sql`
+      UPDATE team_members tm
+      SET variable_symbol = candidate.vs
+      FROM (
+        SELECT ${input.year} || lpad(s::text, 3, '0') AS vs
+        FROM generate_series(1, 9999) s
+        WHERE NOT EXISTS (
+          SELECT 1 FROM team_members other
+          WHERE other.team_id = ${input.team_id}
+            AND other.variable_symbol IS NOT NULL
+            AND NULLIF(ltrim(other.variable_symbol, '0'), '')
+                = NULLIF(ltrim(${input.year} || lpad(s::text, 3, '0'), '0'), '')
+        )
+        ORDER BY s
+        LIMIT 1
+      ) candidate
+      WHERE tm.id = ${input.member_id}
+        AND tm.variable_symbol IS NULL
+    `,
+  });
+
+  /**
+   * Hands the new member the next free variable symbol, if the team asked for that. Called from
+   * `addMember` rather than from the four join paths (invite accept, Discord auto-join, guild
+   * registration, new-team provisioning) so none of them can drift.
+   *
+   * Two things this must never do:
+   *
+   * - **Fail the join.** A member who joined without a symbol is a treasurer's five-second fix;
+   *   a member who could not join at all is not. Every failure is logged and swallowed.
+   * - **Poison the caller's transaction.** `provisionNewTeam` and the invite path call
+   *   `addMember` inside `sql.withTransaction`, and two people joining at once can race onto the
+   *   same candidate — the unique index rejects the loser and Postgres aborts the whole
+   *   transaction with it. The savepoint confines that to this statement so the retry, and the
+   *   join itself, survive. Same mechanism as `setVariableSymbol`.
+   */
+  const autoAssignVariableSymbol = (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId) =>
+    autoAssignVariableSymbolsEnabledQuery(teamId).pipe(
+      Effect.flatMap((row) =>
+        row.enabled
+          ? sql
+              .withTransaction(
+                autoAssignVariableSymbolQuery({
+                  member_id: memberId,
+                  team_id: teamId,
+                  year: String(new Date().getFullYear()),
+                }),
+              )
+              // Only the race loses here, and only to another member taking the candidate — so
+              // the retry recomputes against a roster that now includes them.
+              .pipe(Effect.retry({ times: 3 }))
+          : Effect.void,
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning('Auto-assigning a variable symbol on join failed', {
+          teamId,
+          memberId,
+          cause,
+        }),
+      ),
+    );
+
   const addMember = (input: typeof TeamMember.TeamMember.insert.Type) =>
     addMemberQuery(input).pipe(
       SqlErrors.catchUniqueViolation(() => new MemberAlreadyExistsError()),
       catchSqlErrors,
+      Effect.tap((member) => autoAssignVariableSymbol(member.team_id, member.id)),
     );
 
   const assignRoleToMemberQuery = SqlSchema.void({
@@ -544,40 +639,53 @@ const make = Effect.gen(function* () {
   // index (`uq_team_members_team_variable_symbol`) can raise. Order matters: the unique-violation
   // catch must run BEFORE `catchSqlErrors`, which would otherwise turn the raw `SqlError` into an
   // untyped defect and mask the conflict.
+  //
+  // The UPDATE is wrapped in its OWN `withTransaction` so the holder lookup below can run. Callers
+  // may already be inside a transaction (`assignVariableSymbols` loops over the whole batch in
+  // one), and Postgres aborts a transaction the moment a statement raises — the recovery SELECT
+  // would then be rejected with `current transaction is aborted` and 500 instead of 409. Nested,
+  // this emits SAVEPOINT / ROLLBACK TO SAVEPOINT, which un-aborts the outer transaction before the
+  // lookup. Un-nested it is a plain BEGIN/ROLLBACK around one UPDATE, so both call sites behave
+  // identically.
   const setVariableSymbol = (
     memberId: TeamMember.TeamMemberId,
     teamId: Team.TeamId,
     variableSymbol: Option.Option<string>,
   ) =>
-    updateVariableSymbolQuery({ member_id: memberId, variable_symbol: variableSymbol }).pipe(
-      SqlErrors.catchUniqueViolationOn(
-        VARIABLE_SYMBOL_UNIQUE_CONSTRAINT,
-        () => new VsConflictMarker(),
-      ),
-      catchSqlErrors,
-      Effect.catchTag('VsConflictMarker', () =>
-        findByTeamAndVariableSymbol(teamId, variableSymbol).pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () =>
-                Effect.fail(
-                  new VariableSymbolConflict({
-                    holderMemberId: memberId,
-                    holderName: Option.none(),
-                  }),
-                ),
-              onSome: (holder) =>
-                Effect.fail(
-                  new VariableSymbolConflict({
-                    holderMemberId: holder.member_id,
-                    holderName: holder.name,
-                  }),
-                ),
-            }),
+    sql
+      .withTransaction(
+        updateVariableSymbolQuery({ member_id: memberId, variable_symbol: variableSymbol }).pipe(
+          SqlErrors.catchUniqueViolationOn(
+            VARIABLE_SYMBOL_UNIQUE_CONSTRAINT,
+            () => new VsConflictMarker(),
           ),
         ),
-      ),
-    );
+      )
+      .pipe(
+        catchSqlErrors,
+        Effect.catchTag('VsConflictMarker', () =>
+          findByTeamAndVariableSymbol(teamId, variableSymbol).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.fail(
+                    new VariableSymbolConflict({
+                      holderMemberId: memberId,
+                      holderName: Option.none(),
+                    }),
+                  ),
+                onSome: (holder) =>
+                  Effect.fail(
+                    new VariableSymbolConflict({
+                      holderMemberId: holder.member_id,
+                      holderName: holder.name,
+                    }),
+                  ),
+              }),
+            ),
+          ),
+        ),
+      );
 
   // Last-active-manager guard consulted by `deactivateMemberAndCascade` — built on
   // `effectiveRolesFrom` (see that file's header) rather than a second hand-rolled

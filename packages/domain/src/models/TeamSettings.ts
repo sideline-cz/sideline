@@ -40,6 +40,7 @@ export class TeamSettings extends Model.Class<TeamSettings>('TeamSettings')({
   min_players_threshold: Schema.Int,
   rsvp_reminders_enabled: Schema.Boolean,
   require_complete_profile: Schema.Boolean,
+  auto_assign_variable_symbols: Schema.Boolean,
   rsvp_reminder_days_before: Schema.Int,
   rsvp_reminder_days_before_overrides: RsvpReminderDaysBeforeOverrides,
   rsvp_lock_hours_before: Schema.OptionFromNullOr(Schema.Int),

@@ -43,6 +43,10 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
   minPlayersThreshold: Schema.Int,
   rsvpRemindersEnabled: Schema.Boolean,
   requireCompleteProfile: Schema.Boolean,
+  // Hands a joining member the next free `{year}{seq3}` variable symbol. Tolerant decode for the
+  // usual reason: web bundles a FROZEN copy of this schema, so a new bundle served against a
+  // server that predates the column must not take the settings page down.
+  autoAssignVariableSymbols: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   rsvpReminderDaysBefore: Schema.Int,
   // Per-event-type overrides for the reminder lead time; `rsvpReminderDaysBefore` remains the
   // fallback for any type absent from the map. Decodes TOLERANTLY (missing key -> `{}`) for the
@@ -121,6 +125,7 @@ export const UpdateTeamSettingsRequest = Schema.Struct({
   ),
   rsvpRemindersEnabled: Schema.OptionFromOptional(Schema.Boolean),
   requireCompleteProfile: Schema.OptionFromOptional(Schema.Boolean),
+  autoAssignVariableSymbols: Schema.OptionFromOptional(Schema.Boolean),
   rsvpReminderDaysBefore: Schema.OptionFromOptional(
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 14 }))),
   ),

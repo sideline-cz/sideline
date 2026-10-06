@@ -77,7 +77,21 @@ export function AssignVariableSymbolsDialog({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(tr('members_saveFailed'))),
+      // The batch is all-or-nothing by design (the server runs it in one transaction), so a
+      // conflict means NOTHING was assigned and the previewed list is stale. Say both, and name
+      // the holder — the generic save-failed toast left the treasurer with no way to act.
+      Effect.catchTag('VariableSymbolTaken', (e) =>
+        Effect.fail(
+          ClientError.make(
+            tr('members_vs_assignConflict', {
+              member: Option.getOrElse(e.holderName, () => tr('members_fieldEmpty')),
+            }),
+          ),
+        ),
+      ),
+      Effect.mapError((e) =>
+        e._tag === 'ClientError' ? e : ClientError.make(tr('members_saveFailed')),
+      ),
       run({ success: tr('members_vs_assignSuccess') }),
     );
     setAssigning(false);

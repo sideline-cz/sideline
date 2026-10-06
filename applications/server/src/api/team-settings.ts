@@ -94,6 +94,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordPersonalEventsChannelFormat: DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
                     discordEventsChannelId: Option.none(),
                     requireCompleteProfile: false,
+                    autoAssignVariableSymbols: false,
                   }),
                 onSome: (s) =>
                   new TeamSettingsApi.TeamSettingsInfo({
@@ -128,6 +129,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordPersonalEventsChannelFormat: s.discord_personal_events_channel_format,
                     discordEventsChannelId: s.discord_events_channel_id,
                     requireCompleteProfile: s.require_complete_profile,
+                    autoAssignVariableSymbols: s.auto_assign_variable_symbols,
                   }),
               }),
             ),
@@ -261,6 +263,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                               payload.requireCompleteProfile,
                               () => false,
                             ),
+                            autoAssignVariableSymbols: Option.getOrElse(
+                              payload.autoAssignVariableSymbols,
+                              () => false,
+                            ),
                           }),
                         onSome: (s) =>
                           settings.upsert({
@@ -392,6 +398,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                             requireCompleteProfile: Option.getOrElse(
                               payload.requireCompleteProfile,
                               () => s.require_complete_profile,
+                            ),
+                            autoAssignVariableSymbols: Option.getOrElse(
+                              payload.autoAssignVariableSymbols,
+                              () => s.auto_assign_variable_symbols,
                             ),
                           }),
                       }).pipe(
@@ -550,6 +560,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   discordPersonalEventsChannelFormat: result.discord_personal_events_channel_format,
                   discordEventsChannelId: result.discord_events_channel_id,
                   requireCompleteProfile: result.require_complete_profile,
+                  autoAssignVariableSymbols: result.auto_assign_variable_symbols,
                 }),
             ),
             Effect.catchTag(
