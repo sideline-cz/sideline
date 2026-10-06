@@ -447,6 +447,7 @@ export const mockTeamSettings = {
   rsvpRemindersEnabled: true,
   requireCompleteProfile: false,
   autoAssignVariableSymbols: false,
+  autoApplyCreditEnabled: false,
   rsvpReminderDaysBefore: 1,
   rsvpReminderDaysBeforeOverrides: {},
   rsvpLockHoursBefore: null,

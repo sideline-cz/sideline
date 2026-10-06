@@ -47,6 +47,11 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
   // usual reason: web bundles a FROZEN copy of this schema, so a new bundle served against a
   // server that predates the column must not take the settings page down.
   autoAssignVariableSymbols: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+  // Spends a member's held credit against what they owe without a treasurer clicking Settle.
+  // A BOOLEAN projection of `team_settings.auto_apply_credit_by_user_id` -- the server stores a
+  // user id (NULL = off) because the resulting `payments` rows need a recorder, and nothing
+  // about that belongs on the client. Tolerant decode for the usual frozen-web-bundle reason.
+  autoApplyCreditEnabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   rsvpReminderDaysBefore: Schema.Int,
   // Per-event-type overrides for the reminder lead time; `rsvpReminderDaysBefore` remains the
   // fallback for any type absent from the map. Decodes TOLERANTLY (missing key -> `{}`) for the
@@ -126,6 +131,7 @@ export const UpdateTeamSettingsRequest = Schema.Struct({
   rsvpRemindersEnabled: Schema.OptionFromOptional(Schema.Boolean),
   requireCompleteProfile: Schema.OptionFromOptional(Schema.Boolean),
   autoAssignVariableSymbols: Schema.OptionFromOptional(Schema.Boolean),
+  autoApplyCreditEnabled: Schema.OptionFromOptional(Schema.Boolean),
   rsvpReminderDaysBefore: Schema.OptionFromOptional(
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 14 }))),
   ),

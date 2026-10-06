@@ -75,6 +75,7 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   // `TeamMembersRepository.autoAssignVariableSymbol`. DEFAULT false; turning it on does NOT
   // backfill existing members, that stays the bulk dialog's job.
   auto_assign_variable_symbols: Schema.Boolean,
+  auto_apply_credit_by_user_id: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
 /** One team with the scheduled rules quiz enabled, plus everything the cron
@@ -132,6 +133,7 @@ const TeamSettingsUpsertInput = Schema.Struct({
   rules_quiz_time: Schema.String,
   require_complete_profile: Schema.Boolean,
   auto_assign_variable_symbols: Schema.Boolean,
+  auto_apply_credit_by_user_id: Schema.OptionFromNullOr(Schema.String),
 });
 
 class EventNeedingClaimRequest extends Schema.Class<EventNeedingClaimRequest>(
@@ -218,7 +220,8 @@ const make = Effect.gen(function* () {
              rules_quiz_interval_days,
              TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time,
              require_complete_profile,
-             auto_assign_variable_symbols
+             auto_assign_variable_symbols,
+             auto_apply_credit_by_user_id
       FROM team_settings
       WHERE team_id = ${teamId}
     `,
@@ -283,7 +286,8 @@ const make = Effect.gen(function* () {
                                  rules_quiz_interval_days,
                                  rules_quiz_time,
                                  require_complete_profile,
-                                 auto_assign_variable_symbols)
+                                 auto_assign_variable_symbols,
+                                 auto_apply_credit_by_user_id)
       VALUES (${input.team_id}, ${input.event_horizon_days},
               ${input.min_players_threshold},
               ${input.rsvp_reminders_enabled},
@@ -312,7 +316,8 @@ const make = Effect.gen(function* () {
               ${input.rules_quiz_interval_days},
               ${input.rules_quiz_time},
               ${input.require_complete_profile},
-              ${input.auto_assign_variable_symbols})
+              ${input.auto_assign_variable_symbols},
+              ${input.auto_apply_credit_by_user_id})
       ON CONFLICT (team_id) DO UPDATE SET
         event_horizon_days = ${input.event_horizon_days},
         min_players_threshold = ${input.min_players_threshold},
@@ -345,6 +350,7 @@ const make = Effect.gen(function* () {
         rules_quiz_time = ${input.rules_quiz_time},
         require_complete_profile = ${input.require_complete_profile},
         auto_assign_variable_symbols = ${input.auto_assign_variable_symbols},
+        auto_apply_credit_by_user_id = ${input.auto_apply_credit_by_user_id},
         updated_at = now()
       RETURNING team_id, event_horizon_days,
                 min_players_threshold,
@@ -374,7 +380,8 @@ const make = Effect.gen(function* () {
                 rules_quiz_interval_days,
                 TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time,
                 require_complete_profile,
-                auto_assign_variable_symbols
+                auto_assign_variable_symbols,
+                auto_apply_credit_by_user_id
     `,
   });
 
@@ -536,6 +543,7 @@ const make = Effect.gen(function* () {
     rulesQuizTime = '18:00',
     requireCompleteProfile = false,
     autoAssignVariableSymbols = false,
+    autoApplyCreditByUserId = Option.none<string>(),
   }: {
     teamId: Team.TeamId;
     eventHorizonDays: number;
@@ -569,6 +577,7 @@ const make = Effect.gen(function* () {
     rulesQuizTime?: string;
     requireCompleteProfile?: boolean;
     autoAssignVariableSymbols?: boolean;
+    autoApplyCreditByUserId?: Option.Option<string>;
   }) =>
     _upsertSettings({
       team_id: teamId,
@@ -603,6 +612,7 @@ const make = Effect.gen(function* () {
       rules_quiz_time: rulesQuizTime,
       require_complete_profile: requireCompleteProfile,
       auto_assign_variable_symbols: autoAssignVariableSymbols,
+      auto_apply_credit_by_user_id: autoApplyCreditByUserId,
     }).pipe(catchSqlErrors);
 
   const getHorizonDays = (teamId: Team.TeamId) =>

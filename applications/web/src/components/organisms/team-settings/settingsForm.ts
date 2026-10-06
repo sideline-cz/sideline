@@ -65,6 +65,7 @@ export type SettingsFormValues = {
   rsvpRemindersEnabled: boolean;
   requireCompleteProfile: boolean;
   autoAssignVariableSymbols: boolean;
+  autoApplyCreditEnabled: boolean;
   rsvpReminderDaysBefore: string;
   maxMissedRsvps: string;
   claimRequestDaysBefore: string;
@@ -133,6 +134,7 @@ export const settingsFormFrom = (
   rsvpRemindersEnabled: settings.rsvpRemindersEnabled,
   requireCompleteProfile: settings.requireCompleteProfile,
   autoAssignVariableSymbols: settings.autoAssignVariableSymbols,
+  autoApplyCreditEnabled: settings.autoApplyCreditEnabled,
   rsvpReminderDaysBefore: String(settings.rsvpReminderDaysBefore),
   maxMissedRsvps: String(settings.maxMissedRsvps),
   claimRequestDaysBefore: String(settings.claimRequestDaysBefore),
@@ -287,6 +289,7 @@ export const settingsRequestFrom = (
   rsvpRemindersEnabled: Option.some(values.rsvpRemindersEnabled),
   requireCompleteProfile: Option.some(values.requireCompleteProfile),
   autoAssignVariableSymbols: Option.some(values.autoAssignVariableSymbols),
+  autoApplyCreditEnabled: Option.some(values.autoApplyCreditEnabled),
   rsvpReminderDaysBefore: Option.some(Number.parseInt(values.rsvpReminderDaysBefore, 10)),
   maxMissedRsvps: Option.some(Number.parseInt(values.maxMissedRsvps, 10)),
   claimRequestDaysBefore: Option.some(Number(values.claimRequestDaysBefore)),
