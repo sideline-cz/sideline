@@ -19,6 +19,13 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
+import {
+  daysFromNow,
+  governingSeasonId,
+  readSeasons,
+  type SeasonFixtureRow,
+  setSeasons,
+} from '../seasonFixtures.js';
 
 const SmallApi = HttpApi.make('api').add(MembershipPlanApi.MembershipPlanApiGroup);
 
@@ -191,15 +198,18 @@ const getPlanRows = (teamId: Team.TeamId) =>
     ),
   );
 
-/** The allowance columns, which `getPlanRows` deliberately does not carry — `free_trainings_anchor_at`
- * is only ever asserted by the re-stamp cases below. */
+/** The allowance column, which `getPlanRows` deliberately does not carry.
+ *
+ * `free_trainings_anchor_at` is GONE — the free-trainings allowance is anchored to the TEAM'S
+ * SEASON now, not to a per-plan stamp, so there is no plan column left to read and no re-stamp
+ * rule left to assert. The anchor's behaviour lives in `trainingPeriodCharges.test.ts`, against
+ * `seasons.starts_at`. */
 const getPlanAllowance = (planId: string) =>
   runSeeded(
     SqlClient.SqlClient.asEffect().pipe(
       Effect.andThen(
-        (sql) => sql<{ free_trainings_included: number; free_trainings_anchor_at: Date }>`
-          SELECT free_trainings_included, free_trainings_anchor_at
-          FROM membership_plans WHERE id = ${planId}
+        (sql) => sql<{ free_trainings_included: number }>`
+          SELECT free_trainings_included FROM membership_plans WHERE id = ${planId}
         `,
       ),
       Effect.map((rows) => rows[0]),
@@ -511,10 +521,13 @@ describe('PATCH /teams/:teamId/membership-plans/:membershipPlanId — full repla
   // get this wrong, both of which this case fails on:
   //   - a plain required field  -> 400 on every save from those bundles;
   //   - `withDecodingDefaultKey(() => 0)` (or COALESCEing `EXCLUDED`) -> the allowance is silently
-  //     zeroed, and the manager's correction then re-stamps a FRESH anchor, handing out the
-  //     allowance a second time.
-  // Hence the anchor assertion alongside the value one: `free_trainings_anchor_at` must not move.
-  it('an update that OMITS freeTrainingsIncluded keeps the stored allowance and the anchor', async () => {
+  //     zeroed, and the manager's correction then hands the allowance out a second time.
+  //
+  // The anchor half of this case is GONE: `free_trainings_anchor_at` and its re-stamp trigger
+  // were dropped with the per-season allowance (migration `1793900000`), so there is no longer an
+  // anchor to move. What replaces it is the assertion that the VALUE itself behaves as before —
+  // raising 0 -> 2 sticks, and an omitting update keeps 2.
+  it('an update that OMITS freeTrainingsIncluded keeps the stored allowance', async () => {
     const fixture = await seedFixture(['finance:manage_fees']);
     sessionsStore.set('actor-token', fixture.actorUserId);
 
@@ -525,10 +538,10 @@ describe('PATCH /teams/:teamId/membership-plans/:membershipPlanId — full repla
         body: JSON.stringify(basicPayload),
       }),
     ).then(asJson);
-    const atCreate = await getPlanAllowance(created.membershipPlanId);
+    expect((await getPlanAllowance(created.membershipPlanId))?.free_trainings_included).toBe(0);
 
-    // 0 -> 2 is the one transition that re-stamps the anchor. Doing it here is what makes the
-    // assertion below meaningful: an unmoved anchor only proves something once it HAS moved.
+    // Raise it first, so the "keep" assertion below has a non-default value to keep. A test that
+    // only ever sees 0 cannot tell "kept" from "zeroed".
     const raised = await handler(
       new Request(
         `http://localhost/teams/${fixture.team.id}/membership-plans/${created.membershipPlanId}`,
@@ -540,10 +553,7 @@ describe('PATCH /teams/:teamId/membership-plans/:membershipPlanId — full repla
       ),
     ).then(asJson);
     expect(raised.freeTrainingsIncluded).toBe(2);
-    const afterRaise = await getPlanAllowance(created.membershipPlanId);
-    expect(afterRaise?.free_trainings_anchor_at.getTime()).toBeGreaterThan(
-      atCreate?.free_trainings_anchor_at.getTime() ?? 0,
-    );
+    expect((await getPlanAllowance(created.membershipPlanId))?.free_trainings_included).toBe(2);
 
     // The old bundle's save: every key it knows, nothing it does not.
     const { freeTrainingsIncluded: _omitted, ...withoutAllowance } = basicPayload;
@@ -565,12 +575,6 @@ describe('PATCH /teams/:teamId/membership-plans/:membershipPlanId — full repla
 
     const stored = await getPlanAllowance(created.membershipPlanId);
     expect(stored?.free_trainings_included).toBe(2);
-    // COALESCE writes the SAME value back, so OLD = NEW = 2 and
-    // `membership_plans_stamp_free_trainings_anchor_trg`'s
-    // `WHEN (OLD.free_trainings_included = 0 AND NEW.free_trainings_included > 0)` is false.
-    expect(stored?.free_trainings_anchor_at.getTime()).toBe(
-      afterRaise?.free_trainings_anchor_at.getTime(),
-    );
   });
 
   it('an update that SENDS freeTrainingsIncluded still overwrites the stored allowance', async () => {
@@ -1637,5 +1641,611 @@ describe('GET /teams/:teamId/membership-plans — the assignments roster', () =>
     const memberBody = await listResponseBody(fixture.team.id, 'target-token');
     expect(memberBody.selectedPlanId).toBe(created.membershipPlanId);
     expect(memberBody.assignments, 'the member is not a manager').toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// "Give a season real dates" — the selection GATE, the two slot-keyed PUTs, and the
+// seeding/display split on the list response.
+//
+// TDD: written BEFORE the migration, the repository changes and the `upsertNextSeason` handler
+// exist. Every case below fails until all three land.
+//
+// EVERY season-sensitive case routes through `setSeasons`. `seed_first_season_trg` gives each new
+// team an always-open season at `starts_at = now()`, and `CHECK (expires_at > starts_at)` forces
+// an already-expired season to carry a PAST `starts_at` — which is LESS than the seeded row's, so
+// the seeded row stays `current` and answers the gate. Without `setSeasons` the 409 cases FAIL and
+// the 204 cases PASS FOR THE WRONG REASON.
+//
+// There is no way to advance the clock: `TestClock` moves Effect's virtual clock, never Postgres
+// `now()`, and every gate here is SQL-side. Past-dating rows IS "advancing past the date".
+// ---------------------------------------------------------------------------
+
+/** `setSeasons` lifted into this file's promise-shaped world. */
+const arrangeSeasons = (teamId: Team.TeamId, rows: ReadonlyArray<SeasonFixtureRow>) =>
+  runSeeded(setSeasons(teamId, rows));
+
+const seasonRows = (teamId: Team.TeamId) => runSeeded(readSeasons(teamId));
+
+const governingSeason = (teamId: Team.TeamId) => runSeeded(governingSeasonId(teamId));
+
+/** The Release-A legacy mirror column on `teams`, read raw. Deleted in Release B. */
+const legacyTeamDeadline = (teamId: Team.TeamId) =>
+  runSeeded(
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.andThen(
+        (sql) => sql<{ membership_selection_deadline: Date | null }>`
+          SELECT membership_selection_deadline FROM teams WHERE id = ${teamId}
+        `,
+      ),
+      Effect.map((rows) => rows[0]?.membership_selection_deadline ?? null),
+    ),
+  );
+
+/** PUT …/membership-selection-deadline — the CURRENT season's slot. `expiresAt` is deliberately
+ * omitted from the body when the caller omits it: absent means KEEP THE STORED VALUE, and that is
+ * what an old bundle sends for the whole rollout window. */
+const putCurrentSeason = (
+  teamId: Team.TeamId,
+  token: string,
+  body: { deadline: string | null; expiresAt?: string | null },
+) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/membership-selection-deadline`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
+
+/** PUT …/seasons/next — the NEXT season's slot. The slot IS the identity, so this is both the
+ * create and the update path, and a double-submit is a 204 either way. */
+const putNextSeason = (
+  teamId: Team.TeamId,
+  token: string,
+  body: { startsAt: string; deadline: string | null; expiresAt: string | null },
+) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/seasons/next`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
+
+const iso = (d: Date) => d.toISOString();
+
+describe('PUT /teams/:teamId/me/membership-plan — the season gate', () => {
+  // CASE 20 — THE ACCEPTANCE CRITERION, both halves in one test. Decision 3 is two claims, not
+  // one: past the expiry a plan is no longer SELECTABLE, *and* a member already on it KEEPS it.
+  // Asserting only the 409 would stay green under an implementation that also cleared the column.
+  it('a season past its expiry closes selection — and the member already on a plan is untouched', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+
+    // Pick a plan while the season is still open, then advance past the expiry.
+    await arrangeSeasons(fixture.team.id, [{ startsAt: daysFromNow(-60) }]);
+    expect((await selectPlan(fixture.team.id, 'actor-token', seeded?.id)).status).toBe(204);
+    const before = await getMemberColumn(fixture.actorMemberId);
+    expect(before).toBe(seeded?.id);
+
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-60), expiresAt: daysFromNow(-1) },
+    ]);
+
+    const response = await selectPlan(fixture.team.id, 'actor-token', seeded?.id);
+
+    expect(response.status).toBe(409);
+    expect((await asJson(response))._tag).toBe('MembershipSelectionClosed');
+    expect(await getMemberColumn(fixture.actorMemberId), 'byte-identical').toBe(before);
+  });
+
+  // CASE 21 — the sibling that keeps case 20 honest: the expiry, not the fixture, is what closed
+  // selection.
+  it('a season whose expiry is still in the future leaves selection open', async () => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-60), expiresAt: daysFromNow(1) },
+    ]);
+
+    expect((await selectPlan(fixture.team.id, 'actor-token', seeded?.id)).status).toBe(204);
+  });
+
+  // CASE 22 — the two dates gate INDEPENDENTLY, and `open(s)` is a conjunction. The first row is
+  // deliberately stored: there is no `selection_deadline <= expires_at` CHECK, the web must not
+  // block one either, and a legal row in that order has to behave.
+  it.each([
+    { label: 'deadline future, expiry PASSED', deadline: 1, expiry: -1, status: 409 },
+    { label: 'deadline PASSED, expiry future', deadline: -1, expiry: 1, status: 409 },
+    { label: 'both in the future', deadline: 1, expiry: 1, status: 204 },
+  ])('$label -> $status', async ({ deadline, expiry, status }) => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    await arrangeSeasons(fixture.team.id, [
+      {
+        startsAt: daysFromNow(-60),
+        deadline: daysFromNow(deadline),
+        expiresAt: daysFromNow(expiry),
+      },
+    ]);
+
+    expect((await selectPlan(fixture.team.id, 'actor-token', seeded?.id)).status).toBe(status);
+  });
+
+  // CASE 23 — a stale FUTURE season cannot close a team that is open today. `next` is only ever
+  // consulted when `current` is shut.
+  it('a queued next season with a passed deadline does NOT close an open current season', async () => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    const currentStart = daysFromNow(-30);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: currentStart, deadline: daysFromNow(30) },
+      { startsAt: daysFromNow(60), deadline: daysFromNow(-2) },
+    ]);
+
+    expect((await selectPlan(fixture.team.id, 'actor-token', seeded?.id)).status).toBe(204);
+
+    const rows = await seasonRows(fixture.team.id);
+    const current = rows.find((r) => r.starts_at.getTime() === currentStart.getTime());
+    expect(await governingSeason(fixture.team.id)).toBe(current?.id);
+  });
+
+  // CASE 23b — THE TIMELINE TEST. The case that killed gate rule v1 ("the season in effect
+  // governs"): under v1 a future season's deadline expires before that season is ever current, so
+  // there is NO instant at which a member can pick for it and rollover is unreachable.
+  //
+  // FALSIFICATION PROCEDURE (mandatory — a rule test that has never been seen red is not
+  // evidence). Revert `governing_season_id` to the current-season-only form:
+  //
+  //   SELECT s.id FROM seasons s
+  //    WHERE s.team_id = p_team_id AND s.starts_at <= now()
+  //    ORDER BY s.starts_at DESC LIMIT 1
+  //
+  // rebuild `@sideline/migrations`, and re-run this FILE. This test must go RED (409, not 204)
+  // while every other test in it stays green. Then restore the two-candidate form and watch it go
+  // green. If it does not go red, it is not testing the rule.
+  //
+  // ALREADY RUN at the SQL layer, 2026-10-07 against the PG17 testcontainer, because the gate
+  // functions landed before this endpoint was wired to them:
+  //
+  //   [WITH FIX]    selection_is_open = true  | next governs = true
+  //   [FIX REMOVED] selection_is_open = false | next governs = false
+  //   [RESTORED]    selection_is_open = true  | next governs = true
+  //
+  // Re-run it HERE, through the HTTP path, once `selectMembershipPlan` actually calls
+  // `selection_is_open` — that is the leg this test owns and the SQL-layer run cannot cover.
+  it('a future season with an OPEN deadline REOPENS selection, and its dates are what is reported', async () => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    const s2Deadline = daysFromNow(7);
+    const s2Expiry = daysFromNow(180);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-365), expiresAt: daysFromNow(-1) }, // S1 — finished
+      { startsAt: daysFromNow(21), deadline: s2Deadline, expiresAt: s2Expiry }, // S2 — queued, open
+    ]);
+
+    expect((await selectPlan(fixture.team.id, 'actor-token', seeded?.id)).status).toBe(204);
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+    expect(new Date(body.selectionDeadline).getTime()).toBe(s2Deadline.getTime());
+    expect(new Date(body.seasonExpiresAt).getTime()).toBe(s2Expiry.getTime());
+  });
+
+  // CASE 23c — guards the OTHER direction, gate rule v2 ("ANY season with an open window"): a
+  // queued season does not reopen selection unconditionally, only when it is itself open.
+  it('a queued next season that is ALSO shut leaves selection closed', async () => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-365), expiresAt: daysFromNow(-1) },
+      { startsAt: daysFromNow(21), deadline: daysFromNow(-2) },
+    ]);
+
+    const response = await selectPlan(fixture.team.id, 'actor-token', seeded?.id);
+
+    expect(response.status).toBe(409);
+    expect((await asJson(response))._tag).toBe('MembershipSelectionClosed');
+  });
+
+  // CASE 23d — gate rule v2's own bug at the API layer. A finished season with a NULL deadline
+  // means "that season never had a deadline", not "selection is open forever". Reachable from the
+  // UI today: set an expiry, leave the deadline box empty.
+  it('a finished season with a NULL deadline does not hold selection open', async () => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-365), deadline: null, expiresAt: daysFromNow(-1) },
+    ]);
+
+    expect((await selectPlan(fixture.team.id, 'actor-token', seeded?.id)).status).toBe(409);
+  });
+});
+
+describe('PUT /teams/:teamId/seasons/next', () => {
+  // CASE 24 — ROLLOVER (decision 4). The member keeps their plan across the boundary with NO
+  // re-confirmation: nothing clears the column, and the new season reopens selection on its own.
+  it('a new season rolls the member over: same plan, no re-confirmation, selection open again', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const planB = await createPlanViaApi(fixture.team.id, 'actor-token', 'Plan B');
+
+    // Season 1, open: the member picks B.
+    await arrangeSeasons(fixture.team.id, [{ startsAt: daysFromNow(-60) }]);
+    expect((await selectPlan(fixture.team.id, 'actor-token', planB.membershipPlanId)).status).toBe(
+      204,
+    );
+
+    // Season 1 ends. Selection is shut; the member is still on B.
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-60), expiresAt: daysFromNow(-1) },
+    ]);
+    expect(
+      (await selectPlan(fixture.team.id, 'actor-token', planB.membershipPlanId)).status,
+      'selection really is shut before the rollover',
+    ).toBe(409);
+    expect(await getMemberColumn(fixture.actorMemberId)).toBe(planB.membershipPlanId);
+
+    const created = await putNextSeason(fixture.team.id, 'actor-token', {
+      startsAt: iso(daysFromNow(1)),
+      deadline: null,
+      expiresAt: null,
+    });
+    expect(created.status).toBe(204);
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+    expect(body.selectedPlanId, 'carried over, with nothing re-confirmed').toBe(
+      planB.membershipPlanId,
+    );
+    expect(await getMemberColumn(fixture.actorMemberId)).toBe(planB.membershipPlanId);
+    expect(
+      (await selectPlan(fixture.team.id, 'actor-token', planB.membershipPlanId)).status,
+      'the new season reopens selection',
+    ).toBe(204);
+  });
+
+  // CASE 25 — THE AC'S EXACT WORDS: "creating a second season leaves the first season's dates
+  // intact". Case 26b is the stronger form; this one is kept because it is the literal wording and
+  // should be greppable.
+  it('creating a SECOND season leaves the FIRST season’s dates intact', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-60), deadline: daysFromNow(10), expiresAt: daysFromNow(90) },
+    ]);
+    const [firstBefore] = await seasonRows(fixture.team.id);
+
+    const response = await putNextSeason(fixture.team.id, 'actor-token', {
+      startsAt: iso(daysFromNow(120)),
+      deadline: iso(daysFromNow(100)),
+      expiresAt: iso(daysFromNow(400)),
+    });
+
+    expect(response.status).toBe(204);
+    const rows = await seasonRows(fixture.team.id);
+    expect(rows).toHaveLength(2);
+    const firstAfter = rows.find((r) => r.id === firstBefore?.id);
+    expect(firstAfter?.starts_at.getTime()).toBe(firstBefore?.starts_at.getTime());
+    expect(firstAfter?.selection_deadline?.getTime()).toBe(
+      firstBefore?.selection_deadline?.getTime(),
+    );
+    expect(firstAfter?.expires_at?.getTime()).toBe(firstBefore?.expires_at?.getTime());
+  });
+
+  // CASE 26b — the mirror of case 26: `…/seasons/next` writes NEXT and leaves CURRENT
+  // byte-identical. The other half of "two writable rows, one Save each".
+  it('writes NEXT and leaves CURRENT byte-identical', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const currentStart = daysFromNow(-30);
+    const nextStart = daysFromNow(90);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: currentStart, deadline: daysFromNow(10), expiresAt: daysFromNow(60) },
+      { startsAt: nextStart, deadline: daysFromNow(80), expiresAt: daysFromNow(400) },
+    ]);
+    const before = await seasonRows(fixture.team.id);
+    const currentBefore = before.find((r) => r.starts_at.getTime() === currentStart.getTime());
+
+    const newDeadline = daysFromNow(85);
+    const response = await putNextSeason(fixture.team.id, 'actor-token', {
+      startsAt: iso(nextStart),
+      deadline: iso(newDeadline),
+      expiresAt: iso(daysFromNow(500)),
+    });
+
+    expect(response.status).toBe(204);
+    const after = await seasonRows(fixture.team.id);
+    expect(after).toHaveLength(2);
+    const currentAfter = after.find((r) => r.id === currentBefore?.id);
+    expect(currentAfter?.selection_deadline?.getTime()).toBe(
+      currentBefore?.selection_deadline?.getTime(),
+    );
+    expect(currentAfter?.expires_at?.getTime()).toBe(currentBefore?.expires_at?.getTime());
+    const nextAfter = after.find((r) => r.id !== currentBefore?.id);
+    expect(nextAfter?.selection_deadline?.getTime()).toBe(newDeadline.getTime());
+  });
+
+  // CASE 26c — IDEMPOTENT ON THE SLOT. This is what replaced the `SeasonAlreadyExists` 409: a
+  // create has to tell "already exists" apart from success; a slot does not.
+  it('is idempotent — the same payload twice is 204 twice and leaves one row', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    await arrangeSeasons(fixture.team.id, [{ startsAt: daysFromNow(-30) }]);
+    const payload = {
+      startsAt: iso(daysFromNow(90)),
+      deadline: iso(daysFromNow(80)),
+      expiresAt: iso(daysFromNow(400)),
+    };
+
+    const first = await putNextSeason(fixture.team.id, 'actor-token', payload);
+    const second = await putNextSeason(fixture.team.id, 'actor-token', payload);
+
+    expect(first.status).toBe(204);
+    expect(second.status).toBe(204);
+    const rows = await seasonRows(fixture.team.id);
+    expect(rows).toHaveLength(2);
+    const queued = rows.filter((r) => r.starts_at.getTime() > Date.now());
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.selection_deadline?.getTime()).toBe(new Date(payload.deadline).getTime());
+    expect(queued[0]?.expires_at?.getTime()).toBe(new Date(payload.expiresAt).getTime());
+  });
+
+  // CASE 26d — the STRUCTURAL guarantee that this slot can never address the running season. 400,
+  // not 409: a non-future start does not collide with anything, it simply fails to name the slot.
+  it('rejects a startsAt at or before now() with 400 SeasonStartNotInFuture, writing nothing', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-30), deadline: daysFromNow(10) },
+    ]);
+    const before = await seasonRows(fixture.team.id);
+
+    const response = await putNextSeason(fixture.team.id, 'actor-token', {
+      startsAt: iso(daysFromNow(-1)),
+      deadline: iso(daysFromNow(10)),
+      expiresAt: null,
+    });
+
+    expect(response.status).toBe(400);
+    expect((await asJson(response))._tag).toBe('SeasonStartNotInFuture');
+    const after = await seasonRows(fixture.team.id);
+    expect(after).toHaveLength(before.length);
+    expect(after[0]?.id).toBe(before[0]?.id);
+    expect(after[0]?.starts_at.getTime()).toBe(before[0]?.starts_at.getTime());
+    expect(after[0]?.selection_deadline?.getTime()).toBe(before[0]?.selection_deadline?.getTime());
+  });
+
+  // CASE 26e — "UPDATE the slot", never "insert a second". A second queued season would be
+  // invisible to `governing_season_id` (it only ever takes the EARLIEST) and hidden by the UI,
+  // which is the worst kind of row: live, wrong and unreachable.
+  it('creates the slot when empty and UPDATES it when occupied, never inserting a second', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    await arrangeSeasons(fixture.team.id, [{ startsAt: daysFromNow(-30) }]);
+
+    await putNextSeason(fixture.team.id, 'actor-token', {
+      startsAt: iso(daysFromNow(60)),
+      deadline: null,
+      expiresAt: null,
+    });
+    const afterCreate = await seasonRows(fixture.team.id);
+    expect(afterCreate).toHaveLength(2);
+
+    const movedStart = daysFromNow(120);
+    await putNextSeason(fixture.team.id, 'actor-token', {
+      startsAt: iso(movedStart),
+      deadline: null,
+      expiresAt: null,
+    });
+
+    const rows = await seasonRows(fixture.team.id);
+    expect(rows, 'still exactly two seasons — the slot was UPDATED').toHaveLength(2);
+    const queued = rows.filter((r) => r.starts_at.getTime() > Date.now());
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.starts_at.getTime()).toBe(movedStart.getTime());
+  });
+});
+
+describe('PUT /teams/:teamId/membership-selection-deadline — the CURRENT season’s slot', () => {
+  // CASE 26 — THE BLOCKER REGRESSION. An earlier revision targeted "the latest season", so the
+  // page seeded this box from the GOVERNING season and wrote it back to the LATEST one — different
+  // rows the moment a next season is queued. The box snapped back and next season's deadline was
+  // silently overwritten. One slot, one row, one Save.
+  it('writes the CURRENT season and leaves NEXT byte-identical', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const currentStart = daysFromNow(-30);
+    const nextStart = daysFromNow(270);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: currentStart, deadline: daysFromNow(90) },
+      { startsAt: nextStart, deadline: daysFromNow(260), expiresAt: daysFromNow(600) },
+    ]);
+    const before = await seasonRows(fixture.team.id);
+    const nextBefore = before.find((r) => r.starts_at.getTime() === nextStart.getTime());
+
+    const newDeadline = daysFromNow(45);
+    const response = await putCurrentSeason(fixture.team.id, 'actor-token', {
+      deadline: iso(newDeadline),
+    });
+
+    expect(response.status).toBe(204);
+    const after = await seasonRows(fixture.team.id);
+    const currentAfter = after.find((r) => r.starts_at.getTime() === currentStart.getTime());
+    expect(currentAfter?.selection_deadline?.getTime(), 'landed on CURRENT').toBe(
+      newDeadline.getTime(),
+    );
+    const nextAfter = after.find((r) => r.id === nextBefore?.id);
+    expect(nextAfter?.starts_at.getTime()).toBe(nextBefore?.starts_at.getTime());
+    expect(nextAfter?.selection_deadline?.getTime()).toBe(
+      nextBefore?.selection_deadline?.getTime(),
+    );
+    expect(nextAfter?.expires_at?.getTime()).toBe(nextBefore?.expires_at?.getTime());
+  });
+
+  // CASE 27 — THE DUAL-WRITE MIRROR, and the arbiter for the data-modifying-CTE question. The
+  // legacy `teams.membership_selection_deadline` must equal the GOVERNING season's RAW
+  // `selection_deadline` — never a LEAST() of the two dates; the old server's column means "the
+  // deadline" and a rollback has to read it that way.
+  //
+  // If a developer implements the write as ONE `WITH … UPDATE … ` statement, the mirror's subquery
+  // shares the data-modifying CTE's snapshot and reads the PRE-update value — this assertion is
+  // what catches it, and it makes the two-statement-in-a-transaction form mandatory.
+  it('mirrors the governing season’s RAW deadline into teams.membership_selection_deadline', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-30), deadline: daysFromNow(90), expiresAt: daysFromNow(10) },
+    ]);
+
+    const newDeadline = daysFromNow(45);
+    await putCurrentSeason(fixture.team.id, 'actor-token', { deadline: iso(newDeadline) });
+
+    const [season] = await seasonRows(fixture.team.id);
+    const mirrored = await legacyTeamDeadline(fixture.team.id);
+    expect(mirrored?.getTime(), 'the POST-update value, not the pre-update one').toBe(
+      newDeadline.getTime(),
+    );
+    expect(
+      mirrored?.getTime(),
+      'the raw column, never LEAST(deadline, expiry) — the expiry here is EARLIER',
+    ).toBe(season?.selection_deadline?.getTime());
+  });
+
+  // CASE 28 — ABSENT = KEEP THE STORED VALUE (server AGENTS.md rule 5). Web deploys LAST, so for
+  // the whole rollout window old bundles send `{ deadline }` with no `expiresAt`. The single thing
+  // that breaks the rollout if it is wrong: "absent" must not be read as "clear it".
+  it('an omitted expiresAt keeps the stored expiry while still updating the deadline', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    await arrangeSeasons(fixture.team.id, [{ startsAt: daysFromNow(-30) }]);
+
+    const expiry = daysFromNow(200);
+    expect(
+      (
+        await putCurrentSeason(fixture.team.id, 'actor-token', {
+          deadline: iso(daysFromNow(100)),
+          expiresAt: iso(expiry),
+        })
+      ).status,
+    ).toBe(204);
+
+    // The old bundle's payload: the key it knows, nothing it does not.
+    const newDeadline = daysFromNow(120);
+    expect(
+      (await putCurrentSeason(fixture.team.id, 'actor-token', { deadline: iso(newDeadline) }))
+        .status,
+    ).toBe(204);
+
+    const [season] = await seasonRows(fixture.team.id);
+    expect(season?.expires_at?.getTime(), 'kept, not cleared').toBe(expiry.getTime());
+    expect(season?.selection_deadline?.getTime()).toBe(newDeadline.getTime());
+  });
+
+  // CASE 28b — an EMPTY deadline box clears the deadline. Pairs with the web test: without
+  // deleting `MembershipPlansPage.tsx:509-510`'s `if (!trimmed) return;` this request is never
+  // issued at all, so blanking the field is a silent no-op behind a success toast.
+  it('{ deadline: null } clears the column and reopens selection', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const [seeded] = await getPlanRows(fixture.team.id);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-30), deadline: daysFromNow(-1) },
+    ]);
+    expect((await selectPlan(fixture.team.id, 'actor-token', seeded?.id)).status).toBe(409);
+
+    expect(
+      (await putCurrentSeason(fixture.team.id, 'actor-token', { deadline: null })).status,
+    ).toBe(204);
+
+    const [season] = await seasonRows(fixture.team.id);
+    expect(season?.selection_deadline).toBeNull();
+    expect((await selectPlan(fixture.team.id, 'actor-token', seeded?.id)).status).toBe(204);
+  });
+});
+
+describe('GET /teams/:teamId/membership-plans — seasons on the wire', () => {
+  // CASE 29 — the Release-A rollout guarantee on the plan payload, with NO schema change behind
+  // it. An already-loaded bundle still sends `expiresAt` on create/update
+  // (`onExcessProperty: "ignore"` drops it) and still expects to READ a present `expiresAt` key —
+  // `OptionFromNullOr` encodes `None` as a PRESENT `null`, which is exactly what that frozen
+  // required-key copy needs.
+  it('an OLD bundle’s create payload carrying expiresAt still succeeds, and reads back null', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+
+    const response = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/membership-plans`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...basicPayload, expiresAt: '2027-01-01T00:00:00.000Z' }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    const body = await asJson(response);
+    expect(Object.hasOwn(body, 'expiresAt'), 'present key, not an absent one').toBe(true);
+    expect(body.expiresAt).toBeNull();
+  });
+
+  // CASE 29b — THE SEEDING/DISPLAY SPLIT, which is the whole shape of the response. Each form
+  // input is seeded from its OWN season object's OWN raw column; the display-only pair is the
+  // GOVERNING season's. Run deliberately in the M4 state (current expired, next open) — there
+  // `governing` is NEXT, and `currentSeason` must STILL be populated. That is the state a
+  // single-governing-season response shape could not express at all, and it is why there are two
+  // nested objects rather than five loose instants.
+  it('currentSeason and nextSeason are the RAW rows; the display pair is the GOVERNING season (M4)', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const currentStart = daysFromNow(-365);
+    const currentExpiry = daysFromNow(-1);
+    const nextStart = daysFromNow(21);
+    const nextDeadline = daysFromNow(7);
+    const nextExpiry = daysFromNow(400);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: currentStart, deadline: null, expiresAt: currentExpiry },
+      { startsAt: nextStart, deadline: nextDeadline, expiresAt: nextExpiry },
+    ]);
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+
+    // The Current block still renders, even though NEXT is governing.
+    expect(body.currentSeason).not.toBeNull();
+    expect(new Date(body.currentSeason.startsAt).getTime()).toBe(currentStart.getTime());
+    expect(body.currentSeason.selectionDeadline).toBeNull();
+    expect(new Date(body.currentSeason.expiresAt).getTime()).toBe(currentExpiry.getTime());
+
+    expect(new Date(body.nextSeason.startsAt).getTime()).toBe(nextStart.getTime());
+    expect(new Date(body.nextSeason.selectionDeadline).getTime()).toBe(nextDeadline.getTime());
+    expect(new Date(body.nextSeason.expiresAt).getTime()).toBe(nextExpiry.getTime());
+
+    // The display-only pair reports the GOVERNING season — `next`, because `current` is shut.
+    expect(new Date(body.selectionDeadline).getTime()).toBe(nextDeadline.getTime());
+    expect(new Date(body.seasonExpiresAt).getTime()).toBe(nextExpiry.getTime());
+  });
+
+  // The same split with CURRENT governing, so the case above cannot pass by always reporting
+  // `next`.
+  it('with current OPEN, the display pair reports CURRENT while nextSeason still carries its own dates', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const currentDeadline = daysFromNow(30);
+    const nextDeadline = daysFromNow(260);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: daysFromNow(-30), deadline: currentDeadline },
+      { startsAt: daysFromNow(270), deadline: nextDeadline },
+    ]);
+
+    const body = await listResponseBody(fixture.team.id, 'actor-token');
+
+    expect(new Date(body.selectionDeadline).getTime()).toBe(currentDeadline.getTime());
+    expect(body.seasonExpiresAt).toBeNull();
+    expect(new Date(body.nextSeason.selectionDeadline).getTime()).toBe(nextDeadline.getTime());
   });
 });
