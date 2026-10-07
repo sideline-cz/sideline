@@ -12,6 +12,7 @@ import React from 'react';
 import { CoachAssignmentCard } from '~/components/organisms/team-settings/CoachAssignmentCard';
 import { DiscordDefaultsCard } from '~/components/organisms/team-settings/DiscordDefaultsCard';
 import { EmailForwardingCard } from '~/components/organisms/team-settings/EmailForwardingCard';
+import { FinanceAutomationCard } from '~/components/organisms/team-settings/FinanceAutomationCard';
 import { FioBankCard } from '~/components/organisms/team-settings/FioBankCard';
 import { GeneralLimitsCard } from '~/components/organisms/team-settings/GeneralLimitsCard';
 import { GenerationWeightsCard } from '~/components/organisms/team-settings/GenerationWeightsCard';
@@ -64,11 +65,14 @@ interface TeamSettingsPageProps {
 }
 
 /**
- * Six tabs behind one shared save bar. The four cards saved by
+ * Six tabs behind one shared save bar. The five cards saved by
  * `updateTeamSettings` (`GeneralLimitsCard`, `RemindersCard`,
- * `CoachAssignmentCard`, `DiscordDefaultsCard`) share one `useTeamSettingsForm`
- * that lives above the tabs — never inside a tab panel — precisely so
- * switching between the General and Discord tabs cannot unmount it; the
+ * `CoachAssignmentCard`, `DiscordDefaultsCard`, `FinanceAutomationCard`) share
+ * one `useTeamSettingsForm` that lives above the tabs — never inside a tab
+ * panel — precisely so switching tab cannot unmount it. That is load-bearing
+ * for `FinanceAutomationCard` in particular: it sits on the Finance tab while
+ * the shared form registers its save-bar entry under `general`, so an edit made
+ * there has to survive the trip to another tab. The
  * remaining cards each own their own `useCardForm` and register one
  * `useSaveBarEntry` apiece. `SaveBar` collects whichever of the seven forms
  * are currently dirty and renders one row per form; there is deliberately no
@@ -277,7 +281,10 @@ function TeamSettingsPageBody({
           className='data-[state=inactive]:hidden flex flex-col gap-6 max-w-2xl'
         >
           {canManageBankSync && (
-            <FioBankCard teamId={teamId} initialConfig={bankSyncConfig} onRefresh={onRefresh} />
+            <>
+              <FinanceAutomationCard form={form} />
+              <FioBankCard teamId={teamId} initialConfig={bankSyncConfig} onRefresh={onRefresh} />
+            </>
           )}
         </TabsContent>
 

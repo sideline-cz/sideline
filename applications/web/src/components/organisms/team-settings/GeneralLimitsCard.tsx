@@ -248,36 +248,6 @@ export function GeneralLimitsCard({ form: { values, setField } }: GeneralLimitsC
           <p className='text-xs text-muted-foreground'>
             {tr('teamSettings_requireCompleteProfile_help')}
           </p>
-          <div className='flex items-center gap-2'>
-            <input
-              id='auto-assign-variable-symbols'
-              type='checkbox'
-              checked={values.autoAssignVariableSymbols}
-              onChange={(e) => setField('autoAssignVariableSymbols', e.target.checked)}
-              className='h-4 w-4'
-            />
-            <label htmlFor='auto-assign-variable-symbols' className='text-sm font-medium'>
-              {tr('teamSettings_autoAssignVariableSymbols')}
-            </label>
-          </div>
-          <p className='text-xs text-muted-foreground'>
-            {tr('teamSettings_autoAssignVariableSymbols_help')}
-          </p>
-          <div className='flex items-center gap-2'>
-            <input
-              id='auto-apply-credit-enabled'
-              type='checkbox'
-              checked={values.autoApplyCreditEnabled}
-              onChange={(e) => setField('autoApplyCreditEnabled', e.target.checked)}
-              className='h-4 w-4'
-            />
-            <label htmlFor='auto-apply-credit-enabled' className='text-sm font-medium'>
-              {tr('teamSettings_autoApplyCreditEnabled')}
-            </label>
-          </div>
-          <p className='text-xs text-muted-foreground'>
-            {tr('teamSettings_autoApplyCreditEnabled_help')}
-          </p>
         </div>
       </CardContent>
     </Card>

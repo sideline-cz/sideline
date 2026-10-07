@@ -2855,6 +2855,7 @@
   "teamSettings_autoAssignVariableSymbols_help": "Noví členové dostanou další volný symbol hned při vstupu. Stávajících členů bez symbolu se to netýká — na ty použij „Přidělit variabilní symboly“.",
   "teamSettings_autoApplyCreditEnabled": "Používat kredit člena automaticky",
   "teamSettings_autoApplyCreditEnabled_help": "Kredit, který člen má, se sám započte na jeho nezaplacené poplatky, od nejstaršího data splatnosti — stejně, jako by to udělalo Vyrovnat. U poplatků za tréninky se čeká na konec měsíce, protože se jejich částka do té doby ještě přepočítává.",
+  "teamSettings_financeAutomation": "Automatizace",
   "teamSettings_achievementChannel": "Kanál pro úspěchy",
   "teamSettings_achievementChannelDisabled": "Žádný — neposílat oznámení o úspěších",
   "teamSettings_achievementChannelHelp": "Discord kanál, kam se odesílají oznámení o získaných úspěších. Vyberte „Žádný“ pro vypnutí oznámení o úspěších.",
