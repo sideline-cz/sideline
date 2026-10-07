@@ -9,7 +9,7 @@ import { formatMoney } from '~/rest/finance/formatMoney.js';
 
 /** Discord blurple — selection open. */
 const COLOR_OPEN = 0x5865f2;
-/** Grey — past the selection deadline. */
+/** Grey — selection closed, by deadline or by the season ending. */
 const COLOR_CLOSED = 0x95a5a6;
 
 /**
@@ -23,10 +23,26 @@ export const MAX_PLANS = 20;
 export const planLabel = (plan: MembershipRpcModels.MembershipPlanView, locale: Locale): string =>
   Option.getOrElse(plan.name, () => m.membershipPlan_defaultName({}, { locale }));
 
-/** True once the team's selection deadline has passed. `None` = always open. */
-export const isSelectionClosed = (view: MembershipRpcModels.MembershipSelectionView): boolean =>
-  Option.isSome(view.deadline) &&
-  DateTime.isLessThanOrEqualTo(view.deadline.value, DateTime.nowUnsafe());
+const hasPassed = (instant: Option.Option<DateTime.Utc>): boolean =>
+  Option.isSome(instant) && DateTime.isLessThanOrEqualTo(instant.value, DateTime.nowUnsafe());
+
+/**
+ * The governing season's three states, derived from its two raw instants. `None` on both = open
+ * forever. Everything that is not `open` disables the controls; only the copy differs.
+ *
+ * The expiry wins when BOTH have passed. A deadline is almost always earlier than its expiry, so
+ * the other tie-break would make the season-ended line unreachable in production — and a finished
+ * season is both the state the member is actually in and the more useful next action ("you keep
+ * your plan until the next season" beats "ask a team admin" once the season is gone).
+ */
+export const selectionState = (
+  view: MembershipRpcModels.MembershipSelectionView,
+): 'open' | 'deadline-passed' | 'season-ended' =>
+  hasPassed(view.season_expires_at)
+    ? 'season-ended'
+    : hasPassed(view.deadline)
+      ? 'deadline-passed'
+      : 'open';
 
 /**
  * The public board.
@@ -43,7 +59,26 @@ export const buildMembershipBoard = (
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
 } => {
-  const closed = isSelectionClosed(view);
+  const state = selectionState(view);
+  const closed = state !== 'open';
+
+  /**
+   * `None` renders no line at all — reachable only in the `open` state, where there is no date to
+   * show. Both closed states hold a `Some` by construction: `selectionState` returns them only
+   * when that very Option has passed.
+   */
+  const dateLine = (
+    instant: Option.Option<DateTime.Utc>,
+    message: typeof m.bot_membership_deadline_line,
+  ): string | undefined =>
+    Option.getOrUndefined(
+      Option.map(instant, (at) =>
+        message(
+          { relative: toDiscordTimestamp(at, 'R'), absolute: toDiscordTimestamp(at, 'f') },
+          { locale },
+        ),
+      ),
+    );
 
   const fields: Discord.RichEmbedField[] = view.plans.slice(0, MAX_PLANS).map((plan) => {
     const lines = [
@@ -64,17 +99,16 @@ export const buildMembershipBoard = (
     return { name: `${planLabel(plan, locale)}${suffix}`, value: lines.join('\n'), inline: false };
   });
 
-  const description = Option.match(view.deadline, {
-    onNone: () => undefined,
-    onSome: (deadline) =>
-      (closed ? m.bot_membership_closed_line : m.bot_membership_deadline_line)(
-        {
-          relative: toDiscordTimestamp(deadline, 'R'),
-          absolute: toDiscordTimestamp(deadline, 'f'),
-        },
-        { locale },
-      ),
-  });
+  const description = ((): string | undefined => {
+    switch (state) {
+      case 'season-ended':
+        return dateLine(view.season_expires_at, m.bot_membership_season_ended_line);
+      case 'deadline-passed':
+        return dateLine(view.deadline, m.bot_membership_closed_line);
+      case 'open':
+        return dateLine(view.deadline, m.bot_membership_deadline_line);
+    }
+  })();
 
   const embeds: ReadonlyArray<Discord.RichEmbed> = [
     {

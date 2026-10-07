@@ -5,7 +5,7 @@ import * as Discord from 'dfx/types';
 import { Option } from 'effect';
 import type { Locale } from '~/locale.js';
 import { formatMoney } from '~/rest/finance/formatMoney.js';
-import { isSelectionClosed, MAX_PLANS, planLabel } from './buildMembershipBoard.js';
+import { MAX_PLANS, planLabel, selectionState } from './buildMembershipBoard.js';
 
 const COLOR_OPEN = 0x5865f2;
 const COLOR_CLOSED = 0x95a5a6;
@@ -36,7 +36,8 @@ export const buildMembershipPickView = (
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
 } => {
-  const closed = isSelectionClosed(view);
+  // Both closed states disable identically; the footer string is true for either.
+  const closed = selectionState(view) !== 'open';
 
   // `None` means never picked — NOT "on the default plan". Resolve against the plan list exactly
   // as the web does; a selection pointing at a since-archived plan reads back as never-picked,

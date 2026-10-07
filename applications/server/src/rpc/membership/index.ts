@@ -6,8 +6,11 @@ import {
   type Team,
   type TeamMember,
 } from '@sideline/domain';
-import { Array, DateTime, Effect, Option } from 'effect';
-import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
+import { Array, Effect, Option } from 'effect';
+import {
+  MembershipPlansRepository,
+  selectionWindowHasClosed,
+} from '~/repositories/MembershipPlansRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 
@@ -73,6 +76,12 @@ const buildView = (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId, canMa
           plans: Array.map(list, toPlanView),
           selected_plan_id: Option.flatMap(selection, (row) => row.membership_plan_id),
           deadline: Option.flatMap(selection, (row) => row.membership_selection_deadline),
+          // The SAME governing season's expiry, carried separately so the bot can tell "deadline
+          // passed" (ask a team admin) from "season ended" (you keep your plan until the next
+          // season). The WIRE key is optional — the rolling deploy order is bot -> server -> web,
+          // so a new bot must decode an old server's payload where it is absent — but the TYPE
+          // side is required, which is why it is passed explicitly here.
+          season_expires_at: Option.flatMap(selection, (row) => row.season_expires_at),
           can_manage: canManage,
         }),
     ),
@@ -140,12 +149,13 @@ const rpcHandlers = Effect.Do.pipe(
                     > =>
                       Option.match(selection, {
                         onNone: () => Effect.fail(new MembershipRpcModels.MembershipNotMember()),
+                        // EITHER date, matching `selection_is_open`. A season that ENDED with a
+                        // NULL deadline is reachable from the UI today (set an expiry, leave the
+                        // deadline box empty); classifying on the deadline alone would report
+                        // "that plan is not available" — a lie, and the board would then render
+                        // the wrong next action.
                         onSome: (row) =>
-                          Option.isSome(row.membership_selection_deadline) &&
-                          DateTime.isLessThanOrEqualTo(
-                            row.membership_selection_deadline.value,
-                            DateTime.nowUnsafe(),
-                          )
+                          selectionWindowHasClosed(row)
                             ? Effect.fail(new MembershipRpcModels.MembershipSelectionLocked())
                             : Effect.fail(new MembershipRpcModels.MembershipPlanUnavailable()),
                       }),

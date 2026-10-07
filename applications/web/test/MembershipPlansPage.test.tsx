@@ -30,7 +30,6 @@ vi.mock('~/lib/translations.js', () => ({
       membershipPlan_edit: 'Edit',
       membershipPlan_archiveAction: 'Archive',
       membershipPlan_priceFree: 'Free',
-      membershipPlan_noExpiry: 'No expiry',
       team_backToTeams: 'Back to teams',
       achievement_admin_cancel: 'Cancel',
       common_cancel: 'Cancel',
@@ -47,10 +46,24 @@ vi.mock('~/lib/translations.js', () => ({
       membershipPlan_deadlineHint: 'Members must choose by this date.',
       membershipPlan_save: 'Save',
       membershipPlan_saving: 'Saving…',
-      membershipPlan_deadlineClear: 'Clear',
       membershipPlan_deadlineSaved: 'Deadline saved.',
-      membershipPlan_deadlineCleared: 'Deadline cleared.',
       membershipPlan_deadlineSaveFailed: 'Failed to save deadline.',
+      // "Give a season real dates" — the season panel (design §9.3). Stubs only; NO COPY
+      // ASSERTION belongs in this file (see the note on the free-trainings block below).
+      membershipPlan_season_currentHeading: 'Current season',
+      membershipPlan_season_nextHeading: 'Next season',
+      membershipPlan_season_startsLabel: 'Season starts',
+      membershipPlan_season_endsLabel: 'Season ends',
+      membershipPlan_season_hint: 'Season hint.',
+      membershipPlan_season_badgeOpen: 'Selection open',
+      membershipPlan_season_badgeClosed: 'Selection closed',
+      membershipPlan_season_badgeEnded: 'Season ended',
+      membershipPlan_season_startNew: 'Start new season',
+      membershipPlan_season_nextHint: 'Next season hint.',
+      membershipPlan_season_saved: 'Season dates saved.',
+      membershipPlan_season_saveFailed: 'Failed to save the season dates.',
+      membershipPlan_season_created: 'Next season added.',
+      membershipPlan_season_orderInvalid: 'The end date must be after the start date.',
       // Slice 3 — the member-assignment section (plan Task 5).
       membershipPlan_assign_sectionTitle: 'Member assignments',
       membershipPlan_assign_hint: 'Assign a plan to any member, deadline or not.',
@@ -63,9 +76,6 @@ vi.mock('~/lib/translations.js', () => ({
     };
     if (key === 'membershipPlan_perTraining') {
       return `${String(params?.amount)} per training`;
-    }
-    if (key === 'membershipPlan_expiresOn') {
-      return `Expires ${String(params?.date)}`;
     }
     if (key === 'membershipPlan_makeDefaultAria') {
       return `Make ${String(params?.name)} the default plan`;
@@ -88,6 +98,9 @@ vi.mock('~/lib/translations.js', () => ({
     if (key === 'membershipPlan_selectionClosedNotice') {
       return `Selection closed on ${String(params?.date)} ${String(params?.time)}.`;
     }
+    if (key === 'membershipPlan_seasonEndedNotice') {
+      return `The season ended on ${String(params?.date)}. You stay on your current plan.`;
+    }
     return map[key] ?? key;
   },
   setTranslationOverrides: vi.fn(),
@@ -100,6 +113,11 @@ vi.mock('~/lib/translations.js', () => ({
 // stays out of the mocked API surface entirely.
 const selectMembershipPlanImpl = vi.fn();
 const setMembershipSelectionDeadlineImpl = vi.fn();
+// "Give a season real dates" — the ONE new endpoint. The Next block's Save is its only caller,
+// and "Start new season" issues NO request at all (it is a pure UI reveal; the block's first Save
+// creates the row). Mocked for the same reason as the others: without it the click throws "not a
+// function" instead of reaching an assertion.
+const upsertNextSeasonImpl = vi.fn();
 // Slice 3 — the captain-side single-member write. Mocked for the same reason as the two
 // above: without it, changing a row's Select throws "not a function" instead of asserting.
 const assignMembershipPlanImpl = vi.fn();
@@ -117,6 +135,7 @@ vi.mock('~/lib/runtime', async () => {
             selectMembershipPlan: (args: unknown) => selectMembershipPlanImpl(args),
             setMembershipSelectionDeadline: (args: unknown) =>
               setMembershipSelectionDeadlineImpl(args),
+            upsertNextSeason: (args: unknown) => upsertNextSeasonImpl(args),
             assignMembershipPlan: (args: unknown) => assignMembershipPlanImpl(args),
             updateMembershipPlan: (args: unknown) => updateMembershipPlanImpl(args),
           },
@@ -226,9 +245,34 @@ function assignment(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-// Every render call goes through here so the two Slice 2 props (required, no default in the
-// component) don't have to be repeated at every call site — only the cases that care about them
-// override them.
+// One season's RAW columns — the shape `MembershipPlanListResponse.currentSeason` /
+// `.nextSeason` carry. Nothing here is derived: these objects exist to SEED FORM INPUTS, and an
+// input seeded from a derived value that it then writes back is the data-loss loop this shape
+// exists to make unreachable.
+function season(overrides: Record<string, unknown> = {}) {
+  return {
+    startsAt: DateTime.makeUnsafe('2026-01-01T00:00:00Z'),
+    selectionDeadline: Option.none<DateTime.Utc>(),
+    expiresAt: Option.none<DateTime.Utc>(),
+    ...overrides,
+  } as any;
+}
+
+/** `yyyy-MM-dd` in LOCAL time — the value an `<input type='date'>` carries. */
+function localDateString(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate(),
+  ).padStart(2, '0')}`;
+}
+
+const TOMORROW = localDateString(new Date(Date.now() + 24 * 60 * 60 * 1000));
+
+// Every render call goes through here so the required props (no defaults in the component) don't
+// have to be repeated at every call site — only the cases that care about them override them.
+//
+// `currentSeason` DEFAULTS TO `Some`, deliberately: `None` is state M9, in which the whole panel
+// renders NOTHING, so a `None` default would silently delete the deadline input every existing
+// case in this file depends on. M9 has its own case below.
 function renderPage(overrides: Record<string, unknown> = {}) {
   return render(
     <MembershipPlansPage
@@ -237,6 +281,9 @@ function renderPage(overrides: Record<string, unknown> = {}) {
       plans={[]}
       selectedPlanId={Option.none()}
       selectionDeadline={Option.none()}
+      seasonExpiresAt={Option.none()}
+      currentSeason={Option.some(season())}
+      nextSeason={Option.none()}
       assignments={[]}
       {...overrides}
     />,
@@ -742,5 +789,323 @@ describe('MembershipPlansPage — member assignments section', () => {
     });
 
     expect(assignmentRow('Alice').getAttribute('data-value')).toBe(DEFAULT_SENTINEL);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// "Give a season real dates" — the season panel.
+//
+// TDD: written BEFORE the panel exists. Every case below fails until `MembershipPlansPage` takes
+// the three new props (`currentSeason`, `nextSeason`, `seasonExpiresAt`) and renders the two
+// SeasonBlocks (plan Task 6, design §2.2-§2.7).
+//
+// Assumed contract, taken from design.md §2:
+//   - the panel is manager-only and renders NOTHING when `currentSeason` is `None` (state M9)
+//   - two blocks, Current then Next in DOM order, each with its OWN Save button
+//   - Current block:  `Season starts` is READ-ONLY TEXT (§2.5), plus `Selection deadline` and
+//                     `Season ends` inputs; its Save calls `setMembershipSelectionDeadline`
+//   - Next block:     all three editable; its Save calls `upsertNextSeason`
+//   - the Next block renders iff `nextSeason` exists OR the manager clicked "Start new season"
+//   - "Start new season" renders iff there is no `nextSeason`, and issues NO request
+//   - every input is seeded from its OWN season object's OWN raw column, and the top-level
+//     `selectionDeadline` / `seasonExpiresAt` pair seeds NOTHING
+//
+// NO COPY ASSERTION BELONGS HERE. `~/lib/translations.js` is mocked with a hardcoded key -> string
+// map, so `en.json` is never loaded and any wording assertion asserts against test-local fiction.
+// ---------------------------------------------------------------------------
+
+/** The two blocks' inputs share label text and are told apart by DOM order — Current always
+ * precedes Next (§2.2's hierarchy). The design pins `season-*` / `next-season-*` id prefixes, but
+ * the exact ids are not part of the contract, so order is the stabler handle. */
+const deadlineInputs = () => screen.getAllByLabelText('Selection deadline') as HTMLInputElement[];
+const seasonEndsInputs = () => screen.getAllByLabelText('Season ends') as HTMLInputElement[];
+const saveButtons = () => screen.getAllByRole('button', { name: 'Save' });
+
+describe('MembershipPlansPage — the season panel renders at all', () => {
+  // M9, the ROLLBACK CONTRACT. `currentSeason: None` is unreachable in production
+  // (`seed_first_season_trg` plus the migration backfill) and occurs in exactly one window: a
+  // SERVER ROLLBACK, where the endpoints behind those boxes do not exist yet. So every control
+  // offered there is a control that fails — the panel renders NOTHING, degrading to exactly
+  // today's page. Not an empty state, not blank boxes, not a badge-less skeleton.
+  it('renders NOTHING when currentSeason is None, and does not crash', () => {
+    renderPage({ currentSeason: Option.none(), plans: [PLAN_A] });
+
+    expect(screen.queryByText('Current season')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Selection deadline')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start new season' })).not.toBeInTheDocument();
+    // The page itself still renders.
+    expect(screen.getByText('Plan A')).toBeInTheDocument();
+  });
+
+  it('hides the whole panel from non-managers', () => {
+    renderPage({ canManage: false, plans: [PLAN_A], currentSeason: Option.some(season()) });
+
+    expect(screen.queryByText('Current season')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Selection deadline')).not.toBeInTheDocument();
+  });
+
+  // The trigger disappears when the slot is full (§2.6 anti-confusion move 4): a manager can never
+  // be looking at a queued season and a "create another" button at the same time, which is what
+  // makes the second-queued-season state — invisible to the gate anyway, since `next` is the
+  // EARLIEST future season — unreachable from the UI.
+  it('shows "Start new season" only when there is no next season', () => {
+    const { unmount } = renderPage({ nextSeason: Option.none() });
+    expect(screen.getByRole('button', { name: 'Start new season' })).toBeInTheDocument();
+    unmount();
+
+    renderPage({
+      nextSeason: Option.some(season({ startsAt: DateTime.makeUnsafe('2027-09-01T00:00:00Z') })),
+    });
+    expect(screen.queryByRole('button', { name: 'Start new season' })).not.toBeInTheDocument();
+    expect(screen.getByText('Next season')).toBeInTheDocument();
+  });
+});
+
+describe('MembershipPlansPage — each block is seeded from its OWN season object', () => {
+  // CASE 39c — THE WEB-SIDE GUARD for the blocker that survived review round 1. The bug there was
+  // not a typo: the Current block's input was seeded from the GOVERNING season and saved into the
+  // LATEST one, which are different rows the moment a next season is queued, so the box snapped
+  // back and next season's deadline was silently overwritten.
+  //
+  // DISCRIMINATOR: the two objects carry DIFFERENT dates, and the top-level display pair carries a
+  // THIRD. An implementation that seeds either box from the pair fails on a value that appears in
+  // neither input.
+  it('the Current block shows currentSeason’s dates and the Next block shows nextSeason’s', () => {
+    renderPage({
+      currentSeason: Option.some(
+        season({
+          startsAt: DateTime.makeUnsafe('2026-09-01T12:00:00Z'),
+          selectionDeadline: Option.some(DateTime.makeUnsafe('2026-09-15T12:00:00Z')),
+          expiresAt: Option.some(DateTime.makeUnsafe('2027-06-30T12:00:00Z')),
+        }),
+      ),
+      nextSeason: Option.some(
+        season({
+          startsAt: DateTime.makeUnsafe('2027-09-01T12:00:00Z'),
+          selectionDeadline: Option.some(DateTime.makeUnsafe('2027-08-20T12:00:00Z')),
+          expiresAt: Option.some(DateTime.makeUnsafe('2028-06-30T12:00:00Z')),
+        }),
+      ),
+      // DISPLAY ONLY. This value must appear in NO input.
+      selectionDeadline: Option.some(DateTime.makeUnsafe('2099-01-01T12:00:00Z')),
+    });
+
+    const deadlines = deadlineInputs();
+    expect(deadlines).toHaveLength(2);
+    expect(deadlines[0]?.value).toBe('2026-09-15');
+    expect(deadlines[1]?.value).toBe('2027-08-20');
+
+    const ends = seasonEndsInputs();
+    expect(ends[0]?.value).toBe('2027-06-30');
+    expect(ends[1]?.value).toBe('2028-06-30');
+
+    for (const input of [...deadlines, ...ends]) {
+      expect(input.value, 'the display-only pair must never reach an input').not.toBe('2099-01-01');
+    }
+  });
+
+  // §2.4's other half: a box is blank ONLY when the column is actually NULL. That is what makes
+  // "an empty box means Option.none()" unambiguous rather than destructive.
+  it('a NULL column renders a BLANK box, never a fallback from somewhere else', () => {
+    renderPage({
+      currentSeason: Option.some(season({ selectionDeadline: Option.none() })),
+      selectionDeadline: Option.some(DateTime.makeUnsafe('2099-01-01T12:00:00Z')),
+    });
+
+    expect(deadlineInputs()[0]?.value).toBe('');
+  });
+});
+
+describe('MembershipPlansPage — the Current block’s Save', () => {
+  // CASE 39b — AN EMPTY BOX SENDS `Option.none()`. Red until `MembershipPlansPage.tsx:509-510`'s
+  // `if (!trimmed) return;` is deleted: with that line in place, blanking the field is a SILENT
+  // NO-OP behind a success toast. There is no Clear button to test any more — it is deleted, and
+  // "an empty box means none" is the smaller mechanism that replaced it.
+  //
+  // Pairs with the server case `{ deadline: null } clears the column and reopens selection`.
+  it('clearing the deadline box sends deadline: Option.none()', async () => {
+    setMembershipSelectionDeadlineImpl.mockReturnValueOnce(Effect.succeed(undefined));
+    renderPage({
+      currentSeason: Option.some(
+        season({ selectionDeadline: Option.some(DateTime.makeUnsafe('2026-09-15T12:00:00Z')) }),
+      ),
+    });
+
+    fireEvent.change(deadlineInputs()[0] as HTMLInputElement, { target: { value: '' } });
+    fireEvent.click(saveButtons()[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(setMembershipSelectionDeadlineImpl).toHaveBeenCalledOnce();
+    });
+    const args = setMembershipSelectionDeadlineImpl.mock.calls[0][0] as {
+      payload: { deadline: Option.Option<DateTime.Utc> };
+    };
+    expect(Option.isNone(args.payload.deadline)).toBe(true);
+  });
+
+  // The Current block owns `{ deadline, expiresAt }` and NO `startsAt` — a running season's start
+  // is history, and a date box that could move it would fire the fee recompute and re-price the
+  // open month with no confirmation.
+  it('sends the expiry alongside the deadline, and never a startsAt', async () => {
+    setMembershipSelectionDeadlineImpl.mockReturnValueOnce(Effect.succeed(undefined));
+    renderPage({ currentSeason: Option.some(season()) });
+
+    fireEvent.change(deadlineInputs()[0] as HTMLInputElement, { target: { value: '2026-09-30' } });
+    fireEvent.change(seasonEndsInputs()[0] as HTMLInputElement, {
+      target: { value: '2027-06-30' },
+    });
+    fireEvent.click(saveButtons()[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(setMembershipSelectionDeadlineImpl).toHaveBeenCalledOnce();
+    });
+    const args = setMembershipSelectionDeadlineImpl.mock.calls[0][0] as {
+      payload: Record<string, unknown>;
+    };
+    expect(Object.hasOwn(args.payload, 'startsAt')).toBe(false);
+    expect(
+      upsertNextSeasonImpl,
+      'the Current block can never reach the next slot',
+    ).not.toHaveBeenCalled();
+  });
+});
+
+describe('MembershipPlansPage — the Next block’s Save', () => {
+  // CASE 40. "Start new season" issues NO request — it is a pure UI reveal; the block's FIRST Save
+  // creates the row, every later Save updates it. That is why one endpoint was enough and why the
+  // button says Save rather than Create.
+  it('"Start new season" reveals the block without a request, and its Save calls upsertNextSeason', async () => {
+    upsertNextSeasonImpl.mockReturnValueOnce(Effect.succeed(undefined));
+    renderPage({ currentSeason: Option.some(season()), nextSeason: Option.none() });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start new season' }));
+    expect(upsertNextSeasonImpl, 'the reveal is not a request').not.toHaveBeenCalled();
+
+    const startInputs = screen.getAllByLabelText('Season starts') as HTMLInputElement[];
+    const nextStart = startInputs[startInputs.length - 1] as HTMLInputElement;
+    fireEvent.change(nextStart, { target: { value: '2027-09-01' } });
+    const saves = saveButtons();
+    fireEvent.click(saves[saves.length - 1] as HTMLElement);
+
+    await waitFor(() => {
+      expect(upsertNextSeasonImpl).toHaveBeenCalledOnce();
+    });
+    const args = upsertNextSeasonImpl.mock.calls[0][0] as {
+      payload: { startsAt: DateTime.Utc };
+    };
+    // START of local day — the harmful direction reverses for a start date (§4): a deadline that
+    // closes a few hours late is harmless, a season that starts a few hours late is not.
+    expect(Number(DateTime.toEpochMillis(args.payload.startsAt))).toBe(
+      new Date(2027, 8, 1, 0, 0, 0, 0).getTime(),
+    );
+    expect(
+      setMembershipSelectionDeadlineImpl,
+      'the Next block can never reach the current season’s row',
+    ).not.toHaveBeenCalled();
+  });
+
+  // CASE 40b — THE CLAMP. State M3: the season ended two months ago and the manager opens the page
+  // today. A naive "1st of the month after `currentSeason.expiresAt`" prefills a PAST date and a
+  // naive `min` of "day after expiresAt" is also past — so the Save 400s with
+  // `SeasonStartNotInFuture` on the value the UI ITSELF chose.
+  //
+  //   default = max( 1st of the month after currentSeason.expiresAt , 1st of next month )
+  //   min     = max( tomorrow , day after currentSeason.expiresAt )
+  //
+  // `tomorrow`, not `today`: the server's test is `<= now()` and today's date anchors to the START
+  // of the local day, so it is already past by the time it lands.
+  it('prefills a FUTURE startsAt and a FUTURE min when the current season ended months ago', () => {
+    const twoMonthsAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    renderPage({
+      currentSeason: Option.some(
+        season({
+          startsAt: DateTime.makeUnsafe(
+            new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString(),
+          ),
+          expiresAt: Option.some(DateTime.makeUnsafe(twoMonthsAgo.toISOString())),
+        }),
+      ),
+      nextSeason: Option.none(),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start new season' }));
+
+    const startInputs = screen.getAllByLabelText('Season starts') as HTMLInputElement[];
+    const nextStart = startInputs[startInputs.length - 1] as HTMLInputElement;
+    // `yyyy-MM-dd` sorts lexicographically, so a string compare IS a date compare.
+    expect(nextStart.value >= TOMORROW, `prefill ${nextStart.value} must be >= ${TOMORROW}`).toBe(
+      true,
+    );
+    expect(
+      (nextStart.getAttribute('min') ?? '') >= TOMORROW,
+      `min ${nextStart.getAttribute('min')} must be >= ${TOMORROW}`,
+    ).toBe(true);
+    // The 1st of a month, because a mid-month start resets that whole month's free trainings.
+    expect(nextStart.value.endsWith('-01')).toBe(true);
+  });
+});
+
+describe('MembershipPlansPage — the member’s notice, three ways', () => {
+  // CASE 39 (the added half). The three-way state is derived in the consumer from the two RAW
+  // display-only instants, and EXPIRY WINS when both have passed: a finished season is the better
+  // explanation, and it needs different copy and a different next action than a passed deadline.
+  //
+  // The web runs the same three lines the bot runs, on the same server-picked pair — the
+  // two-candidate pick itself lives in exactly ONE place, SQL. Re-deriving it here from
+  // `currentSeason`/`nextSeason` would run it against the BROWSER clock, and an implementer
+  // reaching for `currentSeason` would show "the season ended" in state M4 beside an ENABLED
+  // Choose button, which is precisely the state the gate rewrite exists to make work.
+  it('a PASSED seasonExpiresAt renders the season-ended notice, not the deadline one', () => {
+    const past = DateTime.makeUnsafe('2020-01-01T00:00:00Z');
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      selectionDeadline: Option.some(past),
+      seasonExpiresAt: Option.some(past),
+    });
+
+    expect(screen.getByText(/The season ended on/)).toBeInTheDocument();
+    expect(screen.queryByText(/Selection closed on/)).not.toBeInTheDocument();
+    for (const button of screen.getAllByRole('button', { name: /^Choose / })) {
+      expect(
+        button,
+        'both closed states disable identically — only the copy differs',
+      ).toBeDisabled();
+    }
+  });
+
+  it('a passed deadline with a FUTURE expiry still renders the deadline-passed notice', () => {
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      selectionDeadline: Option.some(DateTime.makeUnsafe('2020-01-01T00:00:00Z')),
+      seasonExpiresAt: Option.some(DateTime.makeUnsafe('2999-01-01T00:00:00Z')),
+    });
+
+    expect(screen.getByText(/Selection closed on/)).toBeInTheDocument();
+    expect(screen.queryByText(/The season ended on/)).not.toBeInTheDocument();
+  });
+
+  // M4 at the member's level: the governing season is NEXT, its deadline is in the future, and the
+  // member may pick — even though the CURRENT season has ended. Nothing about the Current block's
+  // "Season ended" badge may reach this notice.
+  it('a FUTURE selectionDeadline keeps Choose enabled even while currentSeason has expired', () => {
+    renderPage({
+      plans: [PLAN_A, PLAN_B],
+      currentSeason: Option.some(
+        season({ expiresAt: Option.some(DateTime.makeUnsafe('2020-01-01T00:00:00Z')) }),
+      ),
+      nextSeason: Option.some(
+        season({
+          startsAt: DateTime.makeUnsafe('2999-01-01T00:00:00Z'),
+          selectionDeadline: Option.some(DateTime.makeUnsafe('2998-12-01T00:00:00Z')),
+        }),
+      ),
+      selectionDeadline: Option.some(DateTime.makeUnsafe('2998-12-01T00:00:00Z')),
+      seasonExpiresAt: Option.none(),
+    });
+
+    expect(screen.getByText(/You can change your plan until/)).toBeInTheDocument();
+    for (const button of screen.getAllByRole('button', { name: /^Choose / })) {
+      expect(button).not.toBeDisabled();
+    }
   });
 });

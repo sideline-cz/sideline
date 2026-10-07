@@ -204,6 +204,32 @@ Rules:
 4. **Verify the backfill cannot collide with the index before writing it.** Here it cannot: `idx_roles_team_name` is a full unique index on `(team_id, name)`, so at most one `'Player'` row exists per team. State that reasoning in a comment on the backfill — a reviewer cannot re-derive it from the migration alone.
 5. **Application writes against this index need a row lock, not just a transaction** — see `applications/server/AGENTS.md` → "The Team's Default Role Resolves In Exactly One Place", rules 4 and 5.
 
+### A Seed Trigger Goes BEFORE Its Backfill, Not After
+
+When a migration establishes "every row of X always has a child in Y" — a `seasons` row per team, a default membership plan per team — it needs two statements: a trigger that seeds the child for rows created from now on, and a backfill for the rows that already exist. **Create the trigger FIRST.**
+
+```typescript
+// 1. Trigger first. CREATE TRIGGER takes ShareRowExclusiveLock on `teams`, which conflicts with
+//    the RowExclusiveLock an INSERT needs — so from here to COMMIT no new team can appear.
+Effect.tap(() => sql`CREATE OR REPLACE TRIGGER seed_first_season_trg AFTER INSERT ON teams ...`),
+// 2. Backfill second, inside the same transaction, guarded on the FACT that no child exists.
+Effect.tap(() => sql`
+  INSERT INTO seasons (team_id, ...) SELECT t.id, ... FROM teams t
+  WHERE NOT EXISTS (SELECT 1 FROM seasons s WHERE s.team_id = t.id)
+`),
+```
+
+Backfill-first leaves a window: a team inserted between the two statements is seen by neither, and gets **no child row, permanently and invisibly**. Nothing errors, nothing logs, and the defect only surfaces later as a feature that silently does nothing for that one team.
+
+Trigger-first closes it without any explicit locking, and the reason is worth knowing rather than trusting. Measured on PG17: `CREATE TRIGGER` (and `CREATE OR REPLACE TRIGGER`) takes `ShareRowExclusiveLock` on the table; `INSERT` takes `RowExclusiveLock`; those two conflict. Because `MigrateBefore` runs the whole migration inside one `sql.withTransaction`, the lock is held to COMMIT — so a concurrent insert blocks until the backfill has already run, and an insert that was already in flight makes `CREATE TRIGGER` wait for it, after which the backfill's own fresh statement snapshot sees that team and seeds it. Either order of arrival ends with exactly one child row.
+
+Rules:
+
+1. **Trigger first, backfill second, one transaction.** Do not "optimise" the trigger to the end because it reads as setup.
+2. **The backfill is still guarded on a fact, never a value** (see "Reinterpreting Stored Values"). With the trigger live, a team may already have been seeded by it before the backfill runs — `WHERE NOT EXISTS` is what makes that a no-op instead of a duplicate, and it is also what makes a re-run of the whole migration a no-op.
+3. **Pin it with a test that the migration is a no-op on a second full run**, asserting the child count per team is exactly 1. A test that only checks "a child exists" passes just as happily with two.
+4. **Known precedent, deliberately not retrofitted:** `1792400000_create_event_types.ts` and `1792800000_create_membership_plans.ts` both backfill before creating their seed trigger and carry this same hole. They are long since applied, so the window is closed by time rather than by correctness — but do not copy their ordering into a new migration.
+
 ### Updating CHECK Constraints
 
 To add a new value to an existing CHECK constraint (e.g. adding a status enum value), drop the old constraint and create a new one:

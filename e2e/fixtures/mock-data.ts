@@ -199,6 +199,19 @@ export const mockMembershipPlanList = {
       isDefault: true,
     },
   ],
+  // Both gates `null` means "this season never closes", so `open(current)` holds with NO
+  // dependency on the wall clock — every existing assertion that expects a working Choose
+  // button keeps passing, and nothing here can go stale. `startsAt` is a fixed past instant,
+  // consistent with this file's April-2026 world. Renders as the fresh-team state: the start
+  // filled, both date boxes blank. Without it the page decodes to `currentSeason: None` and the
+  // season panel renders nothing at all (the server-rollback contract), which is not the state
+  // the e2e suite should be exercising.
+  currentSeason: {
+    startsAt: '2026-01-01T00:00:00.000Z',
+    selectionDeadline: null,
+    expiresAt: null,
+  },
+  nextSeason: null,
 };
 
 export const mockEventList = {

@@ -28,7 +28,13 @@ const PLAN_B = '00000000-0000-0000-0000-0000000000a2' as MembershipPlan.Membersh
 let selectRowsAffected: number;
 let storedSelection: Option.Option<{
   membership_plan_id: Option.Option<MembershipPlan.MembershipPlanId>;
+  // DELIBERATE NAME, preserved by the repository: it is the GOVERNING SEASON's raw
+  // `selection_deadline` now, not `teams.membership_selection_deadline`, and never a LEAST() of
+  // the two dates. Keeping the name is what makes this RPC need no production change.
   membership_selection_deadline: Option.Option<DateTime.Utc>;
+  // The SAME governing season's expiry, carried separately so the bot can tell "deadline passed"
+  // (ask a team admin) from "season ended" (you keep your plan until the next season).
+  season_expires_at: Option.Option<DateTime.Utc>;
 }>;
 let selectCalls: Array<unknown>;
 
@@ -37,6 +43,7 @@ beforeEach(() => {
   storedSelection = Option.some({
     membership_plan_id: Option.none(),
     membership_selection_deadline: Option.none(),
+    season_expires_at: Option.none(),
   });
   selectCalls = [];
 });
@@ -49,7 +56,6 @@ const planRow = (id: MembershipPlan.MembershipPlanId, isDefault: boolean) => ({
   currency: 'CZK',
   price_per_training_minor: 8000,
   free_trainings_included: 0,
-  expires_at: Option.none(),
   is_default: isDefault,
 });
 
@@ -131,6 +137,7 @@ describe('Membership/GetMembershipSelection', () => {
       storedSelection = Option.some({
         membership_plan_id: Option.some(PLAN_B),
         membership_selection_deadline: Option.none(),
+        season_expires_at: Option.none(),
       });
 
       const view = yield* callRpc('Membership/GetMembershipSelection', {
@@ -192,6 +199,7 @@ describe('Membership/SelectMembershipPlan', () => {
       storedSelection = Option.some({
         membership_plan_id: Option.some(PLAN_B),
         membership_selection_deadline: Option.none(),
+        season_expires_at: Option.none(),
       });
 
       const view = yield* callRpc('Membership/SelectMembershipPlan', {
@@ -216,6 +224,7 @@ describe('Membership/SelectMembershipPlan', () => {
         membership_selection_deadline: Option.some(
           DateTime.subtract(DateTime.nowUnsafe(), { hours: 1 }),
         ),
+        season_expires_at: Option.none(),
       });
 
       const error = yield* Effect.flip(
@@ -264,11 +273,40 @@ describe('Membership/SelectMembershipPlan', () => {
     }),
   );
 
+  // CASE 37 — the 19c / 23d shape at the RPC layer, and the one the bot path needs end to end.
+  // A season that ENDED with a NULL `selection_deadline` is reachable from the UI today: set an
+  // expiry, leave the deadline box empty. If the classification branch only looks at
+  // `membership_selection_deadline`, this falls through to `MembershipPlanUnavailable` — "that
+  // plan is not available", which is a lie, and the board renders the wrong next action.
+  itEffect.effect(
+    'reports MembershipSelectionLocked on a PASSED season expiry even with a None deadline',
+    () =>
+      Effect.gen(function* () {
+        selectRowsAffected = 0;
+        storedSelection = Option.some({
+          membership_plan_id: Option.none(),
+          membership_selection_deadline: Option.none(),
+          season_expires_at: Option.some(DateTime.subtract(DateTime.nowUnsafe(), { hours: 1 })),
+        });
+
+        const error = yield* Effect.flip(
+          callRpc('Membership/SelectMembershipPlan', {
+            guild_id: GUILD_ID,
+            discord_user_id: MEMBER_DISCORD_ID,
+            plan_id: PLAN_A,
+          }),
+        );
+
+        expect(error._tag).toBe('MembershipSelectionLocked');
+      }),
+  );
+
   itEffect.effect('a future deadline still lets the write through', () =>
     Effect.gen(function* () {
       storedSelection = Option.some({
         membership_plan_id: Option.some(PLAN_A),
         membership_selection_deadline: Option.some(DateTime.add(DateTime.nowUnsafe(), { days: 7 })),
+        season_expires_at: Option.none(),
       });
 
       const view = yield* callRpc('Membership/SelectMembershipPlan', {

@@ -31,6 +31,7 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { createTeam, createTeamMember, createUser, nextDiscordId } from '../bankSyncFixtures.js';
 import { cleanDatabase, secondTestPgClient, TestPgClient } from '../helpers.js';
+import { setSeasons } from '../seasonFixtures.js';
 
 const TestLayer = Layer.mergeAll(
   EventAttendanceRepository.Default,
@@ -67,10 +68,12 @@ const PAST_MONTH_START = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth
 // that case is past attendance in the SAME period as the anchor but EARLIER than the stamp.
 const PAST_MONTH_START_2 = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 1, 15, 18));
 const PAST_MONTH_START_3 = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 1, 15, 20));
-// The mid-past-month anchor INSTANT for the period-alignment regression case.
+// The mid-past-month season-start INSTANT for the period-alignment regression case.
 const PAST_MONTH_MID = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 1, 16, 0));
-// Two months back — the ordinary "this plan has existed for a while" anchor.
-const OLD_ANCHOR = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 2, 1));
+// Two months back — the ordinary "this season has been running for a while" start. The season is
+// the free-trainings anchor now, so every case that wants PAST attendance to COUNT puts the
+// season's start before it.
+const OLD_SEASON_START = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - 2, 1));
 // Inside the NEXT period, for the reschedule-into-the-future case.
 const NEXT_MONTH_MID = new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() + 1, 10, 12));
 
@@ -120,7 +123,6 @@ const setDefaultPlanPrice = (
       currency: currency as never,
       price_per_training_minor: priceMinor as never,
       free_trainings_included: Option.some(freeTrainings as never),
-      expires_at: def.expires_at,
     });
   });
 
@@ -140,7 +142,6 @@ const createPlan = (
         currency: currency as never,
         price_per_training_minor: priceMinor as never,
         free_trainings_included: Option.some(freeTrainings as never),
-        expires_at: Option.none(),
       }),
     ),
   );
@@ -169,25 +170,23 @@ const setMemberPlanRaw = (memberId: TeamMember.TeamMemberId, planId: string) =>
     ),
   );
 
-/** Writes `membership_plans.free_trainings_anchor_at` directly. Takes an ABSOLUTE Date, never a
- * month count — the period-alignment case needs a mid-month instant. Raw SQL on purpose: the
- * column has no application writer at all, which is the point of choosing it. It does NOT touch
- * `created_at`; `created_at` is no longer the anchor.
+/** Replaces the team's seasons with ONE season starting at `at` — the free-trainings anchor.
  *
- * ORDERING TRAP, the single most likely way these tests silently lie:
- *  - `setDefaultPlanPrice(..., allowance)` moves the allowance 0 -> N, which fires the BEFORE
- *    trigger and stamps the anchor to `now()`. So ALWAYS call this AFTER setting the allowance.
- *  - this call fires NEITHER trigger (BEFORE watches `free_trainings_included`; AFTER watches the
- *    five money columns, and the anchor is deliberately not one of them), so it performs NO
- *    recompute. Every anchor change must be followed by an attendance write, or an explicit
- *    `recomputePeriod`, before asserting. */
-const setPlanAnchor = (planId: string, at: Date) =>
-  SqlClient.SqlClient.asEffect().pipe(
-    Effect.andThen(
-      (sql) =>
-        sql`UPDATE membership_plans SET free_trainings_anchor_at = ${at} WHERE id = ${planId}`,
-    ),
-  );
+ * This replaces the old `setPlanAnchor`. `membership_plans.free_trainings_anchor_at` and its
+ * re-stamp trigger were dropped by migration `1793900000`: the allowance is anchored to the
+ * TEAM'S SEASON now and RESETS at every rollover, reversing the "never resets" half of PR #746.
+ * (#746's ANTI-FARMING half survives: a season is manager-controlled and team-wide, so it is not
+ * farmable by a member toggling plans — which is what case `switching plans` below pins.)
+ *
+ * Takes an ABSOLUTE Date, never a month count — the period-alignment case needs a mid-month
+ * instant.
+ *
+ * ORDERING TRAP, inverted from the old one and just as sharp: this call DOES fire
+ * `seasons_recompute_trg`, whose `fees` EXISTS pre-check PASSES once a training fee shell exists
+ * for the open period. Call it BEFORE any attendance write, or it silently re-prices rows the
+ * test just arranged. Every case below calls it immediately after `setDefaultPlanPrice`, while
+ * `fees` is still empty. */
+const setSeasonStart = (teamId: Team.TeamId, at: Date) => setSeasons(teamId, [{ startsAt: at }]);
 
 /** Forces a recompute with no attendance write. */
 const recomputePeriod = (teamId: Team.TeamId, periodStart: Date) =>
@@ -1363,15 +1362,23 @@ describe('training_period_charges — free trainings included (all-time)', () =>
 });
 
 // ---------------------------------------------------------------------------
-// 21. The ALL-TIME allowance
+// 21. The PER-SEASON allowance (was: ALL-TIME)
 // ---------------------------------------------------------------------------
 //
-// Everything above this line uses CURRENT-month attendance only, where `prior` is empty and the
-// old per-period semantics and the new all-time ones agree exactly. The cases below are the ones
-// that do NOT agree, and each comment says whether the case DISCRIMINATES (it goes red against a
-// per-period implementation) or is only a REGRESSION NET (it would pass under both).
+// PR #746 made the allowance ALL-TIME, anchored to a per-plan `free_trainings_anchor_at`. This
+// feature REVERSES the "never resets" half of that: the allowance is now anchored to the TEAM'S
+// SEASON and RESETS at every rollover. #746 was correct against the requirement it was given;
+// the requirement changed. Its ANTI-FARMING half survives untouched — a season is
+// manager-controlled and team-wide, so a member cannot refresh their own allowance by toggling
+// plans, which is exactly what `switching plans` at the bottom of this block pins.
+//
+// Everything ABOVE this line uses CURRENT-month attendance only, where `prior` is empty and
+// per-period, all-time and per-season semantics all agree. The cases below are the ones that do
+// NOT agree. Each comment says whether the case DISCRIMINATES (it goes red against a per-period
+// implementation) or is only a REGRESSION NET (it would pass under both) — and the season-reset
+// case at the end is the headline, because it goes red against #746's own shipped semantics.
 
-describe('training_period_charges — the ALL-TIME allowance across periods', () => {
+describe('training_period_charges — the PER-SEASON allowance across periods', () => {
   // THE ACCEPTANCE TEST, and a DISCRIMINATOR: under the old per-period formula the current month
   // sees a fresh allowance of 2 against 2 attended and produces NO FEE AT ALL, so this single case
   // is what makes the fix provable.
@@ -1381,7 +1388,7 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
       const member = yield* addBilledMember(team.id, 'alltime-consumed-member');
       yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
       // Anchor AFTER the allowance — setting it 0 -> 2 just stamped the anchor to now().
-      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
 
       for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
         const past = yield* createTraining(team.id, captain.id, startAt);
@@ -1409,7 +1416,7 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
       const { team, captain } = yield* seedTeam('alltime-partial');
       const member = yield* addBilledMember(team.id, 'alltime-partial-member');
       yield* setDefaultPlanPrice(team.id, 100, 'CZK', 3);
-      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
 
       for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
         const past = yield* createTraining(team.id, captain.id, startAt);
@@ -1430,17 +1437,17 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
   );
 
   // DISCRIMINATOR, and the ONLY case that fails against an INSTANT-aligned `prior` lower bound.
-  // The anchor is stamped at day 16 of the past month; both past attendances are on day 15, i.e.
-  // strictly BEFORE the anchor instant but in the SAME period as it. `prior` compares
+  // The SEASON starts at day 16 of the past month; both past attendances are on day 15, i.e.
+  // strictly BEFORE the season instant but in the SAME period as it. `prior` compares
   // training_period_start on both sides, so they count. With an instant floor they would fall out
   // of `prior` while still being covered by their own month's pass — four free trainings on a
-  // two-training allowance.
-  it.effect('an allowance burned earlier in the ANCHOR MONTH does not come back', () =>
+  // two-training allowance. This is #746's PARTITION rule, re-asserted against the new anchor.
+  it.effect('an allowance burned earlier in the SEASON-START MONTH does not come back', () =>
     Effect.gen(function* () {
       const { team, captain } = yield* seedTeam('alltime-anchor-month');
       const member = yield* addBilledMember(team.id, 'alltime-anchor-month-member');
       yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
-      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, PAST_MONTH_MID);
+      yield* setSeasonStart(team.id, PAST_MONTH_MID);
 
       for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
         const past = yield* createTraining(team.id, captain.id, startAt);
@@ -1468,7 +1475,7 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
       const { team, captain } = yield* seedTeam('alltime-crossing');
       const member = yield* addBilledMember(team.id, 'alltime-crossing-member');
       yield* setDefaultPlanPrice(team.id, 100, 'CZK', 3);
-      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
 
       const past = yield* createTraining(team.id, captain.id, PAST_MONTH_START);
       yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
@@ -1501,7 +1508,7 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
       const { team, captain } = yield* seedTeam('alltime-sum');
       const member = yield* addBilledMember(team.id, 'alltime-sum-member');
       yield* setDefaultPlanPrice(team.id, 100, 'CZK', 4);
-      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
 
       for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2, PAST_MONTH_START_3]) {
         const past = yield* createTraining(team.id, captain.id, startAt);
@@ -1532,7 +1539,7 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
       const { team, captain } = yield* seedTeam('alltime-stable');
       const member = yield* addBilledMember(team.id, 'alltime-stable-member');
       yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
-      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
 
       for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
         const past = yield* createTraining(team.id, captain.id, startAt);
@@ -1560,14 +1567,19 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  // DISCRIMINATES a `created_at` anchor (which would give '300' — the seeded default plan predates
-  // every training, so `prior` would be 2 and nobody would ever get the allowance) from the anchor
-  // COLUMN. It does NOT discriminate a full revert to per-period semantics, which lands on the
-  // same '100' — do not count this among the cases that prove the fix.
-  it.effect('setting an allowance on the seeded default plan anchors at the EDIT', () =>
+  // PORTED from "setting an allowance on the seeded default plan anchors at the EDIT", which
+  // asserted #746's re-stamp rule. That rule is GONE — the trigger and the column were dropped —
+  // so the inverted statement is what now needs pinning: a PRICE/ALLOWANCE EDIT MOVES NOTHING.
+  // The season is the anchor, and only a season moves it.
+  //
+  // DISCRIMINATOR against any lingering re-stamp behaviour: if setting the allowance 0 -> 2 still
+  // re-anchored to `now()`, `prior` would be 0 and this would be '100'. Under the season anchor
+  // the past month's 2 count, `free_left` is 0, and all 3 current trainings are chargeable.
+  it.effect('setting an allowance does NOT re-anchor — only the season does', () =>
     Effect.gen(function* () {
-      const { team, captain } = yield* seedTeam('alltime-edit-anchor');
-      const member = yield* addBilledMember(team.id, 'alltime-edit-anchor-member');
+      const { team, captain } = yield* seedTeam('season-edit-no-restamp');
+      const member = yield* addBilledMember(team.id, 'season-edit-no-restamp-member');
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
 
       // Attendance BEFORE the manager sets anything. No price yet, so no fee either.
       for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
@@ -1575,7 +1587,7 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
         yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
       }
 
-      // No setPlanAnchor here on purpose: this edit is what stamps it.
+      // The edit that used to re-stamp the anchor.
       yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
 
       for (const startAt of [TRAINING_START, TRAINING_START_2, TRAINING_START_3]) {
@@ -1587,24 +1599,24 @@ describe('training_period_charges — the ALL-TIME allowance across periods', ()
 
       const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
       if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
-      // The anchor's period IS the current period, so prior 0 => free_left 2 => 1 chargeable.
-      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('100');
+      // prior 2 (the past month, inside the running season) => free_left 0 => 3 chargeable.
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('300');
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  // DISCRIMINATOR against the rejected PER-MEMBER anchor (D2): with the anchor stamped at plan
-  // SELECTION, moving to B would reset `prior` to 0 and produce no fee — the farming hole, reachable
-  // by any member through the self-service `selectMembershipPlan`. Plan-level and equally old means
-  // the burned 2 still count.
-  it.effect('switching to an EQUALLY OLD plan does not grant a fresh allowance', () =>
+  // #746's ANTI-FARMING HALF, which SURVIVES the per-season reversal and is STRONGER under it:
+  // the anchor is a property of the TEAM'S SEASON, not of the plan and not of the member, so
+  // there is no longer even a per-plan stamp a member could chase. With a per-member anchor
+  // (rejected as D2) moving to B would reset `prior` to 0 and produce no fee — a farming hole any
+  // member could open through the self-service `selectMembershipPlan`.
+  it.effect('switching plans does not grant a fresh allowance — the SEASON is the anchor', () =>
     Effect.gen(function* () {
-      const { team, captain } = yield* seedTeam('alltime-switch-old');
-      const member = yield* addBilledMember(team.id, 'alltime-switch-old-member');
+      const { team, captain } = yield* seedTeam('season-switch-plan');
+      const member = yield* addBilledMember(team.id, 'season-switch-plan-member');
       yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
-      yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
 
       const planB = yield* createPlan(team.id, 100, 'CZK', 'Older B', 2);
-      yield* setPlanAnchor(planB.id, OLD_ANCHOR);
 
       for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
         const past = yield* createTraining(team.id, captain.id, startAt);
@@ -1638,7 +1650,7 @@ const pastCorrectionState = (username: string) =>
     const { team, captain } = yield* seedTeam(username);
     const member = yield* addBilledMember(team.id, `${username}-member`);
     yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
-    yield* setPlanAnchor((yield* defaultPlan(team.id)).id, OLD_ANCHOR);
+    yield* setSeasonStart(team.id, OLD_SEASON_START);
 
     const currentTrainings: EventRow[] = [];
     for (const startAt of [TRAINING_START, TRAINING_START_2, TRAINING_START_3]) {
@@ -2066,6 +2078,386 @@ describe('membership_plans_pricing_recompute_trg — the widened WHEN clause', (
       expect(yield* plans.setDefaultMembershipPlan(premium.id as never, team.id)).toBe(1);
 
       expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('250');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 24. The season boundary — "Give a season real dates"
+// ---------------------------------------------------------------------------
+//
+// TDD: written BEFORE migration `1793900000` exists. Every case below fails until the migration
+// lands AND `packages/migrations` is rebuilt — the integration suite imports the COMPILED
+// migrations from `packages/migrations/dist`.
+//
+// This block is the reversal of PR #746's "never resets" half, stated as behaviour: the
+// free-trainings allowance is anchored to the TEAM'S SEASON and RESETS at a rollover. The
+// anchor is resolved by PERIOD, never by instant — a season starting mid-month governs that
+// WHOLE month — which is what makes `prior` and the in-period count meet on a period boundary
+// instead of double-counting a month's trainings into neither set.
+
+/** The team's season set, ADDING one row rather than replacing the set (`setSeasons` replaces). */
+const addSeason = (teamId: Team.TeamId, startsAt: Date) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql`INSERT INTO seasons (team_id, starts_at) VALUES (${teamId}, ${startsAt})`,
+    ),
+  );
+
+/** Moves an existing season's `starts_at` — the shape `updateNextSeasonQuery` writes on every
+ * Save after the first, and the ONLY way `seasons_recompute_trg`'s UPDATE arm can be reached. */
+const moveSeason = (teamId: Team.TeamId, from: Date, to: Date) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql`
+        UPDATE seasons SET starts_at = ${to}, updated_at = now()
+        WHERE team_id = ${teamId} AND starts_at = ${from}
+      `,
+    ),
+  );
+
+const deleteSeasons = (teamId: Team.TeamId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) => sql`DELETE FROM seasons WHERE team_id = ${teamId}`),
+  );
+
+/** Calls `training_period_charges` directly — the function's OWN output, with no `fees` writer in
+ * between. "The member is not emitted at all" is a statement about this result set, and reading
+ * it here says so exactly rather than inferring it from a pruned assignment. */
+const chargesFor = (teamId: Team.TeamId, periodStart: Date) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql<{ team_member_id: string; currency: string; amount_minor: string }>`
+        SELECT team_member_id::text AS team_member_id, currency, amount_minor::text AS amount_minor
+        FROM training_period_charges(
+          ${teamId}, ${periodStart.toISOString().slice(0, 10)}::date
+        )
+      `,
+    ),
+  );
+
+const seasonsRecomputeTrigger = (enabled: boolean) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) =>
+      sql.unsafe(
+        `ALTER TABLE seasons ${enabled ? 'ENABLE' : 'DISABLE'} TRIGGER seasons_recompute_trg`,
+      ),
+    ),
+  );
+
+// Instants INSIDE the current period, positioned relative to the three current-month trainings
+// (NOW-60m, NOW-30m, NOW-15m). Same month-boundary exposure the whole file already carries for
+// `TRAINING_START` — a run begun within an hour of a month rollover straddles periods.
+/** After the FIRST current training, before the other two — the period-alignment case. */
+const SEASON_MID_CURRENT = new Date(NOW.getTime() - 45 * 60 * 1000);
+/** After ALL three current trainings — the "drops the open month's charge" case. */
+const SEASON_LATE_CURRENT = new Date(NOW.getTime() - 5 * 60 * 1000);
+/** Still in the FUTURE, but in the SAME period — the trigger's period-vs-instant guard. */
+const SEASON_FUTURE_SAME_PERIOD = new Date(NOW.getTime() + 30 * 60 * 1000);
+
+describe('training_period_charges — the allowance RESETS at a season boundary', () => {
+  // CASE 31 — THE HEADLINE. This is the behaviour PR #746 removed, restored per season.
+  //
+  // DISCRIMINATOR against #746's own shipped semantics: under an all-time anchor the member stays
+  // at '100' forever, because the two trainings they burned last month can never stop counting.
+  // Advancing the season is the whole assertion.
+  it.effect('a new season gives the member a FRESH allowance in the open month', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('season-reset');
+      const member = yield* addBilledMember(team.id, 'season-reset-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
+
+      // Allowance fully burned last month...
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      // ...so this month's single training is chargeable.
+      const current = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(current, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+
+      const before = yield* chargesFor(team.id, PERIOD_START);
+      expect(before, 'under season 1 the allowance is spent').toHaveLength(1);
+      expect(before[0]?.amount_minor).toBe('100');
+
+      // A new season starts inside the open month.
+      yield* addSeason(team.id, SEASON_MID_CURRENT);
+
+      const after = yield* chargesFor(team.id, PERIOD_START);
+      expect(
+        after,
+        'a fresh allowance of 2 covers the single attendance — the member is not emitted at all',
+      ).toEqual([]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // CASE 31b — ROLLOVER BY THE CLOCK NEEDS NO TRIGGER, and this proves it instead of hoping it.
+  // A season becomes current by the passage of TIME, which is not a write, so nothing can fire.
+  // It does not matter: `training_period_charges(team, P)` resolves the season governing PERIOD P
+  // by period alignment, at whatever time it is called.
+  //
+  // RUN WITH `seasons_recompute_trg` DISABLED — if this fails with the trigger off, Step 7's
+  // "there is no clock-driven staleness to close" claim is wrong and it is a money bug.
+  it.effect(
+    'resolves the season by PERIOD at call time — passes with seasons_recompute_trg OFF',
+    () =>
+      Effect.gen(function* () {
+        yield* seasonsRecomputeTrigger(false);
+        const { team, captain } = yield* seedTeam('season-clock-rollover');
+        const member = yield* addBilledMember(team.id, 'season-clock-rollover-member');
+        yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+        // Season 2 is queued for the 1st of the OPEN month while the clock is still in the PAST
+        // month — the exact arrangement in which the trigger's period guard returns NULL. With the
+        // trigger disabled outright, NOTHING recomputes on the season write at all.
+        yield* setSeasons(team.id, [{ startsAt: OLD_SEASON_START }, { startsAt: PERIOD_START }]);
+
+        for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+          const past = yield* createTraining(team.id, captain.id, startAt);
+          yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+        }
+        const current = yield* createTraining(team.id, captain.id, TRAINING_START);
+        yield* confirm(current, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+
+        // Season 2 governs the open period, so last month's two burned trainings are behind the
+        // boundary. Under season 1 this member would be charged '100'.
+        expect(yield* chargesFor(team.id, PERIOD_START)).toEqual([]);
+        expect(yield* trainingFees(team.id), 'and no shell was created either').toEqual([]);
+      }).pipe(
+        Effect.ensuring(seasonsRecomputeTrigger(true).pipe(Effect.orDie)),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  // CASE 32 — PERIOD ALIGNMENT, #746's partition rule re-asserted against the new anchor. A
+  // training EARLIER in month M than the season instant must count toward M's in-period total and
+  // must NOT also land in `prior`: exactly one allowance for month M, never two.
+  //
+  // DISCRIMINATOR against flattening the period-aligned expression into an instant comparison. An
+  // instant floor pushes the first training into `prior` (free_left 0) while `in_period` still
+  // counts all three, giving '300' instead of '100'.
+  it.effect('a season starting MID-month gives that month exactly ONE allowance, never two', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('season-period-align');
+      const member = yield* addBilledMember(team.id, 'season-period-align-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      // Arranged BEFORE any attendance: `setSeasons` fires the recompute trigger, whose `fees`
+      // pre-check would otherwise rewrite rows this test is about to assert.
+      yield* setSeasons(team.id, [
+        { startsAt: OLD_SEASON_START },
+        { startsAt: SEASON_MID_CURRENT },
+      ]);
+
+      // One training BEFORE the season instant, two after — all three in month M.
+      for (const startAt of [TRAINING_START, TRAINING_START_2, TRAINING_START_3]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+
+      const charges = yield* chargesFor(team.id, PERIOD_START);
+      expect(charges).toHaveLength(1);
+      // 3 attended in M, ONE allowance of 2 => 1 chargeable. '300' means the pre-season training
+      // was counted twice: once in `prior` and once in `in_period`.
+      expect(charges[0]?.amount_minor).toBe('100');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // CASE 32b — PINNED, NOT FIXED. A mid-month season start resets that WHOLE month's free
+  // trainings, which can DROP a bill the member has already seen. Correct per #746's partition
+  // rule and in the UNDER-charge direction — but #746's version only fired when a manager
+  // deliberately RAISED an allowance, whereas this is routine.
+  //
+  // Accepted with copy as the mitigation (the season hint says so, and the start input defaults to
+  // the 1st). Re-anchoring the period floor to `training_period_start(starts_at) + 1 month` is a
+  // real behaviour change and belongs to the billing ticket. This test exists so the next person
+  // meets it deliberately rather than in production.
+  it.effect(
+    'a mid-month season start DROPS the open month’s charge and prunes the assignment',
+    () =>
+      Effect.gen(function* () {
+        const { team, captain } = yield* seedTeam('season-drops-charge');
+        const member = yield* addBilledMember(team.id, 'season-drops-charge-member');
+        yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+        yield* setSeasonStart(team.id, OLD_SEASON_START);
+
+        // Allowance already burned last month.
+        for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+          const past = yield* createTraining(team.id, captain.id, startAt);
+          yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+        }
+        // Two trainings this month, both chargeable: the member has SEEN a 200 invoice.
+        for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+          const training = yield* createTraining(team.id, captain.id, startAt);
+          yield* confirm(training, team.id, captain.id, [
+            { team_member_id: member.id, present: true },
+          ]);
+        }
+        const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+        if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+        expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('200');
+
+        // A season queued mid-month. `seasons_recompute_trg` re-prices the open period on INSERT.
+        yield* addSeason(team.id, SEASON_LATE_CURRENT);
+
+        expect(
+          yield* assignmentFor(fee.id, member.id),
+          'the invoice the member already saw is gone — accepted, under-charging, pinned here',
+        ).toBeUndefined();
+        expect(
+          feeForPeriod(yield* trainingFees(team.id), PERIOD_START)?.id,
+          'the shell itself is never deleted',
+        ).toBe(fee.id);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // CASE 32c — THE TRIGGER'S GUARD IS PERIOD-ALIGNED, NOT INSTANT-ALIGNED, and this is the only
+  // test on the one case the trigger exists for. A season whose `starts_at` is still in the FUTURE
+  // but falls in the OPEN period governs that whole period the moment it is inserted.
+  //
+  // DISCRIMINATOR: an `IF NEW.starts_at > now() THEN RETURN NULL` guard — which an earlier
+  // revision of the plan had — returns NULL here and this test goes red, because the open month's
+  // money is never recomputed. Compare PERIODS, never instants.
+  it.effect('a FUTURE season start inside the OPEN period still recomputes that period', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('season-trigger-period');
+      const member = yield* addBilledMember(team.id, 'season-trigger-period-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
+
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+      const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('200');
+
+      // STILL IN THE FUTURE, same period. No attendance write follows — the trigger is the only
+      // thing that can move this money.
+      yield* addSeason(team.id, SEASON_FUTURE_SAME_PERIOD);
+
+      expect(
+        yield* assignmentFor(fee.id, member.id),
+        'the open period was recomputed on INSERT, despite starts_at > now()',
+      ).toBeUndefined();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // CASE 32d — THE UPDATE ARM. `seasons_recompute_trg` is `AFTER INSERT OR UPDATE OF starts_at`,
+  // and both halves of that are money.
+  //
+  // `updateNextSeasonQuery` rewrites `starts_at` on EVERY next-season Save after the first, so
+  // dragging the queued start across a period boundary is routine, not exotic. Under the original
+  // `AFTER INSERT` trigger neither move below fires anything: the stored assignment keeps a figure
+  // computed against a season that no longer governs the open month, and it stays wrong until some
+  // unrelated write (an attendance confirm, a plan change) jolts it — at which point the invoice
+  // moves with no cause the manager can see.
+  //
+  // Both directions, in one case, because they exercise DIFFERENT arms of the guard:
+  //   * next period -> open period  : NEW's period is the open one. Caught by NEW.
+  //   * open period -> next period  : NEW's period is in the FUTURE, so NEW alone returns early.
+  //                                   Only OLD's period says the open month changed. This is the
+  //                                   VACATED period, and it is the half an `OLD`-blind fix misses.
+  //
+  // DISCRIMINATOR: revert the trigger to `AFTER INSERT ON seasons` and the first assertion fails
+  // at '200'. Keep the trigger but drop the `OR training_period_start(OLD.starts_at, ...)` leg and
+  // the first passes while the LAST fails at `undefined` — which is why both moves are asserted.
+  it.effect('moving a queued season ACROSS a period boundary re-prices the open month', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('season-moved');
+      const member = yield* addBilledMember(team.id, 'season-moved-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
+
+      // Allowance burned last month, two chargeable trainings this month.
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+      const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('200');
+
+      // Queue next season in the NEXT period. The INSERT arm's period guard returns early — the
+      // open month is untouched, and this is the state every "Save" starts from.
+      yield* addSeason(team.id, NEXT_MONTH_MID);
+      expect(
+        (yield* assignmentFor(fee.id, member.id))?.amount_minor,
+        'a season queued in a FUTURE period must not move the open month',
+      ).toBe('200');
+
+      // Save #2 drags the start back into the OPEN period (still future, same month). The open
+      // month is now governed by the queued season: a FRESH allowance of 2 covers both trainings.
+      yield* moveSeason(team.id, NEXT_MONTH_MID, SEASON_FUTURE_SAME_PERIOD);
+      expect(
+        yield* assignmentFor(fee.id, member.id),
+        'the UPDATE must re-price the open month — NEW arm',
+      ).toBeUndefined();
+
+      // Save #3 pushes it back out. The open month is VACATED: the old season governs again, its
+      // allowance is already burned, and the 200 must come back. NEW's period is in the future
+      // here, so only OLD can say the open month changed.
+      yield* moveSeason(team.id, SEASON_FUTURE_SAME_PERIOD, NEXT_MONTH_MID);
+      expect(
+        (yield* assignmentFor(fee.id, member.id))?.amount_minor,
+        'the UPDATE must re-price the period it VACATED — OLD arm',
+      ).toBe('200');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // CASE 34 — THE DOCUMENTED DEGRADATION, pinned rather than branched on. With zero seasons
+  // `(SELECT starts_at FROM season)` is NULL, every `>= NULL` predicate is NULL, `prior` is 0 and
+  // the member gets the full allowance. UNDER-charge, the same direction as the migration
+  // backfill — never a crash and never an overcharge.
+  //
+  // Unreachable in production (`seed_first_season_trg` plus the Step-2 backfill), which is why it
+  // is a degradation contract and not a supported state.
+  it.effect('a team with ZERO seasons gets the full allowance — under-charge, no crash', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('season-zero');
+      const member = yield* addBilledMember(team.id, 'season-zero-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
+
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+      const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('200');
+
+      yield* deleteSeasons(team.id);
+      const result = yield* Effect.result(recomputePeriod(team.id, PERIOD_START));
+
+      expect(result._tag, 'no crash').toBe('Success');
+      expect(
+        yield* chargesFor(team.id, PERIOD_START),
+        'full allowance, member not emitted',
+      ).toEqual([]);
+      expect(yield* assignmentFor(fee.id, member.id)).toBeUndefined();
     }).pipe(Effect.provide(TestLayer)),
   );
 });

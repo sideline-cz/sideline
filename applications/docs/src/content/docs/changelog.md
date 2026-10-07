@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-10-07 — New: membership seasons with real dates
+
+Membership plans now live inside **seasons** instead of one open-ended deadline. Go to **Team → Finances → Membership plans** to set the current season's selection deadline and end date, and to queue the next season ahead of time with its own start date.
+
+- A plan's free-training allowance (if it has one) now resets at the start of every season, instead of being consumed once for the life of the membership.
+- Queuing a next season doesn't change the current one — the new season takes over automatically once its start date arrives, with no action needed.
+- Plans no longer have their own expiry date — the season's end date replaces it.
+- API integrators: `MembershipPlanRequest.expiresAt` is removed; `MembershipPlanInfo.expiresAt` is deprecated and always `null`. `GET /teams/:teamId/membership-plans` gains `currentSeason`, `nextSeason`, and `seasonExpiresAt`. `PUT /teams/:teamId/membership-selection-deadline` gains an `expiresAt` field; new `PUT /teams/:teamId/seasons/next` queues the next season. See the [Finances guide](/guides/finances/#seasons-setting-a-selection-deadline-and-planning-ahead) and the internal API reference.
+
 ## 2026-09-29 — New: managers can assign members to a membership plan directly
 
 Admins and Treasurers can now set or clear any member's membership plan from **Team → Finances → Membership plans**, instead of waiting for the member to pick one themselves. A new **Move all members** action moves everyone from one plan (or "no plan chosen") to another in a single confirmation — useful for retiring an old plan.

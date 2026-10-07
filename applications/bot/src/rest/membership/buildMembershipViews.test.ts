@@ -42,6 +42,7 @@ const makeView = (
   overrides: Partial<{
     selected: Option.Option<MembershipPlan.MembershipPlanId>;
     deadline: Option.Option<DateTime.Utc>;
+    seasonExpiresAt: Option.Option<DateTime.Utc>;
     canManage: boolean;
   }> = {},
 ): MembershipRpcModels.MembershipSelectionView =>
@@ -49,6 +50,7 @@ const makeView = (
     plans,
     selected_plan_id: overrides.selected ?? Option.none(),
     deadline: overrides.deadline ?? Option.none(),
+    season_expires_at: overrides.seasonExpiresAt ?? Option.none(),
     can_manage: overrides.canManage ?? false,
   });
 
@@ -95,6 +97,34 @@ describe('membership board', () => {
 
     expect(pick?.custom_id).toBe('membership-open');
     expect(pick?.disabled).toBe(true);
+  });
+
+  it('explains an ended season even when the deadline is NULL', () => {
+    // The regression this guards: the old `Option.match(view.deadline, …)` returned `undefined`
+    // for a NULL deadline, so a season that ended without one rendered a grey board with a dead
+    // Pick button and no explanation at all.
+    const past = DateTime.subtract(DateTime.nowUnsafe(), { hours: 1 });
+    const { embeds, components } = buildMembershipBoard(
+      makeView(twelvePlans, { deadline: Option.none(), seasonExpiresAt: Option.some(past) }),
+      locale,
+    );
+
+    expect(embeds[0]?.description).toBeDefined();
+    expect(embeds[0]?.description).toContain('The season ended');
+    expect(buttonsOf(components)[0]?.disabled).toBe(true);
+  });
+
+  it('prefers the season-ended line when both the deadline and the expiry have passed', () => {
+    const { embeds } = buildMembershipBoard(
+      makeView(twelvePlans, {
+        deadline: Option.some(DateTime.subtract(DateTime.nowUnsafe(), { days: 30 })),
+        seasonExpiresAt: Option.some(DateTime.subtract(DateTime.nowUnsafe(), { hours: 1 })),
+      }),
+      locale,
+    );
+
+    expect(embeds[0]?.description).toContain('The season ended');
+    expect(embeds[0]?.description).not.toContain('Selection closed');
   });
 
   it('disables the picker button when the team has no plans', () => {

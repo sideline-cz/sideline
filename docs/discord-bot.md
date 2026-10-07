@@ -86,7 +86,7 @@ Twelve top-level commands are registered globally: `/carpool`, `/complete`, `/ev
 1. A treasurer invokes `/membership` (or `/clenstvi`) in the channel where the board should live.
 2. The handler returns a deferred ephemeral acknowledgement and forks a background fiber.
 3. The fiber calls `Membership/GetMembershipSelection` and refuses with `bot_membership_err_not_manager` when `can_manage` is false.
-4. On success the bot posts a public `buildMembershipBoard` message: one embed field per active plan (price, per-training price, free-training allowance, and a "team default" marker), the selection deadline if the team has one, and two buttons — **Pick your plan** and **My plan**.
+4. On success the bot posts a public `buildMembershipBoard` message: one embed field per active plan (price, per-training price, free-training allowance, and a "team default" marker), a description line for the GOVERNING season's state (`selectionState`, below), and two buttons — **Pick your plan** and **My plan**.
 5. The ephemeral reply is updated with a localised "board posted" confirmation.
 
 **Buttons:** the board's two custom_ids are the constants `membership-open` and `membership-mine`. No plan id appears on the public message — per-plan buttons (`mp:{planId}`) exist only on the per-user ephemeral picker, which is what keeps a team with many plans from tripping Discord's duplicate-`custom_id` error `50035` (see "Membership selection buttons" below).
@@ -1574,11 +1574,11 @@ Appears on the permanent audit embed posted to the system channel when a team ad
 1. Defers ephemerally and forks.
 2. Calls `Membership/GetMembershipSelection`.
 3. **Repaints the board it was clicked on**, from `interaction.message`. This is why no message id is stored anywhere: the button lives ON the board, so its interaction carries the board's own channel and message, and any click refreshes a board that went stale through a plan rename, reprice or archive — for everyone, not just the clicker. Best effort; a failure here never costs the member their picker.
-4. Replies with `buildMembershipPickView`: the member's current plan plus one button per plan, 4 per row, the chosen one PRIMARY, all disabled once the deadline has passed.
+4. Replies with `buildMembershipPickView`: the member's current plan plus one button per plan, 4 per row, the chosen one PRIMARY, all disabled once the GOVERNING season's window has closed — by its deadline passing, or by the season itself ending, whichever happened (`selectionState`, shared with the board — see `buildMembershipBoard.ts`).
 
-Disabled on the board itself when the team has no plans or the selection deadline has passed.
+Disabled on the board itself when the team has no plans or selection has closed for either reason above. The board's description line tells the two closed states apart ("ask a team admin" for a passed deadline vs. "you keep your current plan until the next season opens" for a finished season); the picker and the write path below do not distinguish them.
 
-**`membership-mine` (public board, SECONDARY):** the same RPC, rendered read-only — current plan, no buttons. Never disabled: a member may always look up what they are on, deadline or not.
+**`membership-mine` (public board, SECONDARY):** the same RPC, rendered read-only — current plan, no buttons. Never disabled: a member may always look up what they are on, open or closed.
 
 **`mp:{planId}` (ephemeral picker):** responds `DEFERRED_UPDATE_MESSAGE` (type 6) and edits the ephemeral in place — legal because no plan button opens a modal. Calls `Membership/SelectMembershipPlan` and re-renders the picker from the view it returns, so the highlighted plan can never disagree with what was stored.
 
@@ -1591,7 +1591,7 @@ Disabled on the board itself when the team has no plans or the selection deadlin
 | `MembershipSelectionLocked` | Selection is closed — ask a team admin |
 | `MembershipPlanUnavailable` | That plan is no longer available; open the board again |
 
-**The deadline is enforced in the server's UPDATE, never in the bot.** A board sitting in scrollback still shows enabled buttons to anyone who has not clicked since the deadline passed; the write is refused all the same, and the member gets the "closed" message. This is the same guard the HTTP `PUT /teams/:teamId/me/membership-plan` path uses, so the two surfaces cannot drift.
+**The gate is enforced in the server's UPDATE (`selection_is_open`), never in the bot.** A board sitting in scrollback still shows enabled buttons to anyone who has not clicked since the window closed — by deadline or by season end; the write is refused all the same, and the member gets the one generic `MembershipSelectionLocked` message regardless of which of the two closed it. This is the same guard the HTTP `PUT /teams/:teamId/me/membership-plan` path uses, so the two surfaces cannot drift.
 
 **Source files:**
 - `applications/bot/src/interactions/membership.ts`
@@ -2227,7 +2227,7 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 
 | Method | Purpose |
 |--------|---------|
-| `Membership/GetMembershipSelection` | Resolve the team from the guild and the member from the Discord user, then return the active plan list, the member's own raw selection, the team's selection deadline, and a `can_manage` flag (`finance:manage_fees`). Backs `/membership`, both board buttons, and the post-write re-render. |
+| `Membership/GetMembershipSelection` | Resolve the team from the guild and the member from the Discord user, then return the active plan list, the member's own raw selection, the GOVERNING season's `deadline` and `season_expires_at` (the latter an optional key — absent on an old server, decoded as "not ended"), and a `can_manage` flag (`finance:manage_fees`). Backs `/membership`, both board buttons, and the post-write re-render. |
 | `Membership/SelectMembershipPlan` | Record the member's chosen plan and return the same view back. Wraps the SAME repository call as the HTTP `selectMembershipPlan` handler, whose atomic conditional UPDATE holds the deadline and plan-validity guards; a zero-row result is re-read once only to choose between `MembershipNotMember`, `MembershipSelectionLocked` and `MembershipPlanUnavailable`. |
 
 ### Guild group (`Guild/`)

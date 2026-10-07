@@ -11,7 +11,10 @@ import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
 import type { PlanAssignmentRow } from '~/repositories/MembershipPlansRepository.js';
-import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
+import {
+  MembershipPlansRepository,
+  selectionWindowHasClosed,
+} from '~/repositories/MembershipPlansRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 
 type MembershipPlanRowLike = {
@@ -22,7 +25,6 @@ type MembershipPlanRowLike = {
   readonly currency: MembershipPlanApi.MembershipPlanInfo['currency'];
   readonly price_per_training_minor: MembershipPlanApi.MembershipPlanInfo['pricePerTrainingMinor'];
   readonly free_trainings_included: MembershipPlanApi.MembershipPlanInfo['freeTrainingsIncluded'];
-  readonly expires_at: MembershipPlanApi.MembershipPlanInfo['expiresAt'];
   readonly is_default: boolean;
 };
 
@@ -40,7 +42,12 @@ export const toMembershipPlanInfo = (
     currency: row.currency,
     pricePerTrainingMinor: row.price_per_training_minor,
     freeTrainingsIncluded: row.free_trainings_included,
-    expiresAt: row.expires_at,
+    // DEAD FIELD, hardcoded for exactly one release. Expiry is a property of the team's SEASON
+    // now; `membership_plans.expires_at` is no longer written or read. The schema field at
+    // `MembershipPlanApi.ts` is UNCHANGED on purpose — `OptionFromNullOr` ENCODES `None` as a
+    // PRESENT key whose value is `null`, which is exactly what an already-loaded bundle's frozen
+    // required-key copy needs. Release B deletes the field and the column together.
+    expiresAt: Option.none(),
     isDefault: row.is_default,
   });
 
@@ -66,6 +73,20 @@ const toAssignment = (row: PlanAssignmentRow): MembershipPlanApi.MembershipPlanA
       () => row.username,
     ),
     membershipPlanId: row.membership_plan_id,
+  });
+
+// The same nominal-`Schema.Class` rule as `toAssignment` above: `SeasonInfo` is nested in a FIELD
+// of the response, so `scripts/check-rpc-encoding.mjs` cannot see it and the explicit `new` is the
+// only thing between a repo row and a dead encode.
+const toSeasonInfo = (row: {
+  readonly starts_at: DateTime.Utc;
+  readonly selection_deadline: Option.Option<DateTime.Utc>;
+  readonly expires_at: Option.Option<DateTime.Utc>;
+}): MembershipPlanApi.SeasonInfo =>
+  new MembershipPlanApi.SeasonInfo({
+    startsAt: row.starts_at,
+    selectionDeadline: row.selection_deadline,
+    expiresAt: row.expires_at,
   });
 
 const forbidden = new MembershipPlanApi.Forbidden();
@@ -100,6 +121,11 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               Effect.bind('selection', ({ membership }) =>
                 plans.findMemberSelection(membership.id, teamId),
               ),
+              // SEEDING, read separately from the display-only pair `selection` carries. These
+              // are the RAW `current` / `next` rows, never the governing pick: in the "current
+              // expired, next open" state `governing` is NEXT and the Current block must still
+              // render its OWN dates. One block, one row, one Save.
+              Effect.bind('seasons', () => plans.findSeasons(teamId)),
               // THE PRIVACY BOUNDARY. Every member of the team hits this endpoint; only
               // Admin/Treasurer may see who is on which fee tier, so the roster is `[]` for
               // everyone else. `finance:manage_fees` and nothing weaker — `finance:view` is held
@@ -108,7 +134,7 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               Effect.bind('assignments', ({ canManage }) =>
                 canManage ? plans.findPlanAssignments(teamId) : Effect.succeed([]),
               ),
-              Effect.map(({ list, canManage, selection, assignments }) =>
+              Effect.map(({ list, canManage, selection, seasons, assignments }) =>
                 Option.match(selection, {
                   // A real branch, not dead code: the member was deactivated between
                   // `requireMembership` above and this read — `findMemberSelectionQuery` filters
@@ -117,12 +143,19 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                   // global-admin branch and already failed with 403. `assignments` belongs in
                   // BOTH arms — the Type side of the field is required, only the wire key is
                   // optional.
+                  // The season pair belongs in BOTH arms, same as `assignments`: the Type side
+                  // of each field is required, only the wire key is optional. The deactivated
+                  // member still gets the team's seasons — they are team-wide facts, not
+                  // membership-scoped ones.
                   onNone: () =>
                     new MembershipPlanApi.MembershipPlanListResponse({
                       canManage,
                       plans: Array.map(list, toMembershipPlanInfo),
                       selectedPlanId: Option.none(),
                       selectionDeadline: Option.none(),
+                      seasonExpiresAt: Option.none(),
+                      currentSeason: Option.map(seasons.current_season, toSeasonInfo),
+                      nextSeason: Option.map(seasons.next_season, toSeasonInfo),
                       assignments: Array.map(assignments, toAssignment),
                     }),
                   onSome: (row) =>
@@ -130,7 +163,13 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                       canManage,
                       plans: Array.map(list, toMembershipPlanInfo),
                       selectedPlanId: row.membership_plan_id,
+                      // DISPLAY ONLY — the GOVERNING season's pair, server-derived, never seeded
+                      // into an input and never written back. The two objects below are for the
+                      // manager's FORM; this pair is for the member's NOTICE.
                       selectionDeadline: row.membership_selection_deadline,
+                      seasonExpiresAt: row.season_expires_at,
+                      currentSeason: Option.map(seasons.current_season, toSeasonInfo),
+                      nextSeason: Option.map(seasons.next_season, toSeasonInfo),
                       assignments: Array.map(assignments, toAssignment),
                     }),
                 }),
@@ -159,7 +198,6 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                   currency: payload.currency,
                   price_per_training_minor: payload.pricePerTrainingMinor,
                   free_trainings_included: payload.freeTrainingsIncluded,
-                  expires_at: payload.expiresAt,
                 }),
               ),
               Effect.map(({ created }) => toMembershipPlanInfo(created)),
@@ -200,7 +238,6 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                   currency: payload.currency,
                   price_per_training_minor: payload.pricePerTrainingMinor,
                   free_trainings_included: payload.freeTrainingsIncluded,
-                  expires_at: payload.expiresAt,
                 }),
               ),
               Effect.map(({ updated }) => toMembershipPlanInfo(updated)),
@@ -352,12 +389,13 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                           > =>
                             Option.match(selection, {
                               onNone: () => Effect.fail(forbidden),
+                              // EITHER date, matching `selection_is_open`: a season that ended
+                              // with a NULL deadline closes selection just as hard as a passed
+                              // deadline does. ONE tagged error on the HTTP side — the web picks
+                              // its copy from the display-only pair it already holds, and the BOT
+                              // is where the two closed states become two strings.
                               onSome: (row) =>
-                                Option.isSome(row.membership_selection_deadline) &&
-                                DateTime.isLessThanOrEqualTo(
-                                  row.membership_selection_deadline.value,
-                                  DateTime.nowUnsafe(),
-                                )
+                                selectionWindowHasClosed(row)
                                   ? Effect.fail(selectionClosed)
                                   : Effect.fail(notFound),
                             }),
@@ -459,7 +497,63 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'finance:manage_fees', forbidden),
               ),
-              Effect.flatMap(() => plans.setSelectionDeadline(teamId, payload.deadline)),
+              // `payload.expiresAt` is passed through VERBATIM as the value-and-presence pair:
+              // the outer `Option` is PRESENCE (absent = keep the stored value, which is what
+              // every old bundle sends for the whole rollout window), the inner one is the VALUE.
+              // Branched in SQL, never unwrapped here.
+              Effect.bind('rowsAffected', () =>
+                plans.setSelectionDeadline(
+                  teamId,
+                  payload.deadline,
+                  payload.expiresAt,
+                  payload.currentSeasonStartsAt,
+                ),
+              ),
+              // 0 rows has TWO causes and only this layer can tell them apart. If the caller sent
+              // no `currentSeasonStartsAt` — every frozen old bundle for the whole rollout window
+              // — 0 rows means "this team has no current season", which has always been a silent
+              // 204 and must stay one. If they DID send one, 0 rows means their expectation lost:
+              // the page was seeded from a season that is no longer current, so 409 and let the
+              // web refetch. Deliberately NO re-read to confirm which: the UPDATE's own `WHERE`
+              // is the whole guard (Atomic Conditional UPDATE), and a re-read would reintroduce
+              // the very TOCTOU this check exists to close.
+              Effect.flatMap(({ rowsAffected }) =>
+                rowsAffected === 0 && Option.isSome(payload.currentSeasonStartsAt)
+                  ? Effect.fail(new MembershipPlanApi.CurrentSeasonChanged())
+                  : Effect.void,
+              ),
+            ),
+          )
+          // The NEXT season's slot — the other half of the pair above, same `finance:manage_fees`
+          // gate. `requireMembership`, NEVER `requireReadAccess`: the latter mints a
+          // `GLOBAL_ADMIN_SENTINEL_ID` membership with no real `team_members` row, and this
+          // handler's permission check must run against a real membership.
+          .handle('upsertNextSeason', ({ params: { teamId }, payload }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'finance:manage_fees', forbidden),
+              ),
+              // A REQUEST validation, not a DB constraint — the DB cannot express "future
+              // relative to the request". It runs BEFORE the repository is touched, so a rejected
+              // PUT writes nothing at all. 400, not 409: a non-future start does not COLLIDE with
+              // anything, it simply fails to name the slot, whose identity IS `starts_at > now()`.
+              Effect.tap(() =>
+                DateTime.isLessThanOrEqualTo(payload.startsAt, DateTime.nowUnsafe())
+                  ? Effect.fail(new MembershipPlanApi.SeasonStartNotInFuture())
+                  : Effect.void,
+              ),
+              Effect.flatMap(() =>
+                plans.upsertNextSeason({
+                  team_id: teamId,
+                  starts_at: payload.startsAt,
+                  deadline: payload.deadline,
+                  expires_at: payload.expiresAt,
+                }),
+              ),
             ),
           ),
       ),

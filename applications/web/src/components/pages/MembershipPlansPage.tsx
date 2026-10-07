@@ -24,7 +24,7 @@ import {
 } from '~/components/ui/select';
 import {
   dateOnlyToLocalEndOfDay,
-  dateOnlyToUtcNoon,
+  dateOnlyToLocalStartOfDay,
   formatLocalDate,
   formatLocalTime,
 } from '~/lib/datetime.js';
@@ -37,13 +37,24 @@ import { tr } from '~/lib/translations.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Same anchoring approach as FeeFormDialog's parseDueAtField — noon UTC avoids
-// timezone-drift issues (UTC±12 coverage). Empty string means "no expiry".
-function parseExpiresAtField(value: string) {
+// AN EMPTY BOX MEANS `None`, on every season date. There is no Clear button any more: a blank
+// box is unambiguous because every box is seeded from its own season's own RAW column (§2.4), so
+// a box is blank only when the column is actually NULL. The deleted early return this replaces
+// (`if (!trimmed) return;`) made blanking a field a silent no-op behind a success toast.
+const parseSeasonDate = (value: string): Option.Option<DateTime.Utc> => {
   const trimmed = value.trim();
-  if (!trimmed) return Option.none();
-  return Option.some(dateOnlyToUtcNoon(trimmed));
-}
+  return trimmed ? Option.some(dateOnlyToLocalEndOfDay(trimmed)) : Option.none();
+};
+
+/** `yyyy-MM-dd` in the browser's local timezone, for a plain `Date`. */
+const localDateString = (d: Date): string => formatLocalDate(DateTime.fromDateUnsafe(d));
+
+const toLocalDate = (dt: DateTime.Utc): Date => new Date(Number(DateTime.toEpochMillis(dt)));
+
+// `<=`, not `<`, so the web agrees with the server (`<= now()`) and the bot
+// (`isLessThanOrEqualTo`) on the boundary instant instead of disagreeing for one millisecond.
+const hasPassed = (instant: Option.Option<DateTime.Utc>): boolean =>
+  Option.isSome(instant) && DateTime.isLessThanOrEqualTo(instant.value, DateTime.nowUnsafe());
 
 // `plan.name` is None only for the seeded default plan — render the translated label
 // at every site that shows it (row, badge, and the edit form's seed value).
@@ -107,9 +118,6 @@ function MembershipPlanFormDialog({
   const [freeTrainingsStr, setFreeTrainingsStr] = React.useState(
     isEdit && plan && plan.freeTrainingsIncluded > 0 ? String(plan.freeTrainingsIncluded) : '',
   );
-  const [expiresAt, setExpiresAt] = React.useState(
-    isEdit && plan && Option.isSome(plan.expiresAt) ? formatLocalDate(plan.expiresAt.value) : '',
-  );
   const [nameError, setNameError] = React.useState('');
   const [priceError, setPriceError] = React.useState('');
   const [pricePerTrainingError, setPricePerTrainingError] = React.useState('');
@@ -127,11 +135,6 @@ function MembershipPlanFormDialog({
       );
       setFreeTrainingsStr(
         isEdit && plan && plan.freeTrainingsIncluded > 0 ? String(plan.freeTrainingsIncluded) : '',
-      );
-      setExpiresAt(
-        isEdit && plan && Option.isSome(plan.expiresAt)
-          ? formatLocalDate(plan.expiresAt.value)
-          : '',
       );
       setNameError('');
       setPriceError('');
@@ -205,7 +208,6 @@ function MembershipPlanFormDialog({
       freeTrainingsIncluded: Option.some(
         Schema.decodeSync(MembershipPlan.FreeTrainingsIncluded)(freeTrainings),
       ),
-      expiresAt: parseExpiresAtField(expiresAt),
     };
 
     setIsSubmitting(true);
@@ -357,18 +359,6 @@ function MembershipPlanFormDialog({
             {freeTrainingsError && <p className='text-sm text-destructive'>{freeTrainingsError}</p>}
           </div>
 
-          {/* Expires on */}
-          <div className='flex flex-col gap-1.5'>
-            <Label htmlFor='membership-plan-expiresAt'>{tr('membershipPlan_expiresOnField')}</Label>
-            <Input
-              id='membership-plan-expiresAt'
-              type='date'
-              value={expiresAt}
-              onChange={(e) => setExpiresAt(e.target.value)}
-            />
-            <p className='text-xs text-muted-foreground'>{tr('membershipPlan_expiresOnHint')}</p>
-          </div>
-
           <DialogFooter>
             <Button type='button' variant='outline' onClick={onClose}>
               {tr('common_cancel')}
@@ -390,6 +380,169 @@ function MembershipPlanFormDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Season block
+// ---------------------------------------------------------------------------
+
+/** One season's three date boxes, as `yyyy-MM-dd` strings. */
+interface SeasonForm {
+  startsAt: string;
+  deadline: string;
+  expiresAt: string;
+}
+
+const EMPTY_SEASON_FORM: SeasonForm = { startsAt: '', deadline: '', expiresAt: '' };
+
+// THE seeding rule, in one function: every box comes from its own season object's own RAW
+// column. Nothing here reads the top-level display-only `selectionDeadline` / `seasonExpiresAt`
+// pair, and nothing may — a box seeded from a derived value and then written back is the
+// data-destruction loop two review rounds found.
+const seedSeasonForm = (season: Option.Option<MembershipPlanApi.SeasonInfo>): SeasonForm =>
+  Option.match(season, {
+    onNone: () => EMPTY_SEASON_FORM,
+    onSome: (s) => ({
+      startsAt: formatLocalDate(s.startsAt),
+      deadline: Option.match(s.selectionDeadline, { onNone: () => '', onSome: formatLocalDate }),
+      expiresAt: Option.match(s.expiresAt, { onNone: () => '', onSome: formatLocalDate }),
+    }),
+  });
+
+// The ONE blocking validation, and it mirrors the DB CHECK (`expires_at > starts_at`) so it
+// invents no rule of its own. `deadline < startsAt` is deliberately NOT flagged: "pick in August
+// for the September season" is the normal rollover shape. `deadline > expiresAt` is not flagged
+// either — it is inert, not wrong (the expiry closes selection first).
+const isSeasonOrderInvalid = (form: SeasonForm): boolean =>
+  form.startsAt !== '' && form.expiresAt !== '' && form.expiresAt < form.startsAt;
+
+interface SeasonBlockProps {
+  /** `season-*` / `next-season-*`. A duplicate id here means typing next season's deadline
+   *  into this one, so the two blocks' controls are disjoint by construction. */
+  idPrefix: string;
+  heading: string;
+  badge?: React.ReactNode;
+  form: SeasonForm;
+  onChange: (patch: Partial<SeasonForm>) => void;
+  /** Current season: the start is history, so it is read-only TEXT (design §2.5). */
+  startEditable: boolean;
+  /** Clamped past both today and the current season's expiry, so the server's
+   *  `SeasonStartNotInFuture` 400 is unreachable from the UI. */
+  startMin?: string;
+  startRef?: React.RefObject<HTMLInputElement | null>;
+  hint: string;
+  error: string;
+  isSaving: boolean;
+  saveDisabled?: boolean;
+  savePrimary?: boolean;
+  onSave: () => void;
+  onCancel?: () => void;
+}
+
+function SeasonBlock({
+  idPrefix,
+  heading,
+  badge,
+  form,
+  onChange,
+  startEditable,
+  startMin,
+  startRef,
+  hint,
+  error,
+  isSaving,
+  saveDisabled,
+  savePrimary,
+  onSave,
+  onCancel,
+}: SeasonBlockProps) {
+  // Both the deadline and the expiry keep the `min` the lone deadline input carried: an
+  // `<input type='date'>` accepts a 1-4 digit year, so typing `0026-09-30` decodes as 1926 and
+  // instantly locks selection.
+  const today = formatLocalDate(DateTime.nowUnsafe());
+
+  return (
+    <div className='flex flex-col gap-3'>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        {/* A real `h2`, same level as "Member assignments", so heading navigation exposes the
+            current/next split to readers who cannot use the spatial cue. */}
+        <h2 className='text-sm font-semibold'>{heading}</h2>
+        {badge}
+      </div>
+      <div className='flex flex-wrap items-end gap-2'>
+        <div className='flex min-w-[150px] flex-1 flex-col gap-1.5'>
+          {/* `htmlFor` is SPREAD, not passed as `undefined`: Biome strips an `undefined` JSX prop
+              on format, and a label pointing at an id that does not exist is worse than no
+              association at all. In the read-only branch below there is no control to point at,
+              so the label legitimately has none and the value follows it in reading order. */}
+          <Label {...(startEditable ? { htmlFor: `${idPrefix}-starts` } : {})}>
+            {tr('membershipPlan_season_startsLabel')}
+          </Label>
+          {startEditable ? (
+            <Input
+              id={`${idPrefix}-starts`}
+              ref={startRef}
+              type='date'
+              min={startMin}
+              aria-invalid={error !== '' || undefined}
+              value={form.startsAt}
+              onChange={(e) => onChange({ startsAt: e.target.value })}
+            />
+          ) : (
+            // Keeps its `<Label>` and its place in the reading order, but offers no control:
+            // moving a running season's start re-anchors an already-invoiced month's free
+            // trainings, which is not something to do by tabbing through a date box.
+            <p className='py-2 text-sm'>{form.startsAt}</p>
+          )}
+        </div>
+        <div className='flex min-w-[150px] flex-1 flex-col gap-1.5'>
+          <Label htmlFor={`${idPrefix}-deadline`}>{tr('membershipPlan_deadlineLabel')}</Label>
+          <Input
+            id={`${idPrefix}-deadline`}
+            type='date'
+            min={today}
+            value={form.deadline}
+            onChange={(e) => onChange({ deadline: e.target.value })}
+          />
+        </div>
+        <div className='flex min-w-[150px] flex-1 flex-col gap-1.5'>
+          <Label htmlFor={`${idPrefix}-ends`}>{tr('membershipPlan_season_endsLabel')}</Label>
+          <Input
+            id={`${idPrefix}-ends`}
+            type='date'
+            min={today}
+            aria-invalid={error !== '' || undefined}
+            value={form.expiresAt}
+            onChange={(e) => onChange({ expiresAt: e.target.value })}
+          />
+        </div>
+      </div>
+      <p className='text-xs text-muted-foreground'>{hint}</p>
+      {error !== '' && (
+        <p className='text-sm text-destructive' role='alert'>
+          {error}
+        </p>
+      )}
+      <div className='flex flex-wrap gap-2'>
+        {onCancel && (
+          <Button type='button' variant='outline' size='sm' disabled={isSaving} onClick={onCancel}>
+            {tr('common_cancel')}
+          </Button>
+        )}
+        {/* One Save per block, INSIDE the block: a Save button can only ever write the season
+            whose box it sits in. That is the whole anti-confusion mechanism. */}
+        <Button
+          type='button'
+          variant={savePrimary ? 'default' : 'outline'}
+          size='sm'
+          disabled={isSaving || saveDisabled}
+          onClick={onSave}
+        >
+          {isSaving ? tr('membershipPlan_saving') : tr('membershipPlan_save')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -398,7 +551,18 @@ interface MembershipPlansPageProps {
   canManage: boolean;
   plans: ReadonlyArray<MembershipPlanApi.MembershipPlanInfo>;
   selectedPlanId: Option.Option<MembershipPlan.MembershipPlanId>;
+  /**
+   * DISPLAY ONLY, both of them — the GOVERNING season's raw deadline/expiry, picked server-side.
+   * They drive the member's notice and the advisory greying of Choose, and they reach NO request
+   * body and NO input. The two-candidate pick lives in exactly one place, SQL; re-deriving it
+   * here from the two season objects would run it against the browser clock.
+   */
   selectionDeadline: Option.Option<DateTime.Utc>;
+  seasonExpiresAt: Option.Option<DateTime.Utc>;
+  /** SEEDING. The Current block's boxes come from here and its Save writes back here. */
+  currentSeason: Option.Option<MembershipPlanApi.SeasonInfo>;
+  /** SEEDING. Same pairing for the Next block — one block, one row, one Save. */
+  nextSeason: Option.Option<MembershipPlanApi.SeasonInfo>;
   /** Empty for non-managers by construction — the server only fills this under `finance:manage_fees`. */
   assignments: ReadonlyArray<MembershipPlanApi.MembershipPlanAssignment>;
 }
@@ -409,6 +573,9 @@ export function MembershipPlansPage({
   plans,
   selectedPlanId,
   selectionDeadline,
+  seasonExpiresAt,
+  currentSeason,
+  nextSeason,
   assignments,
 }: MembershipPlansPageProps) {
   const run = useRun();
@@ -425,24 +592,90 @@ export function MembershipPlansPage({
   // Advisory only — clock skew between browser and server means this can be a little wrong in
   // either direction. The server re-checks on the actual PUT (`MembershipSelectionClosed`,
   // handled below); this only decides whether to grey out the Choose buttons up front.
-  const isSelectionClosed = Option.match(selectionDeadline, {
-    onNone: () => false,
-    onSome: (deadline) => DateTime.isLessThan(deadline, DateTime.nowUnsafe()),
-  });
+  //
+  // THE SAME THREE LINES THE BOT RUNS, on the SAME server-picked pair, and EXPIRY WINS when both
+  // have passed: a finished season is the better explanation and needs a different next action
+  // than a missed deadline. Both closed states disable Choose identically; only the copy differs.
+  const seasonEnded = hasPassed(seasonExpiresAt);
+  const isSelectionClosed = seasonEnded || hasPassed(selectionDeadline);
 
   // Seeded from the loader; a plain `useState` synced on prop change (not react-hook-form —
   // its `reset`/`keepDirtyValues` merges `resetOptions` in a way that can keep edits a discard
-  // should throw away). Re-synced via `useEffect` because `router.invalidate()` after
-  // Save/Clear re-renders this component with new props, not a fresh mount.
-  const [deadlineInput, setDeadlineInput] = React.useState(() =>
-    Option.match(selectionDeadline, { onNone: () => '', onSome: (d) => formatLocalDate(d) }),
-  );
+  // should throw away). Re-synced via `useEffect` because `router.invalidate()` after a Save
+  // re-renders this component with new props, not a fresh mount.
+  //
+  // ONE useEffect PER BLOCK, each reading only its OWN season object. Nothing here touches the
+  // display-only pair above.
+  const [currentForm, setCurrentForm] = React.useState(() => seedSeasonForm(currentSeason));
   React.useEffect(() => {
-    setDeadlineInput(
-      Option.match(selectionDeadline, { onNone: () => '', onSome: (d) => formatLocalDate(d) }),
+    setCurrentForm(seedSeasonForm(currentSeason));
+  }, [currentSeason]);
+  const [nextForm, setNextForm] = React.useState(() => seedSeasonForm(nextSeason));
+  React.useEffect(() => {
+    setNextForm(seedSeasonForm(nextSeason));
+  }, [nextSeason]);
+
+  const [currentError, setCurrentError] = React.useState('');
+  const [nextError, setNextError] = React.useState('');
+  const [isSavingCurrent, setIsSavingCurrent] = React.useState(false);
+  const [isSavingNext, setIsSavingNext] = React.useState(false);
+  // "Start new season" issues NO request — it is a pure UI reveal; the block's first Save
+  // creates the row and every later Save updates it, because the endpoint is keyed on the SLOT.
+  const [addingNext, setAddingNext] = React.useState(false);
+  const nextStartRef = React.useRef<HTMLInputElement | null>(null);
+  const startNewRef = React.useRef<HTMLButtonElement | null>(null);
+  const didReveal = React.useRef(false);
+
+  const showNextBlock = Option.isSome(nextSeason) || addingNext;
+  const isAddingNew = addingNext && Option.isNone(nextSeason);
+
+  // BOTH the prefill and the `min` are clamped past today AND past the current season's expiry.
+  // Unclamped, a season that ended 2027-02-01 and is opened on 2027-03-15 would prefill
+  // 2027-03-01 and offer a `min` of 2027-02-02 — both past — and the Save would 400 with
+  // `SeasonStartNotInFuture` on the value the UI itself chose. `min`'s job is to make that
+  // rejection unreachable, not to let the server catch what the control allowed. TOMORROW and
+  // not today, because the server tests `<= now()` and a start anchors to 00:00 local.
+  const currentExpiry = Option.flatMap(currentSeason, (s) => s.expiresAt);
+  const nextStartDefault = React.useMemo(() => {
+    const now = new Date();
+    const firstOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return localDateString(
+      Option.match(currentExpiry, {
+        onNone: () => firstOfNextMonth,
+        onSome: (expiry) => {
+          const e = toLocalDate(expiry);
+          // The 1st of a month, always: a season that starts mid-month resets that whole
+          // month's free-training allowance for everyone already invoiced for it.
+          const firstAfterExpiry = new Date(e.getFullYear(), e.getMonth() + 1, 1);
+          return firstAfterExpiry > firstOfNextMonth ? firstAfterExpiry : firstOfNextMonth;
+        },
+      }),
     );
-  }, [selectionDeadline]);
-  const [isSavingDeadline, setIsSavingDeadline] = React.useState(false);
+  }, [currentExpiry]);
+  const nextStartMin = React.useMemo(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return localDateString(
+      Option.match(currentExpiry, {
+        onNone: () => tomorrow,
+        onSome: (expiry) => {
+          const dayAfterExpiry = toLocalDate(expiry);
+          dayAfterExpiry.setDate(dayAfterExpiry.getDate() + 1);
+          return dayAfterExpiry > tomorrow ? dayAfterExpiry : tomorrow;
+        },
+      }),
+    );
+  }, [currentExpiry]);
+
+  // In-place reveal needs no focus trap — one more thing a dialog would have cost.
+  React.useEffect(() => {
+    if (addingNext) {
+      didReveal.current = true;
+      nextStartRef.current?.focus();
+    } else if (didReveal.current) {
+      startNewRef.current?.focus();
+    }
+  }, [addingNext]);
 
   const [memberSearch, setMemberSearch] = React.useState('');
   const [moveOpen, setMoveOpen] = React.useState(false);
@@ -505,48 +738,97 @@ export function MembershipPlansPage({
     [teamIdBranded, run, router],
   );
 
-  const handleSaveDeadline = React.useCallback(async () => {
-    const trimmed = deadlineInput.trim();
-    if (!trimmed) return;
+  // THE CURRENT SEASON'S SAVE. Reads `currentForm` — seeded from `currentSeason` — and writes
+  // the endpoint that owns the current slot. It carries no `startsAt` at all, which is what makes
+  // it structurally incapable of moving a running season's start.
+  const handleSaveCurrentSeason = React.useCallback(async () => {
+    if (isSeasonOrderInvalid(currentForm)) {
+      setCurrentError(tr('membershipPlan_season_orderInvalid'));
+      return;
+    }
+    setCurrentError('');
 
-    setIsSavingDeadline(true);
+    setIsSavingCurrent(true);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.membershipPlan.setMembershipSelectionDeadline({
           params: { teamId: teamIdBranded },
-          // ANCHORING: end of the LOCAL day, not noon UTC — this deadline is ENFORCED
-          // server-side (unlike the inert `expiresAt` above), so anchoring "30 Sep" to noon
-          // UTC would close selection ~14:00 local in UTC+2, which reads as a bug. Closing a
-          // few hours late from clock skew is harmless; closing early is not.
-          payload: { deadline: Option.some(dateOnlyToLocalEndOfDay(trimmed)) },
+          // ANCHORING: end of the LOCAL day, not noon UTC — both of these are ENFORCED
+          // server-side, so anchoring "30 Sep" to noon UTC would close selection ~14:00 local
+          // in UTC+2, which reads as a bug. Closing a few hours late from clock skew is
+          // harmless; closing early is not.
+          //
+          // `expiresAt` is always `Some(...)` — the OUTER Option is "did this bundle send the
+          // key at all", and this bundle always does; the inner one carries the clear.
+          payload: {
+            deadline: parseSeasonDate(currentForm.deadline),
+            expiresAt: Option.some(parseSeasonDate(currentForm.expiresAt)),
+            // THE ROW IDENTITY THIS FORM WAS SEEDED FROM, taken from the SAME `currentSeason`
+            // object `currentForm` was seeded from — never a re-read, which would re-resolve
+            // "current" at Save time and defeat the entire check. The server resolves its slot
+            // from `now()`, so across a season rollover under an open tab that slot is a
+            // DIFFERENT row; this is what turns that into a 409 instead of a silent overwrite of
+            // the new season's dates.
+            currentSeasonStartsAt: Option.map(currentSeason, (s) => s.startsAt),
+          },
         }),
       ),
-      Effect.mapError(() => ClientError.make(tr('membershipPlan_deadlineSaveFailed'))),
-      run({ success: tr('membershipPlan_deadlineSaved') }),
+      // Every failure here means the page no longer matches the server — a rollover (409), a
+      // lost membership (403), anything else. Repaint on all of them, same stance as
+      // `handleChoose`; only the copy branches.
+      Effect.tapError(() => Effect.sync(() => router.invalidate())),
+      Effect.mapError((e) =>
+        e._tag === 'CurrentSeasonChanged'
+          ? ClientError.make(tr('membershipPlan_season_currentChanged'))
+          : ClientError.make(tr('membershipPlan_season_saveFailed')),
+      ),
+      run({ success: tr('membershipPlan_season_saved') }),
     );
-    setIsSavingDeadline(false);
+    setIsSavingCurrent(false);
     if (Option.isSome(result)) {
       router.invalidate();
     }
-  }, [teamIdBranded, run, router, deadlineInput]);
+  }, [teamIdBranded, run, router, currentForm, currentSeason]);
 
-  const handleClearDeadline = React.useCallback(async () => {
-    setIsSavingDeadline(true);
+  // THE NEXT SLOT'S SAVE — create and update are literally the same request, because the server
+  // resolves the slot from `now()` and never from the payload. The toast is the only thing that
+  // differs, and only on the one occasion the reassurance answers the manager's live question.
+  const handleSaveNextSeason = React.useCallback(async () => {
+    if (isSeasonOrderInvalid(nextForm)) {
+      setNextError(tr('membershipPlan_season_orderInvalid'));
+      return;
+    }
+    setNextError('');
+
+    const isCreate = Option.isNone(nextSeason);
+    setIsSavingNext(true);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
-        api.membershipPlan.setMembershipSelectionDeadline({
+        api.membershipPlan.upsertNextSeason({
           params: { teamId: teamIdBranded },
-          payload: { deadline: Option.none() },
+          payload: {
+            // START of the local day — the harmful direction REVERSES for a start date: a
+            // deadline anchored late is generous, but a season anchored late opens after the
+            // advertised day and widens the rollover gap.
+            startsAt: dateOnlyToLocalStartOfDay(nextForm.startsAt),
+            deadline: parseSeasonDate(nextForm.deadline),
+            expiresAt: parseSeasonDate(nextForm.expiresAt),
+          },
         }),
       ),
-      Effect.mapError(() => ClientError.make(tr('membershipPlan_deadlineSaveFailed'))),
-      run({ success: tr('membershipPlan_deadlineCleared') }),
+      // Includes the `SeasonStartNotInFuture` 400 that fires when the queued season's start
+      // passes between page load and Save: the invalidate below repaints, and the manager then
+      // sees that season sitting in the Current block, which is the truth.
+      Effect.mapError(() => ClientError.make(tr('membershipPlan_season_saveFailed'))),
+      run({
+        success: isCreate ? tr('membershipPlan_season_created') : tr('membershipPlan_season_saved'),
+      }),
     );
-    setIsSavingDeadline(false);
+    setIsSavingNext(false);
     if (Option.isSome(result)) {
       router.invalidate();
     }
-  }, [teamIdBranded, run, router]);
+  }, [teamIdBranded, run, router, nextForm, nextSeason]);
 
   // The manager-side sibling of `handleChoose`, minus the deadline branch: the selection
   // deadline binds members, not a treasurer fixing stragglers after the lock (plan §B.2), so
@@ -628,67 +910,130 @@ export function MembershipPlansPage({
         <p className='text-muted-foreground mt-1'>
           {canManage ? tr('membershipPlan_subtitle') : tr('membershipPlan_subtitleMember')}
         </p>
-        <p className='text-sm text-muted-foreground mt-2'>
-          {Option.match(selectionDeadline, {
-            onNone: () => tr('membershipPlan_noDeadlineNotice'),
-            // WITH the time, not just the date: the deadline is an INSTANT, enforced
-            // server-side at that instant, not at local midnight of the date shown — a
-            // date-only notice reads as "closes at midnight" to every viewer outside the
-            // captain's own timezone, when it actually closes hours earlier or later for them.
-            onSome: (deadline) =>
-              isSelectionClosed
-                ? tr('membershipPlan_selectionClosedNotice', {
-                    date: formatLocalDate(deadline),
-                    time: formatLocalTime(deadline),
-                  })
-                : tr('membershipPlan_deadlineNotice', {
-                    date: formatLocalDate(deadline),
-                    time: formatLocalTime(deadline),
-                  }),
-          })}
+        {/* The ONE member-facing notice, and the thing every disabled Choose is
+            `aria-describedby`-linked to, so a screen reader explains the dead control instead of
+            just announcing it. */}
+        <p id='membership-selection-status' className='text-sm text-muted-foreground mt-2'>
+          {seasonEnded && Option.isSome(seasonExpiresAt)
+            ? // Date only, no time: a season ending is a day-level fact, and the member's next
+              // action ("you keep your plan until a new season starts") does not turn on an hour.
+              tr('membershipPlan_seasonEndedNotice', {
+                date: formatLocalDate(seasonExpiresAt.value),
+              })
+            : Option.match(selectionDeadline, {
+                onNone: () => tr('membershipPlan_noDeadlineNotice'),
+                // WITH the time, not just the date: the deadline is an INSTANT, enforced
+                // server-side at that instant, not at local midnight of the date shown — a
+                // date-only notice reads as "closes at midnight" to every viewer outside the
+                // captain's own timezone, when it actually closes hours earlier or later.
+                onSome: (deadline) =>
+                  isSelectionClosed
+                    ? tr('membershipPlan_selectionClosedNotice', {
+                        date: formatLocalDate(deadline),
+                        time: formatLocalTime(deadline),
+                      })
+                    : tr('membershipPlan_deadlineNotice', {
+                        date: formatLocalDate(deadline),
+                        time: formatLocalTime(deadline),
+                      }),
+              })}
         </p>
       </header>
 
-      {canManage && (
-        <div className='flex flex-wrap items-end justify-between gap-3 mb-4'>
-          <div className='flex flex-wrap items-end gap-2'>
-            <div className='flex flex-col gap-1.5'>
-              <Label htmlFor='membership-selection-deadline'>
-                {tr('membershipPlan_deadlineLabel')}
-              </Label>
-              <Input
-                id='membership-selection-deadline'
-                type='date'
-                // `min` stops two failure modes at once: `<input type='date'>` accepts a 1-4
-                // digit year, so typing `0026-09-30` decodes as 1926 and instantly locks
-                // selection, and it also guards against an accidental past-deadline lockout.
-                min={formatLocalDate(DateTime.nowUnsafe())}
-                value={deadlineInput}
-                onChange={(e) => setDeadlineInput(e.target.value)}
+      {/* THE ROLLBACK CONTRACT (state M9). `currentSeason` is `None` only when an OLD server is
+          answering a NEW bundle — a server rollback — and in that window the endpoints behind
+          these boxes do not exist, so every control offered here is a control that fails.
+          Rendering nothing degrades it to exactly today's page. Not an empty state, not blank
+          boxes, not a badge-less skeleton. */}
+      {canManage && Option.isSome(currentSeason) && (
+        <div className='mb-4 flex flex-col gap-3 rounded-lg border p-3'>
+          <SeasonBlock
+            idPrefix='season'
+            heading={tr('membershipPlan_season_currentHeading')}
+            badge={
+              // The badge describes THIS ROW's own columns, not the member gate — in the
+              // rollover state (current ended, next open) it truthfully says "Season ended"
+              // while the member's notice, driven by the server-picked pair, says selection is
+              // open. Both are correct about different things.
+              hasPassed(currentSeason.value.expiresAt) ? (
+                <Badge variant='outline'>{tr('membershipPlan_season_badgeEnded')}</Badge>
+              ) : hasPassed(currentSeason.value.selectionDeadline) ? (
+                <Badge variant='outline'>{tr('membershipPlan_season_badgeClosed')}</Badge>
+              ) : (
+                <Badge variant='secondary'>{tr('membershipPlan_season_badgeOpen')}</Badge>
+              )
+            }
+            form={currentForm}
+            onChange={(patch) => setCurrentForm((f) => ({ ...f, ...patch }))}
+            startEditable={false}
+            hint={tr('membershipPlan_season_hint')}
+            error={currentError}
+            isSaving={isSavingCurrent}
+            onSave={handleSaveCurrentSeason}
+          />
+
+          {showNextBlock && (
+            <>
+              <hr className='border-t' />
+              <SeasonBlock
+                idPrefix='next-season'
+                heading={tr('membershipPlan_season_nextHeading')}
+                form={nextForm}
+                onChange={(patch) => setNextForm((f) => ({ ...f, ...patch }))}
+                startEditable={true}
+                startMin={nextStartMin}
+                startRef={nextStartRef}
+                hint={tr('membershipPlan_season_nextHint')}
+                error={nextError}
+                isSaving={isSavingNext}
+                // `startsAt` is the one required column on the next slot; an empty box has
+                // nothing to send and no error string worth inventing.
+                saveDisabled={nextForm.startsAt.trim() === ''}
+                savePrimary={isAddingNew}
+                onSave={handleSaveNextSeason}
+                onCancel={
+                  isAddingNew
+                    ? () => {
+                        setAddingNext(false);
+                        setNextForm(seedSeasonForm(nextSeason));
+                        setNextError('');
+                      }
+                    : undefined
+                }
               />
-              <p className='text-xs text-muted-foreground'>{tr('membershipPlan_deadlineHint')}</p>
-            </div>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              disabled={isSavingDeadline || !deadlineInput.trim()}
-              onClick={handleSaveDeadline}
-            >
-              {isSavingDeadline ? tr('membershipPlan_saving') : tr('membershipPlan_save')}
-            </Button>
-            {Option.isSome(selectionDeadline) && (
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                disabled={isSavingDeadline}
-                onClick={handleClearDeadline}
-              >
-                {tr('membershipPlan_deadlineClear')}
-              </Button>
-            )}
-          </div>
+            </>
+          )}
+
+          {/* The trigger disappears when the slot is full: a manager can never be looking at a
+              queued season and a "create another" button at the same time. */}
+          {!showNextBlock && (
+            <>
+              <hr className='border-t' />
+              <div>
+                <Button
+                  type='button'
+                  ref={startNewRef}
+                  // The one state where starting a season is the thing the manager came to do.
+                  variant={hasPassed(currentSeason.value.expiresAt) ? 'default' : 'outline'}
+                  size='sm'
+                  onClick={() => {
+                    // Seeded from NOTHING on the current season — a Save here can never clone
+                    // the running season's dates onto a new row.
+                    setNextForm({ startsAt: nextStartDefault, deadline: '', expiresAt: '' });
+                    setNextError('');
+                    setAddingNext(true);
+                  }}
+                >
+                  {tr('membershipPlan_season_startNew')}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {canManage && (
+        <div className='mb-4 flex justify-end'>
           <Button onClick={() => setCreateOpen(true)}>+ {tr('membershipPlan_add')}</Button>
         </div>
       )}
@@ -719,9 +1064,6 @@ export function MembershipPlansPage({
                     count: String(plan.freeTrainingsIncluded),
                   })}`
                 : '';
-            const expiresLabel = Option.isSome(plan.expiresAt)
-              ? tr('membershipPlan_expiresOn', { date: formatLocalDate(plan.expiresAt.value) })
-              : tr('membershipPlan_noExpiry');
             const isEffectivePlan = plan.membershipPlanId === effectivePlanId;
 
             return (
@@ -741,7 +1083,7 @@ export function MembershipPlansPage({
                   </div>
                   <div className='text-xs text-muted-foreground'>
                     {priceLabel} · {perTrainingLabel}
-                    {freeTrainingsLabel} · {expiresLabel}
+                    {freeTrainingsLabel}
                   </div>
                 </div>
                 <div className='ml-auto flex flex-wrap items-center gap-1'>
@@ -753,6 +1095,7 @@ export function MembershipPlansPage({
                       variant='outline'
                       size='sm'
                       disabled={isSelectionClosed}
+                      aria-describedby='membership-selection-status'
                       aria-label={tr('membershipPlan_chooseAria', { name })}
                       onClick={() => handleChoose(plan)}
                     >

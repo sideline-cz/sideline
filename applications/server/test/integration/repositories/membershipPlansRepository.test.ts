@@ -21,6 +21,7 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { createTeam, createTeamMember, createUser, nextDiscordId } from '../bankSyncFixtures.js';
 import { cleanDatabase, secondTestPgClient, TestPgClient } from '../helpers.js';
+import { daysFromNow, readSeasons, setSeasons } from '../seasonFixtures.js';
 
 const TestLayer = Layer.mergeAll(
   MembershipPlansRepository.Default,
@@ -92,7 +93,6 @@ const insertPlan = (
         currency: (overrides.currency ?? 'CZK') as never,
         price_per_training_minor: (overrides.price_per_training_minor ?? 0) as never,
         free_trainings_included: Option.some((overrides.free_trainings_included ?? 0) as never),
-        expires_at: Option.none(),
       }),
     ),
   );
@@ -439,10 +439,14 @@ describe('MembershipPlansRepository.findMemberSelection', () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 
+  // The SOURCE of this value moved: it is the GOVERNING season's raw `selection_deadline` now,
+  // not `teams.membership_selection_deadline`. Reseeded explicitly through a season so the case
+  // cannot pass merely because the legacy column happens to be NULL too.
   it.effect('a team with no deadline reads back membership_selection_deadline as None', () =>
     Effect.gen(function* () {
       const team = yield* seedTeam('sel-find3');
       const member = yield* addMember(team.id, 'find3');
+      yield* setSeasons(team.id, [{ startsAt: daysFromNow(-30) }]);
 
       const found = yield* findMemberSelection(member.id, team.id);
 
@@ -668,7 +672,11 @@ describe('MembershipPlansRepository.selectMembershipPlan', () => {
 });
 
 describe('MembershipPlansRepository.setSelectionDeadline', () => {
-  it.effect('sets the deadline on teams', () =>
+  // TWO reads, and that is the point. `teams.membership_selection_deadline` is now the LEGACY
+  // MIRROR (Release-A rollback safety, deleted in Release B); the season's column is where the
+  // value actually lives. Asserting only the mirror would stay green with the season write
+  // dropped outright, which would silently break the gate the mirror cannot answer.
+  it.effect('writes the CURRENT season and mirrors it into the legacy teams column', () =>
     Effect.gen(function* () {
       const team = yield* seedTeam('deadline1');
       const deadline = DateTime.add(DateTime.nowUnsafe(), { days: 3 });
@@ -679,8 +687,16 @@ describe('MembershipPlansRepository.setSelectionDeadline', () => {
       const rows = yield* sql<{
         membership_selection_deadline: Date | null;
       }>`SELECT membership_selection_deadline FROM teams WHERE id = ${team.id}`;
-
       expect(rows[0]?.membership_selection_deadline).not.toBeNull();
+      expect(rows[0]?.membership_selection_deadline?.getTime()).toBe(
+        Number(DateTime.toEpochMillis(deadline)),
+      );
+
+      const seasons = yield* readSeasons(team.id);
+      expect(seasons, 'the seeded season is written in place, not duplicated').toHaveLength(1);
+      expect(seasons[0]?.selection_deadline?.getTime()).toBe(
+        Number(DateTime.toEpochMillis(deadline)),
+      );
     }).pipe(Effect.provide(TestLayer)),
   );
 
@@ -711,6 +727,10 @@ describe('MembershipPlansRepository.setSelectionDeadline', () => {
           membership_selection_deadline: Date | null;
         }>`SELECT membership_selection_deadline FROM teams WHERE id = ${team.id}`;
         expect(rows[0]?.membership_selection_deadline).toBeNull();
+        // Sibling read: the SEASON is what the gate consults. A clear that only reached the legacy
+        // mirror would leave selection shut while this column said otherwise.
+        const seasons = yield* readSeasons(team.id);
+        expect(seasons[0]?.selection_deadline).toBeNull();
 
         const reopenedAttempt = yield* selectMembershipPlan({
           member_id: member.id,
@@ -1316,5 +1336,124 @@ describe('MembershipPlansRepository.findPlanAssignments', () => {
         expect(planIdOf(onB.id)).toEqual(Option.some(planB.id));
         expect(planIdOf(onArchived.id)).toEqual(Option.some(planC.id));
       }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 13. Concurrent upsertNextSeason serializes — "Give a season real dates", case 44
+// ---------------------------------------------------------------------------
+//
+// TDD: written BEFORE `upsertNextSeason` exists. Fails to compile until the repository exports it.
+
+// `upsertNextSeason({ team_id, starts_at, deadline, expires_at })` is called on the repository
+// directly below — each fiber needs its OWN repository instance over its OWN connection, so there
+// is no shared helper to route through. `starts_at` must be in the future: that is a REQUEST
+// validation enforced at the API layer (400 `SeasonStartNotInFuture`), not a DB constraint,
+// because the DB cannot express "future relative to the request".
+
+const futureSeasonCount = (teamId: Team.TeamId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.flatMap(
+      (sql) => sql<{ count: string }>`
+        SELECT count(*)::text AS count FROM seasons
+        WHERE team_id = ${teamId} AND starts_at > now()
+      `,
+    ),
+    Effect.map((rows) => Number(rows[0]?.count)),
+  );
+
+describe('MembershipPlansRepository.upsertNextSeason — concurrency', () => {
+  // THE RACE, stated: `upsertNextSeason` is a read-the-slot-then-write. Two concurrent calls with
+  // DIFFERENT `startsAt` both find the slot empty and both INSERT — and `UNIQUE (team_id,
+  // starts_at)` CANNOT fire, because the keys differ. The result is a second queued season that
+  // the slot can never address again: invisible to `governing_season_id` (which only ever takes
+  // the EARLIEST future season) and hidden by the UI (the "Start new season" trigger disappears
+  // once one exists). A live row, wrong, and unreachable from every surface.
+  //
+  // THE FIX is three words — `SELECT 1 FROM teams WHERE id = $1 FOR UPDATE` as the transaction's
+  // FIRST statement — which is the same team-row lock idiom this repository already uses.
+  //
+  // PROVE IT CAN FAIL (mandatory; a concurrency test that has never been watched failing is
+  // theatre):
+  //   1. delete that `FOR UPDATE` line from `upsertNextSeasonQuery`;
+  //   2. re-run THIS FILE — the final assertion must go RED with a count of 2;
+  //   3. restore the line and watch it go green.
+  // Record both outputs. `api/finance.test.ts` cannot host this: it is a mock harness with no DB.
+  it.effect(
+    'two CONCURRENT upsertNextSeason calls with DIFFERENT startsAt leave exactly ONE future ' +
+      'season. FAILS with two rows if the `SELECT 1 FROM teams ... FOR UPDATE` slot lock is ' +
+      'dropped — the unique index cannot catch this one, because the keys differ.',
+    () =>
+      Effect.scoped(
+        TestClock.withLive(
+          Effect.gen(function* () {
+            const team = yield* seedTeam('season-slot-conc');
+
+            const repoA = yield* MembershipPlansRepository.asEffect();
+            const sql2 = yield* secondTestPgClient;
+            const repoB = yield* MembershipPlansRepository.asEffect().pipe(
+              Effect.provide(MembershipPlansRepository.Default),
+              Effect.provideService(SqlClient.SqlClient, sql2),
+            );
+
+            // A third connection holds the EXACT row the fix locks — the team row — behind a
+            // `Deferred` barrier, so both calls genuinely queue up and are released together.
+            // Without this they can simply not overlap and the test proves nothing. Same
+            // technique as the `setDefaultMembershipPlan` case above.
+            const sql3 = yield* secondTestPgClient;
+            const holding = yield* Deferred.make<void>();
+            const release = yield* Deferred.make<void>();
+            const barrierFiber = yield* Effect.forkChild(
+              sql3.withTransaction(
+                Effect.Do.pipe(
+                  Effect.tap(() => sql3`SELECT id FROM teams WHERE id = ${team.id} FOR UPDATE`),
+                  Effect.tap(() => Deferred.succeed(holding, undefined)),
+                  Effect.tap(() => Deferred.await(release)),
+                  Effect.asVoid,
+                ),
+              ),
+            );
+            yield* Deferred.await(holding);
+
+            const startsA = DateTime.add(DateTime.nowUnsafe(), { days: 30 });
+            const startsB = DateTime.add(DateTime.nowUnsafe(), { days: 60 });
+            const fiberA = yield* Effect.forkChild(
+              Effect.exit(
+                repoA.upsertNextSeason({
+                  team_id: team.id,
+                  starts_at: startsA,
+                  deadline: Option.none(),
+                  expires_at: Option.none(),
+                }),
+              ),
+            );
+            const fiberB = yield* Effect.forkChild(
+              Effect.exit(
+                repoB.upsertNextSeason({
+                  team_id: team.id,
+                  starts_at: startsB,
+                  deadline: Option.none(),
+                  expires_at: Option.none(),
+                }),
+              ),
+            );
+            yield* Effect.sleep('100 millis');
+            yield* Deferred.succeed(release, undefined);
+            yield* Fiber.join(barrierFiber);
+
+            const exitA = yield* Fiber.join(fiberA);
+            const exitB = yield* Fiber.join(fiberB);
+
+            // BOTH succeed — the slot is idempotent, so the loser is an UPDATE, not a 409.
+            expect(exitA._tag).toBe('Success');
+            expect(exitB._tag).toBe('Success');
+
+            expect(
+              yield* futureSeasonCount(team.id),
+              'one slot, one row — a second queued season would be unreachable forever',
+            ).toBe(1);
+          }),
+        ),
+      ).pipe(Effect.provide(TestLayer)),
   );
 });
