@@ -407,24 +407,6 @@ describe('POST /teams/:teamId/membership-plans', () => {
     expect(body.freeTrainingsIncluded).toBe(0);
     expect((await getPlanAllowance(body.membershipPlanId))?.free_trainings_included).toBe(0);
   });
-
-  it('round-trips an expiresAt Some value', async () => {
-    const fixture = await seedFixture(['finance:manage_fees']);
-    sessionsStore.set('actor-token', fixture.actorUserId);
-    const expiresAt = '2099-06-15T12:00:00.000Z';
-
-    const response = await handler(
-      new Request(`http://localhost/teams/${fixture.team.id}/membership-plans`, {
-        method: 'POST',
-        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...basicPayload, expiresAt }),
-      }),
-    );
-
-    expect(response.status).toBe(201);
-    const body = await asJson(response);
-    expect(body.expiresAt).toBe(expiresAt);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -459,35 +441,6 @@ describe('PATCH /teams/:teamId/membership-plans/:membershipPlanId — full repla
     const updated = await asJson(updateResponse);
     expect(updated.name).toBe('Renamed');
     expect(updated.currency).toBe('EUR');
-  });
-
-  it('an expiresAt Some -> None in the payload actually clears the column', async () => {
-    const fixture = await seedFixture(['finance:manage_fees']);
-    sessionsStore.set('actor-token', fixture.actorUserId);
-
-    const created = await handler(
-      new Request(`http://localhost/teams/${fixture.team.id}/membership-plans`, {
-        method: 'POST',
-        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...basicPayload, expiresAt: '2099-06-15T12:00:00.000Z' }),
-      }),
-    ).then(asJson);
-    expect(created.expiresAt).not.toBeNull();
-
-    const updateResponse = await handler(
-      new Request(
-        `http://localhost/teams/${fixture.team.id}/membership-plans/${created.membershipPlanId}`,
-        {
-          method: 'PATCH',
-          headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...basicPayload, expiresAt: null }),
-        },
-      ),
-    );
-
-    expect(updateResponse.status).toBe(200);
-    const updated = await asJson(updateResponse);
-    expect(updated.expiresAt).toBeNull();
   });
 
   // Regression test for the blocker: editing the seeded default plan's price without setting a

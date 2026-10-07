@@ -93,7 +93,6 @@ const insertPlan = (
         currency: (overrides.currency ?? 'CZK') as never,
         price_per_training_minor: (overrides.price_per_training_minor ?? 0) as never,
         free_trainings_included: Option.some((overrides.free_trainings_included ?? 0) as never),
-        expires_at: Option.none(),
       }),
     ),
   );

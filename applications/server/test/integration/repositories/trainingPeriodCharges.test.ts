@@ -123,7 +123,6 @@ const setDefaultPlanPrice = (
       currency: currency as never,
       price_per_training_minor: priceMinor as never,
       free_trainings_included: Option.some(freeTrainings as never),
-      expires_at: def.expires_at,
     });
   });
 
@@ -143,7 +142,6 @@ const createPlan = (
         currency: currency as never,
         price_per_training_minor: priceMinor as never,
         free_trainings_included: Option.some(freeTrainings as never),
-        expires_at: Option.none(),
       }),
     ),
   );
