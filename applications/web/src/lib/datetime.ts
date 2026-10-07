@@ -48,6 +48,18 @@ export const dateOnlyToLocalEndOfDay = (date: string): DateTime.Utc => {
 };
 
 /**
+ * A season's START date. Sibling of `dateOnlyToLocalEndOfDay`, and the harmful direction
+ * FLIPS: anchoring a deadline late is the generous side, but anchoring a START late opens the
+ * season after the advertised day and widens the rollover gap. So this anchors to the
+ * BEGINNING of the local day (00:00:00.000 local). Every residual clock-skew error then falls
+ * the generous way on both ends — open slightly early, close slightly late.
+ */
+export const dateOnlyToLocalStartOfDay = (date: string): DateTime.Utc => {
+  const [y, mo, d] = date.split('-').map(Number);
+  return DateTime.fromDateUnsafe(new Date(y, mo - 1, d, 0, 0, 0, 0));
+};
+
+/**
  * Format a UTC DateTime as YYYY-MM-DD in UTC.
  * This is now only the rolling-deploy fallback for all-day events (plan §11.2/§17): when
  * an older server hasn't shipped the derived team-local `startDate`/`endDate` yet, readers

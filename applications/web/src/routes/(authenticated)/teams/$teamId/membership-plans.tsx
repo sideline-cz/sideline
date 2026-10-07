@@ -32,6 +32,9 @@ function MembershipPlansRoute() {
       plans={response?.plans ?? []}
       selectedPlanId={response?.selectedPlanId ?? Option.none()}
       selectionDeadline={response?.selectionDeadline ?? Option.none()}
+      seasonExpiresAt={response?.seasonExpiresAt ?? Option.none()}
+      currentSeason={response?.currentSeason ?? Option.none()}
+      nextSeason={response?.nextSeason ?? Option.none()}
       assignments={response?.assignments ?? []}
     />
   );
