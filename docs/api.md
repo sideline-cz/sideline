@@ -7756,9 +7756,11 @@ Reorders a team's active event types. Requires `team:manage`.
 
 **Source:** `packages/domain/src/api/MembershipPlanApi.ts`
 
-Slice 1 of "Setup memberships" — the per-team catalogue of membership tiers (pricing and lifecycle only). Every team is seeded with one default plan (`name: null`, renders the built-in translated label, zero price, `'CZK'`). A captain can add more plans, edit any plan's pricing, promote a different plan to be the team's default, and archive a plan that is no longer offered. Slice 2 lets a player pick which plan they want, with an optional per-team deadline after which selection closes (`selectMembershipPlan` / `setMembershipSelectionDeadline` below). Slice 4 lets a manager assign or bulk-move members onto a plan directly — including after the selection deadline has passed (`assignMembershipPlan` / `reassignMembershipPlan` below).
+Slice 1 of "Setup memberships" — the per-team catalogue of membership tiers (pricing and lifecycle only). Every team is seeded with one default plan (`name: null`, renders the built-in translated label, zero price, `'CZK'`). A captain can add more plans, edit any plan's pricing, promote a different plan to be the team's default, and archive a plan that is no longer offered. Slice 2 lets a player pick which plan they want, with an optional deadline after which selection closes (`selectMembershipPlan` / `setMembershipSelectionDeadline` below). Slice 4 lets a manager assign or bulk-move members onto a plan directly — including after the selection deadline has passed (`assignMembershipPlan` / `reassignMembershipPlan` below).
 
-Permissions deliberately follow the **finance**, not the **team**, boundary: listing is membership-gated only (`canManage` in the response tells the caller whether they may mutate), while create/update/setDefault/delete/setMembershipSelectionDeadline/assignMembershipPlan/reassignMembershipPlan all require `finance:manage_fees` — the same permission `fees` uses. This is not `team:manage`: pricing is a finance decision, and gating it on `team:manage` would lock out the Treasurer, the role that exists specifically to own money. By default Admin and Treasurer hold `finance:manage_fees`; a team that wants its Captain to manage plans grants the permission through the existing per-team role editor — no migration needed. **A Captain does not hold `finance:manage_fees` by default**, so cannot assign or bulk-move members even though it holds `member:view`. `selectMembershipPlan` is the one exception: it is membership-gated only, since any member picks their own plan.
+**Seasons.** As of migration `1793900000_create_seasons.ts` the selection deadline, the expiry that closes selection, and the free-trainings anchor are all properties of a team-wide `seasons` row (`docs/database.md` § 12), not of `teams` or of a plan. Only two seasons are ever addressable from the API: the **current** one (greatest `starts_at <= now()`), owned by `setMembershipSelectionDeadline`, and the **next** one (earliest `starts_at > now()`), owned by the new `upsertNextSeason` below — there is no list, create, or delete endpoint; the next-season slot IS the create path. Selection is open when the **governing** season — of `current`/`next`, the first that is OPEN, else `current`, else `next` — has a `selectionDeadline` and a `seasonExpiresAt` that are each either absent or still in the future; both are carried separately end to end because one instant cannot tell "deadline passed" (ask an admin) from "season ended" (keep your plan until the next one starts).
+
+Permissions deliberately follow the **finance**, not the **team**, boundary: listing is membership-gated only (`canManage` in the response tells the caller whether they may mutate), while create/update/setDefault/delete/setMembershipSelectionDeadline/upsertNextSeason/assignMembershipPlan/reassignMembershipPlan all require `finance:manage_fees` — the same permission `fees` uses. This is not `team:manage`: pricing is a finance decision, and gating it on `team:manage` would lock out the Treasurer, the role that exists specifically to own money. By default Admin and Treasurer hold `finance:manage_fees`; a team that wants its Captain to manage plans grants the permission through the existing per-team role editor — no migration needed. **A Captain does not hold `finance:manage_fees` by default**, so cannot assign or bulk-move members even though it holds `member:view`. `selectMembershipPlan` is the one exception: it is membership-gated only, since any member picks their own plan.
 
 #### Schemas
 
@@ -7772,8 +7774,8 @@ Permissions deliberately follow the **finance**, not the **team**, boundary: lis
 | `priceMinor` | `number` | No | Price in minor units (e.g. cents) |
 | `currency` | `string` | No | ISO 4217 code |
 | `pricePerTrainingMinor` | `number` | No | Per-training price in minor units, for pay-per-training plans |
-| `freeTrainingsIncluded` | `number` | No | Trainings included at no charge ALL-TIME, not per billing period — the allowance is consumed once and never resets. It is counted from `membership_plans.free_trainings_anchor_at`, stamped when a manager first sets a non-zero allowance, and spans every billing period from that anchor on. `0` (the default, and the value every plan predating this field was backfilled with) means every attended training is billed. Tolerantly decoded: an old client omitting the key reads `0` |
-| `expiresAt` | `string \| null` (ISO datetime) | Yes | `null` means the plan never expires |
+| `freeTrainingsIncluded` | `number` | No | Trainings included at no charge PER SEASON, not per billing period and no longer all-time — the allowance is consumed once per season and resets at every rollover. It is counted from the governing season's `startsAt` (see `currentSeason`/`nextSeason` below), not from a column on the plan — this reverses the "consumed once, all-time" rule of an earlier release, as a deliberate product decision: an allowance is now a per-season budget, not a lifetime one. `0` means every attended training is billed. Tolerantly decoded: an old client omitting the key reads `0` |
+| `expiresAt` | `null` (always) | Yes | **Dead field, kept for exactly one release.** Expiry is a property of the team's season now (`seasonExpiresAt` in `MembershipPlanListResponse` below), never of a plan; the server always encodes `null` here regardless of what is stored. A future release deletes this field |
 | `isDefault` | `boolean` | No | Whether this is the team's current default plan |
 
 `MembershipPlanRequest` — the shared create/update payload, full-replace semantics (a `PATCH` re-sends every field, including `currency` — a partial update omitting it would silently rewrite an EUR plan to whatever the server defaults to):
@@ -7784,8 +7786,9 @@ Permissions deliberately follow the **finance**, not the **team**, boundary: lis
 | `priceMinor` | `number` | Yes | Price in minor units |
 | `currency` | `string` | Yes | ISO 4217 code |
 | `pricePerTrainingMinor` | `number` | Yes | Per-training price in minor units |
-| `freeTrainingsIncluded` | `number` | No | 0–999. Trainings included free once, for the life of the membership. **Optional key — an absent key means "keep the stored value"** (0 on a create, where there is nothing stored). Web deploys last, so old bundles omit this key for the whole rollout window; a required field would `400` every one of their saves and a decoding default of `0` would silently zero the allowance on this full-row overwrite. Unlike `MembershipPlanInfo.freeTrainingsIncluded`, which is tolerantly decoded to `0` on the READ side — the asymmetry is deliberate. Sending `0` explicitly still clears the allowance. Accepted on a plan whose `pricePerTrainingMinor` is `0` and simply has no effect there — the charge engine's `price_per_training_minor > 0` gate already makes it a no-op, and rejecting it would break the legitimate "set the allowance, then set the price" edit order |
-| `expiresAt` | `string \| null` (ISO datetime) | Yes | `null` for a plan that never expires |
+| `freeTrainingsIncluded` | `number` | No | 0–999. Trainings included free, once PER SEASON, counted from the governing season's start — not per billing period, and no longer all-time. **Optional key — an absent key means "keep the stored value"** (0 on a create, where there is nothing stored). Web deploys last, so old bundles omit this key for the whole rollout window; a required field would `400` every one of their saves and a decoding default of `0` would silently zero the allowance on this full-row overwrite. Unlike `MembershipPlanInfo.freeTrainingsIncluded`, which is tolerantly decoded to `0` on the READ side — the asymmetry is deliberate. Sending `0` explicitly still clears the allowance. Accepted on a plan whose `pricePerTrainingMinor` is `0` and simply has no effect there — the charge engine's `price_per_training_minor > 0` gate already makes it a no-op, and rejecting it would break the legitimate "set the allowance, then set the price" edit order |
+
+No `expiresAt` key — **removed from this release's API**. Expiry is a property of the team's season now, set via `PUT /teams/:teamId/membership-selection-deadline` (current season) or `PUT /teams/:teamId/seasons/next` (next season) below, never via this payload. An already-loaded bundle that still sends the key is silently ignored (`onExcessProperty` defaults to `"ignore"`), not rejected.
 
 `MembershipPlanAssignment` — one row per active member, only ever populated when the caller can manage (see `assignments` below):
 
@@ -7794,6 +7797,14 @@ Permissions deliberately follow the **finance**, not the **team**, boundary: lis
 | `memberId` | `TeamMemberId` | No | The member's `team_members` row id |
 | `displayName` | `string` | No | Server-resolved display name (name, else Discord nickname/display name, else username) — same resolver as the roster page |
 | `membershipPlanId` | `MembershipPlanId \| null` | Yes | The member's own RAW chosen/assigned plan; `null` means never picked/assigned — NOT "on the default plan", same raw-not-resolved stance as `selectedPlanId` above |
+
+`SeasonInfo` — the RAW column values of ONE season, used to seed the manager's form inputs (`currentSeason`/`nextSeason` on `MembershipPlanListResponse` below). Every field is the column itself, never a derivation:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `startsAt` | `string` (ISO datetime) | No | When this season starts |
+| `selectionDeadline` | `string \| null` (ISO datetime) | Yes | `null` means selection never closes on a deadline for this season |
+| `expiresAt` | `string \| null` (ISO datetime) | Yes | `null` means the season never ends on its own. Carried separately from `selectionDeadline`, never collapsed into a single instant — a consumer that sees one date cannot tell "deadline passed" from "season ended" |
 
 ---
 
@@ -7816,8 +7827,13 @@ Lists a team's active (non-archived) plans, the team's default plan first, then 
 | `canManage` | `boolean` | Whether the caller holds `finance:manage_fees` and may create/update/archive/set-default |
 | `plans` | `MembershipPlanInfo[]` | Active plans only, default plan first |
 | `selectedPlanId` | `MembershipPlanId \| null` | The caller's own RAW chosen plan (`team_members.membership_plan_id`); `null`/absent means never picked one, NOT "on the default plan" — the web resolves the effective plan from `plans` itself |
-| `selectionDeadline` | `string \| null` (ISO datetime) | The team's `membership_selection_deadline`; `null`/absent means selection is always open |
+| `selectionDeadline` | `string \| null` (ISO datetime) | **Display only, never write it back.** The GOVERNING season's raw deadline (of `currentSeason`/`nextSeason`, the first that is open, else `currentSeason`, else `nextSeason`) — no longer `teams.membership_selection_deadline`. `null`/absent means selection is always open |
+| `seasonExpiresAt` | `string \| null` (ISO datetime) | **Display only, never write it back.** The same governing season's expiry, carried separately from `selectionDeadline` so the caller can tell "deadline passed" (ask an admin) from "season ended" (keep your plan until the next one). `null`/absent means the governing season never ends on its own |
+| `currentSeason` | `SeasonInfo \| null` | **Seeding only** — the RAW current-season row (greatest `startsAt <= now()`), for the manager's form. `null`/absent means every season this team has is still in the future. Written back by `PUT /teams/:teamId/membership-selection-deadline` below |
+| `nextSeason` | `SeasonInfo \| null` | **Seeding only** — the RAW next-season row (earliest `startsAt > now()`), for the manager's form. `null`/absent means no season is queued — the state the "start a new season" affordance exists for. Written back by `PUT /teams/:teamId/seasons/next` below |
 | `assignments` | `MembershipPlanAssignment[]` | Who is on which plan, one row per active member. **Empty unless `canManage`** — privileged data, so a non-manager always sees `[]` regardless of the team's actual roster. Absent on the wire decodes to `[]` too (forward-compat default) |
+
+`currentSeason`/`nextSeason` and `selectionDeadline`/`seasonExpiresAt` are deliberately two SEPARATE pairs, not one: the first two seed the manager's two editable date boxes (one block, one row, one Save — a box seeded from one season and saved into the other would silently overwrite the wrong row); the second two are the member-facing notice and are never fed back into any request.
 
 **Errors:**
 
@@ -7958,7 +7974,7 @@ Slice 2 of "Setup memberships". The caller picks which plan they're on. Self-ser
 |---|---|---|
 | `MembershipPlanForbidden` | 403 | Not a member of this team |
 | `MembershipPlanNotFound` | 404 | Plan does not exist, does not belong to `teamId`, or is archived |
-| `MembershipSelectionClosed` | 409 | The team's `membership_selection_deadline` has passed |
+| `MembershipSelectionClosed` | 409 | The GOVERNING season's window is shut — either its `selectionDeadline` or its `seasonExpiresAt` has passed |
 
 Every real precondition (membership, team match, active membership row, deadline, plan tenancy/archived) lives in one atomic `UPDATE ... WHERE` in `MembershipPlansRepository.selectMembershipPlan` — never a preceding read-then-check. On zero rows affected, the handler re-reads the caller's own selection once to choose between `404` and `409`; this classification is best-effort under concurrency (a captain changing the deadline between the write and the re-read can pick the less-precise error), but it can never produce a wrong write.
 
@@ -8028,13 +8044,13 @@ Bulk "move everyone from plan A to plan B" (or from/to the team default). Requir
 | `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
 | `MembershipPlanNotFound` | 404 | `toMembershipPlanId` names a plan that does not exist, does not belong to `teamId`, or is archived. Only checked when the `UPDATE` affects zero rows and a target was specified — an unmatched **source** is not an error, it just moves nobody |
 
-A member already on the target plan is not re-counted: the `UPDATE`'s `WHERE` requires the current plan to differ from the target, so `movedCount` never inflates from a no-op match. This does not immediately change any in-progress training charges — `training_period_charges` recomputes lazily on the next attendance write in the current billing period; past periods are frozen. Editing the PLAN itself is different: changing `pricePerTrainingMinor` or `freeTrainingsIncluded` fires `membership_plans_pricing_recompute_trg`, which recomputes the team's CURRENT period immediately (past periods stay frozen — `recompute_training_period_fees` returns early for them). Raising an allowance from `0` also re-anchors the plan's allowance clock (`free_trainings_anchor_at` is re-stamped), so the free trainings start counting from that edit rather than from the plan's creation. Moving MEMBERS between plans still recomputes lazily, because that write lands on `team_members`, which has no such trigger.
+A member already on the target plan is not re-counted: the `UPDATE`'s `WHERE` requires the current plan to differ from the target, so `movedCount` never inflates from a no-op match. This does not immediately change any in-progress training charges — `training_period_charges` recomputes lazily on the next attendance write in the current billing period; past periods are frozen. Editing the PLAN itself is different: changing `pricePerTrainingMinor` or `freeTrainingsIncluded` fires `membership_plans_pricing_recompute_trg`, which recomputes the team's CURRENT period immediately (past periods stay frozen — `recompute_training_period_fees` returns early for them). The free-trainings allowance itself is anchored on the governing SEASON's start, not on the plan — editing a plan's allowance does not move that anchor; only inserting a new season does (see `PUT /teams/:teamId/seasons/next` below). Moving MEMBERS between plans still recomputes lazily, because that write lands on `team_members`, which has no such trigger.
 
 ---
 
 #### `PUT /teams/:teamId/membership-selection-deadline`
 
-Sets (or clears) the team's membership-selection deadline. Requires `finance:manage_fees` — deliberately not `team:manage`, same reasoning as create/update/archive above. Not nested under `/membership-plans/...` to avoid colliding with the `:membershipPlanId` path segment.
+Writes the team's **CURRENT** season's slot — the one with the greatest `startsAt` not after now(). Requires `finance:manage_fees` — deliberately not `team:manage`, same reasoning as create/update/archive above. Not nested under `/membership-plans/...` to avoid colliding with the `:membershipPlanId` path segment. The path keeps its pre-seasons name even though it now also writes an expiry — renaming it would strand every already-loaded bundle for the whole rollout window, and the name is still accurate about the key that matters to those bundles. There is deliberately no `startsAt` in the payload: a running season's start is history, and a date box that could move it would re-price the open billing month with no confirmation — start dates are only ever editable on the NEXT slot (`upsertNextSeason` below).
 
 **Auth:** Bearer token (AuthMiddleware)
 
@@ -8049,6 +8065,8 @@ Sets (or clears) the team's membership-selection deadline. Requires `finance:man
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `deadline` | `string \| null` (ISO datetime) | Yes | `null` clears the deadline (selection stays open indefinitely) |
+| `expiresAt` | `string \| null` (ISO datetime) | No | **Optional key — an absent key means "keep the stored value"**; `null` explicitly clears it (the season never ends on its own). Old bundles that predate this key omit it, so it must not be required |
+| `currentSeasonStartsAt` | `string` (ISO datetime) | No | Optimistic-concurrency check, not a write target: the `startsAt` of the `currentSeason` object the form was seeded from. If the team's current season has since changed (a rollover happened while the tab was open), the request fails with `409 CurrentSeasonChanged` rather than silently overwriting the new season's dates. **Only checked when sent** — an old bundle that predates this key omits it and gets today's behaviour: a team with no current season at all is a silent `204`, same as before this field existed |
 
 **Response:** `204 No Content`
 
@@ -8057,6 +8075,40 @@ Sets (or clears) the team's membership-selection deadline. Requires `finance:man
 | Tag | Status | When |
 |---|---|---|
 | `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `CurrentSeasonChanged` | 409 | `currentSeasonStartsAt` was sent and no longer names the team's current season — the page is stale; refetch before retrying |
+
+---
+
+#### `PUT /teams/:teamId/seasons/next`
+
+Writes the team's **NEXT** season's slot — the one with the EARLIEST `startsAt` after now(). Requires `finance:manage_fees`, same gate as every other mutating endpoint in this section. The slot IS the identity: a double-submit with the same values rewrites the same row and still returns `204`, which is why there is no separate create endpoint and no "already exists" conflict. There is no `GET`, list, or delete for a season — `GET /teams/:teamId/membership-plans` already carries both seasons, and nothing in this release deletes one.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `UpsertNextSeasonRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `startsAt` | `string` (ISO datetime) | Yes | Must be strictly in the future — this is what makes the request structurally incapable of addressing the running season's row |
+| `deadline` | `string \| null` (ISO datetime) | Yes | `null` means this season has no selection deadline |
+| `expiresAt` | `string \| null` (ISO datetime) | Yes | `null` means this season never ends on its own. This endpoint is new, so unlike `SetSelectionDeadlineRequest` neither date key is optional — every save sends the whole block |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `MembershipPlanForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `SeasonStartNotInFuture` | 400 | `startsAt` is at or before now() — a value the form's own `min` attribute should already have rejected. `400`, not `409`: the slot is "the earliest FUTURE season", so a non-future start does not collide with anything, it simply fails to name the slot |
+
+Starting a season with a mid-month `startsAt` resets that whole month's free-trainings allowance the moment it is created, because the allowance is counted from the governing season's start — see `docs/database.md` § 12's `seasons` notes.
 
 ---
 

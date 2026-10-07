@@ -347,13 +347,26 @@ const make = Effect.gen(function* () {
   // JS. `execute` receives the ENCODED request, so the pair arrives as `boolean` + `Date | null`,
   // never as an `Option` (precedent: `assignMembershipPlanQuery` below). Both `::` casts are
   // required — the `sql` template emits untyped placeholders.
-  const setCurrentSeasonQuery = SqlSchema.void({
+  //
+  // `expected_starts_at` is OPTIMISTIC CONCURRENCY ON THE ROW'S IDENTITY, and it is the only
+  // thing that ties the Save back to the row the form was SEEDED from. The slot predicate above
+  // resolves its target at SAVE time; across a rollover under an open tab that is a DIFFERENT
+  // row than the one the box was filled from. The guard sits on the OUTER `UPDATE`, never inside
+  // the subquery — inside, a stale expectation would simply re-select the old (no longer current)
+  // season and happily write it; outside, it matches nothing and the caller gets a 409.
+  //
+  // NULL = NO CHECK, which is exactly what a frozen old bundle (which never sends the key) must
+  // get. No presence boolean here, unlike `expires_at`: there is no "clear it" meaning for this
+  // parameter, so `null` and absent can safely collapse.
+  const setCurrentSeasonQuery = SqlSchema.findAll({
     Request: Schema.Struct({
       team_id: Team.TeamId,
       deadline: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
       expires_at_present: Schema.Boolean,
       expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+      expected_starts_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
     }),
+    Result: Schema.Struct({ id: Schema.String }),
     execute: (input) => sql`
       UPDATE seasons SET
         selection_deadline = ${input.deadline},
@@ -365,6 +378,9 @@ const make = Effect.gen(function* () {
         WHERE s.team_id = ${input.team_id} AND s.starts_at <= now()
         ORDER BY s.starts_at DESC LIMIT 1
       )
+        AND (${input.expected_starts_at}::timestamptz IS NULL
+             OR starts_at = ${input.expected_starts_at}::timestamptz)
+      RETURNING id::text AS id
     `,
   });
 
@@ -634,10 +650,17 @@ const make = Effect.gen(function* () {
   // `Option` is PRESENCE (`None` = the key was absent, keep the stored value — what every old
   // bundle sends for the whole rollout window), the INNER one is the VALUE (`None` = an explicit
   // null, clear it). Defaulted to absent so existing two-argument callers keep working.
+  //
+  // `expectedStartsAt` `None` = no optimistic check, which is what a frozen old bundle gets.
+  // Returns the ROW COUNT and classifies nothing: 0 rows means either "no current season at all"
+  // (today's silent success) or "the expectation lost", and only the handler — which knows
+  // whether the caller sent an expectation — can tell those apart. Same shape as
+  // `assignMembershipPlan` below.
   const setSelectionDeadline = (
     teamId: Team.TeamId,
     deadline: Option.Option<DateTime.Utc>,
     expiresAt: Option.Option<Option.Option<DateTime.Utc>> = Option.none(),
+    expectedStartsAt: Option.Option<DateTime.Utc> = Option.none(),
   ) =>
     sql
       .withTransaction(
@@ -646,7 +669,10 @@ const make = Effect.gen(function* () {
           deadline,
           expires_at_present: Option.isSome(expiresAt),
           expires_at: Option.flatten(expiresAt),
-        }).pipe(Effect.flatMap(() => mirrorLegacyDeadlineQuery(teamId))),
+          expected_starts_at: expectedStartsAt,
+        }).pipe(
+          Effect.flatMap((rows) => mirrorLegacyDeadlineQuery(teamId).pipe(Effect.as(rows.length))),
+        ),
       )
       .pipe(catchSqlErrors);
 

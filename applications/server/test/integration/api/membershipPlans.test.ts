@@ -1635,13 +1635,14 @@ const legacyTeamDeadline = (teamId: Team.TeamId) =>
     ),
   );
 
-/** PUT …/membership-selection-deadline — the CURRENT season's slot. `expiresAt` is deliberately
- * omitted from the body when the caller omits it: absent means KEEP THE STORED VALUE, and that is
- * what an old bundle sends for the whole rollout window. */
+/** PUT …/membership-selection-deadline — the CURRENT season's slot. `expiresAt` and
+ * `currentSeasonStartsAt` are deliberately omitted from the body when the caller omits them:
+ * absent means KEEP THE STORED VALUE / NO OPTIMISTIC CHECK respectively, and that is what a
+ * frozen old bundle sends for the whole rollout window. */
 const putCurrentSeason = (
   teamId: Team.TeamId,
   token: string,
-  body: { deadline: string | null; expiresAt?: string | null },
+  body: { deadline: string | null; expiresAt?: string | null; currentSeasonStartsAt?: string },
 ) =>
   handler(
     new Request(`http://localhost/teams/${teamId}/membership-selection-deadline`, {
@@ -1823,6 +1824,43 @@ describe('PUT /teams/:teamId/me/membership-plan — the season gate', () => {
 });
 
 describe('PUT /teams/:teamId/seasons/next', () => {
+  // THE §B.3 DRIFT GUARD, the one every sibling endpoint in this file already carries. Without
+  // it, deleting the handler's `requirePermission(…, 'finance:manage_fees', …)` leaves the whole
+  // suite green while any team member could queue a season inside the OPEN month and have
+  // `seasons_recompute_trg` rewrite that month's training fees.
+  it('a member WITHOUT finance:manage_fees -> 403, no season queued', async () => {
+    const fixture = await seedFixture([]);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    await arrangeSeasons(fixture.team.id, [{ startsAt: daysFromNow(-30) }]);
+
+    const response = await putNextSeason(fixture.team.id, 'actor-token', {
+      startsAt: iso(daysFromNow(90)),
+      deadline: null,
+      expiresAt: null,
+    });
+
+    expect(response.status).toBe(403);
+    expect((await asJson(response))._tag).toBe('MembershipPlanForbidden');
+    expect(await seasonRows(fixture.team.id)).toHaveLength(1);
+  });
+
+  it('a non-member -> 403, no season queued', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    const outsiderUserId = await runSeeded(createUser('mp-next-season-outsider'));
+    sessionsStore.set('outsider-token', outsiderUserId);
+    await arrangeSeasons(fixture.team.id, [{ startsAt: daysFromNow(-30) }]);
+
+    const response = await putNextSeason(fixture.team.id, 'outsider-token', {
+      startsAt: iso(daysFromNow(90)),
+      deadline: null,
+      expiresAt: null,
+    });
+
+    expect(response.status).toBe(403);
+    expect((await asJson(response))._tag).toBe('MembershipPlanForbidden');
+    expect(await seasonRows(fixture.team.id)).toHaveLength(1);
+  });
+
   // CASE 24 — ROLLOVER (decision 4). The member keeps their plan across the boundary with NO
   // re-confirmation: nothing clears the column, and the new season reopens selection on its own.
   it('a new season rolls the member over: same plan, no re-confirmation, selection open again', async () => {
@@ -2120,6 +2158,109 @@ describe('PUT /teams/:teamId/membership-selection-deadline — the CURRENT seaso
     const [season] = await seasonRows(fixture.team.id);
     expect(season?.selection_deadline).toBeNull();
     expect((await selectPlan(fixture.team.id, 'actor-token', seeded?.id)).status).toBe(204);
+  });
+
+  // CASE 28c — THE BLOCKER REGRESSION, third costume. The slot predicate resolves its target at
+  // SAVE time; the form was seeded at LOAD time. A manager who leaves the tab open across a
+  // season rollover would otherwise write season A's box into season B — destroying B's deadline
+  // and expiry behind a "Season dates saved." toast. `currentSeasonStartsAt` is optimistic
+  // concurrency on the ROW'S IDENTITY, and asserting the 409 alone is not enough: an
+  // implementation that 409s AFTER writing would stay green.
+  it('a Save seeded from a season that is no longer current -> 409, and the NEW current season is untouched', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+
+    // Page load: A is current, B is queued. The Current block is seeded from A.
+    const seasonAStart = daysFromNow(-30);
+    const seasonBStart = daysFromNow(10);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: seasonAStart, deadline: daysFromNow(-20), expiresAt: daysFromNow(5) },
+      { startsAt: seasonBStart, deadline: daysFromNow(20), expiresAt: daysFromNow(200) },
+    ]);
+
+    // The rollover happens while the tab sits open: B's start is now in the past, so B — not A —
+    // is what the slot predicate resolves to.
+    const rolledOverBStart = daysFromNow(-1);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: seasonAStart, deadline: daysFromNow(-20), expiresAt: daysFromNow(-2) },
+      { startsAt: rolledOverBStart, deadline: daysFromNow(20), expiresAt: daysFromNow(200) },
+    ]);
+    const before = await seasonRows(fixture.team.id);
+    const bBefore = before.find((r) => r.starts_at.getTime() === rolledOverBStart.getTime());
+    expect(bBefore, 'B really is the current season now').toBeDefined();
+
+    // The stale tab Saves — its payload still carries A's identity.
+    const response = await putCurrentSeason(fixture.team.id, 'actor-token', {
+      deadline: iso(daysFromNow(60)),
+      expiresAt: iso(daysFromNow(400)),
+      currentSeasonStartsAt: iso(seasonAStart),
+    });
+
+    expect(response.status).toBe(409);
+    expect((await asJson(response))._tag).toBe('CurrentSeasonChanged');
+    const after = await seasonRows(fixture.team.id);
+    const bAfter = after.find((r) => r.id === bBefore?.id);
+    expect(bAfter?.selection_deadline?.getTime(), 'B’s deadline intact').toBe(
+      bBefore?.selection_deadline?.getTime(),
+    );
+    expect(bAfter?.expires_at?.getTime(), 'B’s expiry intact').toBe(bBefore?.expires_at?.getTime());
+    const aAfter = after.find((r) => r.starts_at.getTime() === seasonAStart.getTime());
+    expect(aAfter?.selection_deadline?.getTime(), 'and A was not written either').toBe(
+      before
+        .find((r) => r.starts_at.getTime() === seasonAStart.getTime())
+        ?.selection_deadline?.getTime(),
+    );
+  });
+
+  // CASE 28d — THE FROZEN-BUNDLE PATH, the half that makes 28c deployable. Deploy order is
+  // bot -> server -> web, so this new server serves old bundles for the entire rollout window and
+  // those bundles never send `currentSeasonStartsAt`. ABSENT MUST MEAN "NO OPTIMISTIC CHECK" and
+  // must never 400 or 409 — the identical stale arrangement as 28c, minus the key, still writes
+  // the current season exactly as it does today.
+  it('the SAME stale arrangement with currentSeasonStartsAt ABSENT still succeeds, exactly as today', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const seasonAStart = daysFromNow(-30);
+    const rolledOverBStart = daysFromNow(-1);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: seasonAStart, deadline: daysFromNow(-20), expiresAt: daysFromNow(-2) },
+      { startsAt: rolledOverBStart, deadline: daysFromNow(20), expiresAt: daysFromNow(200) },
+    ]);
+
+    const newDeadline = daysFromNow(60);
+    const response = await putCurrentSeason(fixture.team.id, 'actor-token', {
+      deadline: iso(newDeadline),
+    });
+
+    expect(response.status).toBe(204);
+    const after = await seasonRows(fixture.team.id);
+    const bAfter = after.find((r) => r.starts_at.getTime() === rolledOverBStart.getTime());
+    expect(bAfter?.selection_deadline?.getTime(), 'landed on the CURRENT season, as always').toBe(
+      newDeadline.getTime(),
+    );
+  });
+
+  // CASE 28e — the sibling that keeps 28c honest: the MISMATCH, not the mere presence of the key,
+  // is what 409s. A matching expectation writes through.
+  it('a matching currentSeasonStartsAt writes through with 204', async () => {
+    const fixture = await seedFixture(['finance:manage_fees']);
+    sessionsStore.set('actor-token', fixture.actorUserId);
+    const currentStart = daysFromNow(-30);
+    await arrangeSeasons(fixture.team.id, [
+      { startsAt: currentStart, deadline: daysFromNow(10) },
+      { startsAt: daysFromNow(90), deadline: daysFromNow(80) },
+    ]);
+
+    const newDeadline = daysFromNow(45);
+    const response = await putCurrentSeason(fixture.team.id, 'actor-token', {
+      deadline: iso(newDeadline),
+      currentSeasonStartsAt: iso(currentStart),
+    });
+
+    expect(response.status).toBe(204);
+    const after = await seasonRows(fixture.team.id);
+    const currentAfter = after.find((r) => r.starts_at.getTime() === currentStart.getTime());
+    expect(currentAfter?.selection_deadline?.getTime()).toBe(newDeadline.getTime());
   });
 });
 

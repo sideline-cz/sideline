@@ -2277,6 +2277,7 @@
   "membershipPlan_season_badgeEnded": "Sezóna skončila",
   "membershipPlan_season_badgeOpen": "Výběr otevřen",
   "membershipPlan_season_created": "Příští sezóna přidána. Termíny současné sezóny zůstaly beze změny.",
+  "membershipPlan_season_currentChanged": "Tato stránka je zastaralá — mezitím začala nová sezóna. Termíny nebyly uloženy. Stránku jsme obnovili, zkontrolujte je prosím a uložte znovu.",
   "membershipPlan_season_currentHeading": "Současná sezóna",
   "membershipPlan_season_endsLabel": "Konec sezóny",
   "membershipPlan_season_hint": "Členové si mohou vybrat typ členství do termínu pro výběr. Po konci sezóny už nikdo přecházet nemůže a každému zůstává typ členství, který má, dokud nezačne příští sezóna. Prázdné datum znamená bez omezení.",

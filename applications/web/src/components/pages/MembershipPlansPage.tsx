@@ -763,17 +763,32 @@ export function MembershipPlansPage({
           payload: {
             deadline: parseSeasonDate(currentForm.deadline),
             expiresAt: Option.some(parseSeasonDate(currentForm.expiresAt)),
+            // THE ROW IDENTITY THIS FORM WAS SEEDED FROM, taken from the SAME `currentSeason`
+            // object `currentForm` was seeded from — never a re-read, which would re-resolve
+            // "current" at Save time and defeat the entire check. The server resolves its slot
+            // from `now()`, so across a season rollover under an open tab that slot is a
+            // DIFFERENT row; this is what turns that into a 409 instead of a silent overwrite of
+            // the new season's dates.
+            currentSeasonStartsAt: Option.map(currentSeason, (s) => s.startsAt),
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(tr('membershipPlan_season_saveFailed'))),
+      // Every failure here means the page no longer matches the server — a rollover (409), a
+      // lost membership (403), anything else. Repaint on all of them, same stance as
+      // `handleChoose`; only the copy branches.
+      Effect.tapError(() => Effect.sync(() => router.invalidate())),
+      Effect.mapError((e) =>
+        e._tag === 'CurrentSeasonChanged'
+          ? ClientError.make(tr('membershipPlan_season_currentChanged'))
+          : ClientError.make(tr('membershipPlan_season_saveFailed')),
+      ),
       run({ success: tr('membershipPlan_season_saved') }),
     );
     setIsSavingCurrent(false);
     if (Option.isSome(result)) {
       router.invalidate();
     }
-  }, [teamIdBranded, run, router, currentForm]);
+  }, [teamIdBranded, run, router, currentForm, currentSeason]);
 
   // THE NEXT SLOT'S SAVE — create and update are literally the same request, because the server
   // resolves the slot from `now()` and never from the payload. The toast is the only thing that

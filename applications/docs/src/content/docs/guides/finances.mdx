@@ -16,6 +16,7 @@ Sideline's Finance module lets admins and members with the Treasurer role define
 - **Variable symbol** — a short number (1–10 digits) attached to a member, printed on their payment QR codes and matched against incoming bank transfers. See [Setting up variable symbols](#setting-up-variable-symbols) below.
 - **Bank movement** — one transaction read from the club's connected bank account. See [Connecting a bank account](#connecting-a-bank-account-fio) below.
 - **Membership plan** — a named pricing tier a team offers (e.g. "Adult membership", "Junior membership"). Every team starts with one free, unnamed default plan. See [Membership plans](#membership-plans) below.
+- **Season** — the period a team's current membership setup applies to: when selection closes, when it ends, and the window a plan's included free trainings are counted against. A team always has a current season and can queue the next one ahead of time. See [Seasons: setting a selection deadline and planning ahead](#seasons-setting-a-selection-deadline-and-planning-ahead) below.
 - **Status** — computed automatically from the assignment's amounts and due date:
 
   | Status | Meaning |
@@ -57,7 +58,7 @@ Several Finance features are planned for follow-up releases:
 - **Monthly recurrence** — auto-generating monthly charges from a fee definition.
 - **Self-report "I've paid"** — a Discord interaction for members to notify captains of unrecorded payments.
 - **Expense receipts** — attaching an image or document URL to an expense record.
-- **Membership plan charging** — enforcing a plan's per-training price and expiry date. Today, members can choose a plan (or be assigned one by a Treasurer/Admin), but nothing bills against it yet — see [Membership plans](#membership-plans) below.
+- **Membership plan charging** — enforcing a plan's per-training price. Today, members can choose a plan (or be assigned one by a Treasurer/Admin), but nothing bills against it yet — see [Membership plans](#membership-plans) below.
 </Aside>
 
 ## Finance overview page
@@ -114,7 +115,7 @@ Go to **Team → Finances → Membership plans** (`/teams/:teamId/membership-pla
 
 Every team starts with one free, unnamed default plan — it's shown with a **Default** badge and displays a built-in "Standard" label until you give it a name. From this page you can:
 
-- **Add a plan** — set a name, a price, a currency, an optional per-training price, and an optional expiry date.
+- **Add a plan** — set a name, a price, a currency, and an optional per-training price.
 - **Edit a plan** — update any of its fields. Leaving the name blank restores the built-in label; the price fields default to free (0) if left blank.
 - **Make a plan the default** — promotes it and automatically demotes the team's current default. A team always has exactly one default plan.
 - **Archive a plan** — hides it from the list. A plan can't be archived while it's the team's default; make another plan the default first.
@@ -122,12 +123,25 @@ Every team starts with one free, unnamed default plan — it's shown with a **De
 Below the plan list, a member can [choose their own plan](#choosing-your-own-plan) — or do it [from Discord](#choosing-your-plan-in-discord). If you hold `finance:manage_fees` (Admin or Treasurer), you also see a **Member assignments** section for setting or overriding any member's plan directly.
 
 <Aside type="caution" title="Pricing and charging are still separate">
-  The per-training price and expiry date fields are stored for reference only — no charging or expiry enforcement happens today. See [Assigning members to a plan](#assigning-members-to-a-plan) below.
+  The per-training price field is stored for reference only — no charging enforcement happens today. See [Assigning members to a plan](#assigning-members-to-a-plan) below.
 </Aside>
+
+### Seasons: setting a selection deadline and planning ahead
+
+If you hold `finance:manage_fees` (Admin or Treasurer by default), the Membership plans page shows a **Current season** panel with two dates you can set or clear at any time:
+
+- **Selection deadline** — the last moment members can pick their own plan (from the web or from Discord). Leave it empty to keep selection open indefinitely.
+- **Season ends** — after this date nobody can switch plans, and everyone keeps whatever plan they're on until the next season opens. Leave it empty for a season that never ends on its own.
+
+<Aside type="tip" title="Free trainings reset every season">
+  If a plan includes free trainings, the allowance is counted per season, not for the lifetime of the membership — every member on such a plan gets a fresh allowance when a new season starts.
+</Aside>
+
+Click **Start new season** to queue the next one ahead of time — set its start date, selection deadline, and end date up front. This does **not** change the current season; members keep switching under the current season's dates until the new one's own start date arrives, at which point it takes over automatically, with no action needed from anyone. Start a new season on the 1st of a month where possible — starting mid-month resets that whole month's free-training count.
 
 ### Choosing your own plan
 
-Any team member can pick which plan they're on from the same **Membership plans** page — click **Choose** on the plan you want. If the team has set a selection deadline, it's shown on the page and every **Choose** button is disabled once it passes. A member who never chooses stays on the team's current default plan.
+Any team member can pick which plan they're on from the same **Membership plans** page — click **Choose** on the plan you want. If the team has set a selection deadline, it's shown on the page, and every **Choose** button is disabled once it passes or once the current season ends, whichever comes first. A member who never chooses stays on the team's current default plan.
 
 ### Choosing your plan in Discord
 
@@ -138,7 +152,7 @@ The board has two buttons:
 - **Pick your plan** — opens a private message only you can see, showing the plan you're on and one button per plan. Tap a plan to switch; the message updates in place.
 - **My plan** — shows the plan you're on without changing anything. This one always works, deadline or not.
 
-The deadline applies exactly as it does on the web: once it passes, the buttons stop accepting changes and the bot tells you to ask an admin. A Treasurer can still reassign anyone from the web app.
+Selection closes exactly as it does on the web, for either of two reasons, and the bot tells you which one: once the deadline passes, the buttons stop accepting changes and the bot tells you to ask an admin; once the season itself ends, the bot instead tells you that you keep your current plan until the next season opens. A Treasurer can still reassign anyone from the web app either way.
 
 Post the board once and leave it — clicking **Pick your plan** refreshes it, so a board that was posted before you renamed, repriced or archived a plan catches up on its own.
 
@@ -179,12 +193,11 @@ Content-Type: application/json
   "priceMinor": 50000,
   "currency": "CZK",
   "pricePerTrainingMinor": 0,
-  "freeTrainingsIncluded": 0,
-  "expiresAt": null
+  "freeTrainingsIncluded": 0
 }
 ```
 
-`name` can be `null` to render the built-in translated label instead of a custom name. `freeTrainingsIncluded` (0–999) is how many trainings the plan includes free IN TOTAL. The allowance is consumed once and never resets; the per-training price applies from the next attended training on. The request returns `201 Created` with the full plan on success; `409 MembershipPlanNameAlreadyTaken` if another active plan in the team already uses that name (case-insensitive).
+`name` can be `null` to render the built-in translated label instead of a custom name. `freeTrainingsIncluded` (0–999) is how many trainings the plan includes free, once PER SEASON — the allowance resets every time a new season starts (see [Seasons: setting a selection deadline and planning ahead](#seasons-setting-a-selection-deadline-and-planning-ahead) above); the per-training price applies once it is used up for the season. The request returns `201 Created` with the full plan on success; `409 MembershipPlanNameAlreadyTaken` if another active plan in the team already uses that name (case-insensitive).
 
 #### Update a membership plan
 
@@ -197,12 +210,11 @@ Content-Type: application/json
   "priceMinor": 55000,
   "currency": "CZK",
   "pricePerTrainingMinor": 0,
-  "freeTrainingsIncluded": 0,
-  "expiresAt": null
+  "freeTrainingsIncluded": 0
 }
 ```
 
-Changing `pricePerTrainingMinor` or `freeTrainingsIncluded` re-prices the CURRENT month's training fees straight away. Months that have already ended are never re-priced. Setting an allowance on a plan that had none starts the member's free-training count from that moment — trainings attended earlier in the same calendar month are covered by the allowance in that month and still count against it from the next month on. A member who has already paid that month's training fee keeps the amount they paid, so the new allowance gives them nothing; set the allowance before the month's fees are paid.
+Changing `pricePerTrainingMinor` or `freeTrainingsIncluded` re-prices the CURRENT month's training fees straight away. Months that have already ended are never re-priced. The free-training allowance is counted from the start of the current season, not from when you make this edit — raising it on an existing plan applies retroactively within the season, and a member who has already paid that month's training fee keeps the amount they paid, so a later increase to the allowance gives them nothing back automatically.
 
 This is a full replacement, not a partial patch — resend every field, including ones you aren't changing. Sending `name: null` clears a plan's stored name back to the built-in label.
 
@@ -248,6 +260,35 @@ Content-Type: application/json
 ```
 
 Moves every member currently on `fromMembershipPlanId` to `toMembershipPlanId`. Either field can be `null`: `null` for `from` targets members who never picked/were never assigned a plan; `null` for `to` clears matched members back to the team default. `toMembershipPlanId` must name an active plan if not `null` — archived plans are a valid source but not a valid target. Returns `200 OK` with `{ "movedCount": number }`; `0` is a normal response, not an error. Returns `404 MembershipPlanNotFound` only when `toMembershipPlanId` itself doesn't resolve.
+
+#### Set the current season's selection deadline and end date
+
+```http
+PUT /api/teams/{teamId}/membership-selection-deadline
+Content-Type: application/json
+
+{
+  "deadline": "2026-09-15T23:59:59.000Z",
+  "expiresAt": "2027-02-01T23:59:59.000Z"
+}
+```
+
+Sets (or clears, with `null`) the current season's selection deadline and end date. Both fields are optional keys — omit one to leave it unchanged. Requires `finance:manage_fees`. Returns `204 No Content`.
+
+#### Queue the next season
+
+```http
+PUT /api/teams/{teamId}/seasons/next
+Content-Type: application/json
+
+{
+  "startsAt": "2027-02-01T00:00:00.000Z",
+  "deadline": null,
+  "expiresAt": null
+}
+```
+
+Creates or updates the team's queued next season — a club only ever has at most one queued at a time, and saving again just updates it. `startsAt` must be in the future (`400 SeasonStartNotInFuture` otherwise). Doesn't change the current season; the new one takes over automatically once its `startsAt` arrives. Requires `finance:manage_fees`. Returns `204 No Content`.
 
 ## Connecting a bank account (Fio)
 

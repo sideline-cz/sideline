@@ -52,6 +52,7 @@ erDiagram
     teams ||--o{ fees : "defines"
     teams ||--o{ membership_plans : "offers"
     team_members }o--o| membership_plans : "selects"
+    teams ||--o{ seasons : "has"
     teams ||--o{ expenses : "incurs"
     teams ||--o{ team_onboarding_tokens : "created for"
     teams ||--o{ weekly_challenges : "sets"
@@ -251,7 +252,7 @@ erDiagram
         TEXT welcome_message_template
         TEXT verify_intro_template
         TEXT achievement_channel_id
-        TIMESTAMPTZ membership_selection_deadline
+        TIMESTAMPTZ membership_selection_deadline "deprecated — see seasons"
     }
 
     team_members {
@@ -974,7 +975,7 @@ erDiagram
 
 ### Finance
 
-The Finance subsystem tracks fee definitions, per-member assignments, payment records, team expenditures, and a per-team catalogue of membership plans ("Setup memberships"). `paid_minor` on `fee_assignments` is kept current by a PostgreSQL trigger; the `fee_assignment_status_v` view computes the displayed status. Payment reminders are delivered via the `payment_reminder_sync_events` outbox (drained by the bot's Finance Sync worker) with `payment_reminders_sent` acting as an idempotency guard. Team expenditures are recorded in `expenses`; every insert, update, and delete is journalled into `expense_history` by the `expenses_audit` trigger. `membership_plans` is pricing and lifecycle (Slice 1); `team_members.membership_plan_id` and `teams.membership_selection_deadline` (Slice 2) let a member pick which plan they're on, subject to an optional per-team deadline — neither `price_per_training_minor` nor `expires_at` is read anywhere yet.
+The Finance subsystem tracks fee definitions, per-member assignments, payment records, team expenditures, and a per-team catalogue of membership plans ("Setup memberships"). `paid_minor` on `fee_assignments` is kept current by a PostgreSQL trigger; the `fee_assignment_status_v` view computes the displayed status. Payment reminders are delivered via the `payment_reminder_sync_events` outbox (drained by the bot's Finance Sync worker) with `payment_reminders_sent` acting as an idempotency guard. Team expenditures are recorded in `expenses`; every insert, update, and delete is journalled into `expense_history` by the `expenses_audit` trigger. `membership_plans` is pricing and lifecycle (Slice 1): `price_per_training_minor` and `free_trainings_included` bill a member's attendance (`training_period_charges`), counted against an allowance that resets every `seasons` rollover. `team_members.membership_plan_id` (Slice 2) lets a member pick which plan they're on, subject to the team's `seasons` row (below) rather than a column on `teams` or on the plan. `membership_plans.expires_at` and `teams.membership_selection_deadline` are **deprecated**, kept for one release as a dual-written rollback mirror and no longer read for behaviour — both are superseded by `seasons.expires_at`/`seasons.selection_deadline`.
 
 ```mermaid
 erDiagram
@@ -985,9 +986,20 @@ erDiagram
         BIGINT price_minor
         CHAR(3) currency
         BIGINT price_per_training_minor
-        TIMESTAMPTZ expires_at
+        TIMESTAMPTZ expires_at "deprecated — no longer read"
         BOOLEAN is_default
         TIMESTAMPTZ archived_at
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        INTEGER free_trainings_included
+    }
+
+    seasons {
+        UUID id PK
+        UUID team_id FK
+        TIMESTAMPTZ starts_at
+        TIMESTAMPTZ selection_deadline
+        TIMESTAMPTZ expires_at
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
     }
@@ -1095,6 +1107,7 @@ erDiagram
     expenses ||--o{ expense_history : "journalled in"
     teams ||--o{ membership_plans : "offers"
     team_members }o--o| membership_plans : "selects"
+    teams ||--o{ seasons : "has"
 ```
 
 ---
@@ -1588,7 +1601,8 @@ erDiagram
 | `payments` | Individual payment records against a fee assignment. Voided (not deleted) when reversed. `bank_transaction_id`/`matched_by` (`auto`/`manual`) link a payment to the Fio bank movement that settled it. |
 | `expenses` | Team expenditure records (pitch hire, travel, equipment, etc.). Hard-deleted; each write is journalled into `expense_history` by a Postgres trigger. |
 | `expense_history` | Append-only audit log for `expenses`. One row per insert/update/delete, capturing the full row snapshot as JSONB. `expense_id` is stored without a FK so history is retained after the expense is deleted. |
-| `membership_plans` | A team's catalogue of membership tiers ("Setup memberships" Slice 1: pricing and lifecycle; Slice 2: `team_members.membership_plan_id` lets a member select one, subject to `teams.membership_selection_deadline`). Every team is seeded with one default plan (`name = NULL`, renders the built-in translated label). Archived, never hard-deleted. |
+| `membership_plans` | A team's catalogue of membership tiers ("Setup memberships" Slice 1: pricing and lifecycle; Slice 2: `team_members.membership_plan_id` lets a member select one, subject to the team's `seasons` row). Every team is seeded with one default plan (`name = NULL`, renders the built-in translated label). `free_trainings_included` is a per-season allowance, reset at every `seasons` rollover. `expires_at` is deprecated (superseded by `seasons.expires_at`). Archived, never hard-deleted. |
+| `seasons` | A team-wide, dated container for the membership-selection deadline, the expiry that closes selection, and the free-trainings anchor — a season GROUPS billing periods, it does not replace them. Every team always has at least one, seeded by a backfill plus an `AFTER INSERT ON teams` trigger. A two-candidate gate (`governing_season_id`/`selection_is_open`) picks the OPEN one of the current season and the next queued one, else falls back to current, else next. Superseded `teams.membership_selection_deadline` (kept one release as a dual-written rollback mirror) and `membership_plans.expires_at`. |
 | `translation_cache_version` | Single-row version counter incremented on every translation override write; used by the frontend for cache invalidation. |
 | `weekly_challenges` | A team-scoped challenge issued for a specific ISO week (`week_start_date` = Monday). Kind is `throwing` or `sport`. Title max 120 chars; description max 2000 chars. Unique on `(team_id, week_start_date)`. |
 | `weekly_challenge_completions` | Records which team members have completed a challenge for its week. Composite PK `(challenge_id, member_id)`; both columns cascade on delete. |

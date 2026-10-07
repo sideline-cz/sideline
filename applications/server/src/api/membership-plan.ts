@@ -501,8 +501,26 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               // the outer `Option` is PRESENCE (absent = keep the stored value, which is what
               // every old bundle sends for the whole rollout window), the inner one is the VALUE.
               // Branched in SQL, never unwrapped here.
-              Effect.flatMap(() =>
-                plans.setSelectionDeadline(teamId, payload.deadline, payload.expiresAt),
+              Effect.bind('rowsAffected', () =>
+                plans.setSelectionDeadline(
+                  teamId,
+                  payload.deadline,
+                  payload.expiresAt,
+                  payload.currentSeasonStartsAt,
+                ),
+              ),
+              // 0 rows has TWO causes and only this layer can tell them apart. If the caller sent
+              // no `currentSeasonStartsAt` — every frozen old bundle for the whole rollout window
+              // — 0 rows means "this team has no current season", which has always been a silent
+              // 204 and must stay one. If they DID send one, 0 rows means their expectation lost:
+              // the page was seeded from a season that is no longer current, so 409 and let the
+              // web refetch. Deliberately NO re-read to confirm which: the UPDATE's own `WHERE`
+              // is the whole guard (Atomic Conditional UPDATE), and a re-read would reintroduce
+              // the very TOCTOU this check exists to close.
+              Effect.flatMap(({ rowsAffected }) =>
+                rowsAffected === 0 && Option.isSome(payload.currentSeasonStartsAt)
+                  ? Effect.fail(new MembershipPlanApi.CurrentSeasonChanged())
+                  : Effect.void,
               ),
             ),
           )

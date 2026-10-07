@@ -176,6 +176,23 @@ export const SetSelectionDeadlineRequest = Schema.Struct({
   // 400 every one of their saves. The inner `OptionFromNullOr` is what lets a NEW bundle send an
   // explicit `null` to CLEAR the expiry -- absent and null must not mean the same thing here.
   expiresAt: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString)),
+  // OPTIMISTIC CONCURRENCY ON THE ROW'S IDENTITY, and the only thing that answers "which row was
+  // this form SEEDED from". The slot keys answer "which endpoint owns which slot"; they resolve
+  // the target at SAVE time, from `now()`. A manager who leaves the tab open across a season
+  // rollover would otherwise write the Current block's values -- seeded at LOAD time from season
+  // A -- into season B, destroying B's deadline and expiry behind a success toast (or 500ing on
+  // `CHECK (expires_at > starts_at)`). The caller sends the `startsAt` of the very `currentSeason`
+  // object the box was seeded from; a mismatch is a 409, never a silent success.
+  //
+  // `OptionFromOptional`, i.e. an OPTIONAL KEY, and that is LOAD-BEARING (`applications/server/
+  // AGENTS.md` rule 5): deploy order is bot -> server -> web, so a new server serves FROZEN old
+  // bundles for the entire rollout window and those bundles will never send this key. ABSENT MUST
+  // MEAN "NO OPTIMISTIC CHECK" -- exactly today's behaviour -- and must NEVER 400. A required
+  // field, or a required field with a client-side default, breaks every one of their saves.
+  //
+  // No inner `OptionFromNullOr` (unlike `expiresAt` above): there is nothing to CLEAR here, so an
+  // explicit `null` would have no meaning distinct from absent. Only the key's presence matters.
+  currentSeasonStartsAt: Schema.OptionFromOptional(Schemas.DateTimeFromIsoString),
 });
 export type SetSelectionDeadlineRequest = Schema.Schema.Type<typeof SetSelectionDeadlineRequest>;
 
@@ -253,6 +270,19 @@ export class MembershipPlanIsDefault extends Schema.TaggedErrorClass<MembershipP
 // rejected, which is why this replaced a 409 that fired on a SUCCESSFUL action.
 export class SeasonStartNotInFuture extends Schema.TaggedErrorClass<SeasonStartNotInFuture>()(
   'SeasonStartNotInFuture',
+  {},
+) {}
+
+// The Current block was seeded from one season and Saved while a DIFFERENT one had become
+// current — a rollover happened under an open tab. 409, not 400 or a silent 204: the request is
+// well-formed and the caller did nothing wrong, the row they addressed simply is not the current
+// one any more. The web's only correct response is "your page is stale" + a refetch; writing the
+// values anywhere would destroy the newly-current season's dates.
+//
+// Only reachable when the caller SENDS `currentSeasonStartsAt`. A frozen old bundle omits it and
+// gets exactly today's behaviour.
+export class CurrentSeasonChanged extends Schema.TaggedErrorClass<CurrentSeasonChanged>()(
+  'CurrentSeasonChanged',
   {},
 ) {}
 
@@ -361,7 +391,10 @@ export class MembershipPlanApiGroup extends HttpApiGroup.make('membershipPlan')
       '/teams/:teamId/membership-selection-deadline',
       {
         success: Schema.Void.pipe(HttpApiSchema.status(204)),
-        error: Forbidden.pipe(HttpApiSchema.status(403)),
+        error: [
+          Forbidden.pipe(HttpApiSchema.status(403)),
+          CurrentSeasonChanged.pipe(HttpApiSchema.status(409)),
+        ],
         payload: SetSelectionDeadlineRequest,
         params: { teamId: TeamId },
       },

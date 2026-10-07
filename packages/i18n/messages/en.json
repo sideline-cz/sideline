@@ -2277,6 +2277,7 @@
   "membershipPlan_season_badgeEnded": "Season ended",
   "membershipPlan_season_badgeOpen": "Selection open",
   "membershipPlan_season_created": "Next season added. The current season's dates are unchanged.",
+  "membershipPlan_season_currentChanged": "This page is out of date — a new season has started in the meantime. Your dates were not saved. The page has been refreshed, please check them and save again.",
   "membershipPlan_season_currentHeading": "Current season",
   "membershipPlan_season_endsLabel": "Season ends",
   "membershipPlan_season_hint": "Members can pick a plan until the selection deadline. After the end date nobody can switch and everyone keeps the plan they are on, until the next season opens. Leave a date empty for no limit.",

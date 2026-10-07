@@ -69,7 +69,11 @@ The record that ties a specific fee to a specific member. An assignment tracks h
 
 ## Membership plan
 
-A named pricing tier a team offers — for example "Adult membership" or "Junior membership". Every team starts with one free, unnamed default plan. Admins or Treasurers can add more plans, edit pricing, promote a different plan to be the team's default, and archive a plan that's no longer offered. Today this covers pricing and lifecycle only — nothing assigns a plan to a member yet. See [Membership plans](/guides/finances/#membership-plans).
+A named pricing tier a team offers — for example "Adult membership" or "Junior membership". Every team starts with one free, unnamed default plan. Admins or Treasurers can add more plans, edit pricing, promote a different plan to be the team's default, and archive a plan that's no longer offered. Members pick their own plan (subject to the team's current [season](#season)), or a Treasurer/Admin can assign or bulk-move members onto a plan directly. See [Membership plans](/guides/finances/#membership-plans).
+
+## Season
+
+The period a team's current membership setup applies to — it carries the deadline by which members must pick a plan, the date selection closes for good, and the window a plan's included free trainings are counted against (resetting every time a new season starts). A team always has a current season, and Admins or Treasurers can queue the next one ahead of time; it takes over automatically once its start date arrives. See [Seasons: setting a selection deadline and planning ahead](/guides/finances/#seasons-setting-a-selection-deadline-and-planning-ahead).
 
 ## Payment
 
