@@ -501,6 +501,40 @@ describe('seasons — seed_first_season_trg (AFTER INSERT ON teams)', () => {
         expect(season.starts_at.getTime()).toBeLessThanOrEqual(Date.now() + 60_000);
       }).pipe(Effect.provide(TestLayer)),
   );
+
+  // Case 17b. THE STEP ORDER, written as the only assertion that can actually observe it.
+  //
+  // The migration creates `seed_first_season_trg` BEFORE it runs the backfill, because
+  // backfill-first leaves a window in which a team created by an old pod mid-rolling-deploy is
+  // matched by neither and ends up with ZERO seasons forever. That reorder is only free if the
+  // backfill stays a true no-op over a team the TRIGGER already seeded — which is a different
+  // state from Case 16's ("the backfill ran twice over its own row"), and the one the reordered
+  // migration actually meets: here the season exists and the team was never in the backfill's
+  // original set.
+  //
+  // DISCRIMINATOR: drop `WHERE NOT EXISTS` from `runBackfill` (kept byte-identical to the
+  // migration's own statement, see its docblock) and this goes red with TWO seasons — in the
+  // reordered migration that is every team in the database, each with a duplicate season whose
+  // `starts_at` differs by microseconds and which therefore wins the `current` slot.
+  it.effect('the backfill does NOT double-seed a team the trigger already seeded', () =>
+    Effect.gen(function* () {
+      const team = yield* seedTeam;
+      yield* setTeamDeadline(team.id, new Date('2026-08-25T21:59:59.999Z'));
+      yield* insertPlanRaw(team.id, 'Adult', { expiresAt: PRODUCTION_PLAN_EXPIRY });
+      const seeded = yield* readSeasons(team.id);
+      expect(seeded, 'the trigger seeded exactly one season').toHaveLength(1);
+
+      yield* runBackfill;
+
+      const after = yield* readSeasons(team.id);
+      expect(after, 'a second full migration run adds nothing').toHaveLength(1);
+      expect(after[0]?.id).toBe(seeded[0]?.id);
+      // NOT re-dated from `teams.membership_selection_deadline` / the plan expiry either: the
+      // guard is on the FACT that a season exists, so the trigger-seeded NULLs stand.
+      expect(after[0]?.selection_deadline).toBeNull();
+      expect(after[0]?.expires_at).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
 });
 
 // ---------------------------------------------------------------------------

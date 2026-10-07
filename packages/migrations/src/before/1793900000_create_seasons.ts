@@ -65,7 +65,57 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
     //     AFTER it is also real ("season starts 1 Sep, pick by 15 Sep"). Both stay legal.
     //   * No CHECK tying selection_deadline to expires_at -- the gate tests them independently.
 
-    // ---- Step 2: backfill one season for EVERY team, carrying BOTH dates -------------------
+    // ---- Step 2a: seed trigger for future teams ---------------------------------------------
+    // This is what makes "a team always has at least one season" a real INVARIANT rather than a
+    // backfill snapshot, and it is why no query below carries a zero-seasons branch. Same shape
+    // as seed_default_membership_plan_trg (1792800000).
+    //
+    // THE TRIGGER COMES BEFORE THE BACKFILL, and the order is the whole guarantee -- not a style
+    // choice. It is INVERTED from 1792400000 / 1792800000, which seed-then-trigger; both carry
+    // the hole described here, inertly, because they are long since applied.
+    //
+    // MigrateBefore runs inside server boot (applications/server/src/run.ts), so during a rolling
+    // deploy an OLD pod is still serving POST /teams while this migration runs. Backfill-first
+    // leaves a window: a team created after the backfill statement and before CREATE TRIGGER
+    // commits is matched by NEITHER, so it gets no season at all, permanently and invisibly --
+    // findSeasons returns None/None (no season panel, so the manager cannot fix it from any
+    // surface), selection_is_open falls through to COALESCE(..., true) and never closes, and
+    // training_period_charges' season CTE is empty so every member gets a full free-trainings
+    // allowance EVERY month.
+    //
+    // Trigger-first closes it in both directions, VERIFIED on postgres:17 rather than assumed:
+    //   * CREATE OR REPLACE TRIGGER ... ON teams takes ShareRowExclusiveLock on teams (checked in
+    //     pg_locks, on both the create and the replace path). INSERT INTO teams takes
+    //     RowExclusiveLock. The two conflict.
+    //   * In-flight inserts DRAIN: the CREATE TRIGGER waits for them to commit, and the backfill
+    //     below is a LATER statement in the same READ COMMITTED transaction, so its fresh
+    //     snapshot sees those teams and seeds them.
+    //   * New inserts BLOCK until this migration commits, by which time the trigger exists and
+    //     seeds them itself.
+    // The migration runs in ONE transaction (effect's Migrator wraps the whole run in
+    // sql.withTransaction), so the lock is held from here to commit.
+    //
+    // The reorder is free: the backfill's WHERE NOT EXISTS is a FACT guard, so a team the trigger
+    // already seeded is simply skipped -- re-running the whole migration stays a true no-op.
+    Effect.tap(
+      () => sql`
+        CREATE OR REPLACE FUNCTION seed_first_season() RETURNS trigger AS $$
+        BEGIN
+          INSERT INTO seasons (team_id, starts_at) VALUES (NEW.id, now());
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+      `,
+    ),
+    Effect.tap(
+      () => sql`
+        CREATE OR REPLACE TRIGGER seed_first_season_trg
+          AFTER INSERT ON teams
+          FOR EACH ROW EXECUTE FUNCTION seed_first_season()
+      `,
+    ),
+
+    // ---- Step 2b: backfill one season for EVERY team, carrying BOTH dates ------------------
     // Idempotent via WHERE NOT EXISTS -- a guard on the FACT that no season exists, never on a
     // value predicate (migrations AGENTS.md, "Reinterpreting Stored Values"). Precedent:
     // 1792800000_create_membership_plans.ts's seed.
@@ -133,28 +183,6 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
           )
         FROM teams t
         WHERE NOT EXISTS (SELECT 1 FROM seasons s WHERE s.team_id = t.id)
-      `,
-    ),
-
-    // ---- Step 3: seed trigger for future teams ----------------------------------------------
-    // This is what makes "a team always has at least one season" a real INVARIANT rather than a
-    // backfill snapshot, and it is why no query below carries a zero-seasons branch. Same shape
-    // as seed_default_membership_plan_trg (1792800000).
-    Effect.tap(
-      () => sql`
-        CREATE OR REPLACE FUNCTION seed_first_season() RETURNS trigger AS $$
-        BEGIN
-          INSERT INTO seasons (team_id, starts_at) VALUES (NEW.id, now());
-          RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql
-      `,
-    ),
-    Effect.tap(
-      () => sql`
-        CREATE OR REPLACE TRIGGER seed_first_season_trg
-          AFTER INSERT ON teams
-          FOR EACH ROW EXECUTE FUNCTION seed_first_season()
       `,
     ),
 
@@ -466,14 +494,25 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
           -- still in the future. An "IF NEW.starts_at > now() THEN RETURN NULL" guard suppresses
           -- the recompute for exactly that case, which is the only case this trigger exists for.
           -- Compare PERIODS, never instants.
-          IF training_period_start(NEW.starts_at, NEW.team_id) > v_period THEN
-            RETURN NULL;  -- the season's own period is wholly in the future; that period is
-                          -- recomputed by whatever write first touches it, with this season
-                          -- already resolvable.
+          --
+          -- ON UPDATE, OLD COUNTS TOO, and skipping it is the money bug this arm exists to close.
+          -- Moving a queued start OUT of the open period (Sep 20 -> Nov 1) leaves the open period
+          -- governed by a DIFFERENT season than it was a moment ago -- NEW's period is in the
+          -- future, so NEW alone would RETURN NULL here and September would keep a charge computed
+          -- against a season that no longer governs it. OLD's period is the open one, so the OR
+          -- below fires. The move INTO the open period (Nov 1 -> Sep 20) is the mirror, caught by
+          -- NEW. team_id is never updated (the trigger is UPDATE OF starts_at and no writer
+          -- touches team_id), so NEW.team_id serves both rows.
+          IF training_period_start(NEW.starts_at, NEW.team_id) > v_period
+             AND (TG_OP <> 'UPDATE'
+                  OR training_period_start(OLD.starts_at, NEW.team_id) > v_period) THEN
+            RETURN NULL;  -- neither the old nor the new period is the open one; the affected
+                          -- periods are all in the future and are recomputed by whatever write
+                          -- first touches them, with this season already resolvable.
           END IF;
           -- Pre-check BEFORE any lock, same shape as events_training_recompute's EXISTS guard. No
           -- training fee shell for the open period = no money on the table = nothing to correct.
-          -- This is also what makes the Step 3 seed trigger and the Step 2 backfill no-ops.
+          -- This is also what makes the Step 2a seed trigger and the Step 2b backfill no-ops.
           IF NOT EXISTS (
             SELECT 1 FROM fees f
             WHERE f.team_id = NEW.team_id AND f.kind = 'training'
@@ -485,15 +524,34 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
         $$ LANGUAGE plpgsql
       `,
     ),
-    // AFTER INSERT ONLY. Do NOT widen this to `INSERT OR UPDATE OF starts_at`: a running season's
-    // start is history, and moving it would re-price settled months from a date box.
+    // INSERT **OR UPDATE OF starts_at**. INSERT-only was wrong: updateNextSeasonQuery
+    // (MembershipPlansRepository) rewrites starts_at on every Save after the first, so a queued
+    // season moved across a period boundary changed what training_period_charges computes for the
+    // open month while firing nothing -- the stored invoice stayed wrong until an unrelated write
+    // jolted it. The old reason for INSERT-only ("a running season's start is history") does not
+    // apply: starts_at is writable only on the FUTURE slot, and the function's own PERIOD guard
+    // returns early for anything outside the open period, so a settled month can never be
+    // re-priced from a date box.
+    //
+    // OF starts_at, not a bare UPDATE: a deadline/expiry Save moves no money, and the column list
+    // keeps it lock-free.
+    //
+    // ONE PERIOD, SO NO ORDERING TO GET WRONG. The function recomputes exactly
+    // training_period_start(now()) and nothing else, on every path -- so there is no multi-period
+    // pass here and no 40P01 window of the kind 1793500000's period-ASCENDING loop exists to
+    // close. That is deliberate, not an omission: moving a start from Sep to Nov changes the
+    // governing season for Sep, Oct AND Nov (every period in between), which is an unbounded
+    // range no trigger should walk. Past periods are frozen by recompute_training_period_fees'
+    // own early return; future periods are recomputed by whatever write first touches them, with
+    // this season already resolvable -- exactly the INSERT path's contract. Only the OPEN period
+    // is corrected here, and only the open period can go stale without being noticed.
     //
     // LOCK ORDER: this adds a new leg, seasons -> fees. Nothing takes them in the opposite order
     // today. A future path that locks fees and then writes seasons is a 40P01 on a money write.
     Effect.tap(
       () => sql`
         CREATE OR REPLACE TRIGGER seasons_recompute_trg
-          AFTER INSERT ON seasons
+          AFTER INSERT OR UPDATE OF starts_at ON seasons
           FOR EACH ROW EXECUTE FUNCTION seasons_recompute()
       `,
     ),

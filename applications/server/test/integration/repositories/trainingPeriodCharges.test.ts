@@ -2104,6 +2104,18 @@ const addSeason = (teamId: Team.TeamId, startsAt: Date) =>
     ),
   );
 
+/** Moves an existing season's `starts_at` — the shape `updateNextSeasonQuery` writes on every
+ * Save after the first, and the ONLY way `seasons_recompute_trg`'s UPDATE arm can be reached. */
+const moveSeason = (teamId: Team.TeamId, from: Date, to: Date) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql`
+        UPDATE seasons SET starts_at = ${to}, updated_at = now()
+        WHERE team_id = ${teamId} AND starts_at = ${from}
+      `,
+    ),
+  );
+
 const deleteSeasons = (teamId: Team.TeamId) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen((sql) => sql`DELETE FROM seasons WHERE team_id = ${teamId}`),
@@ -2338,6 +2350,74 @@ describe('training_period_charges — the allowance RESETS at a season boundary'
         yield* assignmentFor(fee.id, member.id),
         'the open period was recomputed on INSERT, despite starts_at > now()',
       ).toBeUndefined();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // CASE 32d — THE UPDATE ARM. `seasons_recompute_trg` is `AFTER INSERT OR UPDATE OF starts_at`,
+  // and both halves of that are money.
+  //
+  // `updateNextSeasonQuery` rewrites `starts_at` on EVERY next-season Save after the first, so
+  // dragging the queued start across a period boundary is routine, not exotic. Under the original
+  // `AFTER INSERT` trigger neither move below fires anything: the stored assignment keeps a figure
+  // computed against a season that no longer governs the open month, and it stays wrong until some
+  // unrelated write (an attendance confirm, a plan change) jolts it — at which point the invoice
+  // moves with no cause the manager can see.
+  //
+  // Both directions, in one case, because they exercise DIFFERENT arms of the guard:
+  //   * next period -> open period  : NEW's period is the open one. Caught by NEW.
+  //   * open period -> next period  : NEW's period is in the FUTURE, so NEW alone returns early.
+  //                                   Only OLD's period says the open month changed. This is the
+  //                                   VACATED period, and it is the half an `OLD`-blind fix misses.
+  //
+  // DISCRIMINATOR: revert the trigger to `AFTER INSERT ON seasons` and the first assertion fails
+  // at '200'. Keep the trigger but drop the `OR training_period_start(OLD.starts_at, ...)` leg and
+  // the first passes while the LAST fails at `undefined` — which is why both moves are asserted.
+  it.effect('moving a queued season ACROSS a period boundary re-prices the open month', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('season-moved');
+      const member = yield* addBilledMember(team.id, 'season-moved-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK', 2);
+      yield* setSeasonStart(team.id, OLD_SEASON_START);
+
+      // Allowance burned last month, two chargeable trainings this month.
+      for (const startAt of [PAST_MONTH_START, PAST_MONTH_START_2]) {
+        const past = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(past, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      }
+      for (const startAt of [TRAINING_START, TRAINING_START_2]) {
+        const training = yield* createTraining(team.id, captain.id, startAt);
+        yield* confirm(training, team.id, captain.id, [
+          { team_member_id: member.id, present: true },
+        ]);
+      }
+      const fee = feeForPeriod(yield* trainingFees(team.id), PERIOD_START);
+      if (fee === undefined) throw new Error('expected a CURRENT-period fee row');
+      expect((yield* assignmentFor(fee.id, member.id))?.amount_minor).toBe('200');
+
+      // Queue next season in the NEXT period. The INSERT arm's period guard returns early — the
+      // open month is untouched, and this is the state every "Save" starts from.
+      yield* addSeason(team.id, NEXT_MONTH_MID);
+      expect(
+        (yield* assignmentFor(fee.id, member.id))?.amount_minor,
+        'a season queued in a FUTURE period must not move the open month',
+      ).toBe('200');
+
+      // Save #2 drags the start back into the OPEN period (still future, same month). The open
+      // month is now governed by the queued season: a FRESH allowance of 2 covers both trainings.
+      yield* moveSeason(team.id, NEXT_MONTH_MID, SEASON_FUTURE_SAME_PERIOD);
+      expect(
+        yield* assignmentFor(fee.id, member.id),
+        'the UPDATE must re-price the open month — NEW arm',
+      ).toBeUndefined();
+
+      // Save #3 pushes it back out. The open month is VACATED: the old season governs again, its
+      // allowance is already burned, and the 200 must come back. NEW's period is in the future
+      // here, so only OLD can say the open month changed.
+      yield* moveSeason(team.id, SEASON_FUTURE_SAME_PERIOD, NEXT_MONTH_MID);
+      expect(
+        (yield* assignmentFor(fee.id, member.id))?.amount_minor,
+        'the UPDATE must re-price the period it VACATED — OLD arm',
+      ).toBe('200');
     }).pipe(Effect.provide(TestLayer)),
   );
 
