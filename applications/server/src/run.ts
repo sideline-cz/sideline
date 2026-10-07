@@ -28,6 +28,7 @@ import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepositor
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { MemberCreditsRepository } from '~/repositories/MemberCreditsRepository.js';
+import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentReminderSyncEventsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
@@ -55,6 +56,7 @@ import { ImapClient } from '~/services/ImapClient.js';
 import { ImapPoller } from '~/services/ImapPoller.js';
 import { InviteAcceptanceSweepCron } from '~/services/InviteAcceptanceSweepCron.js';
 import { LlmClient } from '~/services/LlmClient.js';
+import { MembershipBillingCron } from '~/services/MembershipBillingCron.js';
 import { PaymentReminderCron } from '~/services/PaymentReminderCron.js';
 import { RsvpReminderCron } from '~/services/RsvpReminderCron.js';
 import { RulesQuizCronEffect as RulesQuizCronBase } from '~/services/RulesQuizCron.js';
@@ -227,6 +229,15 @@ const AutoApplyCreditCronEffect = AutoApplyCreditCron.asEffect().pipe(
   ),
 );
 
+// Its own connection, like every other cron here: `recompute_membership_season_fees` holds the
+// season row lock and the team-wide fees mutex for the length of a team's recompute, and sharing
+// a pool with the request path would let a slow team starve it.
+const MembershipBillingCronEffect = MembershipBillingCron.asEffect().pipe(
+  Effect.provide(
+    MembershipPlansRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
 const CoachingStatusRepositoriesLive = Layer.mergeAll(
   EventsRepository.Default,
   EventSyncEventsRepository.Default,
@@ -320,6 +331,7 @@ Effect.Do.pipe(
         PaymentReminderCronEffect,
         ClaimRequestCronEffect,
         AutoApplyCreditCronEffect,
+        MembershipBillingCronEffect,
         CoachingStatusCronEffect,
         InviteAcceptanceSweepCronEffect,
         EmailSummarizerCronEffect,

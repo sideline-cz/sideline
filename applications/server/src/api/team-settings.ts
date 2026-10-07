@@ -96,6 +96,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     requireCompleteProfile: false,
                     autoAssignVariableSymbols: false,
                     autoApplyCreditEnabled: false,
+                    membershipBillingEnabled: false,
                   }),
                 onSome: (s) =>
                   new TeamSettingsApi.TeamSettingsInfo({
@@ -132,6 +133,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     requireCompleteProfile: s.require_complete_profile,
                     autoAssignVariableSymbols: s.auto_assign_variable_symbols,
                     autoApplyCreditEnabled: Option.isSome(s.auto_apply_credit_by_user_id),
+                    membershipBillingEnabled: Option.isSome(s.membership_billing_by_user_id),
                   }),
               }),
             ),
@@ -275,6 +277,17 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                             // Disabling clears it, which is what turns the feature off.
                             autoApplyCreditByUserId: Option.getOrElse(
                               payload.autoApplyCreditEnabled,
+                              () => false,
+                            )
+                              ? Option.some(currentUser.id)
+                              : Option.none(),
+                            // Same projection, same reason: the membership sweep's credit
+                            // deposits need a recorder and a cron has no caller of its own.
+                            // Deliberately NOT a reuse of `auto_apply_credit_by_user_id` — a
+                            // team that never opted into auto-apply would then have no recorder
+                            // for a downgrade refund.
+                            membershipBillingByUserId: Option.getOrElse(
+                              payload.membershipBillingEnabled,
                               () => false,
                             )
                               ? Option.some(currentUser.id)
@@ -423,6 +436,14 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                               onSome: (enabled) =>
                                 enabled ? Option.some(currentUser.id) : Option.none<string>(),
                             }),
+                            membershipBillingByUserId: Option.match(
+                              payload.membershipBillingEnabled,
+                              {
+                                onNone: () => s.membership_billing_by_user_id,
+                                onSome: (enabled) =>
+                                  enabled ? Option.some(currentUser.id) : Option.none<string>(),
+                              },
+                            ),
                           }),
                       }).pipe(
                         // Timezone change re-anchors this team's all-day events —
@@ -582,6 +603,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   requireCompleteProfile: result.require_complete_profile,
                   autoAssignVariableSymbols: result.auto_assign_variable_symbols,
                   autoApplyCreditEnabled: Option.isSome(result.auto_apply_credit_by_user_id),
+                  membershipBillingEnabled: Option.isSome(result.membership_billing_by_user_id),
                 }),
             ),
             Effect.catchTag(

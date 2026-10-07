@@ -1,4 +1,4 @@
-// The two money toggles that `updateTeamSettings` owns, after being moved off the General tab.
+// The three money toggles that `updateTeamSettings` owns, after being moved off the General tab.
 //
 // They had no test at all while they lived in `GeneralLimitsCard` — only fixture values — so the
 // move itself could have dropped either control with nothing going red. These assert both halves
@@ -26,6 +26,7 @@ const storedSettings = (over: Record<string, unknown> = {}) => ({
   requireCompleteProfile: false,
   autoAssignVariableSymbols: false,
   autoApplyCreditEnabled: false,
+  membershipBillingEnabled: false,
   rsvpReminderDaysBefore: 2,
   rsvpReminderDaysBeforeOverrides: {},
   maxMissedRsvps: 3,
@@ -71,12 +72,15 @@ const variableSymbols = () =>
   screen.getByLabelText<HTMLInputElement>('teamSettings_autoAssignVariableSymbols');
 const autoApplyCredit = () =>
   screen.getByLabelText<HTMLInputElement>('teamSettings_autoApplyCreditEnabled');
+const membershipBilling = () =>
+  screen.getByLabelText<HTMLInputElement>('teamSettings_membershipBillingEnabled');
 
 describe('FinanceAutomationCard', () => {
-  it('renders both toggles unchecked when the team has opted into neither', () => {
+  it('renders every toggle unchecked when the team has opted into none of them', () => {
     renderCard();
     expect(variableSymbols().checked).toBe(false);
     expect(autoApplyCredit().checked).toBe(false);
+    expect(membershipBilling().checked).toBe(false);
     expect(dirty).toBe(false);
   });
 
@@ -100,6 +104,18 @@ describe('FinanceAutomationCard', () => {
     renderCard();
     fireEvent.click(autoApplyCredit());
     expect(latest.autoApplyCreditEnabled).toBe(true);
+    expect(latest.autoAssignVariableSymbols).toBe(false);
+    expect(latest.membershipBillingEnabled).toBe(false);
+    expect(dirty).toBe(true);
+  });
+
+  // This one bills real members real money the moment the next season starts, so "the checkbox
+  // the treasurer ticked is the field that gets saved" is the whole safety property.
+  it('writes the membership-billing toggle into the shared form', () => {
+    renderCard();
+    fireEvent.click(membershipBilling());
+    expect(latest.membershipBillingEnabled).toBe(true);
+    expect(latest.autoApplyCreditEnabled).toBe(false);
     expect(latest.autoAssignVariableSymbols).toBe(false);
     expect(dirty).toBe(true);
   });

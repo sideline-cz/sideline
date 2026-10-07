@@ -53,6 +53,8 @@ erDiagram
     teams ||--o{ membership_plans : "offers"
     team_members }o--o| membership_plans : "selects"
     teams ||--o{ seasons : "has"
+    seasons ||--o{ fees : "bills"
+    membership_plans ||--o{ fees : "prices"
     teams ||--o{ expenses : "incurs"
     teams ||--o{ team_onboarding_tokens : "created for"
     teams ||--o{ weekly_challenges : "sets"
@@ -302,6 +304,7 @@ erDiagram
         TEXT timezone
         INTEGER max_missed_rsvps
         BOOLEAN require_complete_profile
+        UUID membership_billing_by_user_id FK
         INTEGER claim_request_days_before
         TEXT discord_channel_late_rsvp
         BOOLEAN create_discord_channel_on_group
@@ -975,7 +978,7 @@ erDiagram
 
 ### Finance
 
-The Finance subsystem tracks fee definitions, per-member assignments, payment records, team expenditures, and a per-team catalogue of membership plans ("Setup memberships"). `paid_minor` on `fee_assignments` is kept current by a PostgreSQL trigger; the `fee_assignment_status_v` view computes the displayed status. Payment reminders are delivered via the `payment_reminder_sync_events` outbox (drained by the bot's Finance Sync worker) with `payment_reminders_sent` acting as an idempotency guard. Team expenditures are recorded in `expenses`; every insert, update, and delete is journalled into `expense_history` by the `expenses_audit` trigger. `membership_plans` is pricing and lifecycle (Slice 1): `price_per_training_minor` and `free_trainings_included` bill a member's attendance (`training_period_charges`), counted against an allowance that resets every `seasons` rollover. `team_members.membership_plan_id` (Slice 2) lets a member pick which plan they're on, subject to the team's `seasons` row (below) rather than a column on `teams` or on the plan. `membership_plans.expires_at` and `teams.membership_selection_deadline` are **deprecated**, kept for one release as a dual-written rollback mirror and no longer read for behaviour — both are superseded by `seasons.expires_at`/`seasons.selection_deadline`.
+The Finance subsystem tracks fee definitions, per-member assignments, payment records, team expenditures, and a per-team catalogue of membership plans ("Setup memberships"). `paid_minor` on `fee_assignments` is kept current by a PostgreSQL trigger; the `fee_assignment_status_v` view computes the displayed status. Payment reminders are delivered via the `payment_reminder_sync_events` outbox (drained by the bot's Finance Sync worker) with `payment_reminders_sent` acting as an idempotency guard. Team expenditures are recorded in `expenses`; every insert, update, and delete is journalled into `expense_history` by the `expenses_audit` trigger. `membership_plans` is pricing and lifecycle (Slice 1): `price_per_training_minor` and `free_trainings_included` bill a member's attendance (`training_period_charges`), counted against an allowance that resets every `seasons` rollover. `team_members.membership_plan_id` (Slice 2) lets a member pick which plan they're on, subject to the team's `seasons` row (below) rather than a column on `teams` or on the plan. `membership_plans.expires_at` and `teams.membership_selection_deadline` are **deprecated**, kept for one release as a dual-written rollback mirror and no longer read for behaviour — both are superseded by `seasons.expires_at`/`seasons.selection_deadline`. `fees` carries a server-internal `kind` (`'manual'`/`'training'`/`'membership'`, never on the wire); a `'training'` row is written by `recompute_training_period_fees` and a `'membership'` row by `recompute_membership_season_fees` (`MembershipBillingCron`, opt-in per team via `team_settings.membership_billing_by_user_id`), which bills `membership_plans.price_minor` once per `seasons` row rather than per calendar month — see `docs/database.md` § 12 for the delta/floor arithmetic that decides whether a charge or a refund is written.
 
 ```mermaid
 erDiagram
@@ -1017,6 +1020,10 @@ erDiagram
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
         TIMESTAMPTZ archived_at
+        TEXT kind "manual/training/membership"
+        DATE period_start "training only"
+        UUID season_id FK "membership only"
+        UUID membership_plan_id FK "membership only"
     }
 
     fee_assignments {
@@ -1108,6 +1115,8 @@ erDiagram
     teams ||--o{ membership_plans : "offers"
     team_members }o--o| membership_plans : "selects"
     teams ||--o{ seasons : "has"
+    seasons ||--o{ fees : "bills"
+    membership_plans ||--o{ fees : "prices"
 ```
 
 ---
@@ -1557,7 +1566,7 @@ erDiagram
 | `team_members` | Membership record joining a user to a team, carrying per-team profile data including a `missed_rsvps` counter that tracks consecutive events where an invited Player did not respond, an optional `variable_symbol` (unique per team on its leading-zero-stripped form) used to auto-match Fio bank payments and build payment QR codes, and three self-service event preferences (`show_attendee_list`, `rsvp_reminder_dms`, `personal_channels_split`) the member controls from their own web profile page. |
 | `team_invites` | Invite codes that allow new users to join a specific team, optionally pre-assigning them to a group. |
 | `invite_acceptances` | One row per individual accept action; tracks the per-acceptance single-use Discord invite code generated by the bot. |
-| `team_settings` | One-to-one extension of teams holding configurable operational defaults, including `max_missed_rsvps` which controls the engagement threshold for RSVP reminders, and `require_complete_profile` (default `false`), the captain's opt-in for the profile-completeness gate that blocks RSVP/training-claim/carpool-seat actions until a member has a name, birth date, and gender on file. |
+| `team_settings` | One-to-one extension of teams holding configurable operational defaults, including `max_missed_rsvps` which controls the engagement threshold for RSVP reminders, and `require_complete_profile` (default `false`), the captain's opt-in for the profile-completeness gate that blocks RSVP/training-claim/carpool-seat actions until a member has a name, birth date, and gender on file. `membership_billing_by_user_id` (`NULL` by default) both opts the team into per-season membership billing and names the user every credit deposit the billing cron writes is attributed to; `ON DELETE SET NULL` means removing that user turns billing off. |
 | `pending_teams` | Archive of teams that existed before mandatory guild linking was enforced. |
 | `team_onboarding_tokens` | Single-use tokens minted by global admins that allow a designated captain to complete the team setup wizard. Only the SHA-256 hash of the plaintext token is stored. Lifecycle state (`active`, `consumed`, `expired`, `revoked`) is derived from `consumed_at`, `revoked_at`, and `expires_at`. |
 | `roles` | Named permission bundles defined per team; built-in roles are seeded automatically. |
@@ -1594,7 +1603,7 @@ erDiagram
 | `event_roster_requests` | One row per (event, team member) pair created by the roster-attendance provisioning flow. Tracks request status (`pending`, `approved`, `declined`, `cancelled`), source (`auto` or `approval`), whether the member was already on the roster, and the Discord approval embed message ID. |
 | `notifications` | In-app alert records scoped to a team and user, with read/unread tracking. |
 | `translation_overrides` | Global admin-managed overrides for compiled UI strings, keyed by translation key and locale. |
-| `fees` | Fee definitions scoped to a team. Soft-deletable via `archived_at`. |
+| `fees` | Fee definitions scoped to a team. Soft-deletable via `archived_at`. A server-internal `kind` (`manual`/`training`/`membership`) tells a treasurer-created fee apart from the two generator-written ones; `training` rows are keyed by `(team, calendar month, currency)` and `membership` rows by `(team, season, plan, currency)`. |
 | `fee_assignments` | Per-member assignment of a fee, with optional amount and due date overrides. `paid_minor` is trigger-maintained. |
 | `payment_reminder_sync_events` | Outbox records for the bot's Finance Sync worker to send payment reminder DMs. Each row carries a snapshot of the assignment at emission time. Six kinds, including `assigned` (fires once at assignment creation, no due date required — carries the payment QR). |
 | `payment_reminders_sent` | Idempotency guard: one row per (assignment, kind) pair written only after the reminder DM was successfully delivered. Prevents duplicate reminders on retry. |
@@ -1602,7 +1611,7 @@ erDiagram
 | `expenses` | Team expenditure records (pitch hire, travel, equipment, etc.). Hard-deleted; each write is journalled into `expense_history` by a Postgres trigger. |
 | `expense_history` | Append-only audit log for `expenses`. One row per insert/update/delete, capturing the full row snapshot as JSONB. `expense_id` is stored without a FK so history is retained after the expense is deleted. |
 | `membership_plans` | A team's catalogue of membership tiers ("Setup memberships" Slice 1: pricing and lifecycle; Slice 2: `team_members.membership_plan_id` lets a member select one, subject to the team's `seasons` row). Every team is seeded with one default plan (`name = NULL`, renders the built-in translated label). `free_trainings_included` is a per-season allowance, reset at every `seasons` rollover. `expires_at` is deprecated (superseded by `seasons.expires_at`). Archived, never hard-deleted. |
-| `seasons` | A team-wide, dated container for the membership-selection deadline, the expiry that closes selection, and the free-trainings anchor — a season GROUPS billing periods, it does not replace them. Every team always has at least one, seeded by a backfill plus an `AFTER INSERT ON teams` trigger. A two-candidate gate (`governing_season_id`/`selection_is_open`) picks the OPEN one of the current season and the next queued one, else falls back to current, else next. Superseded `teams.membership_selection_deadline` (kept one release as a dual-written rollback mirror) and `membership_plans.expires_at`. |
+| `seasons` | A team-wide, dated container for the membership-selection deadline, the expiry that closes selection, and the free-trainings anchor — a season GROUPS billing periods, it does not replace them. Every team always has at least one, seeded by a backfill plus an `AFTER INSERT ON teams` trigger. A two-candidate gate (`governing_season_id`/`selection_is_open`) picks the OPEN one of the current season and the next queued one, else falls back to current, else next. Superseded `teams.membership_selection_deadline` (kept one release as a dual-written rollback mirror) and `membership_plans.expires_at`. Also the key a per-season membership charge is billed under — see `fees` and `team_settings.membership_billing_by_user_id`. |
 | `translation_cache_version` | Single-row version counter incremented on every translation override write; used by the frontend for cache invalidation. |
 | `weekly_challenges` | A team-scoped challenge issued for a specific ISO week (`week_start_date` = Monday). Kind is `throwing` or `sport`. Title max 120 chars; description max 2000 chars. Unique on `(team_id, week_start_date)`. |
 | `weekly_challenge_completions` | Records which team members have completed a challenge for its week. Composite PK `(challenge_id, member_id)`; both columns cascade on delete. |

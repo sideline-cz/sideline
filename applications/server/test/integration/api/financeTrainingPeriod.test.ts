@@ -1,6 +1,6 @@
-// Slice 3b of "Setup memberships" — the `TrainingFeeImmutable` guards on `updateFee` /
-// `updateAssignment` (`applications/server/src/api/finance.ts`), backed by real repositories over
-// a real Postgres instance.
+// Slice 3b of "Setup memberships" — the `TrainingFeeImmutable` guards on `updateFee`,
+// `assignFee` and `updateAssignment` (`applications/server/src/api/finance.ts`), backed by real
+// repositories over a real Postgres instance.
 //
 // `test/integration/api/finance.test.ts` is a MOCK harness (in-memory `Map`s standing in for
 // `FeesRepository`/`FeeAssignmentsRepository` — there is no `fees.kind` column to even read), so
@@ -248,6 +248,20 @@ const patchFee = (teamId: string, feeId: string, token: string, body: Record<str
     }),
   );
 
+const postAssignment = (
+  teamId: string,
+  feeId: string,
+  token: string,
+  body: Record<string, unknown>,
+) =>
+  handler(
+    new Request(`http://localhost/teams/${teamId}/fees/${feeId}/assignments`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
+
 const patchAssignment = (
   teamId: string,
   feeId: string,
@@ -356,5 +370,63 @@ describe('PATCH /teams/:teamId/fees/:feeId/assignments/:assignmentId — trainin
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.dueMinor).toBe(999);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 29-30. assignFee — a BEHAVIOUR CHANGE to an existing endpoint for an existing kind.
+// `assignFee` had no `kind` check at all; it now refuses the whole call for any non-manual
+// fee, because `bulkInsert` honours `amountMinorOverride` and a hand-typed amount on a
+// generator-owned fee corrupts the member's charged sum. Pinned here, next to the other
+// training-immutability guards, rather than with the membership tests — a training fee that
+// used to 201 now 409s.
+// ---------------------------------------------------------------------------
+
+describe('POST /teams/:teamId/fees/:feeId/assignments — training fee immutability', () => {
+  it("assigning a member onto a kind='training' fee gets 409 TrainingFeeImmutable", async () => {
+    const fixture = await seedFixture();
+    sessionsStore.set('treasurer-token', fixture.treasurerUserId);
+    const { feeId } = await createTrainingFeeAndAssignment(fixture.team.id, fixture.billedMemberId);
+
+    const response = await postAssignment(fixture.team.id, feeId, 'treasurer-token', {
+      memberIds: [fixture.treasurerMemberId],
+      amountMinorOverride: null,
+      dueAtOverride: null,
+    });
+
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body._tag ?? body.tag ?? JSON.stringify(body)).toContain('TrainingFeeImmutable');
+  });
+
+  it('an amountMinorOverride does not get a pass either — the WHOLE call is refused', async () => {
+    const fixture = await seedFixture();
+    sessionsStore.set('treasurer-token', fixture.treasurerUserId);
+    const { feeId } = await createTrainingFeeAndAssignment(fixture.team.id, fixture.billedMemberId);
+
+    const response = await postAssignment(fixture.team.id, feeId, 'treasurer-token', {
+      memberIds: [fixture.treasurerMemberId],
+      amountMinorOverride: 1500,
+      dueAtOverride: null,
+    });
+
+    expect(response.status).toBe(409);
+  });
+
+  it('the same assignment onto a MANUAL fee is unaffected (201, not 409)', async () => {
+    const fixture = await seedFixture();
+    sessionsStore.set('treasurer-token', fixture.treasurerUserId);
+    const { feeId } = await createManualFeeAndAssignment(fixture.team.id, fixture.billedMemberId);
+
+    const response = await postAssignment(fixture.team.id, feeId, 'treasurer-token', {
+      memberIds: [fixture.treasurerMemberId],
+      amountMinorOverride: 1500,
+      dueAtOverride: null,
+    });
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].dueMinor).toBe(1500);
   });
 });

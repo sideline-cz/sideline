@@ -729,4 +729,25 @@ describe('TeamSettingsInfo — rsvpLockHoursBefore tolerance (the frozen-web-sch
     expect(decoded.rsvpLockHoursBeforeOverrides.tournament).toBeNull();
     expect(decoded.rsvpLockHoursBeforeOverrides.training).toBe(3);
   });
+
+  // `base` also predates the finance toggles, which is the direction that matters for money:
+  // an older server that omits the key must never read as "membership billing is ON".
+  it('membershipBillingEnabled defaults to false when the server omits the key', () => {
+    expect(
+      Schema.decodeUnknownSync(TeamSettingsApi.TeamSettingsInfo)(base).membershipBillingEnabled,
+    ).toBe(false);
+    expect(
+      Schema.decodeUnknownSync(TeamSettingsApi.TeamSettingsInfo)({
+        ...base,
+        membershipBillingEnabled: true,
+      }).membershipBillingEnabled,
+    ).toBe(true);
+  });
+
+  it('an omitted membershipBillingEnabled on the update request decodes to None — keep stored', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+    });
+    expect(Option.isNone(result.membershipBillingEnabled)).toBe(true);
+  });
 });

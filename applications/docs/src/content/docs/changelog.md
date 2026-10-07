@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-10-08 — New: membership plans can be billed automatically each season
+
+Treasurers and Admins can now turn on **Bill membership plans each season** in **Team → Settings → Finance → Automation**, so a plan's price is actually charged instead of just displayed. Off by default — nothing changes for a club that doesn't touch it.
+
+- Every active member is billed their plan's price for the season that's currently running — never in advance of a season starting. Anyone who never picked a plan is billed the team's default plan's price. A plan priced at 0 charges nothing.
+- Switching a member's plan partway through a season only moves the difference: a cheaper plan hands the difference back as member credit, a pricier one adds a second charge for the gap. The original charge is never rewritten.
+- Charges this feature creates belong to the system: their amount and currency can't be edited by hand, though they can still be renamed, waived, or archived like any other fee.
+- Billing is tied to whoever last saved the setting — if that person is later removed from Sideline, billing switches itself off automatically and the box clears.
+- API integrators: `TeamSettingsInfo`/`UpdateTeamSettingsRequest` gain `membershipBillingEnabled`. `PATCH /teams/:teamId/fees/:feeId`, `POST /teams/:teamId/fees/:feeId/assignments`, and `PATCH /teams/:teamId/fees/:feeId/assignments/:assignmentId` gain a new `409 GeneratedFeeImmutable` for a membership-generated fee (the assignments endpoint also now returns `409 TrainingFeeImmutable` for a training-generated one, which it previously let through). See the [Finances guide](/guides/finances/#billing-membership-plans-each-season) and the internal API reference.
+
 ## 2026-10-07 — New: membership seasons with real dates
 
 Membership plans now live inside **seasons** instead of one open-ended deadline. Go to **Team → Finances → Membership plans** to set the current season's selection deadline and end date, and to queue the next season ahead of time with its own start date.

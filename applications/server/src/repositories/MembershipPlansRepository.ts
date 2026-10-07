@@ -1,4 +1,4 @@
-import { Fee, MembershipPlan, Team, TeamMember } from '@sideline/domain';
+import { Auth, Fee, MembershipPlan, Team, TeamMember } from '@sideline/domain';
 import { Schemas, SqlErrors } from '@sideline/effect-lib';
 import { DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -106,6 +106,16 @@ export class PlanAssignmentRow extends Schema.Class<PlanAssignmentRow>('PlanAssi
   discord_nickname: Schema.OptionFromNullOr(Schema.String),
   discord_display_name: Schema.OptionFromNullOr(Schema.String),
   username: Schema.String,
+}) {}
+
+// One candidate of the membership-billing sweep. `None` on the recorder means the team was
+// billed at some point but the admin who enabled billing has since been deleted
+// (`ON DELETE SET NULL`) — billing is OFF and the cron warns rather than going quiet.
+export class MembershipBillingTeamRow extends Schema.Class<MembershipBillingTeamRow>(
+  'MembershipBillingTeamRow',
+)({
+  team_id: Team.TeamId,
+  recorded_by_user_id: Schema.OptionFromNullOr(Auth.UserId),
 }) {}
 
 // `free_trainings_included` is an `Option` end to end (see `MembershipPlanApi` rule 5): `None`
@@ -485,6 +495,89 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // ---------------------------------------------------------------------------
+  // Membership billing sweep (MembershipBillingCron)
+  // ---------------------------------------------------------------------------
+
+  // Every team the membership-billing sweep should visit this tick, plus the user its credit
+  // deposits are recorded under.
+  //
+  // THE RUNNING SEASON, NOT THE GOVERNING ONE. This mirrors the season resolver inside
+  // `recompute_membership_season_fees`, and the mirror must stay exact.
+  // `governing_season_id` answers "which season is the member picking for" and returns a QUEUED
+  // season whenever the live one's window has closed (it orders `is_open DESC`), which would
+  // switch billing off for the live season for months. Billing asks its own question — the
+  // latest season that has actually STARTED — which also means a future season is never billable
+  // and no non-selector is ever charged in advance. One LATERAL so the subquery is evaluated
+  // once per row rather than three times.
+  //
+  // TWO gates, both EXPLICIT:
+  //   * a running season EXISTS — THE NULL-SEASON SKIP. Covers both "this team has no seasons"
+  //     (`seed_first_season_trg` makes that unreachable in practice, but billing must not trust
+  //     an invariant it does not own) and "its only season has not started". Either way the team
+  //     is SKIPPED and nothing is written: no fee, no fallback to now(), no synthesised season.
+  //     Written as an explicit predicate rather than as an INNER JOIN on seasons precisely so
+  //     that deleting it is a visible change.
+  //   * `membership_billing_by_user_id IS NOT NULL` — the opt-in, and the user every credit
+  //     deposit the sweep writes is recorded under.
+  //
+  // The second is a BRANCH, not a filter, and that is deliberate. The column is
+  // ON DELETE SET NULL, so removing the admin who enabled billing silently switches it off; a
+  // club that has already been billed for the running season would then just stop, mid-season,
+  // with no surface anywhere saying so. Selecting teams that have membership fees but no
+  // recorder lets the cron log a warning instead of going quiet. The EXISTS rides
+  // `idx_fees_team_season_plan_currency`, so it costs an index probe over a tiny partition.
+  const findMembershipBillingTeamsQuery = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: MembershipBillingTeamRow,
+    execute: () => sql`
+      SELECT ts.team_id::text                        AS team_id,
+             ts.membership_billing_by_user_id::text  AS recorded_by_user_id
+        FROM team_settings ts
+        -- LEFT JOIN LATERAL ... ON true, never CROSS JOIN LATERAL. A CROSS JOIN over an empty
+        -- subquery drops the team row silently, which would make the NULL-season skip an
+        -- accidental side effect of the join shape. LEFT JOIN keeps the row and lets
+        -- season.id IS NOT NULL be a real predicate somebody can read, delete, and notice they
+        -- deleted.
+        LEFT JOIN LATERAL (
+          SELECT s.id
+            FROM seasons s
+           WHERE s.team_id = ts.team_id AND s.starts_at <= now()
+           ORDER BY s.starts_at DESC
+           LIMIT 1
+        ) season ON true
+       WHERE season.id IS NOT NULL
+         AND (
+           ts.membership_billing_by_user_id IS NOT NULL
+           -- NOT scoped to season.id, and that is the whole point of the branch. Scoping it
+           -- makes the warning SELF-EXTINGUISH at rollover, on exactly the day the outage
+           -- becomes total: admin removed in January -> recorder NULL -> warning fires
+           -- correctly all spring (the team still has fees for the running season) -> the
+           -- season rolls, the team has zero fees for the NEW season because billing has been
+           -- off for months -> the EXISTS fails -> the team leaves the candidate set and the
+           -- warning stops, silently.
+           --
+           -- ANY membership fee for the team, ever, is enough to know this club was being
+           -- billed. Free on the index: idx_fees_team_season_plan_currency is
+           -- (team_id, season_id, ...) WHERE kind = 'membership', and team_id alone is a
+           -- usable leading prefix.
+           OR EXISTS (
+             SELECT 1 FROM fees f
+              WHERE f.team_id = ts.team_id AND f.kind = 'membership'
+           )
+         )
+       ORDER BY ts.team_id ASC
+    `,
+  });
+
+  // One statement, one implicit transaction, PER TEAM. Deliberately NOT one statement over every
+  // team: the function takes a seasons row lock and the team-wide fees mutex, and holding every
+  // team's locks in one transaction turns a slow team into a global stall.
+  const recomputeMembershipSeasonFeesQuery = SqlSchema.void({
+    Request: Team.TeamId,
+    execute: (teamId) => sql`SELECT recompute_membership_season_fees(${teamId}::uuid)`,
+  });
+
   // The captain-side sibling of `selectMembershipPlanQuery`. Atomic Conditional UPDATE
   // (AGENTS.md): every guard lives in this one UPDATE's own WHERE. `mp.team_id = tm.team_id` is
   // the tenancy boundary — the row itself, same as `selectMembershipPlanQuery`.
@@ -720,6 +813,20 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const findMembershipBillingTeams = () =>
+    findMembershipBillingTeamsQuery(void 0).pipe(
+      Effect.map((rows) =>
+        rows.map((row) => ({
+          teamId: row.team_id,
+          recordedByUserId: row.recorded_by_user_id,
+        })),
+      ),
+      catchSqlErrors,
+    );
+
+  const recomputeMembershipSeasonFees = (teamId: Team.TeamId) =>
+    recomputeMembershipSeasonFeesQuery(teamId).pipe(catchSqlErrors);
+
   return {
     findMembershipPlansByTeamId,
     findMembershipPlanByIdScoped,
@@ -735,6 +842,8 @@ const make = Effect.gen(function* () {
     findPlanAssignments,
     assignMembershipPlan,
     reassignMembershipPlan,
+    findMembershipBillingTeams,
+    recomputeMembershipSeasonFees,
   };
 });
 
