@@ -597,6 +597,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         require_complete_profile: false,
         auto_assign_variable_symbols: false,
         auto_apply_credit_by_user_id: Option.none(),
+        membership_billing_by_user_id: Option.none(),
       }),
     ),
   findByTeamId: () =>
@@ -634,6 +635,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         require_complete_profile: false,
         auto_assign_variable_symbols: false,
         auto_apply_credit_by_user_id: Option.none(),
+        membership_billing_by_user_id: Option.none(),
       }),
     ),
   upsertSettings: (input: {
@@ -690,6 +692,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       require_complete_profile: false,
       auto_assign_variable_symbols: false,
       auto_apply_credit_by_user_id: Option.none(),
+      membership_billing_by_user_id: Option.none(),
     }),
   upsert: (input: {
     teamId: string;
@@ -760,6 +763,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       require_complete_profile: false,
       auto_assign_variable_symbols: false,
       auto_apply_credit_by_user_id: Option.none(),
+      membership_billing_by_user_id: Option.none(),
     });
   },
   getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),

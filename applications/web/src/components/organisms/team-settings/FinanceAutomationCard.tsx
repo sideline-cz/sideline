@@ -8,9 +8,10 @@ interface FinanceAutomationCardProps {
 }
 
 /**
- * The two money settings that `updateTeamSettings` owns, sitting on the Finance tab next to
+ * The three money settings that `updateTeamSettings` owns, sitting on the Finance tab next to
  * `FioBankCard` rather than in General where they started. They are not general limits: one hands
- * out variable symbols, the other spends members' credit.
+ * out variable symbols, one spends members' credit, and one bills them their membership plan's
+ * price once a season.
  *
  * It takes the SHARED `form` (not its own `useCardForm`) and so saves through the one save bar
  * with the rest of `updateTeamSettings` — unlike `FioBankCard`, which owns its form because it
@@ -57,6 +58,23 @@ export function FinanceAutomationCard({ form: { values, setField } }: FinanceAut
             </div>
             <p className='text-xs text-muted-foreground mt-1'>
               {tr('teamSettings_autoApplyCreditEnabled_help')}
+            </p>
+          </div>
+          <div>
+            <div className='flex items-center gap-2'>
+              <input
+                id='membership-billing-enabled'
+                type='checkbox'
+                checked={values.membershipBillingEnabled}
+                onChange={(e) => setField('membershipBillingEnabled', e.target.checked)}
+                className='h-4 w-4'
+              />
+              <label htmlFor='membership-billing-enabled' className='text-sm font-medium'>
+                {tr('teamSettings_membershipBillingEnabled')}
+              </label>
+            </div>
+            <p className='text-xs text-muted-foreground mt-1'>
+              {tr('teamSettings_membershipBillingEnabled_help')}
             </p>
           </div>
         </div>

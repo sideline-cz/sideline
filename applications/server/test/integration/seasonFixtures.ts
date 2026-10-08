@@ -40,6 +40,12 @@ export interface SeasonFixtureRow {
  * `fees` EXISTS pre-check PASSES once a training fee shell exists for the open period — so
  * arranging a fixture after seeding fees silently rewrites money rows. Arrange seasons BEFORE
  * seeding fees, or assert against the post-recompute state deliberately.
+ *
+ * SECOND ORDERING TRAP, from the membership-billing ticket: `fees.season_id` references
+ * `seasons(id) ON DELETE RESTRICT`, so the leading `DELETE FROM seasons` FAILS outright once any
+ * `kind='membership'` fee points at one of this team's seasons. Same rule, harder consequence —
+ * arrange seasons BEFORE anything runs `recompute_membership_season_fees`, and re-arranging them
+ * afterwards means deleting the generated fees first.
  */
 export const setSeasons = (teamId: string, rows: ReadonlyArray<SeasonFixtureRow>) =>
   Effect.gen(function* () {

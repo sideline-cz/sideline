@@ -128,7 +128,20 @@ function FeesRoute() {
           payload: req,
         }),
       ),
-      Effect.mapError(() => ClientError.make('Failed to assign members')),
+      // Every `kind !== 'manual'` fee 409s here (api/finance.ts), and listFees has no kind
+      // filter, so the generated shells are on this page and this refusal is permanent — not a
+      // transient failure. FeeView carries no `kind`, so the button cannot be hidden; the least
+      // the toast can do is name the real lever.
+      Effect.catchTag('TrainingFeeImmutable', () =>
+        Effect.fail(ClientError.make(tr('fee_management_assignFailedTraining'))),
+      ),
+      Effect.catchTag('GeneratedFeeImmutable', () =>
+        Effect.fail(ClientError.make(tr('fee_management_assignFailedGenerated'))),
+      ),
+      // Preserve the specific messages mapped above; only fall back for unhandled errors.
+      Effect.mapError((e) =>
+        e._tag === 'ClientError' ? e : ClientError.make(tr('fee_management_assignFailed')),
+      ),
       run({ success: 'Members assigned' }),
     );
     if (Option.isSome(result)) {

@@ -15,7 +15,7 @@ Sideline's Finance module lets admins and members with the Treasurer role define
 - **Credit** — money a member has paid that isn't (yet) owed against any fee. Built up either by settling more than is currently outstanding ("pay in advance") or as leftover from a settle-all payment. Credit is automatically applied the next time that member is settled, in the same currency it was paid in. See [Settling a member's balance and paying in advance](#settling-a-members-balance-and-paying-in-advance) below.
 - **Variable symbol** — a short number (1–10 digits) attached to a member, printed on their payment QR codes and matched against incoming bank transfers. See [Setting up variable symbols](#setting-up-variable-symbols) below.
 - **Bank movement** — one transaction read from the club's connected bank account. See [Connecting a bank account](#connecting-a-bank-account-fio) below.
-- **Membership plan** — a named pricing tier a team offers (e.g. "Adult membership", "Junior membership"). Every team starts with one free, unnamed default plan. See [Membership plans](#membership-plans) below.
+- **Membership plan** — a named pricing tier a team offers (e.g. "Adult membership", "Junior membership"). Every team starts with one free, unnamed default plan. See [Membership plans](#membership-plans) below. A plan's price can also be billed to members automatically once a season starts — off by default, see [Billing membership plans each season](#billing-membership-plans-each-season) below.
 - **Season** — the period a team's current membership setup applies to: when selection closes, when it ends, and the window a plan's included free trainings are counted against. A team always has a current season and can queue the next one ahead of time. See [Seasons: setting a selection deadline and planning ahead](#seasons-setting-a-selection-deadline-and-planning-ahead) below.
 - **Status** — computed automatically from the assignment's amounts and due date:
 
@@ -45,6 +45,7 @@ Finance permissions follow a treasurer-style split across four built-in roles. B
 | Create, edit, or delete expenses | Yes | No | Yes | No |
 | View own fee status (My Payments) | Yes | Yes | Yes | Yes |
 | Connect / edit the bank account (Fio) | Yes | No | Yes | No |
+| Turn on automatic membership-plan billing | Yes | No | Yes | No |
 | View and resolve bank movements | Yes | No | Yes | No |
 | Assign variable symbols to members | Yes | Yes | Yes | No |
 
@@ -138,6 +139,23 @@ If you hold `finance:manage_fees` (Admin or Treasurer by default), the Membershi
 </Aside>
 
 Click **Start new season** to queue the next one ahead of time — set its start date, selection deadline, and end date up front. This does **not** change the current season; members keep switching under the current season's dates until the new one's own start date arrives, at which point it takes over automatically, with no action needed from anyone. Start a new season on the 1st of a month where possible — starting mid-month resets that whole month's free-training count.
+
+### Billing membership plans each season
+
+<Badge text="Off by default" variant="caution" /> A plan's price is just a number until a Treasurer or Admin turns on **Bill membership plans each season** in **Team → Settings → Finance → Automation**. Nothing is billed to anyone until that box is checked.
+
+Once it's on:
+
+- Every active member is billed their plan's price for whichever season is currently running — within a minute of you turning billing on if a season has already started, or the moment a queued season takes over otherwise. Members are never billed in advance for a season that hasn't started yet.
+- A member who never chose a plan is billed the team's default plan's price.
+- A plan priced at 0 produces no charge at all — not a free fee, just nothing.
+- Moving a member to a different plan partway through a season only charges or refunds the **difference**: switching to a cheaper plan hands the difference back as member credit (which the **"Use member credit automatically"** setting above can apply to their next charge on its own); switching to a pricier plan adds a second charge for the gap. The charge they already have is never rewritten.
+- These charges belong to the system once created: you can still rename one, waive an individual member's assignment, or archive the whole charge, but its amount and currency can't be edited by hand, and you can't hand-assign a member onto it the way you can with a regular fee.
+- Waiving an assignment, archiving a charge, or voiding a refund settles that member for the rest of the season — they won't be charged or refunded again for it, though a later upgrade can still add a gap charge on top.
+
+<Aside type="caution" title="Billing is tied to whoever last saved this setting">
+  The club member attributed on every credit refund this feature issues — and the only thing keeping billing switched on — is whoever last saved this checkbox, not whoever first turned it on. If that person is later removed from Sideline, billing switches itself off automatically and the box clears here. Re-save the setting to resume; nothing is billed while it's off.
+</Aside>
 
 ### Choosing your own plan
 
@@ -677,6 +695,8 @@ Content-Type: application/json
 
 Pass `amountMinorOverride` or `dueAtOverride` to override the fee's defaults for specific members. Pass `null` to use the fee-level values.
 
+Returns `409` if `feeId` names a fee Sideline generated itself — a monthly training charge or a [per-season membership charge](#billing-membership-plans-each-season) — rather than one created by hand here. Those are maintained automatically; use [Waive an assignment](#waive-an-assignment) if a specific member shouldn't owe it.
+
 ### Record a payment
 
 ```http
@@ -764,6 +784,8 @@ Content-Type: application/json
   "waivedReason": "Hardship exemption approved by committee"
 }
 ```
+
+`waived` and `waivedReason` can always be changed, even on a system-generated training or membership charge. `amountMinor` cannot — sending it against one of those returns `409`.
 
 ### Archive a fee
 

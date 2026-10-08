@@ -14,6 +14,12 @@ import { nestedOptionToNullable } from '~/repositories/patchHelpers.js';
 // `recompute_training_period_fees` (packages/migrations), and the one thing app code needs to
 // know about it is that its identity (currency, period) is not app-editable — see updateFee
 // and updateAssignment in api/finance.ts.
+//
+// A 'membership' fee is the same deal, one generator further: it is written exclusively by
+// `recompute_membership_season_fees`, and BOTH its identity (season, plan, currency — the
+// partial unique index `idx_fees_team_season_plan_currency`) and its assignment amounts are not
+// app-editable. The three guards that enforce that live in api/finance.ts (`updateFee`,
+// `assignFee`, `updateAssignment`), keyed on `kind !== 'manual'`.
 export class FeeRow extends Schema.Class<FeeRow>('FeeRow')({
   id: Fee.FeeId,
   team_id: Team.TeamId,
@@ -27,7 +33,7 @@ export class FeeRow extends Schema.Class<FeeRow>('FeeRow')({
   created_at: Schemas.DateTimeFromDate,
   updated_at: Schemas.DateTimeFromDate,
   archived_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
-  kind: Schema.Literals(['manual', 'training']),
+  kind: Schema.Literals(['manual', 'training', 'membership']),
 }) {}
 
 export class FeeWithCountsRow extends Schema.Class<FeeWithCountsRow>('FeeWithCountsRow')({

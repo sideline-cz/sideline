@@ -236,6 +236,18 @@ export class TrainingFeeImmutable extends Schema.TaggedErrorClass<TrainingFeeImm
   {},
 ) {}
 
+// The sibling of the above for `kind = 'membership'` fees, whose shell row, assignments and
+// amounts are written exclusively by `recompute_membership_season_fees` (packages/migrations).
+// The reason here is STRONGER than for training: a hand-edited membership amount is not
+// silently reverted on the next tick, it STICKS and corrupts the member's `charged` sum, so
+// the generator then derives a bogus charge -- or a bogus refund, which is real spendable
+// member credit -- from the edited figure. A separate tag rather than reusing
+// `TrainingFeeImmutable` because "training" is a false statement about a membership fee.
+export class GeneratedFeeImmutable extends Schema.TaggedErrorClass<GeneratedFeeImmutable>()(
+  'GeneratedFeeImmutable',
+  {},
+) {}
+
 export class SettlementStale extends Schema.TaggedErrorClass<SettlementStale>()('SettlementStale', {
   // the server's figure, so the toast can be specific
   outstandingMinor: Schema.Number,
@@ -314,6 +326,7 @@ export class FinanceApiGroup extends HttpApiGroup.make('finance')
         FeeArchived.pipe(HttpApiSchema.status(409)),
         InvalidAmount.pipe(HttpApiSchema.status(400)),
         TrainingFeeImmutable.pipe(HttpApiSchema.status(409)),
+        GeneratedFeeImmutable.pipe(HttpApiSchema.status(409)),
       ],
       payload: UpdateFeeRequest,
       params: { teamId: TeamId, feeId: FeeId },
@@ -354,6 +367,12 @@ export class FinanceApiGroup extends HttpApiGroup.make('finance')
         FeeNotFound.pipe(HttpApiSchema.status(404)),
         FeeArchived.pipe(HttpApiSchema.status(409)),
         InvalidAmount.pipe(HttpApiSchema.status(400)),
+        // Hand-assigning a member onto a generator-owned fee is a money write into a row the
+        // treasurer does not own: `bulkInsert` honours `amountMinorOverride`, so an arbitrary
+        // amount typed onto a membership shell inflates that member's `charged` sum and the
+        // next tick turns the resulting negative delta into real, spendable member credit.
+        TrainingFeeImmutable.pipe(HttpApiSchema.status(409)),
+        GeneratedFeeImmutable.pipe(HttpApiSchema.status(409)),
       ],
       payload: AssignFeeRequest,
       params: { teamId: TeamId, feeId: FeeId },
@@ -372,6 +391,7 @@ export class FinanceApiGroup extends HttpApiGroup.make('finance')
           FeeArchived.pipe(HttpApiSchema.status(409)),
           InvalidAmount.pipe(HttpApiSchema.status(400)),
           TrainingFeeImmutable.pipe(HttpApiSchema.status(409)),
+          GeneratedFeeImmutable.pipe(HttpApiSchema.status(409)),
         ],
         payload: UpdateAssignmentRequest,
         params: { teamId: TeamId, feeId: FeeId, assignmentId: FeeAssignmentId },

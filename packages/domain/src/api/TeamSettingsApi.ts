@@ -52,6 +52,12 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
   // user id (NULL = off) because the resulting `payments` rows need a recorder, and nothing
   // about that belongs on the client. Tolerant decode for the usual frozen-web-bundle reason.
   autoApplyCreditEnabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+  // Bills each active member their membership plan's price once per season. A BOOLEAN projection
+  // of `team_settings.membership_billing_by_user_id` for the same reason as the line above: the
+  // server stores a user id (NULL = off) because the credit deposits a downgrade refund writes
+  // need a recorder. Tolerant decode for the usual frozen-web-bundle reason; the default is
+  // `false` so an old server that omits the key can never read as "billing is on".
+  membershipBillingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   rsvpReminderDaysBefore: Schema.Int,
   // Per-event-type overrides for the reminder lead time; `rsvpReminderDaysBefore` remains the
   // fallback for any type absent from the map. Decodes TOLERANTLY (missing key -> `{}`) for the
@@ -132,6 +138,7 @@ export const UpdateTeamSettingsRequest = Schema.Struct({
   requireCompleteProfile: Schema.OptionFromOptional(Schema.Boolean),
   autoAssignVariableSymbols: Schema.OptionFromOptional(Schema.Boolean),
   autoApplyCreditEnabled: Schema.OptionFromOptional(Schema.Boolean),
+  membershipBillingEnabled: Schema.OptionFromOptional(Schema.Boolean),
   rsvpReminderDaysBefore: Schema.OptionFromOptional(
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 14 }))),
   ),

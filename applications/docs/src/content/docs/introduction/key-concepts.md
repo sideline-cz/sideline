@@ -69,7 +69,7 @@ The record that ties a specific fee to a specific member. An assignment tracks h
 
 ## Membership plan
 
-A named pricing tier a team offers — for example "Adult membership" or "Junior membership". Every team starts with one free, unnamed default plan. Admins or Treasurers can add more plans, edit pricing, promote a different plan to be the team's default, and archive a plan that's no longer offered. Members pick their own plan (subject to the team's current [season](#season)), or a Treasurer/Admin can assign or bulk-move members onto a plan directly. See [Membership plans](/guides/finances/#membership-plans).
+A named pricing tier a team offers — for example "Adult membership" or "Junior membership". Every team starts with one free, unnamed default plan. Admins or Treasurers can add more plans, edit pricing, promote a different plan to be the team's default, and archive a plan that's no longer offered. Members pick their own plan (subject to the team's current [season](#season)), or a Treasurer/Admin can assign or bulk-move members onto a plan directly. A team can opt in to billing a plan's price to its members automatically once a season starts — off by default. See [Membership plans](/guides/finances/#membership-plans) and [Billing membership plans each season](/guides/finances/#billing-membership-plans-each-season).
 
 ## Season
 
@@ -81,7 +81,7 @@ Money received against a fee assignment. Payments are recorded by admins or trea
 
 ## Credit
 
-Money a member has paid that isn't (yet) owed against any fee, tracked per currency. Built up either by paying more than what's currently outstanding, by paying in advance of any fee being assigned, or — if the club has turned on auto-crediting — as the leftover from a bank transfer a member sent via their standing top-up QR code. Applied automatically the next time that member is settled. See [Settling a member's balance and paying in advance](/guides/finances/#settling-a-members-balance-and-paying-in-advance).
+Money a member has paid that isn't (yet) owed against any fee, tracked per currency. Built up either by paying more than what's currently outstanding, by paying in advance of any fee being assigned, as the leftover from a bank transfer a member sent via their standing top-up QR code (if the club has turned on auto-crediting), or as the difference refunded when a club bills membership plans each season and a member moves to a cheaper one mid-season. Applied automatically the next time that member is settled, or on its own if the club has turned on automatic credit use. See [Settling a member's balance and paying in advance](/guides/finances/#settling-a-members-balance-and-paying-in-advance).
 
 ## Variable symbol
 

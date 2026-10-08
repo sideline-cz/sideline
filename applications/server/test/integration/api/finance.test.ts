@@ -127,6 +127,10 @@ type FeeRecord = {
   due_at: Option.Option<ReturnType<typeof DateTime.nowUnsafe>>;
   recurrence: Fee.FeeRecurrence;
   target_scope: Fee.FeeTargetScope;
+  // Mirrors the real column (NOT NULL DEFAULT 'manual'). Load-bearing in the mock, not
+  // decoration: `updateFee`, `assignFee` and `updateAssignment` all guard on `kind !== 'manual'`,
+  // so a record without it leaves `fee.kind` undefined and every one of those endpoints 409s.
+  kind: 'manual' | 'training' | 'membership';
   created_at: ReturnType<typeof DateTime.nowUnsafe>;
   updated_at: ReturnType<typeof DateTime.nowUnsafe>;
   archived_at: Option.Option<ReturnType<typeof DateTime.nowUnsafe>>;
@@ -264,6 +268,7 @@ const MockFeesRepositoryLayer = Layer.succeed(FeesRepository, {
       due_at: input.due_at ?? Option.none(),
       recurrence: 'none',
       target_scope: input.target_scope ?? 'all_members',
+      kind: 'manual',
       created_at: DateTime.nowUnsafe(),
       updated_at: DateTime.nowUnsafe(),
       archived_at: Option.none(),
@@ -1538,6 +1543,7 @@ describe('Finance API — voidPayment', () => {
       due_at: Option.none(),
       recurrence: 'none',
       target_scope: 'all_members',
+      kind: 'manual',
       created_at: DateTime.nowUnsafe(),
       updated_at: DateTime.nowUnsafe(),
       archived_at: Option.none(),
@@ -1655,6 +1661,7 @@ function seedFee(teamId: Team.TeamId, overrides: Partial<FeeRecord> = {}): Fee.F
     due_at: Option.none(),
     recurrence: 'none',
     target_scope: 'all_members',
+    kind: 'manual',
     created_at: DateTime.nowUnsafe(),
     updated_at: DateTime.nowUnsafe(),
     archived_at: Option.none(),

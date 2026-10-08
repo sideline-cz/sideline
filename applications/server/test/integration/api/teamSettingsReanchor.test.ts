@@ -1098,3 +1098,72 @@ describe('team-settings RSVP-lock change marks personal cards dirty', () => {
     }).pipe(Effect.provide(SeedLayer)),
   );
 });
+
+// ---------------------------------------------------------------------------
+// `membership_billing_by_user_id` — the money-relevant half of
+// `applications/server/AGENTS.md` rule 5 ("a request field absent means KEEP THE STORED VALUE").
+//
+// The column is simultaneously the opt-in flag for `MembershipBillingCron` and the user every
+// credit deposit the sweep records. `UpdateTeamSettingsRequest.membershipBillingEnabled` is
+// `Schema.OptionFromOptional`, so an older web bundle (web deploys LAST) PATCHes without the key
+// at all. If the handler's `onNone` branch ever becomes `Option.none<string>()` instead of
+// `s.membership_billing_by_user_id`, that save silently switches billing OFF mid-season with no
+// error and no log — and before this case, every one of the ~7 694 tests stayed green.
+// ---------------------------------------------------------------------------
+
+const readMembershipBillingUserId = (teamId: Team.TeamId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.flatMap(
+      (sql) => sql<{ membership_billing_by_user_id: string | null }>`
+        SELECT membership_billing_by_user_id::text AS membership_billing_by_user_id
+          FROM team_settings WHERE team_id = ${teamId}::uuid
+      `,
+    ),
+    Effect.map((rows) => rows.at(0)?.membership_billing_by_user_id ?? null),
+  );
+
+describe('team-settings: an ABSENT membershipBillingEnabled keeps the stored recorder', () => {
+  it.effect('a PATCH that omits the key does not switch billing off', () =>
+    Effect.gen(function* () {
+      const guildId = '330000000000000099' as Discord.Snowflake;
+      const { teamId } = yield* Effect.promise(() => setup(guildId));
+
+      // Turn it on through the real endpoint, so the stored recorder is whatever the handler
+      // actually stamps rather than a hand-written fixture.
+      const enable = yield* Effect.promise(() =>
+        patchSettings(teamId, { membershipBillingEnabled: true }),
+      );
+      expect(enable.status).toBe(200);
+      expect(
+        ((yield* Effect.promise(() => enable.json())) as Record<string, unknown>)
+          .membershipBillingEnabled,
+      ).toBe(true);
+
+      const recorder = yield* readMembershipBillingUserId(teamId);
+      expect(recorder).not.toBeNull();
+
+      // An UNRELATED save that never mentions the key — exactly the shape a frozen older web
+      // bundle sends during the rolling deploy window.
+      const unrelated = yield* Effect.promise(() =>
+        patchSettings(teamId, { eventHorizonDays: 30 }),
+      );
+      expect(unrelated.status).toBe(200);
+      expect(
+        ((yield* Effect.promise(() => unrelated.json())) as Record<string, unknown>)
+          .membershipBillingEnabled,
+      ).toBe(true);
+      expect(yield* readMembershipBillingUserId(teamId)).toBe(recorder);
+
+      // The explicit `false` still clears it — "absent" must not be conflated with "off".
+      const disable = yield* Effect.promise(() =>
+        patchSettings(teamId, { membershipBillingEnabled: false }),
+      );
+      expect(disable.status).toBe(200);
+      expect(
+        ((yield* Effect.promise(() => disable.json())) as Record<string, unknown>)
+          .membershipBillingEnabled,
+      ).toBe(false);
+      expect(yield* readMembershipBillingUserId(teamId)).toBeNull();
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});

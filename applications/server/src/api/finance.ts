@@ -25,6 +25,7 @@ const paymentNotFound = new FinanceApi.PaymentNotFound();
 const invalidAmount = new FinanceApi.InvalidAmount();
 const feeArchived = new FinanceApi.FeeArchived();
 const trainingFeeImmutable = new FinanceApi.TrainingFeeImmutable();
+const generatedFeeImmutable = new FinanceApi.GeneratedFeeImmutable();
 
 // ---------------------------------------------------------------------------
 // Helpers: build view DTOs from repo rows
@@ -297,14 +298,18 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
               }
               return Effect.void;
             }),
-            // A 'training' fee's currency is part of its identity (the partial unique index
-            // is on team_id, period_start, currency): changing it here would either violate
-            // that index or silently orphan the fee from recompute_training_period_fees, which
-            // only ever finds it by (team_id, period_start, currency). Caught here, as a typed
-            // 409, rather than left to surface as an untyped 500 via catchSqlErrors.
+            // A GENERATED fee's currency is part of its identity, and the generator only ever
+            // finds the row by that identity: a 'training' fee by (team_id, period_start,
+            // currency), a 'membership' fee by (team_id, season_id, membership_plan_id,
+            // currency) — each backed by a partial unique index. Changing the currency here
+            // would either violate that index or silently orphan the fee from its generator,
+            // which then writes a SECOND shell and bills the whole season again. Caught here as
+            // a typed 409 rather than left to surface as an untyped 500 via catchSqlErrors.
             Effect.tap(({ existing }) =>
-              existing.kind === 'training' && Option.isSome(payload.currency)
-                ? Effect.fail(trainingFeeImmutable)
+              existing.kind !== 'manual' && Option.isSome(payload.currency)
+                ? Effect.fail(
+                    existing.kind === 'training' ? trainingFeeImmutable : generatedFeeImmutable,
+                  )
                 : Effect.void,
             ),
             Effect.tap(() =>
@@ -415,6 +420,25 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
             Effect.tap(({ fee }) =>
               Option.isSome(fee.archived_at) ? Effect.fail(feeArchived) : Effect.void,
             ),
+            // Hand-assigning a member onto a GENERATED fee is a money write into a row the
+            // generator owns. For a membership fee it is worse than a no-op: `bulkInsert`
+            // honours `amountMinorOverride`, so a treasurer typing 1500 onto the membership
+            // shell adds 1500 to that member's `charged` sum, and the next sweep tick reads the
+            // resulting negative delta and deposits 1500 of REAL, SPENDABLE member credit.
+            // Repeatable, with a bigger payout for a bigger number.
+            //
+            // The WHOLE endpoint is refused for a non-manual fee, not just the override branch:
+            // there is no "safe" override value, because without an override the insert lands at
+            // the shell's `amount_minor = 0` and is merely wrong. Generated assignments are the
+            // generator's to create, full stop — a training one would be pruned out from under
+            // the treasurer by the next recompute anyway.
+            Effect.tap(({ fee }) =>
+              fee.kind !== 'manual'
+                ? Effect.fail(
+                    fee.kind === 'training' ? trainingFeeImmutable : generatedFeeImmutable,
+                  )
+                : Effect.void,
+            ),
             Effect.tap(() => {
               if (
                 Option.isSome(payload.amountMinorOverride) &&
@@ -482,13 +506,18 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
               }
               return Effect.void;
             }),
-            // A training assignment's amount is owned by recompute_training_period_fees — the
-            // next attendance/event write (or the next period recompute) would silently revert
-            // a manual edit here, so refuse it up front instead of accepting a change that
-            // never sticks.
+            // A generated assignment's amount is owned by its generator. For 'training' the
+            // edit never sticks — the next attendance/event write silently reverts it. For
+            // 'membership' it is WORSE, and that is why the guard is widened rather than
+            // duplicated: the edit DOES stick, it corrupts the member's `charged` sum, and the
+            // next sweep tick derives a bogus charge or a bogus REFUND off the edited figure.
+            // `dueAt` and `waived` stay allowed on purpose — a waive lowers the refund floor
+            // rather than being refused.
             Effect.tap(({ fee }) =>
-              fee.kind === 'training' && Option.isSome(payload.amountMinor)
-                ? Effect.fail(trainingFeeImmutable)
+              fee.kind !== 'manual' && Option.isSome(payload.amountMinor)
+                ? Effect.fail(
+                    fee.kind === 'training' ? trainingFeeImmutable : generatedFeeImmutable,
+                  )
                 : Effect.void,
             ),
             Effect.tap(() =>

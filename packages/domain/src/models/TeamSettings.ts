@@ -42,6 +42,7 @@ export class TeamSettings extends Model.Class<TeamSettings>('TeamSettings')({
   require_complete_profile: Schema.Boolean,
   auto_assign_variable_symbols: Schema.Boolean,
   auto_apply_credit_by_user_id: Schema.OptionFromNullOr(Schema.String),
+  membership_billing_by_user_id: Schema.OptionFromNullOr(Schema.String),
   rsvp_reminder_days_before: Schema.Int,
   rsvp_reminder_days_before_overrides: RsvpReminderDaysBeforeOverrides,
   rsvp_lock_hours_before: Schema.OptionFromNullOr(Schema.Int),

@@ -506,6 +506,7 @@ Returns the team's current settings.
 | `minPlayersThreshold` | `integer` | No | Minimum players for an event to show a warning |
 | `rsvpRemindersEnabled` | `boolean` | No | Whether RSVP reminders are enabled for this team |
 | `requireCompleteProfile` | `boolean` | No | Captain's opt-in for the profile-completeness gate: when `true`, a member with an incomplete profile (missing name/birth date/gender) is blocked from RSVPing, claiming a training, or reserving/adding a carpool car (see `RsvpProfileIncomplete`/`ClaimProfileIncomplete`/`CarpoolProfileIncomplete` below). Default `false`; also short-circuited server-wide by the `PROFILE_GATE_ENABLED` env var (see `docs/deployment.md`) |
+| `membershipBillingEnabled` | `boolean` | No | Boolean projection of `team_settings.membership_billing_by_user_id` (`docs/database.md` § 12): when `true`, `MembershipBillingCron` bills every active member their membership plan's price once per season. `false` (the default, and what an old server that omits the key decodes to) means billing never runs for this team. Set via `PATCH /teams/:teamId/settings` below, which also records the saving caller as the user every credit deposit the cron writes is attributed to — removing that user from Sideline clears this back to `false` |
 | `rsvpReminderDaysBefore` | `integer` | No | Days before an event the RSVP reminder is sent |
 | `maxMissedRsvps` | `integer` | No | Consecutive missed-RSVP threshold; members holding the default role (built-in `Player` or the team's configured default, see `PUT /teams/:teamId/default-role`) whose `missed_rsvps` counter reaches this value stop receiving reminder DMs and are excluded from the non-responder list (range 1–50; default 4) |
 | `claimRequestDaysBefore` | `integer` | No | Days before a training the coach claim-board message is posted (0 = on the training day; range 0–30) |
@@ -561,6 +562,7 @@ Updates the team's settings. All fields are optional; only provided fields are c
 | `minPlayersThreshold` | `integer` | No | 0–100 | Minimum player threshold |
 | `rsvpRemindersEnabled` | `boolean` | No | — | Enable or disable RSVP reminders |
 | `requireCompleteProfile` | `boolean` | No | — | Enable or disable the profile-completeness gate for this team (default `false`) |
+| `membershipBillingEnabled` | `boolean` | No | — | Turn per-season membership-plan billing on or off. `true` stores the **saving caller's** user id into `membership_billing_by_user_id` (the recorder every cron-issued credit deposit is attributed to); `false` clears it to `NULL`. Absent key leaves the stored value unchanged |
 | `rsvpReminderDaysBefore` | `integer` | No | 0–14 | Days before the event the reminder fires |
 | `maxMissedRsvps` | `integer` | No | 1–50 | Consecutive missed-RSVP threshold above which a default-role member stops receiving reminders (default 4) |
 | `claimRequestDaysBefore` | `integer` | No | 0–30 | Days before a training the coach claim-board message is posted; 0 posts on the training day |
@@ -4122,6 +4124,8 @@ The response shape is:
 
 The Finance group exposes fee management and payment tracking. Permissions follow the treasurer pattern: `finance:view` grants read-only access to team-wide finance data; `finance:manage_fees` is required to create, update, or archive fees and to assign them to members; `finance:record_payments` is required to record or void payments. By default Admin holds all three finance permissions; Captain holds `finance:view` only; the built-in Treasurer role holds all three; Player holds none of the named permissions. Two endpoints — `myStatus` and `myPaymentHistory` — are an exception: they are gated on team membership only (no `finance:view` required) and always return data scoped to the invoking member.
 
+Two fee kinds are written by a generator rather than by a caller of this API: `kind = 'training'` by `recompute_training_period_fees`, and `kind = 'membership'` by `recompute_membership_season_fees` (`MembershipBillingCron`, see `docs/database.md` § 12). `kind` itself is server-internal and never appears on the wire, but `updateFee`, `assignFee`, and `updateAssignment` below each refuse a write that would corrupt one of those two generators' bookkeeping, surfacing as `TrainingFeeImmutable`/`GeneratedFeeImmutable`. Every fee created through `POST /teams/:teamId/fees` is `kind = 'manual'` and is never subject to either guard.
+
 **View types (response DTOs):**
 
 `FeeView` — a fee definition with aggregated assignment counts.
@@ -4356,6 +4360,8 @@ Updates fee metadata. All fields are optional.
 | `FeeNotFound` | 404 | Fee does not exist |
 | `FeeArchived` | 409 | Fee is archived; updates are not permitted |
 | `InvalidAmount` | 400 | Amount is negative |
+| `TrainingFeeImmutable` | 409 | `currency` was included and the fee is `kind = 'training'` — currency is part of its identity (`(team_id, period_start, currency)`) and is owned by `recompute_training_period_fees` |
+| `GeneratedFeeImmutable` | 409 | `currency` was included and the fee is `kind = 'membership'` — currency is part of its identity (`(team_id, season_id, membership_plan_id, currency)`, see `docs/database.md` § 12) and is owned by `recompute_membership_season_fees` |
 
 ---
 
@@ -4441,6 +4447,8 @@ Assigns a fee to one or more members.
 | `FeeNotFound` | 404 | Fee does not exist |
 | `FeeArchived` | 409 | Fee is archived |
 | `InvalidAmount` | 400 | Amount override is negative |
+| `TrainingFeeImmutable` | 409 | `feeId` names a `kind = 'training'` fee — the WHOLE call is refused, regardless of payload, because `recompute_training_period_fees` owns both its assignments and their amounts |
+| `GeneratedFeeImmutable` | 409 | `feeId` names a `kind = 'membership'` fee — same refusal, for `recompute_membership_season_fees`. Assigning a member by hand onto a membership fee's shell would inflate their billed total and could mint real, spendable member credit on the next billing tick |
 
 ---
 
@@ -4479,6 +4487,8 @@ Updates an individual fee assignment (amount, due date, or waiver state).
 | `AssignmentNotFound` | 404 | Assignment does not exist |
 | `FeeArchived` | 409 | Fee is archived |
 | `InvalidAmount` | 400 | Amount is negative |
+| `TrainingFeeImmutable` | 409 | `amountMinor` was included and the assignment's fee is `kind = 'training'` — the next recompute would silently revert a manual edit, so it is refused up front. `dueAt`/`waived`/`waivedReason` are unaffected and can still be changed |
+| `GeneratedFeeImmutable` | 409 | `amountMinor` was included and the assignment's fee is `kind = 'membership'` — worse than training here, because the edit sticks and corrupts the member's billed total for the season instead of being reverted. `dueAt`/`waived`/`waivedReason` are unaffected |
 
 ---
 

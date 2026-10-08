@@ -47,6 +47,7 @@ const BASE: SettingsFormValues = {
   requireCompleteProfile: false,
   autoAssignVariableSymbols: false,
   autoApplyCreditEnabled: false,
+  membershipBillingEnabled: false,
   // Blank = no override, so the whole feature is off in the baseline.
   reminderDaysBefore_training: '',
   reminderDaysBefore_match: '',
@@ -99,6 +100,7 @@ const EDITED: SettingsFormValues = {
   requireCompleteProfile: true,
   autoAssignVariableSymbols: true,
   autoApplyCreditEnabled: true,
+  membershipBillingEnabled: true,
   reminderDaysBefore_training: '1',
   reminderDaysBefore_match: '2',
   reminderDaysBefore_tournament: '7',
@@ -424,6 +426,7 @@ describe('case 7 — a stored per-type `null` survives a save of an unrelated fi
     requireCompleteProfile: false,
     autoAssignVariableSymbols: false,
     autoApplyCreditEnabled: false,
+    membershipBillingEnabled: false,
     rsvpReminderDaysBefore: 2,
     rsvpReminderDaysBeforeOverrides: {},
     maxMissedRsvps: 3,

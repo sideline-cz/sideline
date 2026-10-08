@@ -66,6 +66,7 @@ export type SettingsFormValues = {
   requireCompleteProfile: boolean;
   autoAssignVariableSymbols: boolean;
   autoApplyCreditEnabled: boolean;
+  membershipBillingEnabled: boolean;
   rsvpReminderDaysBefore: string;
   maxMissedRsvps: string;
   claimRequestDaysBefore: string;
@@ -135,6 +136,7 @@ export const settingsFormFrom = (
   requireCompleteProfile: settings.requireCompleteProfile,
   autoAssignVariableSymbols: settings.autoAssignVariableSymbols,
   autoApplyCreditEnabled: settings.autoApplyCreditEnabled,
+  membershipBillingEnabled: settings.membershipBillingEnabled,
   rsvpReminderDaysBefore: String(settings.rsvpReminderDaysBefore),
   maxMissedRsvps: String(settings.maxMissedRsvps),
   claimRequestDaysBefore: String(settings.claimRequestDaysBefore),
@@ -290,6 +292,7 @@ export const settingsRequestFrom = (
   requireCompleteProfile: Option.some(values.requireCompleteProfile),
   autoAssignVariableSymbols: Option.some(values.autoAssignVariableSymbols),
   autoApplyCreditEnabled: Option.some(values.autoApplyCreditEnabled),
+  membershipBillingEnabled: Option.some(values.membershipBillingEnabled),
   rsvpReminderDaysBefore: Option.some(Number.parseInt(values.rsvpReminderDaysBefore, 10)),
   maxMissedRsvps: Option.some(Number.parseInt(values.maxMissedRsvps, 10)),
   claimRequestDaysBefore: Option.some(Number(values.claimRequestDaysBefore)),
