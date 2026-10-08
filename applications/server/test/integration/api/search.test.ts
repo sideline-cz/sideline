@@ -42,6 +42,7 @@ import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { SearchApiLive } from '~/api/search.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -87,6 +88,7 @@ const RealRepos = Layer.mergeAll(
   EventsRepository.Default,
   TrainingTypesRepository.Default,
   RostersRepository.Default,
+  ExpensesRepository.Default,
 );
 
 const TestLayer = HttpApiBuilder.layer(SmallApi).pipe(
