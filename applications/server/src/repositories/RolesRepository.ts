@@ -19,6 +19,7 @@ class RoleWithPermissionCount extends Schema.Class<RoleWithPermissionCount>(
   is_built_in: Schema.Boolean,
   is_default: Schema.Boolean,
   permission_count: Schema.Number,
+  is_archived: Schema.Boolean,
 }) {}
 
 class RoleRow extends Schema.Class<RoleRow>('RoleRow')({
@@ -71,15 +72,19 @@ class RoleGroupRow extends Schema.Class<RoleGroupRow>('RoleGroupRow')({
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  // No `is_archived` predicate, unlike every other query in this file: the roles PAGE offers a
+  // "show archived" toggle and filters client-side. Safe to widen only because `listRoles`
+  // (`api/role.ts`) is this query's sole caller -- `findById` / `findByTeamAndName` below keep
+  // theirs, and an archived role still grants nothing (`effectiveRoles.ts`, rule 4).
   const findByTeamId = SqlSchema.findAll({
     Request: Schema.String,
     Result: RoleWithPermissionCount,
     execute: (teamId) => sql`
-      SELECT r.id, r.team_id, r.name, r.is_built_in, r.is_default,
+      SELECT r.id, r.team_id, r.name, r.is_built_in, r.is_default, r.is_archived,
              (SELECT COUNT(*) FROM role_permissions rp WHERE rp.role_id = r.id)::int AS permission_count
       FROM roles r
-      WHERE r.team_id = ${teamId} AND r.is_archived = false
-      ORDER BY r.is_built_in DESC, r.name ASC
+      WHERE r.team_id = ${teamId}
+      ORDER BY r.is_archived ASC, r.is_built_in DESC, r.name ASC
     `,
   });
 

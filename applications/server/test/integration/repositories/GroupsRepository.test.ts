@@ -984,3 +984,85 @@ describe('GroupsRepository — getActiveAncestors', () => {
     ),
   );
 });
+
+describe('GroupsRepository — findGroupsByTeamId includeArchived', () => {
+  it.effect('omits archived groups by default, so existing callers are unchanged', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000091', 'owner91')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('111111111111111191' as Discord.Snowflake, ownerId),
+      ),
+      Effect.tap(({ team }) => createGroup(team.id, 'Live Group')),
+      Effect.bind('gone', ({ team }) => createGroup(team.id, 'Gone Group')),
+      Effect.tap(({ gone }) => archiveGroup(gone.id)),
+      Effect.bind('groups', ({ team }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findGroupsByTeamId(team.id)),
+        ),
+      ),
+      Effect.tap(({ groups }) =>
+        Effect.sync(() => {
+          expect(groups.map((g) => g.name)).toEqual(['Live Group']);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('returns archived groups flagged as such when asked', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000092', 'owner92')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('111111111111111192' as Discord.Snowflake, ownerId),
+      ),
+      Effect.tap(({ team }) => createGroup(team.id, 'Live Group')),
+      Effect.bind('gone', ({ team }) => createGroup(team.id, 'Gone Group')),
+      Effect.tap(({ gone }) => archiveGroup(gone.id)),
+      Effect.bind('groups', ({ team }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findGroupsByTeamId(team.id, true)),
+        ),
+      ),
+      Effect.tap(({ groups }) =>
+        Effect.sync(() => {
+          // Live rows first -- the ORDER BY puts archived last so the page does not open on a
+          // screenful of tombstones.
+          expect(groups.map((g) => [g.name, g.is_archived])).toEqual([
+            ['Live Group', false],
+            ['Gone Group', true],
+          ]);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('reports member_count 0 for an archived group that still has member rows', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000093', 'owner93')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('111111111111111193' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('member', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+      Effect.bind('gone', ({ team }) => createGroup(team.id, 'Gone Group')),
+      Effect.tap(({ gone, member }) => addGroupMember(gone.id, member.id)),
+      // `archiveGroup` only flips the flag -- `group_members` rows survive on purpose.
+      Effect.tap(({ gone }) => archiveGroup(gone.id)),
+      Effect.bind('groups', ({ team }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findGroupsByTeamId(team.id, true)),
+        ),
+      ),
+      Effect.tap(({ groups }) =>
+        Effect.sync(() => {
+          // 0, not 1: the recursive walk behind member_count still refuses to traverse archived
+          // rows, which is exactly what makes an archived group grant nothing. The count must
+          // agree with that rather than advertising membership the group no longer confers.
+          expect(groups[0]?.is_archived).toBe(true);
+          expect(groups[0]?.member_count).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

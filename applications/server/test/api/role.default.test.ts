@@ -60,6 +60,7 @@ type RoleRow = {
   // Deliberately `false` on every row in every test — see the header. The RESOLVED
   // `defaultRoleId` must never be derived from this column.
   readonly is_default: boolean;
+  readonly is_archived: boolean;
 };
 
 let rolesStore: RoleRow[] = [];
@@ -187,6 +188,7 @@ beforeEach(() => {
       is_built_in: true,
       permission_count: 2,
       is_default: false,
+      is_archived: false,
     },
     {
       id: GUEST_ROLE_ID,
@@ -195,6 +197,7 @@ beforeEach(() => {
       is_built_in: false,
       permission_count: 0,
       is_default: false,
+      is_archived: false,
     },
     {
       id: OTHER_TEAM_ROLE_ID,
@@ -203,6 +206,7 @@ beforeEach(() => {
       is_built_in: false,
       permission_count: 0,
       is_default: false,
+      is_archived: false,
     },
   ];
   permissionsByRole = new Map([

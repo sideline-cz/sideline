@@ -43,6 +43,9 @@ export const toGroupInfo = (
   row: GroupRowLike,
   memberCount: number,
   discordChannelProvisioning: boolean,
+  // Defaulted rather than read off the row: `GroupRowLike` is the shape the create/move paths
+  // also satisfy, and those always produce a live group. Only `listGroups` passes it.
+  isArchived = false,
 ): GroupApi.GroupInfo =>
   new GroupApi.GroupInfo({
     groupId: row.id,
@@ -53,6 +56,7 @@ export const toGroupInfo = (
     color: row.color,
     memberCount,
     discordChannelProvisioning,
+    isArchived,
   });
 
 const forbidden = new GroupApi.Forbidden();
@@ -132,14 +136,19 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'group:manage', forbidden),
               ),
-              Effect.bind('list', () => groups.findGroupsByTeamId(teamId)),
+              // Archived groups included so the page can offer a "show archived" toggle and
+              // filter client-side; `GroupInfo.isArchived` carries which is which. Note the
+              // member count of an archived group reads 0 -- the recursive walk that computes
+              // it still refuses to traverse archived rows, which is what makes an archived
+              // group grant nothing.
+              Effect.bind('list', () => groups.findGroupsByTeamId(teamId, true)),
               Effect.bind('provisioningIds', ({ list }) =>
                 channelSync.hasUnprocessedForGroups(list.map((g) => g.id)),
               ),
               Effect.map(({ list, provisioningIds }) => {
                 const provisioningSet = new Set(provisioningIds);
                 return Array.map(list, (g) =>
-                  toGroupInfo(g, g.member_count, provisioningSet.has(g.id)),
+                  toGroupInfo(g, g.member_count, provisioningSet.has(g.id), g.is_archived),
                 );
               }),
             ),

@@ -54,6 +54,7 @@ export const toRosterPlayer = (entry: RosterEntry) =>
     discordId: entry.discord_id,
     roleNames: entry.role_names,
     effectiveRoles: toEffectiveRoles(entry),
+    groupNames: entry.group_names,
     permissions: entry.permissions,
     name: entry.name,
     birthDate: entry.birth_date,
@@ -167,7 +168,10 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'member:view', new Roster.Forbidden()),
               ),
-              Effect.bind('roster', () => members.findRosterByTeam(teamId)),
+              // The ONLY `findRosterByTeam` caller that asks for departed members: the members
+              // page filters them client-side behind a "show all / only active" toggle, and
+              // `RosterPlayer.active` carries which is which.
+              Effect.bind('roster', () => members.findRosterByTeam(teamId, true)),
               Effect.map(({ roster }) => Array.map(roster, toRosterPlayer)),
             ),
           )
@@ -243,6 +247,9 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                     discordId: entry.discord_id,
                     roleNames: entry.role_names,
                     effectiveRoles: toEffectiveRoles(entry),
+                    // From the pre-update entry: this endpoint edits profile fields only, so
+                    // group membership cannot have changed under it.
+                    groupNames: entry.group_names,
                     permissions: entry.permissions,
                     name: updated.name,
                     birthDate: Option.map(updated.birth_date, DateTime.formatIsoDateUtc),

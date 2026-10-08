@@ -373,6 +373,7 @@ function makeGroupSearchHit(name = 'Widened Group'): AiChatApi.SearchHit {
       color: Option.none<string>(),
       memberCount: 12,
       discordChannelProvisioning: false,
+      isArchived: false,
     }),
   };
 }

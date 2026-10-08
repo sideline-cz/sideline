@@ -57,6 +57,11 @@ const RosterMemberQuery = Schema.Struct({
   include_inactive: Schema.Boolean,
 });
 
+const FindRosterQuery = Schema.Struct({
+  team_id: Schema.String,
+  include_inactive: Schema.Boolean,
+});
+
 const DeactivateMemberQuery = Schema.Struct({
   team_id: Schema.String,
   member_id: Schema.String,
@@ -115,6 +120,26 @@ export class RosterEffectiveRoleRow extends Schema.Class<RosterEffectiveRoleRow>
   group_names: Schema.Array(Schema.String),
 }) {}
 
+/**
+ * The `group_names` source for `RosterEntry`. EVERY query decoding `RosterEntry` must splice
+ * this in — `RostersRepository.findMemberEntries` as well as the two in this file — because the
+ * column is required, and because `api/roster.ts` maps all three through `toRosterPlayer`.
+ * Shared rather than copied for the same reason `effectiveRolesFrom` is: a second hand-written
+ * copy is a second thing to get wrong. Requires the `team_members` row to be aliased `tm`.
+ *
+ * A SEPARATE lateral from `effectiveRolesAggLateral`, not a fourth aggregate inside it: direct
+ * group membership is a plain join over `group_members`, while the effective-roles walk is the
+ * recursive ancestor expression. Folding it in would make all ten of that fragment's call sites
+ * pay for a column only the roster display needs.
+ */
+export const rosterGroupNamesLateral = `
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(array_agg(g.name ORDER BY g.name), '{}') AS group_names
+        FROM group_members gm
+        JOIN groups g ON g.id = gm.group_id AND g.is_archived = false
+        WHERE gm.team_member_id = tm.id
+      ) grp ON true`;
+
 export class RosterEntry extends Schema.Class<RosterEntry>('RosterEntry')({
   member_id: TeamMember.TeamMemberId,
   user_id: User.UserId,
@@ -126,6 +151,14 @@ export class RosterEntry extends Schema.Class<RosterEntry>('RosterEntry')({
   // never needs a default; the default exists purely so hand-built test fixtures that
   // predate this field (`new RosterEntry({...})`) keep constructing without it.
   effective_roles: Schema.Array(RosterEffectiveRoleRow).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
+  // Direct group membership, name-sorted, archived groups excluded. NOT derivable from
+  // `effective_roles[].group_names`, which only names the groups that GRANT a role -- a member
+  // of a role-less group appears here and nowhere there. `withConstructorDefault` for the same
+  // reason as `effective_roles` above: the SQL row always has the column (the aggregate
+  // COALESCEs), the default only keeps hand-built test fixtures constructing.
+  group_names: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
   name: Schema.OptionFromNullOr(Schema.String),
@@ -388,12 +421,14 @@ const make = Effect.gen(function* () {
   // instead of splicing its three aggregates (`role_names` / `permissions` /
   // `effective_roles`) as separate correlated scalar subqueries (each its own
   // `WITH RECURSIVE` materialization) for the same `tm` row.
+
   const findRosterByTeamQuery = SqlSchema.findAll({
-    Request: Schema.String,
+    Request: FindRosterQuery,
     Result: RosterEntry,
-    execute: (teamId) => sql`
+    execute: ({ team_id: teamId, include_inactive: includeInactive }) => sql`
       SELECT tm.id as member_id, tm.user_id, u.discord_id,
              eff.role_names, eff.permissions, eff.effective_roles,
+             grp.group_names,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
              tm.variable_symbol,
              u.username, u.avatar, u.discord_nickname, u.discord_display_name,
@@ -402,11 +437,22 @@ const make = Effect.gen(function* () {
       FROM team_members tm
       JOIN users u ON u.id = tm.user_id
       ${sql.unsafe(effectiveRolesAggLateral('tm'))}
-      WHERE tm.team_id = ${teamId} AND tm.active = true
+      ${sql.unsafe(rosterGroupNamesLateral)}
+      WHERE tm.team_id = ${teamId} AND (${includeInactive} OR tm.active = true)
     `,
   });
 
-  const findRosterByTeam = (teamId: string) => findRosterByTeamQuery(teamId).pipe(catchSqlErrors);
+  /**
+   * `includeInactive` defaults to FALSE on purpose. Only the members PAGE (`listMembers`) asks
+   * for departed members, so it can offer a "show all / only active" toggle. The other callers
+   * must keep seeing active members only: `api/bank-sync.ts` would otherwise start suggesting
+   * variable symbols held by members who have left (the regression PR 756 fixed), and the AI
+   * read tools and player-rating endpoints would describe people who are no longer on the team.
+   */
+  const findRosterByTeam = (teamId: string, includeInactive = false) =>
+    findRosterByTeamQuery({ team_id: teamId, include_inactive: includeInactive }).pipe(
+      catchSqlErrors,
+    );
 
   const findRosterMemberQuery = SqlSchema.findOneOption({
     Request: RosterMemberQuery,
@@ -414,6 +460,7 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       SELECT tm.id as member_id, tm.user_id, u.discord_id,
              eff.role_names, eff.permissions, eff.effective_roles,
+             grp.group_names,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
              tm.variable_symbol,
              u.username, u.avatar, u.discord_nickname, u.discord_display_name,
@@ -422,6 +469,7 @@ const make = Effect.gen(function* () {
       FROM team_members tm
       JOIN users u ON u.id = tm.user_id
       ${sql.unsafe(effectiveRolesAggLateral('tm'))}
+      ${sql.unsafe(rosterGroupNamesLateral)}
       WHERE tm.team_id = ${input.team_id} AND tm.id = ${input.member_id}
         AND (${input.include_inactive} OR tm.active = true)
     `,

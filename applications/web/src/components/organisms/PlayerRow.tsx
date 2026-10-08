@@ -16,6 +16,23 @@ interface PlayerRowProps {
   onDeactivate: (memberId: string) => void;
 }
 
+/**
+ * Direct group membership, comma-joined and truncated. Deliberately plainer than the role
+ * badges: groups are context for the roles above them, and badging both doubles the row height
+ * on a phone. `player.groupNames` is the member's OWN groups — not
+ * `effectiveRoles[].groupNames`, which only names the groups that grant a given role and so
+ * silently omits any group holding no roles.
+ */
+function GroupNames({ names, className }: { names: ReadonlyArray<string>; className?: string }) {
+  if (names.length === 0) return null;
+  const joined = names.join(', ');
+  return (
+    <p className={className} title={joined}>
+      {joined}
+    </p>
+  );
+}
+
 /** Missing VS is not neutral — icon + word, never colour alone (design §5.2). */
 function VariableSymbolMarker() {
   return (
@@ -41,7 +58,7 @@ export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: 
   const hasVs = Option.isSome(player.variableSymbol);
 
   return (
-    <tr className='border-b'>
+    <tr className={player.active ? 'border-b' : 'border-b opacity-60'}>
       <td className='py-2 px-4'>
         <div className='flex items-center gap-2'>
           <Avatar className='size-8'>
@@ -54,7 +71,14 @@ export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: 
             <AvatarFallback>{displayName.slice(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
           <div className='min-w-0'>
-            <p className='font-medium truncate'>{displayName}</p>
+            <p className='font-medium truncate'>
+              {displayName}
+              {!player.active && (
+                <span className='ml-2 text-xs font-normal text-muted-foreground'>
+                  {tr('members_inactiveBadge')}
+                </span>
+              )}
+            </p>
             {/* Role + VS shown inline on mobile since the desktop columns are hidden */}
             <div className='sm:hidden flex items-center gap-2'>
               {!hasVs && <VariableSymbolMarker />}
@@ -66,6 +90,10 @@ export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: 
               {effectiveRoles.length > 0 ? (
                 <EffectiveRolesList roles={effectiveRoles} limit={1} className='text-xs' />
               ) : null}
+              <GroupNames
+                names={player.groupNames}
+                className='truncate text-xs text-muted-foreground'
+              />
             </div>
           </div>
         </div>
@@ -77,6 +105,13 @@ export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: 
       <td className='hidden md:table-cell max-w-[16rem] py-2 px-4'>
         {effectiveRoles.length > 0 ? (
           <EffectiveRolesList roles={effectiveRoles} limit={2} />
+        ) : (
+          tr('members_fieldEmpty')
+        )}
+      </td>
+      <td className='hidden md:table-cell max-w-[14rem] py-2 px-4 text-sm text-muted-foreground'>
+        {player.groupNames.length > 0 ? (
+          <GroupNames names={player.groupNames} className='truncate' />
         ) : (
           tr('members_fieldEmpty')
         )}

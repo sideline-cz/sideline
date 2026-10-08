@@ -251,6 +251,7 @@ function groupHit(overrides: { name?: string; groupId?: string } = {}): AiChatAp
       color: Option.none(),
       memberCount: 10,
       discordChannelProvisioning: false,
+      isArchived: false,
     }),
   };
 }

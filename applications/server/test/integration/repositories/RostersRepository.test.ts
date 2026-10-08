@@ -400,3 +400,81 @@ describe('RostersRepository.findMemberEntriesById — group-inherited roles', ()
     ),
   );
 });
+
+// `findMemberEntries` is the THIRD query decoding `RosterEntry`, and the one that was missed when
+// `group_names` was added — the column is required, so the query that forgets it does not return
+// empty groups, it fails to decode at all. `api/roster.ts` maps these entries through
+// `toRosterPlayer`, so a silent `[]` here would have served every roster member as group-less.
+describe('RostersRepository.findMemberEntriesById — group_names', () => {
+  it.effect('populates group_names, name-sorted and excluding archived groups', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000081', 'owner81')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('111111111111111181' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('member', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+      Effect.bind('roster', ({ team }) => createRoster(team.id)),
+      Effect.tap(({ roster, member }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.addMemberById(roster.id, member.id)),
+        ),
+      ),
+      Effect.bind('zebra', ({ team }) => createGroup(team.id, 'Zebra')),
+      Effect.bind('alpha', ({ team }) => createGroup(team.id, 'Alpha')),
+      Effect.bind('gone', ({ team }) => createGroup(team.id, 'Gone')),
+      Effect.tap(({ zebra, member }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.addMemberById(zebra.id, member.id)),
+        ),
+      ),
+      Effect.tap(({ alpha, member }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.addMemberById(alpha.id, member.id)),
+        ),
+      ),
+      Effect.tap(({ gone, member }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.addMemberById(gone.id, member.id)),
+        ),
+      ),
+      Effect.tap(({ gone }) =>
+        GroupsRepository.asEffect().pipe(Effect.andThen((repo) => repo.archiveGroupById(gone.id))),
+      ),
+      Effect.bind('entries', ({ roster }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findMemberEntriesById(roster.id)),
+        ),
+      ),
+      Effect.tap(({ entries }) =>
+        Effect.sync(() => {
+          expect(entries).toHaveLength(1);
+          expect(entries[0]?.group_names).toEqual(['Alpha', 'Zebra']);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('returns an empty array for a roster member in no groups', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000082', 'owner82')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('111111111111111182' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('member', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+      Effect.bind('roster', ({ team }) => createRoster(team.id)),
+      Effect.tap(({ roster, member }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.addMemberById(roster.id, member.id)),
+        ),
+      ),
+      Effect.bind('entries', ({ roster }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findMemberEntriesById(roster.id)),
+        ),
+      ),
+      Effect.tap(({ entries }) => Effect.sync(() => expect(entries[0]?.group_names).toEqual([]))),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
