@@ -120,6 +120,55 @@ describe('setVariableSymbol — conflict inside an open transaction', () => {
   );
 });
 
+describe('setVariableSymbol — holder with no `users.name`', () => {
+  // The common case in production: ~72% of symbol holders joined via Discord and never got
+  // `users.name` populated, so the raw `u.name` select reported `None` and the treasurer saw
+  // "— already has this symbol". The fixture here deliberately does NOT set a name.
+  it.effect('falls back down the display-name chain instead of naming nobody', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const members = yield* TeamMembersRepository;
+      const owner = yield* createUser('owner-noname');
+      const team = yield* createTeam(nextDiscordId(), owner.id);
+      const holderUser = yield* createUser('filip28');
+      const claimantUser = yield* createUser('claimant-noname');
+      yield* sql`UPDATE users SET name = NULL, discord_display_name = 'Filip' WHERE id = ${holderUser.id}`;
+      const holder = yield* createTeamMember(team.id, holderUser.id);
+      const claimant = yield* createTeamMember(team.id, claimantUser.id);
+      yield* members.setVariableSymbol(holder.id, team.id, Option.some('2026013'));
+
+      const result = yield* Effect.result(
+        members.setVariableSymbol(claimant.id, team.id, Option.some('2026013')),
+      );
+
+      const failure = expectConflict(result, holder.id);
+      expect(Option.getOrNull(failure.holderName as Option.Option<string>)).toBe('Filip');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('falls all the way back to the Discord username', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const members = yield* TeamMembersRepository;
+      const owner = yield* createUser('owner-username');
+      const team = yield* createTeam(nextDiscordId(), owner.id);
+      const holderUser = yield* createUser('filip28');
+      const claimantUser = yield* createUser('claimant-username');
+      yield* sql`UPDATE users SET name = NULL WHERE id = ${holderUser.id}`;
+      const holder = yield* createTeamMember(team.id, holderUser.id);
+      const claimant = yield* createTeamMember(team.id, claimantUser.id);
+      yield* members.setVariableSymbol(holder.id, team.id, Option.some('2026014'));
+
+      const result = yield* Effect.result(
+        members.setVariableSymbol(claimant.id, team.id, Option.some('2026014')),
+      );
+
+      const failure = expectConflict(result, holder.id);
+      expect(Option.getOrNull(failure.holderName as Option.Option<string>)).toBe('filip28');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
 describe('setVariableSymbol — conflict with no surrounding transaction', () => {
   it.effect('still reports the holder (the single-member roster path)', () =>
     Effect.gen(function* () {

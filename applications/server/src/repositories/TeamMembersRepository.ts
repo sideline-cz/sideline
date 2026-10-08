@@ -472,7 +472,8 @@ const make = Effect.gen(function* () {
       name: Schema.OptionFromNullOr(Schema.String),
     }),
     execute: (input) => sql`
-      SELECT tm.id AS member_id, u.name
+      SELECT tm.id AS member_id,
+             COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS name
       FROM team_members tm
       JOIN users u ON u.id = tm.user_id
       WHERE tm.team_id = ${input.team_id}
