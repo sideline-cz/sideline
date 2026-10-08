@@ -1,8 +1,15 @@
-import type { BankSyncApi } from '@sideline/domain';
-import { BankTransaction, Fee, FeeAssignment, Team } from '@sideline/domain';
+import {
+  BankSyncApi,
+  BankTransaction,
+  Fee,
+  FeeAssignment,
+  Team,
+  TeamMember,
+} from '@sideline/domain';
 import { Effect, Option, Schema } from 'effect';
 import { Plus, X } from 'lucide-react';
 import React from 'react';
+import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { Button } from '~/components/ui/button';
 import {
   Dialog,
@@ -16,7 +23,7 @@ import { Label } from '~/components/ui/label';
 import { Textarea } from '~/components/ui/textarea';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { parseAmount } from '~/lib/finance/parseAmount.js';
-import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { ApiClient, ClientError, SilentClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
 type ResolveMode = 'assign' | 'split' | 'other' | 'ignore';
@@ -74,6 +81,18 @@ export function MatchTransactionDialog({
   const [ignoreReason, setIgnoreReason] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
+  // Manual member override. The server resolves a member from the VARIABLE SYMBOL, so a transfer
+  // that carries none — or carries the payer's rather than the player's, the usual shape when a
+  // parent pays — arrives with an empty `candidateAssignments` and both allocating modes greyed
+  // out. `matchBankTransaction` itself only ever needed an `assignmentId`, never a resolved
+  // member, so the capability was always there; this exposes it.
+  const [members, setMembers] = React.useState<
+    ReadonlyArray<{ readonly value: string; readonly label: string }>
+  >([]);
+  const [pickedMemberId, setPickedMemberId] = React.useState('');
+  const [memberCandidates, setMemberCandidates] =
+    React.useState<ReadonlyArray<BankSyncApi.BankTransactionCandidateAssignment> | null>(null);
+  const [loadingMemberFees, setLoadingMemberFees] = React.useState(false);
 
   React.useEffect(() => {
     if (txId === null) return;
@@ -111,6 +130,8 @@ export function MatchTransactionDialog({
         }
         setSplitRows([]);
         setAmountStr('');
+        setPickedMemberId('');
+        setMemberCandidates(null);
       }
     })();
     return () => {
@@ -118,9 +139,86 @@ export function MatchTransactionDialog({
     };
   }, [txId, teamId, run]);
 
-  const selectedCandidate = detail?.candidateAssignments.find(
-    (c) => c.assignmentId === selectedAssignmentId,
-  );
+  // Load the roster once per open, so the override picker is ready without a second click.
+  React.useEffect(() => {
+    if (txId === null) return;
+    let cancelled = false;
+    const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
+    void (async () => {
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) => api.roster.listMembers({ params: { teamId: teamIdBranded } })),
+        Effect.map((roster) =>
+          roster
+            .filter((m) => m.active)
+            .map((m) => ({
+              value: m.memberId,
+              label: Option.match(m.variableSymbol, {
+                onNone: () => m.displayName,
+                onSome: (vs) => `${m.displayName} · ${vs}`,
+              }),
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label)),
+        ),
+        // The picker is an override, not the primary path: a roster that fails to load must not
+        // put an error toast over a dialog whose own data arrived fine.
+        Effect.mapError(() => new SilentClientError({ message: 'listMembers' })),
+        run({}),
+      );
+      if (!cancelled && Option.isSome(result)) setMembers(result.value);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [txId, teamId, run]);
+
+  const handlePickMember = async (memberId: string) => {
+    setPickedMemberId(memberId);
+    setSelectedAssignmentId('');
+    setSplitRows([]);
+    setError(null);
+    if (memberId === '') {
+      setMemberCandidates(null);
+      return;
+    }
+    setLoadingMemberFees(true);
+    const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
+    const memberIdBranded = Schema.decodeSync(TeamMember.TeamMemberId)(memberId);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.finance.listMemberAssignments({
+          params: { teamId: teamIdBranded, memberId: memberIdBranded },
+        }),
+      ),
+      Effect.map((assignments) =>
+        assignments
+          .filter((a) => a.dueMinor - a.paidMinor > 0 && a.status !== 'waived')
+          .map(
+            (a) =>
+              new BankSyncApi.BankTransactionCandidateAssignment({
+                assignmentId: a.assignmentId,
+                feeId: a.feeId,
+                feeName: a.feeName,
+                currency: a.currency,
+                outstandingMinor: (a.dueMinor - a.paidMinor) as typeof a.dueMinor,
+                effectiveDueAt: a.effectiveDueAt,
+              }),
+          ),
+      ),
+      Effect.mapError(() => ClientError.make(tr('bank_resolve_memberFeesFailed'))),
+      run({}),
+    );
+    setLoadingMemberFees(false);
+    if (Option.isSome(result)) {
+      setMemberCandidates(result.value);
+      if (result.value.length === 1) setSelectedAssignmentId(result.value[0].assignmentId);
+    }
+  };
+
+  // The override wins once a member is picked; otherwise the VS-resolved candidates stand.
+  const candidates: ReadonlyArray<BankSyncApi.BankTransactionCandidateAssignment> =
+    memberCandidates ?? detail?.candidateAssignments ?? [];
+
+  const selectedCandidate = candidates.find((c) => c.assignmentId === selectedAssignmentId);
   const txAmountMinor = detail ? Math.abs(Number(detail.amountMinor)) : 0;
   const isOverpayment =
     selectedCandidate !== undefined && txAmountMinor > selectedCandidate.outstandingMinor;
@@ -250,7 +348,7 @@ export function MatchTransactionDialog({
 
   const addSplitRow = () => {
     const used = new Set(splitRows.map((r) => r.assignmentId));
-    const next = detail?.candidateAssignments.find((c) => !used.has(c.assignmentId));
+    const next = candidates.find((c) => !used.has(c.assignmentId));
     if (!next) return;
     setSplitRows((prev) => [...prev, { assignmentId: next.assignmentId, amountStr: '' }]);
   };
@@ -280,6 +378,31 @@ export function MatchTransactionDialog({
           <p className='text-sm text-muted-foreground'>{tr('loading_text')}</p>
         ) : (
           <form onSubmit={handleSubmit} className='flex flex-col gap-4'>
+            {/* Member override. Shown always, not only when the VS resolved nobody: a parent
+                paying under their own symbol resolves to the WRONG member, which looks like a
+                correct match and is the more dangerous of the two cases. */}
+            <div className='flex flex-col gap-2'>
+              <Label htmlFor='resolve-member'>{tr('bank_resolve_member')}</Label>
+              <SearchableSelect
+                id='resolve-member'
+                options={members}
+                value={pickedMemberId}
+                onValueChange={(v) => void handlePickMember(v)}
+                placeholder={Option.getOrElse(detail.resolvedMemberName, () =>
+                  tr('bank_resolve_memberPick'),
+                )}
+                disabled={loadingMemberFees || members.length === 0}
+              />
+              <p className='text-xs text-muted-foreground'>
+                {pickedMemberId === ''
+                  ? tr('bank_resolve_memberHint')
+                  : loadingMemberFees
+                    ? tr('bank_resolve_memberLoading')
+                    : candidates.length === 0
+                      ? tr('bank_resolve_memberNoOpenFees')
+                      : tr('bank_resolve_memberOverride')}
+              </p>
+            </div>
             <fieldset className='flex flex-col gap-2 border-0 p-0 m-0'>
               <label className='flex items-center gap-2 text-sm cursor-pointer'>
                 <input
@@ -287,7 +410,7 @@ export function MatchTransactionDialog({
                   name='resolve-mode'
                   checked={mode === 'assign'}
                   onChange={() => setMode('assign')}
-                  disabled={detail.candidateAssignments.length === 0}
+                  disabled={candidates.length === 0}
                 />
                 {tr('bank_resolve_modeAssign')}
               </label>
@@ -303,7 +426,7 @@ export function MatchTransactionDialog({
                     <option value='' disabled>
                       —
                     </option>
-                    {detail.candidateAssignments.map((c) => (
+                    {candidates.map((c) => (
                       <option key={c.assignmentId} value={c.assignmentId}>
                         {tr('bank_resolve_feeOption', {
                           fee: c.feeName,
@@ -378,16 +501,14 @@ export function MatchTransactionDialog({
                   name='resolve-mode'
                   checked={mode === 'split'}
                   onChange={() => setMode('split')}
-                  disabled={detail.candidateAssignments.length === 0}
+                  disabled={candidates.length === 0}
                 />
                 {tr('bank_resolve_modeSplit')}
               </label>
               {mode === 'split' && (
                 <div className='pl-6 flex flex-col gap-2'>
                   {splitRows.map((row, i) => {
-                    const candidate = detail.candidateAssignments.find(
-                      (c) => c.assignmentId === row.assignmentId,
-                    );
+                    const candidate = candidates.find((c) => c.assignmentId === row.assignmentId);
                     return (
                       <div key={row.assignmentId} className='flex items-center gap-2'>
                         <span className='text-sm flex-1 truncate'>{candidate?.feeName}</span>
