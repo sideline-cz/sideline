@@ -22,6 +22,7 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { ExpenseAttachmentsRepository } from '~/repositories/ExpenseAttachmentsRepository.js';
 import type { ExpenseWithNamesRow } from '~/repositories/ExpensesRepository.js';
 import {
   BankTransactionAlreadyExpensed,
@@ -220,6 +221,9 @@ const makeExpenseRow = (
     updated_by_name: Option.none<string>(),
     created_at: now,
     updated_at: now,
+    // Required: `fromExpenseRow` feeds this straight into `ExpenseView`'s `Schema.Array`, and the
+    // `as ExpenseWithNamesRow` below hides a missing key until the encode 500s at runtime.
+    attachments: [],
     ...overrides,
   }) as ExpenseWithNamesRow;
 
@@ -244,6 +248,17 @@ const MockBankTxLookupLayer = Layer.succeed(
   }),
 );
 
+// `ExpenseApiLive` binds this in the same `Effect.Do` chain as `ExpensesRepository`, so without
+// a stub the whole layer graph fails to build. No test in this file hits the attachment endpoints.
+const MockExpenseAttachmentsRepositoryLayer = Layer.succeed(
+  ExpenseAttachmentsRepository,
+  buildNoop('api/ExpenseAttachmentsRepository', {
+    insert: () => Effect.die(new Error('Not implemented')),
+    findByIdWithBytes: () => Effect.die(new Error('Not implemented')),
+    delete: () => Effect.die(new Error('Not implemented')),
+  }),
+);
+
 const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
   _tag: 'api/ExpensesRepository' as const,
   insert: (input: any) => {
@@ -263,6 +278,7 @@ const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
       updated_by_name: Option.none<string>(),
       created_at: now,
       updated_at: now,
+      attachments: [],
     };
     // Mirrors the `uq_expenses_bank_transaction_id` violation the real repository maps.
     const linkedTo = Option.getOrNull(input.bank_transaction_id ?? Option.none());
@@ -426,7 +442,13 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockTeamsRepositoryLayer),
   Layer.provide(MockTeamMembersRepositoryLayer),
   Layer.provide(MockHttpClientLayer),
-  Layer.provide(Layer.mergeAll(MockExpensesRepositoryLayer, MockBankTxLookupLayer)),
+  Layer.provide(
+    Layer.mergeAll(
+      MockExpensesRepositoryLayer,
+      MockBankTxLookupLayer,
+      MockExpenseAttachmentsRepositoryLayer,
+    ),
+  ),
   Layer.provide(
     Layer.succeed(
       FeesRepository,
@@ -1029,6 +1051,8 @@ describe('Expense API — getExpense', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.expenseId).toBe(id);
+    // Pins the field on the wire: an expense with no invoice answers `[]`, never `undefined`.
+    expect(body.attachments).toEqual([]);
   });
 
   it('GET /teams/:teamId/expenses/:expenseId → 404 when expense not found', async () => {

@@ -107,6 +107,7 @@ authedTest.describe('No horizontal overflow on mobile', () => {
     // reintroduce the sideways scroll PR 723 removed — this is what proves it.
     ['rosters', `/teams/${TEAM_ID}/rosters`],
     ['training types', `/teams/${TEAM_ID}/training-types`],
+    ['expenses', `/teams/${TEAM_ID}/finances/expenses`],
     // The by-member table gains an Actions column + a currency code + a credit line in this
     // ticket (settle-all-and-credit) — this is the regression net for it.
     ['finances', `/teams/${TEAM_ID}/finances`],
@@ -117,6 +118,11 @@ authedTest.describe('No horizontal overflow on mobile', () => {
       await page.setViewportSize({ width: 360, height: 780 });
       await page.goto(url);
       await expect(page.locator('h1').first()).toBeVisible({ timeout: 30000 });
+
+      // The error boundary renders its own <h1>, so "an h1 is visible" is satisfied by a page
+      // that never rendered — and a crash screen trivially has no horizontal overflow, making
+      // every assertion below pass vacuously. Reject it explicitly.
+      await expect(page.locator('h1').first()).not.toHaveText(/Something went wrong/i);
 
       if (name === 'finances') {
         // The overview tab is the default when balance summaries are present (mocked here) —

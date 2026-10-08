@@ -46,7 +46,40 @@ export class ExpenseWithNamesRow extends Schema.Class<ExpenseWithNamesRow>('Expe
   updated_at: Schemas.DateTimeFromDate,
   created_by_name: Schema.OptionFromNullOr(Schema.String),
   updated_by_name: Schema.OptionFromNullOr(Schema.String),
+  attachments: Schema.Array(Expense.ExpenseAttachmentMeta),
 }) {}
+
+/**
+ * Attachment METADATA for one expense, as a jsonb array, empty array (never NULL, never [null])
+ * when the expense has none. One correlated scalar subquery per outer row, served by
+ * idx_expense_attachments_expense_id — no second round trip and no N+1.
+ *
+ * node-pg parses jsonb columns into plain JS values, so the read side decodes this with
+ * Schema.Array(Expense.ExpenseAttachmentMeta) and gets real class instances back, which is what
+ * ExpenseView requires (Schema.Class is nominal).
+ *
+ * jsonb_agg over zero rows returns NULL, hence the COALESCE to an empty array. The
+ * FROM ... WHERE form cannot yield [null]: jsonb_build_object is never NULL.
+ *
+ * The alias is a parameter because the INSERT/UPDATE queries select from a CTE aliased "a" while
+ * findById/listByTeam select from "e". It is a module constant, never user input, and is spliced
+ * with sql.unsafe the same way RostersRepository splices effectiveRolesAggLateral.
+ */
+const attachmentsAgg = (expenseAlias: string): string => `
+  COALESCE(
+    (SELECT jsonb_agg(
+       jsonb_build_object(
+         'attachmentId', ea.id,
+         'filename', ea.filename,
+         'contentType', ea.content_type,
+         'sizeBytes', ea.size_bytes
+       ) ORDER BY ea.created_at ASC, ea.id ASC
+     )
+     FROM expense_attachments ea
+     WHERE ea.expense_id = ${expenseAlias}.id),
+    '[]'::jsonb
+  ) AS attachments
+`;
 
 // ---------------------------------------------------------------------------
 // Balance-summary row (decoded once in the repo so callers receive typed values)
@@ -124,7 +157,8 @@ const make = Effect.gen(function* () {
       SELECT
         a.*,
         COALESCE(cu.name, cu.discord_display_name, cu.discord_nickname, cu.username) AS created_by_name,
-        COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name
+        COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name,
+        ${sql.unsafe(attachmentsAgg('a'))}
       FROM affected a
       LEFT JOIN users cu ON cu.id = a.created_by_user_id
       LEFT JOIN users uu ON uu.id = a.updated_by_user_id
@@ -139,7 +173,8 @@ const make = Effect.gen(function* () {
         SELECT
           e.*,
           COALESCE(cu.name, cu.discord_display_name, cu.discord_nickname, cu.username) AS created_by_name,
-          COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name
+          COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name,
+          ${sql.unsafe(attachmentsAgg('e'))}
         FROM expenses e
         LEFT JOIN users cu ON cu.id = e.created_by_user_id
         LEFT JOIN users uu ON uu.id = e.updated_by_user_id
@@ -157,7 +192,8 @@ const make = Effect.gen(function* () {
       SELECT
         e.*,
         COALESCE(cu.name, cu.discord_display_name, cu.discord_nickname, cu.username) AS created_by_name,
-        COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name
+        COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name,
+        ${sql.unsafe(attachmentsAgg('e'))}
       FROM expenses e
       LEFT JOIN users cu ON cu.id = e.created_by_user_id
       LEFT JOIN users uu ON uu.id = e.updated_by_user_id
@@ -202,7 +238,8 @@ const make = Effect.gen(function* () {
         SELECT
           a.*,
           COALESCE(cu.name, cu.discord_display_name, cu.discord_nickname, cu.username) AS created_by_name,
-          COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name
+          COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name,
+          ${sql.unsafe(attachmentsAgg('a'))}
         FROM affected a
         LEFT JOIN users cu ON cu.id = a.created_by_user_id
         LEFT JOIN users uu ON uu.id = a.updated_by_user_id

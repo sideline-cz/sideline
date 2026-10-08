@@ -144,6 +144,17 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
     ['user_id'],
     drop('A saved dashboard arrangement serves only this person.'),
   ),
+  // Same shape as `bank_transactions` above: the only tie to a person is who uploaded it.
+  skip(
+    'expense_attachments',
+    'users',
+    ['uploaded_by_user_id'],
+    "Invoices and receipts belonging to the club. A supplier invoice carries the vendor's " +
+      'name, address, IČO and bank account — third parties who never consented to appear ' +
+      "in anyone else's personal export. The only tie to this person is who uploaded the " +
+      "file; the document is the club's accounting evidence, not data about them.",
+    financial,
+  ),
   own('expense_history', 'users', ['performed_by_user_id'], financial),
   own('expenses', 'users', ['created_by_user_id', 'updated_by_user_id'], financial),
   own(

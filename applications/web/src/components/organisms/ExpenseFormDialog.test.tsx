@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DateTime, Option } from 'effect';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -12,7 +12,7 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 vi.mock('~/lib/translations.js', () => ({
-  tr: (key: string) => {
+  tr: (key: string, params?: Record<string, unknown>) => {
     const map: Record<string, string> = {
       expense_form_title_create: 'Add Expense',
       expense_form_title_edit: 'Edit Expense',
@@ -33,8 +33,23 @@ vi.mock('~/lib/translations.js', () => ({
       expense_category_travel: 'Travel',
       expense_category_tournaments: 'Tournaments',
       expense_category_other: 'Other',
+      expense_form_saving: 'Saving…',
+      expense_attachments_title: 'Invoices',
+      expense_attachments_hint: 'PDF, JPEG, PNG or HEIC, up to 5 MB',
+      expense_attachments_empty: 'No invoice attached yet',
+      expense_attachments_pending: 'Will be attached when you save',
+      expense_attachments_download: 'Download',
+      expense_attachments_downloadAria: 'Download {filename}',
+      expense_attachments_remove: 'Remove',
+      expense_attachments_removeAria: 'Remove {filename}',
+      expense_attachments_deleteConfirm_title: 'Remove this invoice?',
+      expense_attachments_deleteConfirm_description:
+        '{filename} will be permanently deleted. This cannot be undone.',
+      expense_attachments_deleteConfirm_action: 'Remove invoice',
     };
-    return map[key] ?? key;
+    const template = map[key] ?? key;
+    if (!params) return template;
+    return template.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
   },
   setTranslationOverrides: vi.fn(),
 }));
@@ -63,6 +78,13 @@ const { ExpenseFormDialog } = await import('~/components/organisms/ExpenseFormDi
 
 type ExpenseCategory = 'fields' | 'equipment' | 'travel' | 'tournaments' | 'other';
 
+type AttachmentMeta = {
+  attachmentId: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+};
+
 type ExpenseView = {
   expenseId: string;
   teamId: string;
@@ -75,6 +97,7 @@ type ExpenseView = {
   updatedByUserId: string;
   createdAt: DateTime.Utc;
   updatedAt: DateTime.Utc;
+  attachments: ReadonlyArray<AttachmentMeta>;
 };
 
 type CreateExpenseRequest = {
@@ -104,9 +127,17 @@ function makeExpense(overrides: Partial<ExpenseView> = {}): ExpenseView {
     updatedByUserId: 'user-1',
     createdAt: SPENT_AT,
     updatedAt: SPENT_AT,
+    attachments: [],
     ...overrides,
   };
 }
+
+const ATTACHMENT: AttachmentMeta = {
+  attachmentId: 'att-1',
+  filename: 'invoice.pdf',
+  contentType: 'application/pdf',
+  sizeBytes: 1234,
+};
 
 const TEAM_ID = 'team-1';
 
@@ -426,5 +457,186 @@ describe('ExpenseFormDialog — prefill from a bank movement', () => {
 
     const arg = onSubmit.mock.calls[0][0] as { category: string };
     expect(arg.category).toBe('other');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Invoice attachments (plan §7d)
+// ---------------------------------------------------------------------------
+
+/** jsdom's `input.files` is read-only, so define it rather than letting fireEvent assign it. */
+function selectFiles(input: HTMLInputElement, files: ReadonlyArray<File>) {
+  Object.defineProperty(input, 'files', { value: files, configurable: true });
+  fireEvent.change(input);
+}
+
+function fileInput(): HTMLInputElement {
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+  if (!input) throw new Error('ExpenseFormDialog must render a file input');
+  return input;
+}
+
+function submitButton(): HTMLButtonElement {
+  const button = document.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+  if (!button) throw new Error('ExpenseFormDialog must render a submit button');
+  return button;
+}
+
+function fillRequiredFields() {
+  const amountInput = document.querySelector('input[type="number"]') as HTMLInputElement;
+  fireEvent.change(amountInput, { target: { value: '10' } });
+  const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+  fireEvent.change(dateInput, { target: { value: '2025-05-01' } });
+}
+
+function renderEditWithAttachments(
+  attachments: ReadonlyArray<AttachmentMeta>,
+  handlers: {
+    // Deliberately loose: these are vi.fn() spies handed straight to props with
+    // differing signatures, and `ReturnType<typeof vi.fn>` is assignable to none of them.
+    onSubmit?: (...args: never[]) => unknown;
+    onDownloadAttachment?: (...args: never[]) => unknown;
+    onDeleteAttachment?: (...args: never[]) => unknown;
+  } = {},
+) {
+  return render(
+    <ExpenseFormDialog
+      open={true}
+      mode='edit'
+      expense={makeExpense({ attachments })}
+      teamId={TEAM_ID}
+      onSubmit={(handlers.onSubmit ?? vi.fn()) as never}
+      onCancel={vi.fn()}
+      onDownloadAttachment={(handlers.onDownloadAttachment ?? vi.fn()) as never}
+      onDeleteAttachment={(handlers.onDeleteAttachment ?? vi.fn()) as never}
+    />,
+  );
+}
+
+describe('ExpenseFormDialog — invoice attachments', () => {
+  it('should hand staged files to onSubmit as the second argument', async () => {
+    const onSubmit = vi.fn();
+    renderCreate(onSubmit);
+    fillRequiredFields();
+
+    const file = new File(['x'], 'invoice.pdf', { type: 'application/pdf' });
+    selectFiles(fileInput(), [file]);
+
+    fireEvent.click(submitButton());
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledOnce();
+    });
+
+    const files = onSubmit.mock.calls[0][1] as ReadonlyArray<File>;
+    expect(files).toHaveLength(1);
+    expect(files[0].name).toBe('invoice.pdf');
+  });
+
+  it('should call onSubmit with an empty array when no file is staged', async () => {
+    // No blocking validation — the nudge is a badge, not a gate.
+    const onSubmit = vi.fn();
+    renderCreate(onSubmit);
+    fillRequiredFields();
+
+    fireEvent.click(submitButton());
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledOnce();
+    });
+    expect(onSubmit.mock.calls[0][1]).toEqual([]);
+  });
+
+  it('should list existing attachments with labelled download and remove controls in edit mode', () => {
+    renderEditWithAttachments([ATTACHMENT]);
+
+    expect(screen.queryByText('invoice.pdf')).not.toBeNull();
+    // sr-only labels — icon-only controls are forbidden without one.
+    expect(screen.getByText('Download invoice.pdf')).not.toBeNull();
+    expect(screen.getByText('Remove invoice.pdf')).not.toBeNull();
+  });
+
+  it('should call onDownloadAttachment with the id and filename when download is clicked', () => {
+    const onDownloadAttachment = vi.fn();
+    renderEditWithAttachments([ATTACHMENT], { onDownloadAttachment });
+
+    fireEvent.click(screen.getByText('Download invoice.pdf'));
+
+    expect(onDownloadAttachment).toHaveBeenCalledOnce();
+    expect(onDownloadAttachment).toHaveBeenCalledWith('att-1', 'invoice.pdf');
+  });
+
+  it('should ask for confirmation before deleting an attachment', async () => {
+    // Deleting an accounting document has no undo: this fails if the AlertDialog is ever
+    // reverted to a bare onClick.
+    const onDeleteAttachment = vi.fn();
+    renderEditWithAttachments([ATTACHMENT], { onDeleteAttachment });
+
+    fireEvent.click(screen.getByText('Remove invoice.pdf'));
+
+    expect(onDeleteAttachment).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.queryByText('Remove this invoice?')).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByText('Remove invoice'));
+
+    await waitFor(() => {
+      expect(onDeleteAttachment).toHaveBeenCalledOnce();
+    });
+    expect(onDeleteAttachment).toHaveBeenCalledWith('att-1');
+  });
+
+  it('should not delete when the confirmation is cancelled', async () => {
+    const onDeleteAttachment = vi.fn();
+    renderEditWithAttachments([ATTACHMENT], { onDeleteAttachment });
+
+    fireEvent.click(screen.getByText('Remove invoice.pdf'));
+    await waitFor(() => {
+      expect(screen.queryByText('Remove this invoice?')).not.toBeNull();
+    });
+
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('Cancel'));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Remove this invoice?')).toBeNull();
+    });
+    expect(onDeleteAttachment).not.toHaveBeenCalled();
+  });
+
+  it('should show the empty-state copy when the expense has no attachments', () => {
+    renderEditWithAttachments([]);
+
+    expect(screen.queryByText('No invoice attached yet')).not.toBeNull();
+  });
+
+  it('should disable submit while the submit handler is pending and not fire it twice', async () => {
+    // Without this the window between createExpense and the last upload stays clickable, and a
+    // double click creates two expenses, each with its own upload loop.
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const onSubmit = vi.fn(() => pending);
+
+    renderCreate(onSubmit);
+    fillRequiredFields();
+
+    fireEvent.click(submitButton());
+
+    await waitFor(() => {
+      expect(submitButton().disabled).toBe(true);
+    });
+    expect(submitButton().textContent).toContain('Saving…');
+
+    fireEvent.click(submitButton());
+    expect(onSubmit).toHaveBeenCalledOnce();
+
+    release();
+
+    await waitFor(() => {
+      expect(submitButton().disabled).toBe(false);
+    });
+    expect(onSubmit).toHaveBeenCalledOnce();
   });
 });

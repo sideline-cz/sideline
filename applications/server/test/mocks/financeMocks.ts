@@ -1,5 +1,6 @@
 import { LogicError } from '@sideline/effect-lib';
 import { Effect, Layer, Option } from 'effect';
+import { ExpenseAttachmentsRepository } from '~/repositories/ExpenseAttachmentsRepository.js';
 import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
@@ -77,11 +78,21 @@ export const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
   countHistoryRows: () => Effect.succeed(0),
 } as never);
 
+// `ExpenseApiLive` binds this alongside `ExpensesRepository`, so every suite that builds the full
+// `ApiLive` needs it or the layer graph will not type-check, let alone build.
+export const MockExpenseAttachmentsRepositoryLayer = Layer.succeed(ExpenseAttachmentsRepository, {
+  _tag: 'api/ExpenseAttachmentsRepository' as const,
+  insert: () => LogicError.die('MockExpenseAttachmentsRepositoryLayer.insert not implemented'),
+  findByIdWithBytes: () => Effect.succeed(Option.none()),
+  delete: () => Effect.succeed(false),
+} as never);
+
 export const MockFinanceLayers = Layer.mergeAll(
   MockFeesRepositoryLayer,
   MockFeeAssignmentsRepositoryLayer,
   MockPaymentsRepositoryLayer,
   MockFinanceOverviewRepositoryLayer,
   MockExpensesRepositoryLayer,
+  MockExpenseAttachmentsRepositoryLayer,
   MockMemberCreditsRepositoryLayer,
 );

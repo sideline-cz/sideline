@@ -27,6 +27,7 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { ExpenseAttachmentsRepository } from '~/repositories/ExpenseAttachmentsRepository.js';
 import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
@@ -602,6 +603,11 @@ const TestLayer = ApiLive.pipe(
     ),
   )
   .pipe(Layer.provide(Layer.succeed(ExpensesRepository, buildNoop('api/ExpensesRepository'))))
+  .pipe(
+    Layer.provide(
+      Layer.succeed(ExpenseAttachmentsRepository, buildNoop('api/ExpenseAttachmentsRepository')),
+    ),
+  )
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
   .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))

@@ -1,11 +1,19 @@
 import type { ExpenseApi } from '@sideline/domain';
+import { DateTime } from 'effect';
 import { ExpenseCategoryBadge } from '~/components/molecules/ExpenseCategoryBadge.js';
+import {
+  ListToolbar,
+  listHeaderClass,
+  listScrollClass,
+} from '~/components/molecules/ListToolbar.js';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { formatLocalDate } from '~/lib/datetime.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { tr } from '~/lib/translations.js';
+import { useListFilter } from '~/lib/useListFilter.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,6 +49,54 @@ const CATEGORIES: ReadonlyArray<{ value: string; labelKey: string }> = [
 ];
 
 // ---------------------------------------------------------------------------
+// Toolbar config — module scope, not inline: `useListFilter` memoises on these, so a fresh
+// array each render would recompute the whole list every time.
+// ---------------------------------------------------------------------------
+
+// The "missing invoice" chip and the "No invoice" row badge read the SAME condition — an empty
+// `attachments` array. Keep them in step: a row the chip matches must be a row that is badged.
+const hasNoInvoice = (e: ExpenseView) => e.attachments.length === 0;
+
+const EXPENSE_FILTERS = [
+  { value: 'all', labelKey: 'list_filter_all', predicate: () => true },
+  { value: 'missingInvoice', labelKey: 'expenses_filter_missingInvoice', predicate: hasNoInvoice },
+] as const;
+
+const DEFAULT_FILTER = EXPENSE_FILTERS[0].value;
+
+const spentMs = (e: ExpenseView) => Number(DateTime.toEpochMillis(e.spentAt));
+const createdMs = (e: ExpenseView) => Number(DateTime.toEpochMillis(e.createdAt));
+
+const EXPENSE_SORTS = [
+  {
+    // Default, and deliberately identical to the server's `ORDER BY spent_at DESC, created_at
+    // DESC` — adopting the toolbar must not reshuffle the list on first paint.
+    value: 'newest',
+    labelKey: 'expenses_sort_newest',
+    compare: (a: ExpenseView, b: ExpenseView) =>
+      spentMs(b) - spentMs(a) || createdMs(b) - createdMs(a),
+  },
+  {
+    value: 'oldest',
+    labelKey: 'expenses_sort_oldest',
+    compare: (a: ExpenseView, b: ExpenseView) =>
+      spentMs(a) - spentMs(b) || createdMs(a) - createdMs(b),
+  },
+  {
+    value: 'amountDesc',
+    labelKey: 'expenses_sort_amountDesc',
+    compare: (a: ExpenseView, b: ExpenseView) => b.amountMinor - a.amountMinor,
+  },
+  {
+    value: 'amountAsc',
+    labelKey: 'expenses_sort_amountAsc',
+    compare: (a: ExpenseView, b: ExpenseView) => a.amountMinor - b.amountMinor,
+  },
+] as const;
+
+const expenseSearchFields = (e: ExpenseView) => [e.description, e.category];
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -58,7 +114,18 @@ export function ExpensesListPage({
   onEditExpense,
   onDeleteExpense,
 }: ExpensesListPageProps) {
-  const hasFilters = fromFilter !== '' || toFilter !== '' || categoryFilter.length > 0;
+  const list = useListFilter(expenses, {
+    searchOf: expenseSearchFields,
+    filters: EXPENSE_FILTERS,
+    sorts: EXPENSE_SORTS,
+  });
+
+  const hasFilters =
+    fromFilter !== '' ||
+    toFilter !== '' ||
+    categoryFilter.length > 0 ||
+    list.search !== '' ||
+    list.filter !== DEFAULT_FILTER;
 
   const toggleCategory = (value: string) => {
     if (categoryFilter.includes(value)) {
@@ -68,9 +135,18 @@ export function ExpensesListPage({
     }
   };
 
+  // The date/category filters live in the route, search and the chip live in this hook — one
+  // button has to clear both halves or the toolbar state is unclearable.
+  const clearAll = () => {
+    onClearFilters();
+    list.setSearch('');
+    list.setFilter(DEFAULT_FILTER);
+  };
+
   const header = <PageHeader canManageExpenses={canManageExpenses} onCreate={onCreateExpense} />;
 
-  // Empty state: no expenses ever
+  // No expenses at all — not the same thing as "nothing matched", so don't tell someone to log
+  // an expense they already have.
   if (expenses.length === 0 && !hasFilters) {
     return (
       <div className='flex flex-col gap-4'>
@@ -83,36 +159,22 @@ export function ExpensesListPage({
     );
   }
 
-  // Empty state: filters applied but no results
-  if (expenses.length === 0 && hasFilters) {
-    return (
-      <div className='flex flex-col gap-4'>
-        {header}
-        <FilterBar
-          fromFilter={fromFilter}
-          toFilter={toFilter}
-          categoryFilter={categoryFilter}
-          onFromFilterChange={onFromFilterChange}
-          onToFilterChange={onToFilterChange}
-          onToggleCategory={toggleCategory}
-          onClearFilters={onClearFilters}
-          hasFilters={hasFilters}
-        />
-        <div className='flex flex-col items-center justify-center gap-4 py-16 text-center'>
-          <p className='text-muted-foreground'>{tr('expenses_empty_noResults')}</p>
-          <Button type='button' variant='outline' onClick={onClearFilters}>
-            {tr('expenses_clearFilters')}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className='flex flex-col gap-4'>
       {header}
 
-      {/* Filter bar */}
+      <ListToolbar
+        search={list.search}
+        onSearchChange={list.setSearch}
+        searchPlaceholderKey='expenses_searchPlaceholder'
+        filters={EXPENSE_FILTERS}
+        filter={list.filter}
+        onFilterChange={list.setFilter}
+        sorts={EXPENSE_SORTS}
+        sort={list.sort}
+        onSortChange={list.setSort}
+      />
+
       <FilterBar
         fromFilter={fromFilter}
         toFilter={toFilter}
@@ -120,64 +182,81 @@ export function ExpensesListPage({
         onFromFilterChange={onFromFilterChange}
         onToFilterChange={onToFilterChange}
         onToggleCategory={toggleCategory}
-        onClearFilters={onClearFilters}
+        onClearFilters={clearAll}
         hasFilters={hasFilters}
       />
 
-      {/* Table */}
-      <div className='overflow-x-auto'>
-        <table className='w-full text-sm'>
-          <thead>
-            <tr className='border-b'>
-              <th className='py-2 px-3 text-left font-medium'>{tr('expenses_col_date')}</th>
-              <th className='py-2 px-3 text-left font-medium'>{tr('expenses_col_category')}</th>
-              <th className='py-2 px-3 text-left font-medium'>{tr('expenses_col_description')}</th>
-              <th className='py-2 px-3 text-right font-medium'>{tr('expenses_col_amount')}</th>
-              {canManageExpenses && (
-                <th className='py-2 px-3 text-left font-medium'>{tr('expenses_col_actions')}</th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {expenses.map((expense) => (
-              <tr key={expense.expenseId} className='border-b hover:bg-muted/50'>
-                <td className='py-3 px-3 text-muted-foreground'>
-                  {formatLocalDate(expense.spentAt)}
-                </td>
-                <td className='py-3 px-3'>
-                  <ExpenseCategoryBadge category={expense.category} />
-                </td>
-                <td className='py-3 px-3 max-w-xs truncate'>{expense.description || '—'}</td>
-                <td className='py-3 px-3 text-right tabular-nums'>
-                  {formatMoney(expense.amountMinor, expense.currency, 'en')}
-                </td>
+      {list.filtered.length === 0 ? (
+        <p className='text-muted-foreground'>{tr('list_noMatches')}</p>
+      ) : (
+        <div className={listScrollClass}>
+          <table className='w-full text-sm'>
+            <thead className={listHeaderClass}>
+              <tr className='border-b'>
+                <th className='py-2 px-3 text-left font-medium'>{tr('expenses_col_date')}</th>
+                <th className='py-2 px-3 text-left font-medium'>{tr('expenses_col_category')}</th>
+                <th className='py-2 px-3 text-left font-medium'>
+                  {tr('expenses_col_description')}
+                </th>
+                <th className='py-2 px-3 text-right font-medium'>{tr('expenses_col_amount')}</th>
                 {canManageExpenses && (
-                  <td className='py-3 px-3'>
-                    <div className='flex gap-2 items-center'>
-                      <Button
-                        type='button'
-                        size='sm'
-                        variant='outline'
-                        onClick={() => onEditExpense?.(expense)}
-                      >
-                        {tr('expenses_action_edit')}
-                      </Button>
-                      <Button
-                        type='button'
-                        size='sm'
-                        variant='outline'
-                        onClick={() => onDeleteExpense?.(expense.expenseId)}
-                      >
-                        {tr('expenses_action_delete')}
-                      </Button>
-                    </div>
-                  </td>
+                  <th className='py-2 px-3 text-left font-medium'>{tr('expenses_col_actions')}</th>
                 )}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {list.filtered.map((expense) => (
+                <tr key={expense.expenseId} className='border-b hover:bg-muted/50'>
+                  <td className='py-3 px-3 text-muted-foreground'>
+                    {formatLocalDate(expense.spentAt)}
+                  </td>
+                  <td className='py-3 px-3'>
+                    <ExpenseCategoryBadge category={expense.category} />
+                  </td>
+                  <td className='py-3 px-3 max-w-xs'>
+                    {/* The badge sits OUTSIDE the truncating span: inside it, `overflow:hidden`
+                        clips the nudge away on any long description while the missing-invoice
+                        filter still matches the row. */}
+                    <div className='flex items-center gap-2 min-w-0'>
+                      <span className='truncate'>{expense.description || '—'}</span>
+                      {hasNoInvoice(expense) && (
+                        <Badge variant='outline' className='shrink-0'>
+                          {tr('expenses_badge_noInvoice')}
+                        </Badge>
+                      )}
+                    </div>
+                  </td>
+                  <td className='py-3 px-3 text-right tabular-nums'>
+                    {formatMoney(expense.amountMinor, expense.currency, 'en')}
+                  </td>
+                  {canManageExpenses && (
+                    <td className='py-3 px-3'>
+                      <div className='flex gap-2 items-center'>
+                        <Button
+                          type='button'
+                          size='sm'
+                          variant='outline'
+                          onClick={() => onEditExpense?.(expense)}
+                        >
+                          {tr('expenses_action_edit')}
+                        </Button>
+                        <Button
+                          type='button'
+                          size='sm'
+                          variant='outline'
+                          onClick={() => onDeleteExpense?.(expense.expenseId)}
+                        >
+                          {tr('expenses_action_delete')}
+                        </Button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -207,6 +286,9 @@ function PageHeader({
 
 // ---------------------------------------------------------------------------
 // Filter bar sub-component
+//
+// Stays beside the toolbar rather than folding into `EXPENSE_FILTERS`: the toolbar's chips are
+// single-select, while categories are multi-select and a date range is not a chip at all.
 // ---------------------------------------------------------------------------
 
 interface FilterBarProps {

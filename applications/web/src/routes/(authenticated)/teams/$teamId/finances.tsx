@@ -1,4 +1,11 @@
-import { Fee, FeeAssignment, type FinanceApi, Team, TeamMember } from '@sideline/domain';
+import {
+  type ExpenseApi,
+  Fee,
+  FeeAssignment,
+  type FinanceApi,
+  Team,
+  TeamMember,
+} from '@sideline/domain';
 import { createFileRoute, useNavigate, useRouter, useSearch } from '@tanstack/react-router';
 import { Array, Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -44,12 +51,29 @@ type FinancesTab = 'overview' | 'by-member' | 'by-assignment';
 const isFinancesTab = (value: unknown): value is FinancesTab =>
   value === 'overview' || value === 'by-member' || value === 'by-assignment';
 
+// Pinned explicitly rather than inferred. `Route.useLoaderData()` resolves through the whole
+// registered router type, and that inference collapses to `any` once the generated API client
+// grows past a threshold — which it did when the expenses group gained its attachment endpoints.
+// Annotating the resulting `any` callback parameters instead would hide the collapse, not fix it.
+interface FinancesLoaderData {
+  readonly rows: ReadonlyArray<MemberOverviewRow>;
+  readonly fees: ReadonlyArray<FinanceApi.FeeView>;
+  // The domain view, not the looser `~/components/organisms/AssignmentsTab` one: that declares
+  // `effectiveDueAt` as `Option<unknown>` for test convenience, which does not satisfy
+  // `SettleAssignmentCandidate`. The loader genuinely returns the domain shape.
+  readonly assignments: ReadonlyArray<FinanceApi.FeeAssignmentView>;
+  readonly canManageFees: boolean;
+  readonly canRecordPayments: boolean;
+  readonly teamId: Team.TeamId;
+  readonly balanceSummaries: ReadonlyArray<ExpenseApi.BalanceSummary> | undefined;
+}
+
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances')({
   ssr: false,
   validateSearch: (search: Record<string, unknown>): { tab?: FinancesTab } =>
     isFinancesTab(search.tab) ? { tab: search.tab } : {},
   component: FinancesRoute,
-  loader: async ({ params, context }) => {
+  loader: async ({ params, context }): Promise<FinancesLoaderData> => {
     const teamId = await Schema.decodeEffect(Team.TeamId)(params.teamId).pipe(
       Effect.mapError(NotFound.make),
       context.run,
@@ -113,8 +137,14 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances')(
 
 function FinancesRoute() {
   const { teamId } = Route.useParams();
-  const { rows, fees, assignments, canManageFees, canRecordPayments, balanceSummaries } =
-    Route.useLoaderData();
+  const {
+    rows,
+    fees,
+    assignments,
+    canManageFees,
+    canRecordPayments,
+    balanceSummaries,
+  }: FinancesLoaderData = Route.useLoaderData();
   const { user } = Route.useRouteContext();
   const router = useRouter();
   const run = useRun();

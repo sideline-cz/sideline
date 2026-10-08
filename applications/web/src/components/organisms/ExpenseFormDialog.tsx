@@ -1,8 +1,20 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import { type BankTransaction, Expense, type ExpenseApi } from '@sideline/domain';
 import { Option, Schema } from 'effect';
+import { Download, X } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogFooter } from '~/components/ui/dialog';
 import {
@@ -14,6 +26,7 @@ import {
   FormMessage,
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
+import { Label } from '~/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -53,6 +66,12 @@ export type ExpenseView = {
   updatedByUserId: string;
   createdAt: import('effect').DateTime.Utc;
   updatedAt: import('effect').DateTime.Utc;
+  attachments: ReadonlyArray<{
+    attachmentId: string;
+    filename: string;
+    contentType: string;
+    sizeBytes: number;
+  }>;
 };
 
 /** Seed values for `mode: 'create'`. `category` is deliberately absent: an expense created from
@@ -74,8 +93,13 @@ type ExpenseFormDialogProps =
       expense?: undefined;
       teamId: string;
       prefill?: ExpensePrefill;
-      onSubmit: (req: ExpenseApi.CreateExpenseRequest) => void;
+      onSubmit: (
+        req: ExpenseApi.CreateExpenseRequest,
+        files: ReadonlyArray<File>,
+      ) => void | Promise<void>;
       onCancel: () => void;
+      onDownloadAttachment?: (attachmentId: string, filename: string) => void;
+      onDeleteAttachment?: (attachmentId: string) => void;
     }
   | {
       open: boolean;
@@ -83,8 +107,13 @@ type ExpenseFormDialogProps =
       expense?: ExpenseView;
       teamId: string;
       prefill?: undefined;
-      onSubmit: (req: ExpenseApi.UpdateExpenseRequest) => void;
+      onSubmit: (
+        req: ExpenseApi.UpdateExpenseRequest,
+        files: ReadonlyArray<File>,
+      ) => void | Promise<void>;
       onCancel: () => void;
+      onDownloadAttachment?: (attachmentId: string, filename: string) => void;
+      onDeleteAttachment?: (attachmentId: string) => void;
     };
 
 // ---------------------------------------------------------------------------
@@ -156,10 +185,15 @@ export function ExpenseFormDialog(props: ExpenseFormDialogProps) {
   const defaultsRef = React.useRef(defaults);
   defaultsRef.current = defaults;
 
+  const [stagedFiles, setStagedFiles] = React.useState<ReadonlyArray<File>>([]);
+  const storedAttachments = expense?.attachments ?? [];
+  const isSubmitting = form.formState.isSubmitting;
+
   // Reset when dialog opens/closes
   React.useEffect(() => {
     if (open) {
       form.reset(defaultsRef.current);
+      setStagedFiles([]);
     }
     // `form.reset` is stable; `defaultsRef` is a ref — both safe to omit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,24 +227,31 @@ export function ExpenseFormDialog(props: ExpenseFormDialogProps) {
       ? dateOnlyToUtcNoon(values.spentAt)
       : dateOnlyToUtcNoon(new Date().toISOString().split('T')[0]);
 
+    // Returned so RHF's `handleSubmit` awaits it and keeps `formState.isSubmitting` true for the
+    // whole create-plus-upload window — otherwise a double click creates two expenses.
     if (props.mode === 'edit') {
-      props.onSubmit({
-        amountMinor: Option.some(Schema.decodeSync(Expense.AmountMinor)(amountMinor)),
-        currency: Option.some(Schema.decodeSync(Expense.CurrencyCode)(values.currency)),
-        spentAt: Option.some(spentAtUtc),
-        category: Option.some(values.category),
-        description: Option.some(values.description.trim()),
-      });
-    } else {
-      props.onSubmit({
+      return props.onSubmit(
+        {
+          amountMinor: Option.some(Schema.decodeSync(Expense.AmountMinor)(amountMinor)),
+          currency: Option.some(Schema.decodeSync(Expense.CurrencyCode)(values.currency)),
+          spentAt: Option.some(spentAtUtc),
+          category: Option.some(values.category),
+          description: Option.some(values.description.trim()),
+        },
+        stagedFiles,
+      );
+    }
+    return props.onSubmit(
+      {
         amountMinor: Schema.decodeSync(Expense.AmountMinor)(amountMinor),
         currency: Schema.decodeSync(Expense.CurrencyCode)(values.currency),
         spentAt: spentAtUtc,
         category: values.category,
         description: values.description.trim(),
         bankTransactionId: Option.fromNullishOr(props.prefill?.bankTransactionId),
-      });
-    }
+      },
+      stagedFiles,
+    );
   };
 
   return (
@@ -338,17 +379,115 @@ export function ExpenseFormDialog(props: ExpenseFormDialogProps) {
               )}
             />
 
+            {/* Invoices */}
+            <div className='flex flex-col gap-2'>
+              <Label htmlFor='expense-attachments'>{tr('expense_attachments_title')}</Label>
+              <Input
+                id='expense-attachments'
+                type='file'
+                multiple
+                accept='application/pdf,image/jpeg,image/png,image/heic'
+                onChange={(e) => setStagedFiles([...(e.target.files ?? [])])}
+              />
+              <p className='text-sm text-muted-foreground'>{tr('expense_attachments_hint')}</p>
+              {storedAttachments.length === 0 && stagedFiles.length === 0 && (
+                <p className='text-sm text-muted-foreground'>{tr('expense_attachments_empty')}</p>
+              )}
+              {storedAttachments.map((attachment) => (
+                <div
+                  key={attachment.attachmentId}
+                  className='flex items-center gap-2 text-sm justify-between'
+                >
+                  <span className='truncate'>{attachment.filename}</span>
+                  <div className='flex items-center gap-1'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      onClick={() =>
+                        props.onDownloadAttachment?.(attachment.attachmentId, attachment.filename)
+                      }
+                    >
+                      <Download className='size-3' aria-hidden='true' />
+                      <span className='sr-only'>
+                        {tr('expense_attachments_downloadAria', { filename: attachment.filename })}
+                      </span>
+                    </Button>
+                    <DeleteAttachmentControl
+                      filename={attachment.filename}
+                      onConfirm={() => props.onDeleteAttachment?.(attachment.attachmentId)}
+                    />
+                  </div>
+                </div>
+              ))}
+              {stagedFiles.map((file) => (
+                <div key={file.name} className='flex items-center gap-2 text-sm justify-between'>
+                  <span className='truncate'>{file.name}</span>
+                  <span className='text-muted-foreground'>{tr('expense_attachments_pending')}</span>
+                </div>
+              ))}
+            </div>
+
             <DialogFooter>
-              <Button type='button' variant='outline' onClick={onCancel}>
+              <Button type='button' variant='outline' onClick={onCancel} disabled={isSubmitting}>
                 {tr('expense_form_cancel')}
               </Button>
-              <Button type='submit'>
-                {isEdit ? tr('expense_form_submit_edit') : tr('expense_form_submit_create')}
+              <Button type='submit' disabled={isSubmitting}>
+                {isSubmitting
+                  ? tr('expense_form_saving')
+                  : isEdit
+                    ? tr('expense_form_submit_edit')
+                    : tr('expense_form_submit_create')}
               </Button>
             </DialogFooter>
           </form>
         </Form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Delete confirmation control
+// ---------------------------------------------------------------------------
+
+// Deleting an attachment permanently destroys an accounting document with no undo, which
+// `applications/web/AGENTS.md:1242` makes an explicit MUST for `AlertDialog`. Staged files get no
+// remove control — re-picking in the file input replaces the selection and destroys nothing.
+function DeleteAttachmentControl({
+  filename,
+  onConfirm,
+}: {
+  filename: string;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon'
+          className='text-muted-foreground hover:text-destructive'
+        >
+          <X className='size-3' aria-hidden='true' />
+          <span className='sr-only'>{tr('expense_attachments_removeAria', { filename })}</span>
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{tr('expense_attachments_deleteConfirm_title')}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {tr('expense_attachments_deleteConfirm_description', { filename })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{tr('expense_form_cancel')}</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>
+            {tr('expense_attachments_deleteConfirm_action')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

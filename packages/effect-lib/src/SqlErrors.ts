@@ -2,6 +2,7 @@ import { Effect, Option, Predicate, Schema } from 'effect';
 import { SqlError } from 'effect/unstable/sql/SqlError';
 
 const PG_UNIQUE_VIOLATION = '23505';
+const PG_FOREIGN_KEY_VIOLATION = '23503';
 
 const PgError = Schema.Struct({ code: Schema.String });
 const PgConstraintError = Schema.Struct({ constraint: Schema.String });
@@ -42,6 +43,26 @@ export const isUniqueViolation = (error: SqlError): boolean =>
     Option.map((code) => code === PG_UNIQUE_VIOLATION),
     Option.getOrElse(() => false),
   );
+
+export const isForeignKeyViolation = (error: SqlError): boolean =>
+  getCode(error.cause).pipe(
+    Option.map((code) => code === PG_FOREIGN_KEY_VIOLATION),
+    Option.getOrElse(() => false),
+  );
+
+// For the window between "I checked the parent row exists" and "I inserted the child": the
+// parent can be deleted in between, and the FK violation is the only honest signal. Mapping it
+// to the same not-found the pre-flight check would have raised keeps a routine race out of the
+// 500s and the defect log.
+export const catchForeignKeyViolation =
+  <E2>(mapError: () => E2) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>) =>
+    self.pipe(
+      Effect.catchIf(
+        (e) => e instanceof SqlError && isForeignKeyViolation(e),
+        () => Effect.fail(mapError()),
+      ),
+    );
 
 export const catchUniqueViolation =
   <E2>(mapError: () => E2) =>
