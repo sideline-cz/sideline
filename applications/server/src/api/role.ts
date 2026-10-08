@@ -10,7 +10,7 @@ import {
   requireReadAccess,
 } from '~/api/permissions.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
-import { RolesRepository } from '~/repositories/RolesRepository.js';
+import { RolesRepository, type RoleWithPermissionCount } from '~/repositories/RolesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 
 const forbidden = new RoleApi.Forbidden();
@@ -28,6 +28,21 @@ const DEFAULT_ROLE_ESCALATION_PERMISSIONS: ReadonlyArray<string> = [
   'role:manage',
   'member:remove',
 ];
+
+/**
+ * The one `RoleWithPermissionCount` -> `RoleApi.RoleInfo` mapper. Shared with the AI read tool
+ * `listRoles` (`services/ai/readTools.ts`) so an assistant/command-palette row and the roles
+ * page cannot drift — same reason `toEventInfo`/`toGroupInfo`/`toRosterInfo` are exported.
+ */
+export const toRoleInfo = (row: RoleWithPermissionCount): RoleApi.RoleInfo =>
+  new RoleApi.RoleInfo({
+    roleId: row.id,
+    teamId: row.team_id,
+    name: row.name,
+    isBuiltIn: row.is_built_in,
+    permissionCount: row.permission_count,
+    isArchived: row.is_archived,
+  });
 
 export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
   Effect.Do.pipe(
@@ -56,18 +71,7 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
               ({ roleList, canManage, defaultRole, defaultPermissions }) =>
                 new RoleApi.RoleListResponse({
                   canManage,
-                  roles: Array.map(
-                    roleList,
-                    (r) =>
-                      new RoleApi.RoleInfo({
-                        roleId: r.id,
-                        teamId: teamId,
-                        name: r.name,
-                        isBuiltIn: r.is_built_in,
-                        permissionCount: r.permission_count,
-                        isArchived: r.is_archived,
-                      }),
-                  ),
+                  roles: Array.map(roleList, toRoleInfo),
                   defaultRoleId: Option.map(defaultRole, (r) => r.id),
                   defaultRoleGrantsManage: defaultPermissions.some((p) =>
                     DEFAULT_ROLE_ESCALATION_PERMISSIONS.includes(p),

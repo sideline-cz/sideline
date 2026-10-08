@@ -28,16 +28,19 @@ import { DateTime, Effect, Option } from 'effect';
 import { toEventInfo } from '~/api/event.js';
 import { toGroupInfo } from '~/api/group.js';
 import { hasPermission } from '~/api/permissions.js';
+import { toRoleInfo } from '~/api/role.js';
 import { toEffectiveRoles, toRosterInfo } from '~/api/roster.js';
 import { toTrainingTypeInfo } from '~/api/training-type.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, type EventWithDetails } from '~/repositories/EventsRepository.js';
+import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
+import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { type RosterEntry, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
@@ -766,3 +769,94 @@ export const listMembershipPlans = (
       hits: [],
     })),
   );
+
+// ---------------------------------------------------------------------------
+// list_roles — `role:view` (api/role.ts:42).
+//
+// `role:view`, NOT `role:manage`. The sidebar's roles entry is gated on `role:manage` because
+// that page is an EDITOR; the `listRoles` endpoint itself only needs `role:view`, and mirroring
+// the stricter nav gate here would hide roles from every caller who may read them.
+//
+// `findRolesByTeamId` returns archived roles too (the page offers a "show archived" toggle). An
+// archived role is a tombstone that grants nothing, so it is not a search destination — filtered
+// out here rather than at the repository, which the roles page still needs unfiltered.
+// ---------------------------------------------------------------------------
+
+export interface ListRolesArgs {
+  readonly query?: string;
+  readonly limit?: number;
+}
+
+export const listRoles = (
+  args: ListRolesArgs,
+  ctx: EntityReadContext,
+): Effect.Effect<ToolExecutionResult, never, RolesRepository> =>
+  hasPermission(ctx.membership, 'role:view')
+    ? Effect.Do.pipe(
+        Effect.bind('roles', () => RolesRepository.asEffect()),
+        Effect.bind('list', ({ roles }) => roles.findRolesByTeamId(ctx.teamId)),
+        Effect.map(({ list }) =>
+          buildListResult(
+            applyLimit(
+              applyQueryFilter(
+                list.filter((role) => !role.is_archived),
+                args.query,
+                (role) => role.name,
+              ),
+              args.limit,
+            ),
+            (row) => ({ kind: 'role', role: toRoleInfo(row) }),
+            (row) => ({ name: row.name, builtIn: row.is_built_in }),
+          ),
+        ),
+      )
+    : Effect.succeed(forbiddenResult('role:view'));
+
+// ---------------------------------------------------------------------------
+// list_expenses — `finance:view` (api/expenses.ts:99).
+//
+// `finance:view`, the READ gate — `finance:manage_fees` gates the writes and the receipt
+// download (api/expenses.ts:332), neither of which this tool offers. `listByTeam` with no
+// filters: category/date narrowing is what the expenses page's own controls are for, and a
+// free-text palette query has no vocabulary for either.
+// ---------------------------------------------------------------------------
+
+export interface ListExpensesArgs {
+  readonly query?: string;
+  readonly limit?: number;
+}
+
+export const listExpenses = (
+  args: ListExpensesArgs,
+  ctx: EntityReadContext,
+): Effect.Effect<ToolExecutionResult, never, ExpensesRepository> =>
+  hasPermission(ctx.membership, 'finance:view')
+    ? Effect.Do.pipe(
+        Effect.bind('expenses', () => ExpensesRepository.asEffect()),
+        Effect.bind('list', ({ expenses }) => expenses.listByTeam(ctx.teamId, {})),
+        Effect.map(({ list }) =>
+          buildListResult(
+            applyLimit(
+              applyQueryFilter(list, args.query, (expense) => expense.description),
+              args.limit,
+            ),
+            (row) => ({
+              kind: 'expense',
+              expenseId: row.id,
+              description: row.description,
+              amountMinor: row.amount_minor,
+              currency: row.currency,
+              spentAt: row.spent_at,
+              category: row.category,
+            }),
+            (row) => ({
+              description: row.description,
+              amountMinor: row.amount_minor,
+              currency: row.currency,
+              spentAt: DateTime.formatIso(row.spent_at),
+              category: row.category,
+            }),
+          ),
+        ),
+      )
+    : Effect.succeed(forbiddenResult('finance:view'));
