@@ -9,6 +9,7 @@
 // controllable `useParams`/`useLoaderData`/`useRouteContext`, mock `useRouter`/`useNavigate`/
 // `useSearch`, and render `Route.options.component` directly).
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render } from '@testing-library/react';
 import { Effect } from 'effect';
 import type React from 'react';
@@ -128,7 +129,20 @@ function assertComponent<T>(component: T | undefined): T {
   return component;
 }
 
-const Component = assertComponent(Route.options.component);
+const RouteComponent = assertComponent(Route.options.component);
+
+// The route reads `balanceSummary` through `useQuery` so the Overview window toggle refetches
+// without re-running the whole loader. Retries off so a failing query fails the test loudly
+// rather than hanging it.
+// Reset per test (see beforeEach) so query state never leaks between cases, but stable across a
+// `rerender` — a client rebuilt on every render would throw away the result mid-test.
+let queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+const Component = () => (
+  <QueryClientProvider client={queryClient}>
+    <RouteComponent />
+  </QueryClientProvider>
+);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -199,6 +213,7 @@ beforeEach(() => {
   mockUseParams.mockReturnValue({ teamId });
   mockUseRouteContext.mockReturnValue({ user: { id: 'user-1' } });
   mockUseSearch.mockReturnValue({});
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   mockNavigate.mockReset();
   mockFinancesOverviewPage.mockReset();
   mockSettleMemberDialog.mockReset();

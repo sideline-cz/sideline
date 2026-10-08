@@ -416,7 +416,8 @@ const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
   listByTeam: () => Effect.succeed([]),
   update: () => Effect.succeed(Option.none()),
   delete: () => Effect.succeed(false),
-  balanceSummaryByTeam: () => Effect.succeed([]),
+  balanceSummaryByTeam: () =>
+    Effect.succeed({ window: 'all', windowStart: Option.none(), summaries: [] }),
   countHistoryRows: () => Effect.succeed(0),
 } as never);
 

@@ -6,6 +6,7 @@ import {
   Team,
   TeamMember,
 } from '@sideline/domain';
+import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate, useRouter, useSearch } from '@tanstack/react-router';
 import { Array, Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -27,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '~/components/ui/dialog';
+import { formatLocalDate } from '~/lib/datetime.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { ApiClient, ClientError, NotFound, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
@@ -51,6 +53,11 @@ type FinancesTab = 'overview' | 'by-member' | 'by-assignment';
 const isFinancesTab = (value: unknown): value is FinancesTab =>
   value === 'overview' || value === 'by-member' || value === 'by-assignment';
 
+type BalanceWindow = 'all' | 'season';
+
+const isBalanceWindow = (value: unknown): value is BalanceWindow =>
+  value === 'all' || value === 'season';
+
 // Pinned explicitly rather than inferred. `Route.useLoaderData()` resolves through the whole
 // registered router type, and that inference collapses to `any` once the generated API client
 // grows past a threshold — which it did when the expenses group gained its attachment endpoints.
@@ -70,8 +77,12 @@ interface FinancesLoaderData {
 
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances')({
   ssr: false,
-  validateSearch: (search: Record<string, unknown>): { tab?: FinancesTab } =>
-    isFinancesTab(search.tab) ? { tab: search.tab } : {},
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { tab?: FinancesTab; window?: BalanceWindow } => ({
+    ...(isFinancesTab(search.tab) ? { tab: search.tab } : {}),
+    ...(isBalanceWindow(search.window) ? { window: search.window } : {}),
+  }),
   component: FinancesRoute,
   loader: async ({ params, context }): Promise<FinancesLoaderData> => {
     const teamId = await Schema.decodeEffect(Team.TeamId)(params.teamId).pipe(
@@ -91,7 +102,8 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances')(
           api.finance.listFees({ params: { teamId } }),
           api.expenses.balanceSummary({
             params: { teamId },
-            query: { from: Option.none(), to: Option.none() },
+            // The loader is always the all-time view; the window toggle refetches client-side.
+            query: { from: Option.none(), to: Option.none(), window: Option.none() },
           }),
         ]),
       ),
@@ -148,7 +160,9 @@ function FinancesRoute() {
   const { user } = Route.useRouteContext();
   const router = useRouter();
   const run = useRun();
-  const { tab: searchTab } = useSearch({ from: Route.id });
+  const { tab: searchTab, window: searchWindow } = useSearch({ from: Route.id });
+  // `window` shadows the global in this scope, so it is read under a local name throughout.
+  const requestedWindow: BalanceWindow = searchWindow ?? 'all';
   const navigate = useNavigate({ from: Route.fullPath });
 
   const hasOverviewTab = balanceSummaries !== undefined;
@@ -157,8 +171,51 @@ function FinancesRoute() {
     searchTab === 'overview' && !hasOverviewTab ? 'by-member' : (searchTab ?? defaultTab);
 
   const handleTabChange = (tab: FinancesTab) => {
-    navigate({ search: { tab } });
+    navigate({ search: { tab, window: searchWindow } });
   };
+
+  const handleWindowChange = (next: BalanceWindow) => {
+    navigate({ search: { tab: searchTab, window: next } });
+  };
+
+  const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
+
+  // Only `balanceSummary` is refetched on a window change. Putting `window` in `loaderDeps`
+  // would re-run the whole loader, including the per-fee `listAssignments` fan-out above — N
+  // requests to change one heading.
+  const balanceQuery = useQuery<ReadonlyArray<ExpenseApi.BalanceSummary>>({
+    queryKey: ['balanceSummary', teamId, requestedWindow],
+    // The loader already fetched exactly this, so the default view costs no second request.
+    initialData: requestedWindow === 'all' ? balanceSummaries : undefined,
+    // The Overview tab only exists when the loader's call succeeded; without it there is nothing
+    // to toggle between.
+    enabled: balanceSummaries !== undefined,
+    retry: false,
+    throwOnError: false,
+    queryFn: async () => {
+      const effect = ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.expenses.balanceSummary({
+            params: { teamId: teamIdBranded },
+            query: {
+              from: Option.none(),
+              to: Option.none(),
+              window: Option.some(requestedWindow),
+            },
+          }),
+        ),
+        Effect.mapError(() => ClientError.make(tr('finance_error_loadFailed'))),
+      );
+      return Option.getOrThrow(await run()(effect));
+    },
+  });
+
+  // On a failed refetch this falls back to the loader's all-time data — and because the heading
+  // below reads the window off the DATA rather than off the request, it correctly says "All time"
+  // instead of claiming a season the figures do not cover.
+  const activeSummaries = balanceQuery.data ?? balanceSummaries;
+  const appliedWindow: BalanceWindow = activeSummaries?.[0]?.window ?? requestedWindow;
+  const appliedWindowStart = activeSummaries?.[0]?.windowStart;
 
   const [logPaymentAssignment, setLogPaymentAssignment] = React.useState<FeeAssignmentView | null>(
     null,
@@ -183,8 +240,6 @@ function FinancesRoute() {
           r.currency === frozenSettleRow.currency,
       ) ?? frozenSettleRow)
     : null;
-
-  const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
 
   const decodeAssignmentIds = (a: FeeAssignmentView) => ({
     feeId: Schema.decodeSync(Fee.FeeId)(a.feeId),
@@ -368,7 +423,15 @@ function FinancesRoute() {
         userId={user.id}
         assignmentsTabContent={assignmentsTabContent}
         createFeeHref={`/teams/${teamId}/finances/fees`}
-        balanceSummaries={balanceSummaries}
+        balanceSummaries={activeSummaries}
+        balanceWindow={requestedWindow}
+        balanceWindowApplied={appliedWindow}
+        balanceWindowStartLabel={
+          appliedWindowStart !== undefined && Option.isSome(appliedWindowStart)
+            ? tr('finance_window_since', { date: formatLocalDate(appliedWindowStart.value) })
+            : undefined
+        }
+        onBalanceWindowChange={handleWindowChange}
         activeTab={activeTab}
         onTabChange={handleTabChange}
         canRecordPayments={canRecordPayments}

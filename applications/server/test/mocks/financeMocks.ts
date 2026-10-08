@@ -66,15 +66,20 @@ export const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
   update: () => Effect.succeed(Option.none()),
   delete: () => Effect.succeed(false),
   balanceSummaryByTeam: () =>
-    Effect.succeed([
-      {
-        currency: 'CZK',
-        incomeMinor: 0,
-        expensesMinor: 0,
-        netMinor: 0,
-        byCategory: [],
-      },
-    ]),
+    Effect.succeed({
+      window: 'all',
+      windowStart: Option.none(),
+      summaries: [
+        {
+          currency: 'CZK',
+          incomeMinor: 0,
+          expensesMinor: 0,
+          netMinor: 0,
+          byCategory: [],
+          byMonth: [],
+        },
+      ],
+    }),
   countHistoryRows: () => Effect.succeed(0),
 } as never);
 

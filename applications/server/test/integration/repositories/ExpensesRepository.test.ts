@@ -638,7 +638,9 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
       ),
       Effect.bind('summary', ({ team }) =>
         ExpensesRepository.asEffect().pipe(
-          Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+          Effect.andThen((repo) =>
+            repo.balanceSummaryByTeam(team.id).pipe(Effect.map((r) => r.summaries)),
+          ),
         ),
       ),
       Effect.tap(({ summary }) =>
@@ -662,7 +664,9 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
       ),
       Effect.bind('summary', ({ team }) =>
         ExpensesRepository.asEffect().pipe(
-          Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+          Effect.andThen((repo) =>
+            repo.balanceSummaryByTeam(team.id).pipe(Effect.map((r) => r.summaries)),
+          ),
         ),
       ),
       Effect.tap(({ summary }) =>
@@ -747,7 +751,9 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
       ),
       Effect.bind('summary', ({ team }) =>
         ExpensesRepository.asEffect().pipe(
-          Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+          Effect.andThen((repo) =>
+            repo.balanceSummaryByTeam(team.id).pipe(Effect.map((r) => r.summaries)),
+          ),
         ),
       ),
       Effect.tap(({ summary }) =>
@@ -847,7 +853,9 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
         ),
         Effect.bind('summary', ({ team }) =>
           ExpensesRepository.asEffect().pipe(
-            Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+            Effect.andThen((repo) =>
+              repo.balanceSummaryByTeam(team.id).pipe(Effect.map((r) => r.summaries)),
+            ),
           ),
         ),
         Effect.tap(({ summary }) =>
@@ -911,7 +919,9 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
         ),
         Effect.bind('summary', ({ team }) =>
           ExpensesRepository.asEffect().pipe(
-            Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+            Effect.andThen((repo) =>
+              repo.balanceSummaryByTeam(team.id).pipe(Effect.map((r) => r.summaries)),
+            ),
           ),
         ),
         Effect.tap(({ summary }) =>
@@ -1105,6 +1115,204 @@ describe('ExpensesRepository — bank_transaction_id', () => {
         Effect.sync(() => {
           expect(remaining[0]?.expenses).toBe('0');
           expect(remaining[0]?.txs).toBe('0');
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// balanceSummaryByTeam — byMonth and the window
+// ---------------------------------------------------------------------------
+
+// Every team gets a season at `starts_at = now()` from the AFTER INSERT trigger in
+// 1793900000_create_seasons.ts, so the 2025-dated fixtures below all sit BEFORE the season. That
+// is what makes 'season' and 'all' distinguishable here without having to fabricate dates.
+describe('ExpensesRepository — balanceSummaryByTeam byMonth and window', () => {
+  const seedTwoMonths = (teamId: Team.TeamId, userId: User.UserId) =>
+    Effect.Do.pipe(
+      // March: 2000 minor spent. April: 3000 minor spent.
+      Effect.tap(() =>
+        ExpensesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insert({
+              team_id: teamId,
+              amount_minor: 2000,
+              currency: 'CZK',
+              spent_at: DateTime.fromDateUnsafe(new Date('2025-03-10T12:00:00Z')),
+              category: 'fields',
+              description: 'March pitch',
+              created_by_user_id: userId,
+              updated_by_user_id: userId,
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(() =>
+        ExpensesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insert({
+              team_id: teamId,
+              amount_minor: 3000,
+              currency: 'CZK',
+              spent_at: DateTime.fromDateUnsafe(new Date('2025-04-10T12:00:00Z')),
+              category: 'equipment',
+              description: 'April kit',
+              created_by_user_id: userId,
+              updated_by_user_id: userId,
+            }),
+          ),
+        ),
+      ),
+    );
+
+  it.effect('byMonth buckets expenses per team-local month, ascending, gaps omitted', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('930000000000000030', 'exp-owner-30')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('932000000000000000' as Discord.Snowflake, userId),
+      ),
+      Effect.tap(({ team, userId }) => seedTwoMonths(team.id, userId)),
+      Effect.bind('result', ({ team }) =>
+        ExpensesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          const czk = result.summaries.find((s) => s.currency === 'CZK');
+          expect(czk?.byMonth).toEqual([
+            { month: '2025-03-01', incomeMinor: 0, expensesMinor: 2000 },
+            { month: '2025-04-01', incomeMinor: 0, expensesMinor: 3000 },
+          ]);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('byMonth buckets in team_settings.timezone, not the server zone', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('930000000000000031', 'exp-owner-31')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('932100000000000000' as Discord.Snowflake, userId),
+      ),
+      Effect.tap(({ team }) =>
+        SqlClient.SqlClient.asEffect().pipe(
+          Effect.flatMap(
+            (sql) => sql`
+              INSERT INTO team_settings (team_id, timezone) VALUES (${team.id}, 'Europe/Prague')
+              ON CONFLICT (team_id) DO UPDATE SET timezone = 'Europe/Prague'
+            `,
+          ),
+        ),
+      ),
+      // 23:00Z on 31 March is 01:00 on 1 April in Prague (UTC+2, DST began 30 March 2025).
+      // Bucketed in UTC this lands in March and the assertion below fails.
+      Effect.tap(({ team, userId }) =>
+        ExpensesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insert({
+              team_id: team.id,
+              amount_minor: 4200,
+              currency: 'CZK',
+              spent_at: DateTime.fromDateUnsafe(new Date('2025-03-31T23:00:00Z')),
+              category: 'travel',
+              description: 'Late night coach',
+              created_by_user_id: userId,
+              updated_by_user_id: userId,
+            }),
+          ),
+        ),
+      ),
+      Effect.bind('result', ({ team }) =>
+        ExpensesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          const czk = result.summaries.find((s) => s.currency === 'CZK');
+          expect(czk?.byMonth.map((m) => m.month)).toEqual(['2025-04-01']);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect("window 'all' is the default and reports itself with no start", () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('930000000000000032', 'exp-owner-32')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('932200000000000000' as Discord.Snowflake, userId),
+      ),
+      Effect.tap(({ team, userId }) => seedTwoMonths(team.id, userId)),
+      Effect.bind('result', ({ team }) =>
+        ExpensesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          expect(result.window).toBe('all');
+          expect(Option.isNone(result.windowStart)).toBe(true);
+          expect(result.summaries).toHaveLength(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect("window 'season' scopes to the governing season and reports its start", () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('930000000000000033', 'exp-owner-33')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('932300000000000000' as Discord.Snowflake, userId),
+      ),
+      Effect.tap(({ team, userId }) => seedTwoMonths(team.id, userId)),
+      Effect.bind('result', ({ team }) =>
+        ExpensesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id, { window: 'season' })),
+        ),
+      ),
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          expect(result.window).toBe('season');
+          expect(Option.isSome(result.windowStart)).toBe(true);
+          // The season starts now; both fixtures are dated 2025, so nothing is in range.
+          expect(result.summaries).toHaveLength(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect("a team with no governing season falls back to all-time AND says window 'all'", () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('930000000000000034', 'exp-owner-34')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('932400000000000000' as Discord.Snowflake, userId),
+      ),
+      Effect.tap(({ team, userId }) => seedTwoMonths(team.id, userId)),
+      // No seasons at all -> governing_season_id returns NULL.
+      Effect.tap(({ team }) =>
+        SqlClient.SqlClient.asEffect().pipe(
+          Effect.flatMap((sql) => sql`DELETE FROM seasons WHERE team_id = ${team.id}`),
+        ),
+      ),
+      Effect.bind('result', ({ team }) =>
+        ExpensesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id, { window: 'season' })),
+        ),
+      ),
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          // The whole point: a season was REQUESTED, none applied. Reporting 'season' here would
+          // put an all-time figure under a season heading.
+          expect(result.window).toBe('all');
+          expect(Option.isNone(result.windowStart)).toBe(true);
+          expect(result.summaries[0]?.expensesMinor).toBe(5000);
         }),
       ),
       Effect.provide(TestLayer),

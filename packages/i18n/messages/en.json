@@ -3235,5 +3235,17 @@
   "rsvp_lockedJustNow": "RSVP just closed for this event. Reload the page to see the final list.",
   "rsvp_yourAnswerLabel": "Your answer",
   "rsvp_noAnswerLocked": "We didn't get an answer from you before the deadline.",
-  "bot_embed_rsvp_until": "🔒 RSVP until {when}"
+  "bot_embed_rsvp_until": "🔒 RSVP until {when}",
+  "balance_dashboard_collected": "Collected",
+  "balance_dashboard_stillOwed": "still owed",
+  "balance_dashboard_trend_title": "Income and spending by month",
+  "balance_dashboard_trend_income": "Income",
+  "balance_dashboard_trend_expenses": "Expenses",
+  "balance_dashboard_trend_monthColumn": "Month",
+  "balance_dashboard_window_all": "All time",
+  "balance_dashboard_window_season": "This season",
+  "finance_window_label": "Time range",
+  "finance_window_allTime": "All time",
+  "finance_window_season": "This season",
+  "finance_window_since": "Since {date}"
 }

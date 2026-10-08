@@ -62,6 +62,21 @@ interface FinancesOverviewPageProps {
    */
   balanceSummaries?: ReadonlyArray<ExpenseApi.BalanceSummary>;
   /**
+   * The window the user SELECTED. Drives the control's pressed state only — it must not wait on
+   * the refetch, or clicking a window does nothing visible until the response lands.
+   */
+  balanceWindow?: 'all' | 'season';
+  /**
+   * The window the figures ACTUALLY cover, per the server. Separate from the selection because
+   * the two legitimately differ: a team with no governing season selects 'season' and is served
+   * 'all'. The heading reads this one so it can never claim a season the figures don't cover.
+   */
+  balanceWindowApplied?: 'all' | 'season';
+  /** Pre-formatted season start for the Overview heading, e.g. 'Since 1 Sep 2026'. */
+  balanceWindowStartLabel?: string;
+  /** User picked a different window. Omitted → the window control is not rendered. */
+  onBalanceWindowChange?: (window: 'all' | 'season') => void;
+  /**
    * Controlled active tab value. When provided together with onTabChange,
    * the component operates in controlled mode (URL-synced).
    */
@@ -385,6 +400,10 @@ export function FinancesOverviewPage({
   assignmentsTabContent,
   createFeeHref,
   balanceSummaries,
+  balanceWindow,
+  balanceWindowApplied,
+  balanceWindowStartLabel,
+  onBalanceWindowChange,
   activeTab: controlledActiveTab,
   onTabChange,
   canRecordPayments,
@@ -500,7 +519,34 @@ export function FinancesOverviewPage({
 
       {/* Tab content */}
       {activeTab === 'overview' && hasOverviewTab ? (
-        <BalanceDashboard summaries={balanceSummaries ?? []} />
+        <div className='flex flex-col gap-4'>
+          {/* Deliberately OUTSIDE BalanceDashboard: it early-returns an empty state when a
+              window has no activity, and a control rendered inside it would disappear exactly
+              when the user needs it to get back. */}
+          {onBalanceWindowChange !== undefined && (
+            <fieldset className='flex gap-1 border-0 p-0 m-0'>
+              <legend className='sr-only'>{tr('finance_window_label')}</legend>
+              {(['all', 'season'] as const).map((value) => (
+                <Button
+                  key={value}
+                  type='button'
+                  size='sm'
+                  variant={(balanceWindow ?? 'all') === value ? 'secondary' : 'ghost'}
+                  aria-pressed={(balanceWindow ?? 'all') === value}
+                  onClick={() => onBalanceWindowChange(value)}
+                >
+                  {tr(value === 'all' ? 'finance_window_allTime' : 'finance_window_season')}
+                </Button>
+              ))}
+            </fieldset>
+          )}
+          <BalanceDashboard
+            summaries={balanceSummaries ?? []}
+            rows={rows}
+            window={balanceWindowApplied}
+            windowStartLabel={balanceWindowStartLabel}
+          />
+        </div>
       ) : activeTab === 'by-member' ? (
         <ByMemberContent
           rows={rows}
