@@ -3,7 +3,7 @@ import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import { effectiveRolesAggLateral } from '~/repositories/effectiveRoles.js';
-import { RosterEntry } from '~/repositories/TeamMembersRepository.js';
+import { RosterEntry, rosterGroupNamesLateral } from '~/repositories/TeamMembersRepository.js';
 
 class RosterWithCount extends Schema.Class<RosterWithCount>('RosterWithCount')({
   id: RosterModel.RosterId,
@@ -115,6 +115,7 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       SELECT tm.id AS member_id, tm.user_id, u.discord_id,
              eff.role_names, eff.permissions, eff.effective_roles,
+             grp.group_names,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
              tm.variable_symbol,
              u.username, u.avatar, u.discord_nickname, u.discord_display_name,
@@ -124,6 +125,7 @@ const make = Effect.gen(function* () {
       JOIN team_members tm ON tm.id = rmb.team_member_id
       JOIN users u ON u.id = tm.user_id
       ${sql.unsafe(effectiveRolesAggLateral('tm'))}
+      ${sql.unsafe(rosterGroupNamesLateral)}
       WHERE rmb.roster_id = ${input.roster_id}
     `,
   });

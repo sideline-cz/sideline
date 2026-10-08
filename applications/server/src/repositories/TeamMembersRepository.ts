@@ -120,6 +120,26 @@ export class RosterEffectiveRoleRow extends Schema.Class<RosterEffectiveRoleRow>
   group_names: Schema.Array(Schema.String),
 }) {}
 
+/**
+ * The `group_names` source for `RosterEntry`. EVERY query decoding `RosterEntry` must splice
+ * this in — `RostersRepository.findMemberEntries` as well as the two in this file — because the
+ * column is required, and because `api/roster.ts` maps all three through `toRosterPlayer`.
+ * Shared rather than copied for the same reason `effectiveRolesFrom` is: a second hand-written
+ * copy is a second thing to get wrong. Requires the `team_members` row to be aliased `tm`.
+ *
+ * A SEPARATE lateral from `effectiveRolesAggLateral`, not a fourth aggregate inside it: direct
+ * group membership is a plain join over `group_members`, while the effective-roles walk is the
+ * recursive ancestor expression. Folding it in would make all ten of that fragment's call sites
+ * pay for a column only the roster display needs.
+ */
+export const rosterGroupNamesLateral = `
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(array_agg(g.name ORDER BY g.name), '{}') AS group_names
+        FROM group_members gm
+        JOIN groups g ON g.id = gm.group_id AND g.is_archived = false
+        WHERE gm.team_member_id = tm.id
+      ) grp ON true`;
+
 export class RosterEntry extends Schema.Class<RosterEntry>('RosterEntry')({
   member_id: TeamMember.TeamMemberId,
   user_id: User.UserId,
@@ -401,18 +421,6 @@ const make = Effect.gen(function* () {
   // instead of splicing its three aggregates (`role_names` / `permissions` /
   // `effective_roles`) as separate correlated scalar subqueries (each its own
   // `WITH RECURSIVE` materialization) for the same `tm` row.
-
-  // `grp` is a SEPARATE lateral from `effectiveRolesAggLateral`, not a fourth aggregate inside
-  // it: direct group membership is a plain join over `group_members`, while the effective-roles
-  // walk is the recursive ancestor expression. Folding this into that fragment would make every
-  // one of its ten call sites pay for a column only the roster display needs.
-  const rosterGroupNamesLateral = `
-      LEFT JOIN LATERAL (
-        SELECT COALESCE(array_agg(g.name ORDER BY g.name), '{}') AS group_names
-        FROM group_members gm
-        JOIN groups g ON g.id = gm.group_id AND g.is_archived = false
-        WHERE gm.team_member_id = tm.id
-      ) grp ON true`;
 
   const findRosterByTeamQuery = SqlSchema.findAll({
     Request: FindRosterQuery,
