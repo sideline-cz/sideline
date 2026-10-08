@@ -28,11 +28,11 @@ export class FinanceStatusCurrencyGroup extends Schema.Class<FinanceStatusCurren
 )({
   currency: CurrencyCode,
   total_outstanding_minor: AmountMinor,
+  // Credit the member holds in this currency, NOT already deducted from
+  // `total_outstanding_minor` — the two are independent balances server-side. Whatever renders
+  // the group is responsible for netting them (see `buildFinanceStatusEmbed`).
+  credit_minor: AmountMinor,
   assignments: Schema.Array(FinanceStatusAssignment),
-}) {}
-
-export class GetMyStatusResult extends Schema.Class<GetMyStatusResult>('GetMyStatusResult')({
-  groups: Schema.Array(FinanceStatusCurrencyGroup),
 }) {}
 
 /**
@@ -44,6 +44,19 @@ export class PaymentQrResult extends Schema.Class<PaymentQrResult>('PaymentQrRes
   spayd: Schema.String,
   png_base64: Schema.String,
   filename: Schema.String,
+}) {}
+
+export class GetMyStatusResult extends Schema.Class<GetMyStatusResult>('GetMyStatusResult')({
+  groups: Schema.Array(FinanceStatusCurrencyGroup),
+  // The one standing code `/finance` always shows: the net outstanding sum in the club's
+  // bank-account currency, or — when that nets to zero — the same code with no `AM`, so the
+  // member can still top up any amount. `null` only when the club has no usable bank config or
+  // the member has no variable symbol; the command then renders exactly as it did before.
+  //
+  // `NullOr`, not `OptionFromNullOr`: an `Option`-wrapped `Schema.Class` here is one step more
+  // type-inference than `SyncRpcs`' already-large union survives — it collapses `AppLive`'s `R`
+  // to `unknown` and surfaces as an unrelated error in `run.ts`.
+  qr: Schema.NullOr(PaymentQrResult),
 }) {}
 
 /**

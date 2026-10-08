@@ -40,10 +40,65 @@ const FinanceRpcRepos = Effect.Do.pipe(
   Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
 );
 
+/**
+ * The single code `/finance` always shows. One SPAYD for the club's bank-account currency,
+ * carrying the member's net outstanding total as `AM` — or, when they owe nothing, the very same
+ * code with NO `AM`, which is the "any amount, any time" top-up code `getMyTopup` already serves
+ * on the web.
+ *
+ * Fees in any other currency are deliberately outside the amount: a club has exactly one
+ * configured account and a SPAYD carries exactly one amount in one currency. Those fees stay
+ * visible in the embed's per-currency total line.
+ *
+ * `None` for every missing piece — no bank config, no IBAN, no variable symbol, an un-renderable
+ * payload. The command then renders exactly as it did before the QR existed.
+ */
+export const buildMyStatusQr = (opts: {
+  readonly iban: Option.Option<string>;
+  readonly recipientName: Option.Option<string>;
+  readonly variableSymbol: string | null;
+  readonly currency: string;
+  readonly netOutstandingMinor: number;
+}): Effect.Effect<FinanceRpcModels.PaymentQrResult | null> => {
+  const vsNorm = Option.fromNullishOr(opts.variableSymbol).pipe(
+    Option.map((vs) => vs.trim().replace(/^0+/, '')),
+    Option.filter((vs) => vs !== ''),
+  );
+  if (Option.isNone(opts.iban) || Option.isNone(vsNorm)) return Effect.succeed(null);
+
+  const spaydOpt = Spayd.buildSpayd({
+    acc: opts.iban.value,
+    // Omitted entirely when nothing is owed — that absence IS the "no amount" half of the
+    // feature, not a fallback. `0.00` would make banks prefill a zero-crown transfer.
+    ...(opts.netOutstandingMinor > 0 ? { amountMinor: BigInt(opts.netOutstandingMinor) } : {}),
+    currency: opts.currency,
+    variableSymbol: vsNorm.value,
+    recipientName: Option.getOrUndefined(
+      Option.map(opts.recipientName, Spayd.transliterateToSpaydAscii),
+    ),
+  });
+
+  return Option.match(spaydOpt, {
+    onNone: () => Effect.succeed(null),
+    onSome: (spayd) =>
+      renderQrPng(spayd).pipe(
+        Effect.map(
+          (png) =>
+            new FinanceRpcModels.PaymentQrResult({
+              spayd,
+              png_base64: Buffer.from(png).toString('base64'),
+              filename: 'qr-finance-status.png',
+            }),
+        ),
+        Effect.catchTag('QrRenderError', () => Effect.succeed(null)),
+      ),
+  });
+};
+
 export const FinanceRpcLive = FinanceRpcRepos.pipe(
   Effect.let(
     'Finance/GetMyStatus',
-    ({ teams, users, members, financeOverview }) =>
+    ({ teams, users, members, financeOverview, bankSyncConfigRepo, sql }) =>
       ({
         guild_id,
         discord_user_id,
@@ -83,7 +138,85 @@ export const FinanceRpcLive = FinanceRpcRepos.pipe(
           Effect.bind('statusGroups', ({ team, user }) =>
             financeOverview.myStatus(team.id, user.id),
           ),
-          Effect.map(({ statusGroups }) => {
+          // Raw SQL, not `MemberCreditsRepository` / `TeamMembersRepository`: every extra service
+          // bound here joins `SyncRpcsLive`'s requirement union, which is already big enough that
+          // one more member tips TypeScript's inference over and silently collapses `AppLive`'s
+          // `R` to `unknown` — surfacing as an unrelated-looking error in `run.ts`. The same
+          // reason `Finance/GetPaymentQr` below reads `fee_assignments` through `sql` directly.
+          Effect.bind('member_', ({ member }) =>
+            Effect.all(
+              {
+                creditAccounts: sql<{
+                  readonly currency: string;
+                  readonly balance_minor: string;
+                }>`
+                  SELECT currency, balance_minor::text AS balance_minor
+                    FROM member_credit_accounts WHERE team_member_id = ${member.id}
+                `.pipe(
+                  Effect.map((rows) =>
+                    rows.map((row) => ({
+                      currency: row.currency,
+                      balanceMinor: Number(row.balance_minor),
+                    })),
+                  ),
+                ),
+                variableSymbol: sql<{ readonly variable_symbol: string | null }>`
+                  SELECT variable_symbol FROM team_members WHERE id = ${member.id}
+                `.pipe(Effect.map((rows) => rows[0]?.variable_symbol ?? null)),
+              },
+              { concurrency: 2 },
+            ).pipe(
+              // A credit or symbol lookup that fails must not fail the whole command: the member
+              // still gets their fee list, just without the QR and without the credit line.
+              Effect.catchTag('SqlError', (e) =>
+                Effect.logWarning('Finance/GetMyStatus: credit/symbol lookup failed', e).pipe(
+                  Effect.as({
+                    creditAccounts: [] as ReadonlyArray<{
+                      readonly currency: string;
+                      readonly balanceMinor: number;
+                    }>,
+                    variableSymbol: null as string | null,
+                  }),
+                ),
+              ),
+            ),
+          ),
+          Effect.let('creditAccounts', ({ member_ }) => member_.creditAccounts),
+          Effect.let('variableSymbol', ({ member_ }) => member_.variableSymbol),
+          Effect.bind('configOpt', ({ team }) => bankSyncConfigRepo.findByTeam(team.id)),
+          Effect.bind('qr', ({ statusGroups, creditAccounts, configOpt, variableSymbol }) =>
+            Option.match(configOpt, {
+              onNone: () => Effect.succeed<FinanceRpcModels.PaymentQrResult | null>(null),
+              onSome: (config) => {
+                // Only the bank account's own currency can carry an amount — see
+                // `buildMyStatusQr`. A member who owes nothing in it (or owes it off entirely in
+                // credit) gets the no-amount code, which is the point of the feature.
+                const group = statusGroups.find((g) => g.currency === config.currency);
+                const creditMinor =
+                  creditAccounts.find((a) => a.currency === config.currency)?.balanceMinor ?? 0;
+                const netOutstandingMinor = Math.max(
+                  0,
+                  (group?.totalOutstandingMinor ?? 0) - creditMinor,
+                );
+                return buildMyStatusQr({
+                  iban: Option.flatMap(config.account_number, (accountNumber) =>
+                    Option.flatMap(config.bank_code, (bankCode) =>
+                      CzIban.buildCzIban({
+                        prefix: Option.getOrUndefined(config.account_prefix),
+                        accountNumber,
+                        bankCode,
+                      }),
+                    ),
+                  ),
+                  recipientName: config.recipient_name,
+                  variableSymbol,
+                  currency: config.currency,
+                  netOutstandingMinor,
+                });
+              },
+            }),
+          ),
+          Effect.map(({ statusGroups, creditAccounts, qr }) => {
             const groups = statusGroups.map((group) => {
               const assignments = group.assignments.map((row) => {
                 const effectiveDueAtStr = Option.map(row.effective_due_at, (date: Date) =>
@@ -105,10 +238,13 @@ export const FinanceRpcLive = FinanceRpcRepos.pipe(
                 total_outstanding_minor: Schema.decodeSync(Fee.AmountMinor)(
                   group.totalOutstandingMinor,
                 ),
+                credit_minor: Schema.decodeSync(Fee.AmountMinor)(
+                  creditAccounts.find((a) => a.currency === group.currency)?.balanceMinor ?? 0,
+                ),
                 assignments,
               });
             });
-            return new FinanceRpcModels.GetMyStatusResult({ groups });
+            return new FinanceRpcModels.GetMyStatusResult({ groups, qr });
           }),
         ),
   ),

@@ -7,6 +7,7 @@ import * as DiscordTypes from 'dfx/types';
 import { Effect, Metric, Option } from 'effect';
 import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
+import { paymentQrAttachment } from '~/rcp/finance/paymentQrAttachment.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { buildFinanceStatusEmbed } from './buildFinanceStatusEmbed.js';
@@ -70,22 +71,55 @@ export const statusHandler = Interaction.asEffect().pipe(
                 effectiveDueAt: Option.getOrNull(a.effective_due_at),
               })),
             );
-            return buildFinanceStatusEmbed({ assignments: allAssignments, locale });
+            const qr = Option.fromNullishOr(result.qr);
+            const attachment = Option.map(qr, paymentQrAttachment);
+            return {
+              payload: buildFinanceStatusEmbed({
+                assignments: allAssignments,
+                credits: result.groups.map((group) => ({
+                  currency: group.currency,
+                  balanceMinor: group.credit_minor,
+                })),
+                qr: Option.map(qr, (q) => ({
+                  spayd: q.spayd,
+                  imageUrl: `attachment://${q.filename}`,
+                })),
+                locale,
+              }),
+              files: Option.map(attachment, ({ file }) => [file]),
+            };
           }),
           Effect.catchTag('FinanceGuildNotFound', () =>
-            Effect.succeed(buildFinanceStatusEmbed({ assignments: [], locale })),
-          ),
-          Effect.catchTag('FinanceMemberNotFound', () =>
-            Effect.succeed({ content: m.bot_finance_error_notMember({}, { locale }) }),
-          ),
-          Effect.catchTag('RpcClientError', () =>
-            Effect.succeed({ content: m.bot_finance_error_generic({}, { locale }) }),
-          ),
-          Effect.flatMap((payload) =>
-            rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
-              payload,
+            Effect.succeed({
+              payload: buildFinanceStatusEmbed({ assignments: [], locale }),
+              files: Option.none<Array<File>>(),
             }),
           ),
+          Effect.catchTag('FinanceMemberNotFound', () =>
+            Effect.succeed({
+              payload: { content: m.bot_finance_error_notMember({}, { locale }) },
+              files: Option.none<Array<File>>(),
+            }),
+          ),
+          Effect.catchTag('RpcClientError', () =>
+            Effect.succeed({
+              payload: { content: m.bot_finance_error_generic({}, { locale }) },
+              files: Option.none<Array<File>>(),
+            }),
+          ),
+          Effect.flatMap(({ payload, files }) => {
+            const send = Effect.suspend(() =>
+              rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                payload,
+              }),
+            );
+            // `withFiles` wraps the whole REST effect, which is why `send` is suspended — the
+            // same shape `handlePaymentReminderReady` uses for the reminder DM's QR.
+            return Option.match(files, {
+              onNone: () => send,
+              onSome: (f) => rest.withFiles(f)(send),
+            });
+          }),
           Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (error) =>
             Effect.logError('Failed to update finance status response', error),
           ),
