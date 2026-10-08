@@ -44,8 +44,11 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DateTime, Effect, Option, Schema } from 'effect';
+import { Calendar, Users, Wallet } from 'lucide-react';
 import type React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NavGroup, NavItem } from '~/lib/navigation/teamNav.js';
+import type { RecentEntry } from '~/lib/palette/recents.js';
 
 // ---------------------------------------------------------------------------
 // jsdom polyfills cmdk needs (plan §F.6 setup notes)
@@ -68,6 +71,8 @@ const TR_MAP: Record<string, string> = {
   search_description: 'Search description copy',
   search_placeholder: 'Search placeholder copy',
   search_hint: 'Search hint copy',
+  search_goTo: 'Go to',
+  search_recent: 'Recent',
   search_loading: 'Search loading copy',
   search_noResults: 'No matches for "{query}"',
   search_error: 'Search error copy',
@@ -191,6 +196,38 @@ const { CommandPalette } = await import('~/components/organisms/CommandPalette.j
 
 const TEAM_ID = 'team-1';
 
+// A two-group slice of the real `teamNav.ts` shape — already permission-filtered, which is the
+// contract the palette relies on (it never re-filters). `Calendar`/`Wallet` stand in for the
+// real icons; the palette renders `<item.icon />` with no props.
+const NAV_GROUPS: ReadonlyArray<NavGroup> = [
+  {
+    id: 'team',
+    label: 'Team',
+    items: [
+      { title: 'Events', icon: Calendar, to: '/teams/$teamId/events', params: { teamId: TEAM_ID } },
+      {
+        title: 'Members',
+        icon: Users,
+        to: '/teams/$teamId/members',
+        params: { teamId: TEAM_ID },
+      },
+    ],
+  },
+  {
+    id: 'finance',
+    label: 'Finance',
+    items: [
+      {
+        title: 'Finances',
+        icon: Wallet,
+        to: '/teams/$teamId/finances',
+        params: { teamId: TEAM_ID },
+        requiredPermission: 'finance:view',
+      },
+    ],
+  },
+];
+
 let idCounter = 0;
 const nextId = (prefix: string) => `${prefix}-${idCounter++}`;
 
@@ -312,21 +349,36 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSelectHit: (hit: AiChatApi.SearchHit) => void;
   onAskAssistant: (question: string) => void;
+  navGroups: ReadonlyArray<NavGroup>;
+  onSelectNav: (item: NavItem) => void;
+  recents: ReadonlyArray<RecentEntry>;
+  onSelectRecent: (entry: RecentEntry) => void;
 }
 
 function setup(
-  overrides: Partial<Omit<Props, 'onOpenChange' | 'onSelectHit' | 'onAskAssistant'>> = {},
+  overrides: Partial<
+    Omit<
+      Props,
+      'onOpenChange' | 'onSelectHit' | 'onAskAssistant' | 'onSelectNav' | 'onSelectRecent'
+    >
+  > = {},
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onOpenChange = vi.fn();
   const onSelectHit = vi.fn();
   const onAskAssistant = vi.fn();
+  const onSelectNav = vi.fn();
+  const onSelectRecent = vi.fn();
   const baseProps: Props = {
     teamId: TEAM_ID,
     open: true,
     onOpenChange,
     onSelectHit,
     onAskAssistant,
+    navGroups: NAV_GROUPS,
+    onSelectNav,
+    recents: [],
+    onSelectRecent,
     ...overrides,
   };
 
@@ -345,7 +397,16 @@ function setup(
     );
   };
 
-  return { ...utils, client, onOpenChange, onSelectHit, onAskAssistant, rerenderWith };
+  return {
+    ...utils,
+    client,
+    onOpenChange,
+    onSelectHit,
+    onAskAssistant,
+    onSelectNav,
+    onSelectRecent,
+    rerenderWith,
+  };
 }
 
 function getInput(): HTMLInputElement {
@@ -432,7 +493,9 @@ describe('CommandPalette', () => {
       await settle();
 
       expect(mockSearch).not.toHaveBeenCalled();
-      expect(screen.getByText(TR_MAP.search_hint)).not.toBeNull();
+      // Idle renders the static MENU, not a hint — the hint only survives as the fallback for a
+      // caller with no nav entries at all (covered in "static navigation menu" below).
+      expect(screen.getByText('Events')).not.toBeNull();
       // "The Ask row appears at one character" (design §6.1 / plan §F.6 extra assertion #2).
       expect(
         screen.getByText(interpolate(TR_MAP.search_askAssistantAbout, { query: 'a' })),
@@ -544,7 +607,11 @@ describe('CommandPalette', () => {
         trainingTypeHit({ name: 'Speed' }),
       ]);
       mockSearch.mockReturnValueOnce(Effect.succeed(hits));
-      const { container } = setup();
+      // `navGroups: []` isolates this to the SEARCH grouping. With the real menu present, 'ev'
+      // also matches the "Events" nav entry, whose title is the same string as the `event`
+      // kind heading (both are `tr('event_events')`) — correct in the app, ambiguous for a
+      // `getByText` here. The "Go to" group has its own tests below.
+      const { container } = setup({ navGroups: [] });
       // Two characters, not one: the dedicated floor test above pins that a 1-char query
       // issues no request at all, so a 1-char query here could never produce these rows.
       await typeQuery('ev');
@@ -728,7 +795,7 @@ describe('CommandPalette', () => {
       // Backspace all the way down to idle (below the 2-char floor) — no rows, no request.
       await typeQuery('i');
       await settle();
-      expect(screen.getByText(TR_MAP.search_hint)).not.toBeNull();
+      expect(screen.getByText('Events')).not.toBeNull();
       expect(screen.queryByText('First-term hit')).toBeNull();
 
       mockSearch.mockReturnValueOnce(Effect.succeed(hitsThroughWire([secondHit])));
@@ -822,7 +889,7 @@ describe('CommandPalette', () => {
       // NO further timer advance, so it fails under that bug.
       expect(getInput().value).toBe('');
       expect(screen.queryByText('Stale event')).toBeNull();
-      expect(screen.getByText(TR_MAP.search_hint)).not.toBeNull();
+      expect(screen.getByText('Events')).not.toBeNull();
     });
 
     // The bug this pins: `placeholderData: (previous) => previous` is keyed per-observer, not
@@ -884,6 +951,89 @@ describe('CommandPalette', () => {
       expect(listbox.contains(liveRegions[0] as Node)).toBe(false);
 
       expect(dialog.querySelectorAll('[role="status"]')).toHaveLength(0);
+    });
+  });
+
+  describe('static navigation menu and recents', () => {
+    it('with no query typed, renders every nav group and entry the caller was given', () => {
+      setup();
+
+      expect(screen.getByText('Team')).not.toBeNull();
+      expect(screen.getByText('Finance')).not.toBeNull();
+      for (const title of ['Events', 'Members', 'Finances']) {
+        expect(screen.getByText(title)).not.toBeNull();
+      }
+    });
+
+    it('renders nothing for a group the caller filtered out — the palette never re-derives gates', () => {
+      // THE permission assertion. `navGroups` arrives already filtered by `filterNavGroups`, the
+      // same call the sidebar makes. A member without `finance:view` has no Finance group in the
+      // prop at all, so the palette must show no trace of it — if this ever starts passing by
+      // accident because the palette filters too, that is the drift this split exists to prevent.
+      setup({ navGroups: NAV_GROUPS.filter((group) => group.id !== 'finance') });
+
+      expect(screen.queryByText('Finance')).toBeNull();
+      expect(screen.queryByText('Finances')).toBeNull();
+      expect(screen.getByText('Events')).not.toBeNull();
+    });
+
+    it('falls back to the hint when there is no menu and no history', () => {
+      setup({ navGroups: [] });
+
+      expect(screen.getByText(TR_MAP.search_hint)).not.toBeNull();
+    });
+
+    it('selecting a nav entry hands the whole item back and closes the palette', () => {
+      const { onSelectNav, onOpenChange } = setup();
+
+      const row = screen.getByText('Members').closest('[role="option"]');
+      expect(row).not.toBeNull();
+      // biome-ignore lint/style/noNonNullAssertion: asserted non-null above
+      fireEvent.click(row!);
+
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+      expect(onSelectNav).toHaveBeenCalledTimes(1);
+      expect(onSelectNav.mock.calls[0]?.[0]?.to).toBe('/teams/$teamId/members');
+    });
+
+    it('while typing, matching nav entries render under the "Go to" heading alongside the hits', async () => {
+      vi.useFakeTimers();
+      mockSearch.mockReturnValueOnce(Effect.succeed(hitsThroughWire([])));
+      setup();
+      await typeQuery('finan');
+      await settle();
+
+      await waitFor(() => {
+        expect(screen.getByText(TR_MAP.search_goTo)).not.toBeNull();
+      });
+      // Only the matching entry — 'finan' does not match Events or Members.
+      expect(screen.getByText('Finances')).not.toBeNull();
+      expect(screen.queryByText('Events')).toBeNull();
+    });
+
+    it('renders a recent hit and hands the entry back on select', () => {
+      const recent = { type: 'hit' as const, hit: eventHit({ title: 'Recent event' }) };
+      const { onSelectRecent } = setup({ recents: [recent] });
+
+      expect(screen.getByText(TR_MAP.search_recent)).not.toBeNull();
+      const row = screen.getByText('Recent event').closest('[role="option"]');
+      expect(row).not.toBeNull();
+      // biome-ignore lint/style/noNonNullAssertion: asserted non-null above
+      fireEvent.click(row!);
+
+      expect(onSelectRecent).toHaveBeenCalledWith(recent);
+    });
+
+    it('drops a recent nav entry whose destination the caller no longer offers', () => {
+      // A recent stores only a route. If the entry behind it has since been gated away, the
+      // route no longer resolves against `navGroups` and the row must not render — a recent
+      // must never become a back door into a page the sidebar now hides.
+      setup({
+        navGroups: NAV_GROUPS.filter((group) => group.id !== 'finance'),
+        recents: [{ type: 'nav', to: '/teams/$teamId/finances' }],
+      });
+
+      expect(screen.queryByText('Finances')).toBeNull();
     });
   });
 });

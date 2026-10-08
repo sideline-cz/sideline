@@ -29,7 +29,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // applications/web/src/lib/assistant -> applications/web/src/routes/(authenticated)/teams/$teamId
 const ROUTES_DIR = join(HERE, '..', '..', 'routes', '(authenticated)', 'teams', '$teamId');
 
-const EXPECTED_KINDS: ReadonlyArray<Kind> = ['event', 'group', 'member', 'roster', 'trainingType'];
+const EXPECTED_KINDS: ReadonlyArray<Kind> = [
+  'event',
+  'group',
+  'member',
+  'roster',
+  'trainingType',
+  'role',
+  'expense',
+];
 
 // kind -> the route file that must exist on disk for ENTITY_ROUTE[kind] to be real.
 const ROUTE_FILES: Record<Kind, string> = {
@@ -38,14 +46,16 @@ const ROUTE_FILES: Record<Kind, string> = {
   group: 'groups.$groupId.tsx',
   roster: 'rosters.$rosterId.tsx',
   trainingType: 'training-types.$trainingTypeId.tsx',
+  role: 'roles.$roleId.tsx',
+  // `finances_` (trailing underscore) opts the detail route out of the `finances` layout — the
+  // URL it serves is still `/teams/$teamId/finances/expenses/$expenseId`.
+  expense: 'finances_.expenses.$expenseId.tsx',
 };
 
 describe('ENTITY_ROUTE', () => {
   // 13.8/1
   it('has exactly one entry per EntityRef kind', () => {
-    expect(Object.keys(ENTITY_ROUTE).sort()).toEqual(
-      ['event', 'group', 'member', 'roster', 'trainingType'].sort(),
-    );
+    expect(Object.keys(ENTITY_ROUTE).sort()).toEqual([...EXPECTED_KINDS].sort());
   });
 
   // 13.8/2
@@ -72,6 +82,8 @@ describe('ENTITY_ROUTE', () => {
       group: '/teams/$teamId/groups/$groupId',
       roster: '/teams/$teamId/rosters/$rosterId',
       trainingType: '/teams/$teamId/training-types/$trainingTypeId',
+      role: '/teams/$teamId/roles/$roleId',
+      expense: '/teams/$teamId/finances/expenses/$expenseId',
     });
   });
 

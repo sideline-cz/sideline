@@ -23,6 +23,8 @@ export const ENTITY_ROUTE = {
   group: '/teams/$teamId/groups/$groupId',
   roster: '/teams/$teamId/rosters/$rosterId',
   trainingType: '/teams/$teamId/training-types/$trainingTypeId',
+  role: '/teams/$teamId/roles/$roleId',
+  expense: '/teams/$teamId/finances/expenses/$expenseId',
 } as const satisfies Record<EntityKind, string>;
 
 export const entityKindLabels: Record<EntityKind, () => string> = {
@@ -31,6 +33,8 @@ export const entityKindLabels: Record<EntityKind, () => string> = {
   group: () => tr('assistant_result_group'),
   roster: () => tr('assistant_result_roster'),
   trainingType: () => tr('assistant_result_trainingType'),
+  role: () => tr('assistant_result_role'),
+  expense: () => tr('assistant_result_expense'),
 };
 
 /**

@@ -12,7 +12,7 @@
 import type { AiChatApi } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { Option } from 'effect';
-import { Calendar, Dumbbell, UserCog, UsersRound } from 'lucide-react';
+import { Calendar, Dumbbell, ReceiptText, Shield, UserCog, UsersRound } from 'lucide-react';
 import type React from 'react';
 import { ColorDot } from '~/components/atoms/ColorDot.js';
 import { AssistantResultRow } from '~/components/molecules/assistant/AssistantResultRow.js';
@@ -21,9 +21,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Badge } from '~/components/ui/badge';
 import { useIsMobile } from '~/hooks/use-mobile.js';
 import { ENTITY_ROUTE, entityKindLabels } from '~/lib/assistant/entityRoutes.js';
-import { formatEventDateRange } from '~/lib/datetime.js';
+import { formatEventDateRange, formatLocalDate } from '~/lib/datetime.js';
 import { getEventColor } from '~/lib/event-colors.js';
 import { eventStatusClasses, eventStatusLabels, eventTypeName } from '~/lib/event-labels.js';
+import { expenseCategoryLabels } from '~/lib/finance/expenseCategories.js';
+import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { resolveEffectiveRoles } from '~/lib/roles/resolveEffectiveRoles.js';
 import { sortEffectiveRoles } from '~/lib/roles/role-order.js';
 import { tr } from '~/lib/translations.js';
@@ -244,6 +246,69 @@ export function AssistantResultCard({
               <Link
                 to={ENTITY_ROUTE.trainingType}
                 params={{ teamId, trainingTypeId: trainingType.trainingTypeId }}
+                className={className}
+              >
+                {children}
+              </Link>
+            ))
+          }
+        />
+      );
+    }
+    case 'role': {
+      const { role } = reference;
+
+      return (
+        <AssistantResultRow
+          kindLabel={entityKindLabels.role()}
+          leading={<Shield className='size-4 shrink-0 text-muted-foreground' aria-hidden='true' />}
+          primary={role.name}
+          secondary={tr('role_permissionCount', { count: role.permissionCount })}
+          trailing={
+            role.isBuiltIn ? <Badge variant='secondary'>{tr('role_builtIn')}</Badge> : undefined
+          }
+          renderLink={
+            renderWrapper ??
+            ((children, className) => (
+              <Link
+                to={ENTITY_ROUTE.role}
+                params={{ teamId, roleId: role.roleId }}
+                className={className}
+              >
+                {children}
+              </Link>
+            ))
+          }
+        />
+      );
+    }
+    case 'expense': {
+      const secondary = [
+        formatLocalDate(reference.spentAt),
+        expenseCategoryLabels[reference.category](),
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(' \u00b7 ');
+
+      return (
+        <AssistantResultRow
+          kindLabel={entityKindLabels.expense()}
+          leading={
+            <ReceiptText className='size-4 shrink-0 text-muted-foreground' aria-hidden='true' />
+          }
+          primary={reference.description}
+          secondary={secondary}
+          trailing={
+            <span className='shrink-0 tabular-nums'>
+              {formatMoney(reference.amountMinor, reference.currency, 'en')}
+            </span>
+          }
+          renderLink={
+            renderWrapper ??
+            ((children, className) => (
+              <Link
+                to={ENTITY_ROUTE.expense}
+                params={{ teamId, expenseId: reference.expenseId }}
                 className={className}
               >
                 {children}

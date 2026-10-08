@@ -1,8 +1,14 @@
 /**
- * The Cmd/Ctrl+K search palette (design `.work-plans/command-palette-search-design.md`,
+ * The Cmd/Ctrl+K command palette (design `.work-plans/command-palette-search-design.md`,
  * plan `.work-plans/command-palette-search.md` §C). Owns the hotkey listener, the query +
  * 250ms debounce, the `useQuery` search (Pattern C, `applications/web/AGENTS.md:831`),
  * grouping, all seven render states and the "Ask the assistant" row.
+ *
+ * It is a MENU as well as a search box. With no query typed it shows recents and the static
+ * navigation entries; while typing it shows search hits first, then the nav entries whose title
+ * matches, then the Ask row. `navGroups` arrives already permission-filtered from
+ * `lib/navigation/teamNav.ts` — the SAME list and the SAME filter the sidebar renders, so an
+ * entry can never be visible in one and hidden in the other. Do not re-derive the gates here.
  *
  * Takes no router hooks (organisms must not, `applications/web/AGENTS.md:26`) and owns no
  * `open` state — both are `AuthenticatedLayoutContent`'s, the same split
@@ -50,6 +56,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '~/components/ui/dialog';
+import type { NavGroup, NavItem } from '~/lib/navigation/teamNav.js';
+import type { RecentEntry } from '~/lib/palette/recents.js';
+import { recentEntryId } from '~/lib/palette/recents.js';
 import { ApiClient, SilentClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 import { cn } from '~/lib/utils';
@@ -60,6 +69,11 @@ interface CommandPaletteProps {
   onOpenChange: (open: boolean) => void;
   onSelectHit: (hit: AiChatApi.SearchHit) => void;
   onAskAssistant: (question: string) => void;
+  /** Already permission-filtered by the caller (`filterNavGroups`) — never filtered again here. */
+  navGroups: ReadonlyArray<NavGroup>;
+  onSelectNav: (item: NavItem) => void;
+  recents: ReadonlyArray<RecentEntry>;
+  onSelectRecent: (entry: RecentEntry) => void;
 }
 
 type SearchHitKind = AiChatApi.SearchHit['kind'];
@@ -72,6 +86,8 @@ const KIND_ORDER: ReadonlyArray<SearchHitKind> = [
   'group',
   'roster',
   'trainingType',
+  'role',
+  'expense',
 ];
 
 // Plural headings (existing keys) — NOT `entityKindLabels`, whose singular forms are the
@@ -82,7 +98,45 @@ const KIND_HEADING: Record<SearchHitKind, () => string> = {
   group: () => tr('team_groups'),
   roster: () => tr('team_rosters'),
   trainingType: () => tr('team_trainingTypes'),
+  role: () => tr('team_roles'),
+  expense: () => tr('expenses_navTitle'),
 };
+
+// The selected-row styling, shared by every row type so a hit, a nav entry and a recent all
+// highlight identically under the arrow keys.
+const ROW_CLASSNAME =
+  'border-transparent cursor-default data-[selected=true]:bg-accent data-[selected=true]:border-accent-foreground/20';
+
+/**
+ * One static navigation row. `item` is optional because a RECENT nav entry is stored as a bare
+ * route: if that page later becomes permission-gated away (or is removed), the route no longer
+ * resolves to a `NavItem` and the row must not render at all — a recent must never become a
+ * back door to an entry the sidebar would now hide.
+ */
+function NavRow({
+  item,
+  value,
+  onSelect,
+}: {
+  item: NavItem | undefined;
+  value: string;
+  onSelect: () => void;
+}) {
+  if (item === undefined) return null;
+  return (
+    <CommandItem value={value} onSelect={onSelect} className={ROW_CLASSNAME}>
+      <item.icon />
+      <span>{item.title}</span>
+    </CommandItem>
+  );
+}
+
+/** cmdk `value` for a nav row. Prefixed so it can never collide with a `searchHitId`. */
+const navValue = (item: NavItem) => `nav:${item.to}`;
+
+/** cmdk `value` for a recent row. `recentEntryId` already prefixes by type; `recent:` keeps a
+ *  recent and the same destination's live row from sharing a value when both are on screen. */
+const recentValue = (entry: RecentEntry) => `recent:${recentEntryId(entry)}`;
 
 function useOnlineStatus(): boolean {
   const [online, setOnline] = React.useState(() =>
@@ -109,6 +163,10 @@ export function CommandPalette({
   onOpenChange,
   onSelectHit,
   onAskAssistant,
+  navGroups,
+  onSelectNav,
+  recents,
+  onSelectRecent,
 }: CommandPaletteProps) {
   const run = useRun();
   const teamIdBranded = React.useMemo(() => Schema.decodeSync(Team.TeamId)(teamId), [teamId]);
@@ -210,6 +268,24 @@ export function CommandPalette({
     ? tr('search_askAssistant', { query: trimmedQuery })
     : tr('search_askAssistantAbout', { query: trimmedQuery });
 
+  // Nav entries that match the TYPED query (not the debounced one): these are filtered in
+  // memory, so making the user wait 250ms for them would be a pointless lag the search's own
+  // network round trip does not justify.
+  const matchingNavItems = React.useMemo(() => {
+    if (trimmedQuery.length === 0) return [];
+    const lower = trimmedQuery.toLowerCase();
+    return navGroups.flatMap((group) =>
+      group.items.filter((item) => item.title.toLowerCase().includes(lower)),
+    );
+  }, [navGroups, trimmedQuery]);
+
+  // Route -> entry, over the ALREADY permission-filtered groups. A recent nav entry resolves
+  // through this, so an entry the caller filtered out simply has no match and does not render.
+  const navItemsByRoute = React.useMemo(
+    () => new Map(navGroups.flatMap((group) => group.items.map((item) => [item.to, item]))),
+    [navGroups],
+  );
+
   const hitsByKind = React.useMemo(() => {
     const map = new Map<SearchHitKind, Array<AiChatApi.SearchHit>>();
     for (const hit of data ?? []) {
@@ -224,22 +300,33 @@ export function CommandPalette({
   // typed the Ask row is the only item, so cmdk highlights it — and it KEEPS that highlight
   // when results arrive. A blind Enter would then fire a rate-limited LLM turn instead of
   // opening the top result, which is the exact outcome putting the Ask row last is meant to
-  // prevent. Re-point the highlight at the first rendered hit whenever the hit set changes.
-  const firstHitValue = React.useMemo(() => {
+  // prevent. Re-point the highlight at the first rendered row whenever the rendered set changes.
+  //
+  // "First rendered row" is not "first hit" any more: with no query typed there are no hits at
+  // all, and the first row is a recent or a nav entry. Leaving the highlight on the Ask row in
+  // that state would make Enter-on-an-empty-palette ask the assistant about nothing.
+  const firstValue = React.useMemo(() => {
+    if (phase === 'idle') {
+      const firstRecent = recents[0];
+      if (firstRecent !== undefined) return recentValue(firstRecent);
+      const firstNav = navGroups[0]?.items[0];
+      return firstNav === undefined ? undefined : navValue(firstNav);
+    }
     for (const kind of KIND_ORDER) {
       const hits = hitsByKind.get(kind);
       if (hits !== undefined && hits.length > 0 && hits[0] !== undefined) {
         return SearchApi.searchHitId(hits[0]);
       }
     }
-    return undefined;
-  }, [hitsByKind]);
+    const firstNav = matchingNavItems[0];
+    return firstNav === undefined ? undefined : navValue(firstNav);
+  }, [phase, recents, navGroups, hitsByKind, matchingNavItems]);
 
   const [selected, setSelected] = React.useState<string>('');
 
   React.useEffect(() => {
-    if (firstHitValue !== undefined) setSelected(firstHitValue);
-  }, [firstHitValue]);
+    if (firstValue !== undefined) setSelected(firstValue);
+  }, [firstValue]);
 
   // Deliberately NOT the same string as the visible offline/error copy (design §8 point 3
   // reads as if it should be verbatim the same). A visible `<div>` and this live region both
@@ -261,6 +348,16 @@ export function CommandPalette({
   const handleSelectHit = (hit: AiChatApi.SearchHit) => {
     onOpenChange(false);
     onSelectHit(hit);
+  };
+
+  const handleSelectNav = (item: NavItem) => {
+    onOpenChange(false);
+    onSelectNav(item);
+  };
+
+  const handleSelectRecent = (entry: RecentEntry) => {
+    onOpenChange(false);
+    onSelectRecent(entry);
   };
 
   const handleAskAssistant = () => {
@@ -295,9 +392,54 @@ export function CommandPalette({
               </div>
             )}
             {phase === 'idle' && (
-              <div className='py-6 text-center text-sm text-muted-foreground'>
-                {tr('search_hint')}
-              </div>
+              <>
+                {recents.length > 0 && (
+                  <CommandGroup heading={tr('search_recent')}>
+                    {recents.map((entry) =>
+                      entry.type === 'hit' ? (
+                        <AssistantResultCard
+                          key={recentValue(entry)}
+                          reference={entry.hit}
+                          teamId={teamId}
+                          renderWrapper={(children, className) => (
+                            <CommandItem
+                              value={recentValue(entry)}
+                              onSelect={() => handleSelectRecent(entry)}
+                              className={cn(className, ROW_CLASSNAME)}
+                            >
+                              {children}
+                            </CommandItem>
+                          )}
+                        />
+                      ) : (
+                        <NavRow
+                          key={recentValue(entry)}
+                          item={navItemsByRoute.get(entry.to)}
+                          value={recentValue(entry)}
+                          onSelect={() => handleSelectRecent(entry)}
+                        />
+                      ),
+                    )}
+                  </CommandGroup>
+                )}
+                {navGroups.map((group) => (
+                  <CommandGroup key={group.id} heading={group.label}>
+                    {group.items.map((item) => (
+                      <NavRow
+                        key={item.to}
+                        item={item}
+                        value={navValue(item)}
+                        onSelect={() => handleSelectNav(item)}
+                      />
+                    ))}
+                  </CommandGroup>
+                ))}
+                {recents.length === 0 && navGroups.length === 0 && (
+                  <div className='py-6 text-center text-sm text-muted-foreground'>
+                    {tr('search_hint')}
+                  </div>
+                )}
+              </>
             )}
             {phase === 'loading' && (
               <div className='flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground'>
@@ -328,11 +470,7 @@ export function CommandPalette({
                           <CommandItem
                             value={SearchApi.searchHitId(hit)}
                             onSelect={() => handleSelectHit(hit)}
-                            className={cn(
-                              className,
-                              'border-transparent cursor-default',
-                              'data-[selected=true]:bg-accent data-[selected=true]:border-accent-foreground/20',
-                            )}
+                            className={cn(className, ROW_CLASSNAME)}
                           >
                             {children}
                           </CommandItem>
@@ -342,6 +480,18 @@ export function CommandPalette({
                   </CommandGroup>
                 );
               })}
+            {matchingNavItems.length > 0 && (
+              <CommandGroup heading={tr('search_goTo')}>
+                {matchingNavItems.map((item) => (
+                  <NavRow
+                    key={item.to}
+                    item={item}
+                    value={navValue(item)}
+                    onSelect={() => handleSelectNav(item)}
+                  />
+                ))}
+              </CommandGroup>
+            )}
             {showAskRow && (
               <>
                 <CommandSeparator alwaysRender />

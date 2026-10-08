@@ -11,6 +11,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { formatLocalDate } from '~/lib/datetime.js';
+import { CATEGORY_ORDER, expenseCategoryLabels } from '~/lib/finance/expenseCategories.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { tr } from '~/lib/translations.js';
 import { useListFilter } from '~/lib/useListFilter.js';
@@ -40,13 +41,8 @@ interface ExpensesListPageProps {
 // Categories
 // ---------------------------------------------------------------------------
 
-const CATEGORIES: ReadonlyArray<{ value: string; labelKey: string }> = [
-  { value: 'fields', labelKey: 'expense_category_fields' },
-  { value: 'equipment', labelKey: 'expense_category_equipment' },
-  { value: 'travel', labelKey: 'expense_category_travel' },
-  { value: 'tournaments', labelKey: 'expense_category_tournaments' },
-  { value: 'other', labelKey: 'expense_category_other' },
-];
+// `CATEGORY_ORDER` + `expenseCategoryLabels` live in `lib/finance/expenseCategories.ts` — the
+// search result card renders the same labels, and a second copy here would drift.
 
 // ---------------------------------------------------------------------------
 // Toolbar config — module scope, not inline: `useListFilter` memoises on these, so a fresh
@@ -339,16 +335,16 @@ function FilterBar({
         />
       </div>
       <div className='flex flex-wrap gap-1'>
-        {CATEGORIES.map((c) => (
+        {CATEGORY_ORDER.map((c) => (
           <Button
-            key={c.value}
+            key={c}
             type='button'
             size='sm'
-            variant={categoryFilter.includes(c.value) ? 'secondary' : 'outline'}
-            aria-pressed={categoryFilter.includes(c.value)}
-            onClick={() => onToggleCategory(c.value)}
+            variant={categoryFilter.includes(c) ? 'secondary' : 'outline'}
+            aria-pressed={categoryFilter.includes(c)}
+            onClick={() => onToggleCategory(c)}
           >
-            {tr(c.labelKey)}
+            {expenseCategoryLabels[c]()}
           </Button>
         ))}
       </div>
