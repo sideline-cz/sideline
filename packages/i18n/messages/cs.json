@@ -2193,6 +2193,7 @@
   "members_vs_column": "VS",
   "members_vs_duplicate": "Tento symbol už má {member}.",
   "members_vs_duplicateShow": "Zobrazit člena",
+  "members_vs_formerMember": "{member} (bývalý člen)",
   "members_vs_filterMissing": "Bez VS",
   "members_vs_help": "Použije se jako VS u plateb příspěvků. Musí být jedinečný v rámci týmu.",
   "members_vs_label": "Variabilní symbol",

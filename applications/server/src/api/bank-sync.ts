@@ -1532,6 +1532,7 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                                 new Roster.VariableSymbolTaken({
                                   holderMemberId: e.holderMemberId,
                                   holderName: e.holderName,
+                                  holderActive: e.holderActive,
                                 }),
                               ),
                             ),

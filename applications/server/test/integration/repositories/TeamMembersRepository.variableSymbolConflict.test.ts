@@ -53,7 +53,12 @@ const expectConflict = (result: { readonly _tag: string }, holderMemberId: strin
   expect(result._tag).toBe('Failure');
   const failure = (
     result as unknown as {
-      readonly failure: { _tag: string; holderMemberId: string; holderName: unknown };
+      readonly failure: {
+        _tag: string;
+        holderMemberId: string;
+        holderName: unknown;
+        holderActive: boolean;
+      };
     }
   ).failure;
   expect(failure._tag).toBe('VariableSymbolConflict');
@@ -165,6 +170,42 @@ describe('setVariableSymbol — holder with no `users.name`', () => {
 
       const failure = expectConflict(result, holder.id);
       expect(Option.getOrNull(failure.holderName as Option.Option<string>)).toBe('filip28');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+describe('setVariableSymbol — the holder has left the team', () => {
+  // The symbol stays reserved after deactivation on purpose: `uq_team_members_team_variable_symbol`
+  // has no `active` predicate, so a late transfer quoting an old symbol can never be attributed to
+  // whoever came after them. The treasurer therefore needs to be told the blocker has left, or an
+  // unrecognised name reads as a bug rather than a reserved number.
+  it.effect('still conflicts, and reports the holder as inactive', () =>
+    Effect.gen(function* () {
+      const { sql, members, team, holder, claimant } = yield* twoMembersOneHolding(
+        'inactive',
+        '2026001',
+      );
+      yield* sql`UPDATE team_members SET active = false WHERE id = ${holder.id}`;
+
+      const result = yield* Effect.result(
+        members.setVariableSymbol(claimant.id, team.id, Option.some('2026001')),
+      );
+
+      const failure = expectConflict(result, holder.id);
+      expect(Option.getOrNull(failure.holderName as Option.Option<string>)).toBe(HOLDER_NAME);
+      expect(failure.holderActive).toBe(false);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an active holder is reported as active', () =>
+    Effect.gen(function* () {
+      const { members, team, holder, claimant } = yield* twoMembersOneHolding('active', '2026002');
+
+      const result = yield* Effect.result(
+        members.setVariableSymbol(claimant.id, team.id, Option.some('2026002')),
+      );
+
+      expect(expectConflict(result, holder.id).holderActive).toBe(true);
     }).pipe(Effect.provide(TestLayer)),
   );
 });
