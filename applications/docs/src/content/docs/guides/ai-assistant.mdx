@@ -1,14 +1,14 @@
 ---
 title: AI assistant
-description: Ask the in-app assistant questions about your team's events, members, groups, rosters and training types.
+description: Ask the in-app assistant questions about your team's events, members, finances, attendance and more — and about how Sideline itself works.
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-The AI assistant is a chat panel that answers questions about your team's own data — in plain language, with links to the exact events, members, groups, rosters, and training types it's talking about.
+The AI assistant is a chat panel that answers questions about your team's own data — in plain language, with links to the exact events, members, groups, rosters, and training types it's talking about. It can also answer questions about how Sideline itself works, straight from these documentation pages.
 
-<Aside type="caution" title="Read-only">
-The assistant can only look things up and answer questions. It cannot create, edit, cancel, or delete anything — for example, it can tell you when your next training is, but it can't create one for you. Use the normal event, roster, or group pages for that.
+<Aside type="caution" title="It can propose one thing, and only with your confirmation">
+The assistant is almost entirely read-only. The one exception is creating an event: if you ask for one, it shows you a card with the details filled in, and **nothing is created until you confirm it**. You can discard the card instead. It cannot edit, cancel, or delete anything, and it cannot make any other kind of change — use the normal event, roster, or group pages for that.
 </Aside>
 
 ## Where to find it
@@ -17,13 +17,23 @@ Go to **Assistant** in your team's sidebar (`/teams/{teamId}/assistant`). The as
 
 ## What you can ask
 
-The assistant can answer questions about:
+**About your team:**
 
 - **Events** — "What's our next event?", "Which events are cancelled this month?"
 - **Training types** — "Show me our training types"
 - **Members** — "How many active members do we have?"
-- **Groups**
-- **Rosters**
+- **Groups** and **rosters**
+- **Who's coming** — "Who said yes to Thursday's training?", "Who was present at last week's match?"
+- **Finances** — "Which fees are outstanding?", "What's the team's payment overview?"
+- **Membership plans and seasons** — "What plans do we offer?", "When does the current season end?"
+
+**About Sideline itself:**
+
+- "How do I set up a recurring event?"
+- "What's a variable symbol?"
+- "How does carpooling work?"
+
+These are answered from this documentation site, so the answers match the version of Sideline you're actually running.
 
 <Steps>
 
@@ -41,7 +51,11 @@ The conversation only lives in your browser tab for as long as the page is open.
 
 ## It only shows you what you can already see
 
-The assistant answers using your own account's permissions — exactly the same permissions that control what you see elsewhere in the app. It never shows you a member's personal contact details, or lets you see rosters or groups you don't already have access to. If you ask about something outside your permissions, the assistant answers as if that data doesn't exist, the same way the rest of the app would.
+This is the rule the assistant will not bend, and it matters more now that it can reach finances and attendance.
+
+The assistant answers using your own account's permissions — exactly the same permissions that control what you see everywhere else in the app. If you can't open the Finances page, the assistant will not tell you who owes what. If you can't see a group, its events stay invisible here too. It never shows you a member's personal contact details.
+
+Asking the assistant is not a way around a permission you don't have: when you ask about something outside your permissions, it answers as if that data doesn't exist, the same way the rest of the app would. Questions about how Sideline works are the one exception — this documentation is public, so anyone can ask about it.
 
 ## When the assistant can't answer
 

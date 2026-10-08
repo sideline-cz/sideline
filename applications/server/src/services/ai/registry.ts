@@ -1,7 +1,7 @@
 /**
  * The tool registry — plan `.work-plans/ai-app-interaction.md` §8 / §13.3.
  *
- * `ALL_TOOLS` is the single catalogue of the six read tools: name,
+ * `ALL_TOOLS` is the single catalogue of every read tool: name,
  * model-facing description, the derived JSON Schema (`parameters`, built
  * once, eagerly, via `toToolParameters`) and the Effect `schema` it was
  * derived from (kept alongside `parameters` so the no-drift test can
@@ -22,7 +22,7 @@
  * caller's permissions and the team's timezone all come from `ToolContext`,
  * resolved before the model is ever called (see `toolTypes.ts`).
  */
-import { Event, type Role } from '@sideline/domain';
+import { Event, type Role, TeamMember } from '@sideline/domain';
 import { Option, Schema } from 'effect';
 import { hasPermission } from '~/api/permissions.js';
 import { ACTION_REGISTRY } from '~/services/ai/actions.js';
@@ -80,6 +80,43 @@ export const ListMembersSchema = Schema.Struct({
 
 export const ListRostersSchema = Schema.Struct({
   query: Schema.optionalKey(QueryParam),
+  limit: Schema.optionalKey(LimitParam),
+});
+
+// --- the six database read tools + search_docs (`.dev-loop/plan.md`) -------
+
+export const ListFeesSchema = Schema.Struct({
+  query: Schema.optionalKey(QueryParam),
+  limit: Schema.optionalKey(LimitParam),
+});
+
+export const GetFinanceOverviewSchema = Schema.Struct({
+  limit: Schema.optionalKey(LimitParam),
+});
+
+export const ListEventRsvpsSchema = Schema.Struct({
+  eventId: Event.EventId,
+  limit: Schema.optionalKey(LimitParam),
+});
+
+export const ListEventAttendanceSchema = Schema.Struct({
+  eventId: Event.EventId,
+  limit: Schema.optionalKey(LimitParam),
+});
+
+export const ListActivityLogsSchema = Schema.Struct({
+  memberId: Schema.optionalKey(TeamMember.TeamMemberId),
+  limit: Schema.optionalKey(LimitParam),
+});
+
+export const ListMembershipPlansSchema = Schema.Struct({
+  limit: Schema.optionalKey(LimitParam),
+});
+
+/** `query` is REQUIRED here, unlike every list tool's optional free-text filter: a docs search
+ *  with no query has nothing to rank and would return the first N sections of the corpus. */
+export const SearchDocsSchema = Schema.Struct({
+  query: QueryParam,
   limit: Schema.optionalKey(LimitParam),
 });
 
@@ -154,6 +191,57 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'matched against the name, and/or cap the number of rows returned with `limit` (1-50).',
     ListRostersSchema,
     Option.some('roster:view'),
+  ),
+  define(
+    'list_fees',
+    'Lists the team fees (name, description, amount in minor units, currency, due date, whether ' +
+      'archived). Filter with a free-text `query` matched against the fee name, and/or cap the ' +
+      'number of rows with `limit` (1-50). Only available to callers who can see finances.',
+    ListFeesSchema,
+    Option.some('finance:view'),
+  ),
+  define(
+    'get_finance_overview',
+    "Returns the team's finance overview: one row per member and currency with the total due, " +
+      'the total paid, any credit, and how many of their fees are overdue, pending or paid. Use ' +
+      'it for "who still owes money" questions. Only available to callers who can see finances.',
+    GetFinanceOverviewSchema,
+    Option.some('finance:view'),
+  ),
+  define(
+    'list_event_rsvps',
+    'Lists who answered an event invitation and how (yes/no/maybe) plus any message they left. ' +
+      'Requires the `eventId` of an event you can already see — get it from `list_events`.',
+    ListEventRsvpsSchema,
+  ),
+  define(
+    'list_event_attendance',
+    'Lists who was actually present at an event, once attendance has been taken. Requires the ' +
+      '`eventId` of an event you can already see — get it from `list_events`. This is the ' +
+      'recorded attendance, not the RSVPs (use `list_event_rsvps` for those).',
+    ListEventAttendanceSchema,
+  ),
+  define(
+    'list_activity_logs',
+    'Lists logged training activities (activity type, when, duration in minutes, note). With no ' +
+      "`memberId` it returns the caller's OWN logs; pass a `memberId` from `list_members` for " +
+      "another member's. Cap the number of rows with `limit` (1-50).",
+    ListActivityLogsSchema,
+  ),
+  define(
+    'list_membership_plans',
+    "Lists the team's membership plans (name, price in minor units, currency, per-training " +
+      "price, included free trainings, which one is the default) together with the team's " +
+      'current and next season dates. Use it for questions about plans, prices and season dates.',
+    ListMembershipPlansSchema,
+  ),
+  define(
+    'search_docs',
+    'Searches the Sideline product documentation (how-to guides, FAQ, concepts) and returns the ' +
+      'most relevant sections. This is the right tool for "how do I…" and "what does X mean" ' +
+      "questions about the app itself. Do NOT use it for questions about the team's own data — " +
+      'events, members, fees and everything else live in the other tools.',
+    SearchDocsSchema,
   ),
   // Built FROM the action registry (`services/ai/actions.ts`) so a `propose_<action>` tool
   // cannot drift from its entry — adding an action there is enough to offer it here too.

@@ -12,6 +12,10 @@ RUN pnpm install --frozen-lockfile
 FROM deps AS build
 COPY packages/ /app/packages/
 COPY applications/server/ applications/server/
+# `scripts/build-docs-index.mjs` (the server's `codegen` step) reads the end-user docs to
+# build the assistant's `search_docs` index. Content only — the docs app itself is a
+# separate image and is not built here.
+COPY applications/docs/src/content applications/docs/src/content
 COPY tsconfig.* /app/
 RUN pnpm --recursive --parallel run codegen && pnpm build
 

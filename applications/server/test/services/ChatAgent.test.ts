@@ -99,9 +99,15 @@ import type { Event, GroupModel, Role, Team, TeamMember, TrainingType } from '@s
 import { AiChatApi } from '@sideline/domain';
 import { Cause, DateTime, Effect, Exit, Fiber, Layer, Option } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
+import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
+import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, EventWithDetails } from '~/repositories/EventsRepository.js';
+import { FeesRepository } from '~/repositories/FeesRepository.js';
+import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { MembershipWithRole, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
@@ -253,6 +259,40 @@ const makeMembersLayer = () =>
   Layer.succeed(TeamMembersRepository, {
     findRosterByTeam: () => Effect.succeed([]),
   } as never);
+
+/**
+ * `ChatAgent.Default` captures EVERY read-tool repository at construction (so `respond` keeps
+ * `R = never`), including the six added for the database read tools of `.dev-loop/plan.md`.
+ * None of the scripted turns in this file calls those tools, so the stubs only have to exist —
+ * each method dies rather than returning an empty list, so a future test that does script one of
+ * those calls fails loudly instead of silently asserting against a hollow fixture.
+ */
+const unusedRepoLayers = Layer.mergeAll(
+  Layer.succeed(FeesRepository, {
+    listByTeam: () => Effect.die(new Error('ChatAgent.test: FeesRepository not stubbed')),
+  } as never),
+  Layer.succeed(FinanceOverviewRepository, {
+    overviewByTeam: () =>
+      Effect.die(new Error('ChatAgent.test: FinanceOverviewRepository not stubbed')),
+  } as never),
+  Layer.succeed(EventRsvpsRepository, {
+    findRsvpsByEventId: () =>
+      Effect.die(new Error('ChatAgent.test: EventRsvpsRepository not stubbed')),
+  } as never),
+  Layer.succeed(EventAttendanceRepository, {
+    findAttendanceForEvent: () =>
+      Effect.die(new Error('ChatAgent.test: EventAttendanceRepository not stubbed')),
+  } as never),
+  Layer.succeed(ActivityLogsRepository, {
+    findByMember: () => Effect.die(new Error('ChatAgent.test: ActivityLogsRepository not stubbed')),
+  } as never),
+  Layer.succeed(MembershipPlansRepository, {
+    findMembershipPlansByTeamId: () =>
+      Effect.die(new Error('ChatAgent.test: MembershipPlansRepository not stubbed')),
+    findSeasons: () =>
+      Effect.die(new Error('ChatAgent.test: MembershipPlansRepository not stubbed')),
+  } as never),
+);
 
 /**
  * Defensive mock, not required by any of the 6 read tools. `systemPrompt.ts`
@@ -451,6 +491,7 @@ const buildLayer = (llmLayer: Layer.Layer<LlmClient>, fixtures: Fixtures = {}) =
       Layer.provide(membersLayer),
       Layer.provide(teamsLayer),
       Layer.provide(proposalsLayer),
+      Layer.provide(unusedRepoLayers),
     ),
     eventsLayer,
     groupsLayer,
@@ -887,6 +928,7 @@ describe('ChatAgent.respond — E = never is earned, not asserted', () => {
             Layer.provide(makeMembersLayer()),
             Layer.provide(makeTeamsLayer()),
             Layer.provide(proposalsLayer),
+            Layer.provide(unusedRepoLayers),
           ),
           throwingEventsLayer,
           makeGroupsLayer(),

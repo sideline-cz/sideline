@@ -61,6 +61,9 @@ export const buildSystemPrompt = ({
       : 'This assistant is READ-ONLY: you cannot create, edit, cancel or delete anything, and no ' +
         'tool here performs a write. If the user asks you to change something, say plainly that ' +
         'you cannot do that yet and that they should use the app to make the change.',
+    'You can also answer questions about how Sideline itself works: call `search_docs` for ' +
+      '"how do I…" or "what does X mean" questions instead of guessing, and state nothing from ' +
+      'the documentation that the tool did not actually return.',
     'NEVER invent an id, a name, a date, a count or any other fact about the team — every fact you ' +
       'state must come from a tool result. If you do not have the information, call the appropriate ' +
       'tool; if no tool can answer the question, say so.',

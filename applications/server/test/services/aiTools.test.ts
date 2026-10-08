@@ -67,9 +67,14 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import type {
+  ActivityLog,
+  ActivityType,
   Discord,
   Event,
+  EventRsvp,
+  Fee,
   GroupModel,
+  MembershipPlan,
   Role,
   RosterModel,
   Team,
@@ -80,9 +85,15 @@ import type {
 import { DateTime, Effect, Layer, Option, Schema, type ServiceMap } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
 import { toEventInfo } from '~/api/event.js';
+import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
+import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, EventWithDetails } from '~/repositories/EventsRepository.js';
+import { FeesRepository } from '~/repositories/FeesRepository.js';
+import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import {
   MembershipWithRole,
@@ -94,9 +105,15 @@ import { ProposeCreateEventArgs } from '~/services/ai/actions.js';
 import { toToolParameters } from '~/services/ai/jsonSchema.js';
 import {
   currentDatetime,
+  getFinanceOverview,
+  listActivityLogs,
+  listEventAttendance,
+  listEventRsvps,
   listEvents,
+  listFees,
   listGroups,
   listMembers,
+  listMembershipPlans,
   listRosters,
   listTrainingTypes,
 } from '~/services/ai/readTools.js';
@@ -128,6 +145,25 @@ const TT_B1 = '00000000-0000-0000-0000-0000000tb001' as TrainingType.TrainingTyp
 const ROSTER_A1 = '00000000-0000-0000-0000-0000000ra001' as RosterModel.RosterId;
 const ROSTER_B1 = '00000000-0000-0000-0000-0000000rb001' as RosterModel.RosterId;
 
+// --- ids added for the six database read tools (plan half 2) ---------------
+
+const MEMBER_A2 = '00000000-0000-0000-0000-0000000a0002' as TeamMember.TeamMemberId;
+const MEMBER_B1 = '00000000-0000-0000-0000-0000000b0001' as TeamMember.TeamMemberId;
+const USER_2 = 'user-2' as User.UserId;
+
+const FEE_A1 = '00000000-0000-0000-0000-0000000fa001' as Fee.FeeId;
+const FEE_B1 = '00000000-0000-0000-0000-0000000fb001' as Fee.FeeId;
+
+const PLAN_A1 = '00000000-0000-0000-0000-0000000pa001' as MembershipPlan.MembershipPlanId;
+const PLAN_B1 = '00000000-0000-0000-0000-0000000pb001' as MembershipPlan.MembershipPlanId;
+
+const LOG_A1 = '00000000-0000-0000-0000-0000000la001' as ActivityLog.ActivityLogId;
+const LOG_A2 = '00000000-0000-0000-0000-0000000la002' as ActivityLog.ActivityLogId;
+const LOG_B1 = '00000000-0000-0000-0000-0000000lb001' as ActivityLog.ActivityLogId;
+const ACTIVITY_TYPE_A1 = '00000000-0000-0000-0000-0000000aa001' as ActivityType.ActivityTypeId;
+
+const CZK = 'CZK' as Fee.CurrencyCode;
+
 // ---------------------------------------------------------------------------
 // Fixture builders
 // ---------------------------------------------------------------------------
@@ -138,6 +174,9 @@ interface EventOverrides {
   readonly title?: string;
   readonly status?: Event.EventStatus;
   readonly member_group_id?: Option.Option<GroupModel.GroupId>;
+  // `list_event_attendance` gates on THIS column; `list_event_rsvps` gates on `member_group_id`.
+  // The two are independently settable here precisely so a test can make them disagree.
+  readonly owner_group_id?: Option.Option<GroupModel.GroupId>;
 }
 
 const buildEvent = (overrides: EventOverrides = {}): EventWithDetails =>
@@ -162,7 +201,7 @@ const buildEvent = (overrides: EventOverrides = {}): EventWithDetails =>
     created_by_name: Option.none(),
     series_id: Option.none(),
     series_modified: false,
-    owner_group_id: Option.none(),
+    owner_group_id: overrides.owner_group_id ?? Option.none(),
     owner_group_name: Option.none(),
     member_group_id: overrides.member_group_id ?? Option.none(),
     member_group_name: Option.none(),
@@ -319,12 +358,14 @@ interface RosterEntryOverrides {
   readonly avatar?: Option.Option<string>;
   readonly jersey_number?: Option.Option<number>;
   readonly active?: boolean;
+  readonly user_id?: User.UserId;
+  readonly username?: string;
 }
 
 const buildRosterEntry = (overrides: RosterEntryOverrides = {}): RosterEntry =>
   new RosterEntry({
     member_id: overrides.member_id ?? MEMBER_A1,
-    user_id: USER_1,
+    user_id: overrides.user_id ?? USER_1,
     discord_id: overrides.discord_id ?? ('123456789012345678' as Discord.Snowflake),
     role_names: ['Player'],
     permissions: [],
@@ -333,7 +374,7 @@ const buildRosterEntry = (overrides: RosterEntryOverrides = {}): RosterEntry =>
     birth_date: Option.some('2000-01-01'),
     gender: Option.some('female' as User.Gender),
     jersey_number: overrides.jersey_number ?? Option.some(7),
-    username: 'alice#0001',
+    username: overrides.username ?? 'alice#0001',
     avatar: overrides.avatar ?? Option.some('abcd1234'),
     discord_nickname: Option.none(),
     discord_display_name: Option.none(),
@@ -344,10 +385,309 @@ const buildRosterEntry = (overrides: RosterEntryOverrides = {}): RosterEntry =>
 const makeMembersLayer = (byTeam: ReadonlyMap<Team.TeamId, ReadonlyArray<RosterEntry>>) =>
   Layer.succeed(TeamMembersRepository, {
     findRosterByTeam: (teamId: string) => Effect.succeed(byTeam.get(teamId as Team.TeamId) ?? []),
+    // The team-scoped single-member resolver (`TeamMembersRepository.findRosterMemberByIds`,
+    // src/repositories/TeamMembersRepository.ts:565). `list_activity_logs` must route a
+    // model-supplied `memberId` through THIS before it ever touches `ActivityLogsRepository`,
+    // which is scoped by member id alone and knows nothing about teams.
+    findRosterMemberByIds: (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId) =>
+      Effect.succeed(
+        Option.fromNullishOr((byTeam.get(teamId) ?? []).find((m) => m.member_id === memberId)),
+      ),
   } as never);
 
 const itemsOf = (result: unknown): ReadonlyArray<Record<string, unknown>> =>
   (result as { items: ReadonlyArray<Record<string, unknown>> }).items;
+
+// ---------------------------------------------------------------------------
+// Mock repository layers for the six database read tools (plan half 2).
+//
+// Every one of these is a COUNTING stub: it returns `{ layer, calls }` and records the arguments
+// of each call. "The result was empty" is NOT the assertion that matters for the two
+// event-scoped tools — `EventRsvpsRepository.findRsvpsByEventId` and
+// `EventAttendanceRepository.findAttendanceForEvent` both take an eventId ALONE and are not
+// team-scoped, so an executor that calls them with an unvalidated model-supplied id has already
+// read another club's rows by the time it filters. `calls` is what pins "never asked".
+// ---------------------------------------------------------------------------
+
+interface FeeRowLike {
+  readonly id: Fee.FeeId;
+  readonly team_id: Team.TeamId;
+  readonly name: string;
+  readonly description: Option.Option<string>;
+  readonly amount_minor: Fee.AmountMinor;
+  readonly currency: Fee.CurrencyCode;
+  readonly due_at: Option.Option<DateTime.Utc>;
+  readonly recurrence: 'one_off' | 'monthly';
+  readonly target_scope: 'team' | 'group' | 'member';
+  readonly created_at: DateTime.Utc;
+  readonly updated_at: DateTime.Utc;
+  readonly archived_at: Option.Option<DateTime.Utc>;
+  readonly assignment_count: number;
+  readonly paid_count: number;
+  readonly pending_count: number;
+  readonly overdue_count: number;
+}
+
+const buildFeeRow = (overrides: Partial<FeeRowLike> = {}): FeeRowLike => ({
+  id: overrides.id ?? FEE_A1,
+  team_id: overrides.team_id ?? TEAM_A,
+  name: overrides.name ?? 'Spring membership',
+  description: overrides.description ?? Option.some('Covers March to June'),
+  amount_minor: (overrides.amount_minor ?? 150000) as Fee.AmountMinor,
+  currency: overrides.currency ?? CZK,
+  due_at: overrides.due_at ?? Option.some(DateTime.makeUnsafe(Date.parse('2026-03-01T00:00:00Z'))),
+  recurrence: overrides.recurrence ?? 'one_off',
+  target_scope: overrides.target_scope ?? 'team',
+  created_at: overrides.created_at ?? DateTime.makeUnsafe(Date.parse('2026-01-01T00:00:00Z')),
+  updated_at: overrides.updated_at ?? DateTime.makeUnsafe(Date.parse('2026-01-01T00:00:00Z')),
+  archived_at: overrides.archived_at ?? Option.none(),
+  assignment_count: overrides.assignment_count ?? 3,
+  paid_count: overrides.paid_count ?? 1,
+  pending_count: overrides.pending_count ?? 1,
+  overdue_count: overrides.overdue_count ?? 1,
+});
+
+const makeFeesLayer = (rows: ReadonlyArray<FeeRowLike>) => {
+  const calls: Array<Team.TeamId> = [];
+  const layer = Layer.succeed(FeesRepository, {
+    listByTeam: (teamId: Team.TeamId) => {
+      calls.push(teamId);
+      return Effect.succeed(rows.filter((r) => r.team_id === teamId));
+    },
+  } as never);
+  return { layer, calls };
+};
+
+interface OverviewRowLike {
+  readonly teamMemberId: TeamMember.TeamMemberId;
+  readonly memberName: Option.Option<string>;
+  readonly currency: Fee.CurrencyCode;
+  readonly totalDueMinor: number;
+  readonly totalPaidMinor: number;
+  readonly overdueCount: number;
+  readonly pendingCount: number;
+  readonly paidCount: number;
+  readonly creditMinor: number;
+}
+
+const buildOverviewRow = (overrides: Partial<OverviewRowLike> = {}): OverviewRowLike => ({
+  teamMemberId: overrides.teamMemberId ?? MEMBER_A1,
+  memberName: overrides.memberName ?? Option.some('Alice'),
+  currency: overrides.currency ?? CZK,
+  totalDueMinor: overrides.totalDueMinor ?? 150000,
+  totalPaidMinor: overrides.totalPaidMinor ?? 50000,
+  overdueCount: overrides.overdueCount ?? 1,
+  pendingCount: overrides.pendingCount ?? 2,
+  paidCount: overrides.paidCount ?? 3,
+  creditMinor: overrides.creditMinor ?? 0,
+});
+
+const makeFinanceOverviewLayer = (
+  byTeam: ReadonlyMap<Team.TeamId, ReadonlyArray<OverviewRowLike>>,
+) => {
+  const calls: Array<Team.TeamId> = [];
+  const layer = Layer.succeed(FinanceOverviewRepository, {
+    overviewByTeam: (teamId: Team.TeamId) => {
+      calls.push(teamId);
+      return Effect.succeed(byTeam.get(teamId) ?? []);
+    },
+    // `myStatus` is the OTHER overview read (`api/finance.ts`'s self-service endpoint). The spec
+    // pins `overviewByTeam`; if an implementation reaches for this one instead the test must
+    // notice rather than silently pass, so it dies.
+    myStatus: () => Effect.die(new Error('get_finance_overview must use overviewByTeam')),
+  } as never);
+  return { layer, calls };
+};
+
+interface RsvpRowLike {
+  readonly team_member_id: TeamMember.TeamMemberId;
+  readonly response: EventRsvp.RsvpResponse;
+  readonly message: Option.Option<string>;
+  readonly member_name: Option.Option<string>;
+  readonly username: Option.Option<string>;
+  readonly nickname: Option.Option<string>;
+  readonly display_name: Option.Option<string>;
+}
+
+const buildRsvpRow = (overrides: Partial<RsvpRowLike> = {}): RsvpRowLike => ({
+  team_member_id: overrides.team_member_id ?? MEMBER_A1,
+  response: overrides.response ?? ('yes' as EventRsvp.RsvpResponse),
+  message: overrides.message ?? Option.some('Running 10 minutes late'),
+  member_name: overrides.member_name ?? Option.some('Alice'),
+  username: overrides.username ?? Option.some('alice#0001'),
+  nickname: overrides.nickname ?? Option.none(),
+  display_name: overrides.display_name ?? Option.none(),
+});
+
+const makeRsvpsLayer = (byEvent: ReadonlyMap<Event.EventId, ReadonlyArray<RsvpRowLike>>) => {
+  const calls: Array<Event.EventId> = [];
+  const layer = Layer.succeed(EventRsvpsRepository, {
+    findRsvpsByEventId: (eventId: Event.EventId) => {
+      calls.push(eventId);
+      return Effect.succeed(byEvent.get(eventId) ?? []);
+    },
+  } as never);
+  return { layer, calls };
+};
+
+interface AttendanceRowLike {
+  readonly team_member_id: TeamMember.TeamMemberId;
+  readonly member_name: Option.Option<string>;
+  readonly nickname: Option.Option<string>;
+  readonly username: Option.Option<string>;
+  readonly display_name: Option.Option<string>;
+  readonly rsvp_response: Option.Option<EventRsvp.RsvpResponse>;
+  readonly present: boolean;
+  readonly confirmed_at: Option.Option<DateTime.Utc>;
+}
+
+const buildAttendanceRow = (overrides: Partial<AttendanceRowLike> = {}): AttendanceRowLike => ({
+  team_member_id: overrides.team_member_id ?? MEMBER_A1,
+  member_name: overrides.member_name ?? Option.some('Alice'),
+  nickname: overrides.nickname ?? Option.none(),
+  username: overrides.username ?? Option.some('alice#0001'),
+  display_name: overrides.display_name ?? Option.none(),
+  rsvp_response: overrides.rsvp_response ?? Option.some('yes' as EventRsvp.RsvpResponse),
+  present: overrides.present ?? true,
+  confirmed_at:
+    overrides.confirmed_at ?? Option.some(DateTime.makeUnsafe(Date.parse('2026-06-01T12:00:00Z'))),
+});
+
+const makeAttendanceLayer = (
+  byEvent: ReadonlyMap<Event.EventId, ReadonlyArray<AttendanceRowLike>>,
+) => {
+  const calls: Array<Event.EventId> = [];
+  const layer = Layer.succeed(EventAttendanceRepository, {
+    findAttendanceForEvent: (eventId: Event.EventId) => {
+      calls.push(eventId);
+      return Effect.succeed(byEvent.get(eventId) ?? []);
+    },
+  } as never);
+  return { layer, calls };
+};
+
+interface ActivityLogRowLike {
+  readonly id: ActivityLog.ActivityLogId;
+  readonly team_member_id: TeamMember.TeamMemberId;
+  readonly activity_type_id: ActivityType.ActivityTypeId;
+  readonly activity_type_name: string;
+  readonly activity_type_emoji: Option.Option<string>;
+  readonly logged_at: string;
+  readonly duration_minutes: Option.Option<number>;
+  readonly note: Option.Option<string>;
+  readonly source: 'manual' | 'auto';
+}
+
+const buildActivityLogRow = (overrides: Partial<ActivityLogRowLike> = {}): ActivityLogRowLike => ({
+  id: overrides.id ?? LOG_A1,
+  team_member_id: overrides.team_member_id ?? MEMBER_A1,
+  activity_type_id: overrides.activity_type_id ?? ACTIVITY_TYPE_A1,
+  activity_type_name: overrides.activity_type_name ?? 'Gym',
+  activity_type_emoji: overrides.activity_type_emoji ?? Option.some('🏋️'),
+  logged_at: overrides.logged_at ?? '2026-05-01T18:00:00.000Z',
+  duration_minutes: overrides.duration_minutes ?? Option.some(60),
+  note: overrides.note ?? Option.some('Leg day'),
+  source: overrides.source ?? 'manual',
+});
+
+/** Both `findByMember` and `findByTeamMember` are stubbed and share one `calls` array: the
+ *  repository is scoped by MEMBER ID alone either way (src/repositories/ActivityLogsRepository.ts
+ *  :159-163), so which of the two an implementation picks does not change the tenancy question —
+ *  only whether a foreign member id reaches it at all. */
+const makeActivityLogsLayer = (rows: ReadonlyArray<ActivityLogRowLike>) => {
+  const calls: Array<TeamMember.TeamMemberId> = [];
+  const forMember = (memberId: TeamMember.TeamMemberId) => {
+    calls.push(memberId);
+    return Effect.succeed(rows.filter((r) => r.team_member_id === memberId));
+  };
+  const layer = Layer.succeed(ActivityLogsRepository, {
+    findByMember: forMember,
+    findByTeamMember: forMember,
+  } as never);
+  return { layer, calls };
+};
+
+interface MembershipPlanRowLike {
+  readonly id: MembershipPlan.MembershipPlanId;
+  readonly team_id: Team.TeamId;
+  readonly name: Option.Option<string>;
+  readonly price_minor: Fee.AmountMinor;
+  readonly currency: Fee.CurrencyCode;
+  readonly price_per_training_minor: Fee.AmountMinor;
+  readonly free_trainings_included: number;
+  readonly is_default: boolean;
+}
+
+const buildMembershipPlanRow = (
+  overrides: Partial<MembershipPlanRowLike> = {},
+): MembershipPlanRowLike => ({
+  id: overrides.id ?? PLAN_A1,
+  team_id: overrides.team_id ?? TEAM_A,
+  name: overrides.name ?? Option.some('Full season'),
+  price_minor: (overrides.price_minor ?? 500000) as Fee.AmountMinor,
+  currency: overrides.currency ?? CZK,
+  price_per_training_minor: (overrides.price_per_training_minor ?? 0) as Fee.AmountMinor,
+  free_trainings_included: overrides.free_trainings_included ?? 0,
+  is_default: overrides.is_default ?? true,
+});
+
+const SEASONS_A = {
+  current_season: Option.some({
+    starts_at: DateTime.makeUnsafe(Date.parse('2026-01-01T00:00:00Z')),
+    selection_deadline: Option.some(DateTime.makeUnsafe(Date.parse('2026-02-01T00:00:00Z'))),
+    expires_at: Option.some(DateTime.makeUnsafe(Date.parse('2026-12-31T00:00:00Z'))),
+  }),
+  next_season: Option.none(),
+};
+
+const makeMembershipPlansLayer = (rows: ReadonlyArray<MembershipPlanRowLike>) => {
+  const calls: Array<Team.TeamId> = [];
+  const assignmentCalls: Array<Team.TeamId> = [];
+  const layer = Layer.succeed(MembershipPlansRepository, {
+    findMembershipPlansByTeamId: (teamId: Team.TeamId) => {
+      calls.push(teamId);
+      return Effect.succeed(rows.filter((r) => r.team_id === teamId));
+    },
+    findSeasons: () => Effect.succeed(SEASONS_A),
+    // The per-member tier roster. `api/membership-plan.ts:108` returns it ONLY to a caller
+    // holding `finance:manage_fees`; the tool must project it away ENTIRELY rather than
+    // re-derive that rule, so this must never be reached.
+    findPlanAssignments: (teamId: Team.TeamId) => {
+      assignmentCalls.push(teamId);
+      return Effect.succeed([
+        {
+          member_id: MEMBER_A1,
+          membership_plan_id: Option.some(PLAN_A1),
+          name: Option.some('Alice Rosterleak'),
+          discord_nickname: Option.none(),
+          discord_display_name: Option.none(),
+          username: 'alice#0001',
+        },
+      ]);
+    },
+  } as never);
+  return { layer, calls, assignmentCalls };
+};
+
+/** The keys no model-facing row from ANY tool may carry (plan "Invariants" §5). */
+const PII_KEYS = [
+  'email',
+  'birthDate',
+  'birth_date',
+  'gender',
+  'discordId',
+  'discord_id',
+  'userId',
+  'user_id',
+  'permissions',
+];
+
+const expectNoPii = (row: Record<string, unknown>): void => {
+  const keys = Object.keys(row);
+  for (const key of PII_KEYS) {
+    expect(keys).not.toContain(key);
+  }
+};
 
 // ---------------------------------------------------------------------------
 // list_events
@@ -784,6 +1124,557 @@ describe('list_members', () => {
   );
 });
 
+// ===========================================================================
+// The six database read tools — plan `.dev-loop/plan.md` half 2 / `.dev-loop/spec.md`.
+//
+// Gates, verified against the handlers they mirror:
+//   list_fees                finance:view            api/finance.ts:184
+//   get_finance_overview     finance:view            api/finance.ts:376
+//   list_event_rsvps         membership + canSeeGroup(event.member_group_id)   api/event-rsvp.ts:154
+//   list_event_attendance    membership + canSeeGroup(event.owner_group_id)    api/event-attendance.ts:61
+//   list_activity_logs       membership only         api/activity-logs.ts:35
+//   list_membership_plans    membership only, roster projected away   api/membership-plan.ts:108
+//
+// Every forbidden-path case below calls the EXECUTOR directly. `visibleTools(ctx)` hiding the
+// tool is NOT the boundary: `dispatchOneCall` (`ChatAgent.ts`) resolves every call against the
+// full `ALL_TOOLS` catalogue regardless of what this turn's `tools` array contained, and the
+// PROVIDER can emit a call that was never offered.
+// ===========================================================================
+
+const canSeeOnlyGroup =
+  (visible: GroupModel.GroupId) => (groupId: Option.Option<GroupModel.GroupId>) =>
+    Effect.succeed(Option.match(groupId, { onNone: () => true, onSome: (id) => id === visible }));
+
+// ---------------------------------------------------------------------------
+// list_fees — finance:view
+// ---------------------------------------------------------------------------
+
+describe('list_fees', () => {
+  it.effect(
+    'EXECUTOR refuses a caller without finance:view — forbidden, repository never queried, no fee name leaked',
+    () =>
+      Effect.gen(function* () {
+        const fees = makeFeesLayer([buildFeeRow({ name: 'Spring membership' })]);
+        const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
+        const outcome = yield* listFees({}, ctx).pipe(Effect.provide(fees.layer));
+
+        expect(outcome.result).toEqual({ error: 'forbidden', permission: 'finance:view' });
+        expect(outcome.hits).toEqual([]);
+        expect(fees.calls).toEqual([]);
+        expect(JSON.stringify(outcome.result)).not.toContain('Spring membership');
+      }),
+  );
+
+  it.effect('with finance:view: scoped to ctx.teamId, never another team', () =>
+    Effect.gen(function* () {
+      const fees = makeFeesLayer([
+        buildFeeRow({ id: FEE_A1, team_id: TEAM_A, name: 'Team A dues' }),
+        buildFeeRow({ id: FEE_B1, team_id: TEAM_B, name: 'Team B dues' }),
+      ]);
+      const ctx = buildCtx({ membership: buildMembership({ permissions: ['finance:view'] }) });
+      const outcome = yield* listFees({}, ctx).pipe(Effect.provide(fees.layer));
+
+      expect(fees.calls).toEqual([TEAM_A]);
+      const items = itemsOf(outcome.result);
+      expect(items).toHaveLength(1);
+      expect(JSON.stringify(outcome.result)).not.toContain('Team B dues');
+    }),
+  );
+
+  it.effect('model-facing row carries no PII and no raw ids', () =>
+    Effect.gen(function* () {
+      const fees = makeFeesLayer([buildFeeRow({ id: FEE_A1 })]);
+      const ctx = buildCtx({ membership: buildMembership({ permissions: ['finance:view'] }) });
+      const outcome = yield* listFees({}, ctx).pipe(Effect.provide(fees.layer));
+
+      const [item] = itemsOf(outcome.result);
+      expect(item).toBeDefined();
+      expectNoPii(item ?? {});
+      expect(item?.name).toBe('Spring membership');
+      expect(item?.amountMinor).toBe(150000);
+      expect(item?.currency).toBe('CZK');
+      // No reference cards for the new tools (`.dev-loop/spec.md`: no new `SearchHit` kind).
+      expect(outcome.hits).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// get_finance_overview — finance:view
+// ---------------------------------------------------------------------------
+
+describe('get_finance_overview', () => {
+  it.effect(
+    'EXECUTOR refuses a caller without finance:view — forbidden, repository never queried, no member name leaked',
+    () =>
+      Effect.gen(function* () {
+        const overview = makeFinanceOverviewLayer(
+          new Map([[TEAM_A, [buildOverviewRow({ memberName: Option.some('Alice') })]]]),
+        );
+        const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
+        const outcome = yield* getFinanceOverview({}, ctx).pipe(Effect.provide(overview.layer));
+
+        expect(outcome.result).toEqual({ error: 'forbidden', permission: 'finance:view' });
+        expect(outcome.hits).toEqual([]);
+        expect(overview.calls).toEqual([]);
+        expect(JSON.stringify(outcome.result)).not.toContain('Alice');
+      }),
+  );
+
+  it.effect(
+    'with finance:view: overviewByTeam called with ctx.teamId, rows projected per spec',
+    () =>
+      Effect.gen(function* () {
+        const overview = makeFinanceOverviewLayer(
+          new Map([
+            [TEAM_A, [buildOverviewRow({ memberName: Option.some('Alice') })]],
+            [TEAM_B, [buildOverviewRow({ memberName: Option.some('Bob of Team B') })]],
+          ]),
+        );
+        const ctx = buildCtx({ membership: buildMembership({ permissions: ['finance:view'] }) });
+        const outcome = yield* getFinanceOverview({}, ctx).pipe(Effect.provide(overview.layer));
+
+        expect(overview.calls).toEqual([TEAM_A]);
+        const [item] = itemsOf(outcome.result);
+        expect(item).toBeDefined();
+        expectNoPii(item ?? {});
+        expect(item?.memberName).toBe('Alice');
+        expect(item?.totalDueMinor).toBe(150000);
+        expect(item?.totalPaidMinor).toBe(50000);
+        expect(item?.overdueCount).toBe(1);
+        expect(item?.pendingCount).toBe(2);
+        expect(item?.paidCount).toBe(3);
+        expect(item?.creditMinor).toBe(0);
+        expect(JSON.stringify(outcome.result)).not.toContain('Bob of Team B');
+        expect(outcome.hits).toEqual([]);
+      }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// list_membership_plans — membership only, roster PROJECTED AWAY
+// ---------------------------------------------------------------------------
+
+describe('list_membership_plans', () => {
+  it.effect('membership-only: a caller holding zero permissions still gets the plans', () =>
+    Effect.gen(function* () {
+      const plans = makeMembershipPlansLayer([buildMembershipPlanRow({ id: PLAN_A1 })]);
+      const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
+      const outcome = yield* listMembershipPlans({}, ctx).pipe(Effect.provide(plans.layer));
+
+      expect(outcome.result).not.toMatchObject({ error: 'forbidden' });
+      expect(itemsOf(outcome.result)).toHaveLength(1);
+      expect(plans.calls).toEqual([TEAM_A]);
+    }),
+  );
+
+  it.effect('scoped to ctx.teamId — another team’s plan never appears', () =>
+    Effect.gen(function* () {
+      const plans = makeMembershipPlansLayer([
+        buildMembershipPlanRow({ id: PLAN_A1, team_id: TEAM_A, name: Option.some('Team A plan') }),
+        buildMembershipPlanRow({ id: PLAN_B1, team_id: TEAM_B, name: Option.some('Team B plan') }),
+      ]);
+      const ctx = buildCtx();
+      const outcome = yield* listMembershipPlans({}, ctx).pipe(Effect.provide(plans.layer));
+
+      expect(itemsOf(outcome.result)).toHaveLength(1);
+      expect(JSON.stringify(outcome.result)).not.toContain('Team B plan');
+    }),
+  );
+
+  it.effect(
+    'PRIVACY: the per-member roster is projected away even for a caller holding finance:manage_fees — findPlanAssignments is NEVER called',
+    () =>
+      Effect.gen(function* () {
+        const plans = makeMembershipPlansLayer([buildMembershipPlanRow({ id: PLAN_A1 })]);
+        const ctx = buildCtx({
+          membership: buildMembership({
+            permissions: ['finance:view', 'finance:manage_fees', 'member:view', 'team:manage'],
+          }),
+        });
+        const outcome = yield* listMembershipPlans({}, ctx).pipe(Effect.provide(plans.layer));
+
+        expect(plans.assignmentCalls).toEqual([]);
+        const json = JSON.stringify(outcome.result);
+        expect(json).not.toContain('Alice Rosterleak');
+        expect(json).not.toContain('alice#0001');
+        for (const rosterKey of ['assignments', 'members', 'roster', 'memberId', 'member_id']) {
+          expect(json).not.toContain(rosterKey);
+        }
+      }),
+  );
+
+  it.effect('carries the team seasons and no PII', () =>
+    Effect.gen(function* () {
+      const plans = makeMembershipPlansLayer([buildMembershipPlanRow({ id: PLAN_A1 })]);
+      const ctx = buildCtx();
+      const outcome = yield* listMembershipPlans({}, ctx).pipe(Effect.provide(plans.layer));
+
+      const [item] = itemsOf(outcome.result);
+      expect(item).toBeDefined();
+      expectNoPii(item ?? {});
+      expect(item?.name).toBe('Full season');
+      expect(item?.priceMinor).toBe(500000);
+      expect(item?.currency).toBe('CZK');
+      expect((outcome.result as { seasons?: unknown }).seasons).toBeDefined();
+      expect(outcome.hits).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// list_activity_logs — membership only; self-scoped by default
+// ---------------------------------------------------------------------------
+
+describe('list_activity_logs', () => {
+  it.effect(
+    'no memberId: scopes to ctx.membership.id — NOT the whole team (a teammate’s log never appears)',
+    () =>
+      Effect.gen(function* () {
+        const logs = makeActivityLogsLayer([
+          buildActivityLogRow({ id: LOG_A1, team_member_id: MEMBER_A1, note: Option.some('Mine') }),
+          buildActivityLogRow({
+            id: LOG_A2,
+            team_member_id: MEMBER_A2,
+            note: Option.some('Teammate secret'),
+          }),
+        ]);
+        const members = makeMembersLayer(
+          new Map([
+            [
+              TEAM_A,
+              [
+                buildRosterEntry({ member_id: MEMBER_A1, name: Option.some('Alice') }),
+                buildRosterEntry({
+                  member_id: MEMBER_A2,
+                  user_id: USER_2,
+                  name: Option.some('Bob'),
+                  discord_id: '222222222222222222' as Discord.Snowflake,
+                }),
+              ],
+            ],
+          ]),
+        );
+        const ctx = buildCtx({ membership: buildMembership({ id: MEMBER_A1, permissions: [] }) });
+        const outcome = yield* listActivityLogs({}, ctx).pipe(
+          Effect.provide(Layer.mergeAll(logs.layer, members)),
+        );
+
+        expect(logs.calls).toEqual([MEMBER_A1]);
+        expect(itemsOf(outcome.result)).toHaveLength(1);
+        expect(JSON.stringify(outcome.result)).not.toContain('Teammate secret');
+      }),
+  );
+
+  it.effect(
+    'TENANCY: a memberId from another team returns not_found and the logs repository is NEVER called with it',
+    () =>
+      Effect.gen(function* () {
+        const logs = makeActivityLogsLayer([
+          buildActivityLogRow({
+            id: LOG_B1,
+            team_member_id: MEMBER_B1,
+            note: Option.some('Another club’s training'),
+          }),
+        ]);
+        const members = makeMembersLayer(
+          new Map([
+            [TEAM_A, [buildRosterEntry({ member_id: MEMBER_A1 })]],
+            [
+              TEAM_B,
+              [
+                buildRosterEntry({
+                  member_id: MEMBER_B1,
+                  user_id: USER_2,
+                  name: Option.some('Foreign Member'),
+                  discord_id: '333333333333333333' as Discord.Snowflake,
+                }),
+              ],
+            ],
+          ]),
+        );
+        const ctx = buildCtx();
+        const outcome = yield* listActivityLogs({ memberId: MEMBER_B1 }, ctx).pipe(
+          Effect.provide(Layer.mergeAll(logs.layer, members)),
+        );
+
+        expect(logs.calls).toEqual([]);
+        expect(outcome.result).toEqual({ error: 'not_found' });
+        expect(outcome.hits).toEqual([]);
+        expect(JSON.stringify(outcome.result)).not.toContain('forbidden');
+      }),
+  );
+
+  it.effect('model-facing row shape, no PII', () =>
+    Effect.gen(function* () {
+      const logs = makeActivityLogsLayer([
+        buildActivityLogRow({ id: LOG_A1, team_member_id: MEMBER_A1 }),
+      ]);
+      const members = makeMembersLayer(
+        new Map([
+          [TEAM_A, [buildRosterEntry({ member_id: MEMBER_A1, name: Option.some('Alice') })]],
+        ]),
+      );
+      const ctx = buildCtx({ membership: buildMembership({ id: MEMBER_A1, permissions: [] }) });
+      const outcome = yield* listActivityLogs({}, ctx).pipe(
+        Effect.provide(Layer.mergeAll(logs.layer, members)),
+      );
+
+      const [item] = itemsOf(outcome.result);
+      expect(item).toBeDefined();
+      expectNoPii(item ?? {});
+      expect(item?.displayName).toBe('Alice');
+      expect(item?.activityTypeName).toBe('Gym');
+      expect(item?.durationMinutes).toBe(60);
+      expect(item?.note).toBe('Leg day');
+      expect(outcome.hits).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// list_event_rsvps — membership + canSeeGroup(event.MEMBER_group_id)
+// ---------------------------------------------------------------------------
+
+describe('list_event_rsvps', () => {
+  it.effect(
+    'TENANCY: an eventId belonging to another team returns not_found and findRsvpsByEventId is NEVER called',
+    () =>
+      Effect.gen(function* () {
+        const foreignEvent = buildEvent({
+          id: EVENT_B1,
+          team_id: TEAM_B,
+          title: 'Secret Team B Event',
+        });
+        const rsvps = makeRsvpsLayer(
+          new Map([[EVENT_B1, [buildRsvpRow({ member_name: Option.some('Foreign Player') })]]]),
+        );
+        const ctx = buildCtx();
+        const outcome = yield* listEventRsvps({ eventId: EVENT_B1 }, ctx).pipe(
+          Effect.provide(Layer.mergeAll(makeEventsLayer([foreignEvent]), rsvps.layer)),
+        );
+
+        // Not "the result was empty" — the repository is scoped by eventId ALONE, so the only
+        // safe assertion is that it was never asked.
+        expect(rsvps.calls).toEqual([]);
+        expect(outcome.result).toEqual({ error: 'not_found' });
+        expect(outcome.hits).toEqual([]);
+        const json = JSON.stringify(outcome.result);
+        expect(json).not.toContain('forbidden');
+        expect(json).not.toContain('Foreign Player');
+      }),
+  );
+
+  it.effect(
+    'an event in an invisible member group returns not_found, repository never called',
+    () =>
+      Effect.gen(function* () {
+        const event = buildEvent({ id: EVENT_A1, member_group_id: Option.some(GROUP_A1) });
+        const rsvps = makeRsvpsLayer(new Map([[EVENT_A1, [buildRsvpRow({})]]]));
+        const ctx = buildCtx({ canSeeGroup: () => Effect.succeed(false) });
+        const outcome = yield* listEventRsvps({ eventId: EVENT_A1 }, ctx).pipe(
+          Effect.provide(Layer.mergeAll(makeEventsLayer([event]), rsvps.layer)),
+        );
+
+        expect(rsvps.calls).toEqual([]);
+        expect(outcome.result).toEqual({ error: 'not_found' });
+      }),
+  );
+
+  it.effect(
+    'COLUMN GATE: gates on member_group_id — visible member group + INVISIBLE owner group still returns rows',
+    () =>
+      Effect.gen(function* () {
+        // If an implementation reads `owner_group_id` here (the attendance column), this event
+        // gates on GROUP_A2, which the caller cannot see, and the test goes red.
+        const event = buildEvent({
+          id: EVENT_A2,
+          member_group_id: Option.some(GROUP_A1),
+          owner_group_id: Option.some(GROUP_A2),
+        });
+        const rsvps = makeRsvpsLayer(
+          new Map([[EVENT_A2, [buildRsvpRow({ member_name: Option.some('Alice') })]]]),
+        );
+        const ctx = buildCtx({ canSeeGroup: canSeeOnlyGroup(GROUP_A1) });
+        const outcome = yield* listEventRsvps({ eventId: EVENT_A2 }, ctx).pipe(
+          Effect.provide(Layer.mergeAll(makeEventsLayer([event]), rsvps.layer)),
+        );
+
+        expect(rsvps.calls).toEqual([EVENT_A2]);
+        expect(itemsOf(outcome.result)).toHaveLength(1);
+      }),
+  );
+
+  it.effect(
+    'COLUMN GATE (mirror): INVISIBLE member group + visible owner group returns not_found',
+    () =>
+      Effect.gen(function* () {
+        const event = buildEvent({
+          id: EVENT_A3,
+          member_group_id: Option.some(GROUP_A2),
+          owner_group_id: Option.some(GROUP_A1),
+        });
+        const rsvps = makeRsvpsLayer(new Map([[EVENT_A3, [buildRsvpRow({})]]]));
+        const ctx = buildCtx({ canSeeGroup: canSeeOnlyGroup(GROUP_A1) });
+        const outcome = yield* listEventRsvps({ eventId: EVENT_A3 }, ctx).pipe(
+          Effect.provide(Layer.mergeAll(makeEventsLayer([event]), rsvps.layer)),
+        );
+
+        expect(rsvps.calls).toEqual([]);
+        expect(outcome.result).toEqual({ error: 'not_found' });
+      }),
+  );
+
+  it.effect('model-facing row is { displayName, response, message } and carries no PII', () =>
+    Effect.gen(function* () {
+      const event = buildEvent({ id: EVENT_A1 });
+      const rsvps = makeRsvpsLayer(
+        new Map([
+          [
+            EVENT_A1,
+            [
+              buildRsvpRow({
+                member_name: Option.some('Alice'),
+                response: 'yes' as EventRsvp.RsvpResponse,
+                message: Option.some('Running 10 minutes late'),
+              }),
+            ],
+          ],
+        ]),
+      );
+      const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
+      const outcome = yield* listEventRsvps({ eventId: EVENT_A1 }, ctx).pipe(
+        Effect.provide(Layer.mergeAll(makeEventsLayer([event]), rsvps.layer)),
+      );
+
+      const [item] = itemsOf(outcome.result);
+      expect(item).toBeDefined();
+      expectNoPii(item ?? {});
+      expect(Object.keys(item ?? {}).sort()).toEqual(['displayName', 'message', 'response']);
+      expect(item?.displayName).toBe('Alice');
+      expect(item?.response).toBe('yes');
+      expect(outcome.hits).toEqual([]);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// list_event_attendance — membership + canSeeGroup(event.OWNER_group_id)
+//
+// `EventAttendanceRepository.findAttendanceForEvent` takes an eventId ALONE and is NOT
+// team-scoped (src/repositories/EventAttendanceRepository.ts:176). The event lookup through
+// `EventsRepository`, scoped to `ctx.teamId`, is the ONLY thing between the model and another
+// club's attendance sheet.
+// ---------------------------------------------------------------------------
+
+describe('list_event_attendance', () => {
+  it.effect(
+    'TENANCY: an eventId belonging to another team returns not_found and findAttendanceForEvent is NEVER called',
+    () =>
+      Effect.gen(function* () {
+        const foreignEvent = buildEvent({
+          id: EVENT_B1,
+          team_id: TEAM_B,
+          title: 'Secret Team B Event',
+        });
+        const attendance = makeAttendanceLayer(
+          new Map([
+            [EVENT_B1, [buildAttendanceRow({ member_name: Option.some('Foreign Player') })]],
+          ]),
+        );
+        const ctx = buildCtx();
+        const outcome = yield* listEventAttendance({ eventId: EVENT_B1 }, ctx).pipe(
+          Effect.provide(Layer.mergeAll(makeEventsLayer([foreignEvent]), attendance.layer)),
+        );
+
+        expect(attendance.calls).toEqual([]);
+        expect(outcome.result).toEqual({ error: 'not_found' });
+        expect(outcome.hits).toEqual([]);
+        const json = JSON.stringify(outcome.result);
+        expect(json).not.toContain('forbidden');
+        expect(json).not.toContain('Foreign Player');
+      }),
+  );
+
+  it.effect('an unknown eventId returns not_found and the repository is never called', () =>
+    Effect.gen(function* () {
+      const attendance = makeAttendanceLayer(new Map());
+      const ctx = buildCtx();
+      const outcome = yield* listEventAttendance({ eventId: EVENT_B1 }, ctx).pipe(
+        Effect.provide(Layer.mergeAll(makeEventsLayer([]), attendance.layer)),
+      );
+
+      expect(attendance.calls).toEqual([]);
+      expect(outcome.result).toEqual({ error: 'not_found' });
+    }),
+  );
+
+  it.effect(
+    'COLUMN GATE: gates on owner_group_id — visible owner group + INVISIBLE member group still returns rows',
+    () =>
+      Effect.gen(function* () {
+        const event = buildEvent({
+          id: EVENT_A3,
+          member_group_id: Option.some(GROUP_A2),
+          owner_group_id: Option.some(GROUP_A1),
+        });
+        const attendance = makeAttendanceLayer(
+          new Map([[EVENT_A3, [buildAttendanceRow({ member_name: Option.some('Alice') })]]]),
+        );
+        const ctx = buildCtx({ canSeeGroup: canSeeOnlyGroup(GROUP_A1) });
+        const outcome = yield* listEventAttendance({ eventId: EVENT_A3 }, ctx).pipe(
+          Effect.provide(Layer.mergeAll(makeEventsLayer([event]), attendance.layer)),
+        );
+
+        expect(attendance.calls).toEqual([EVENT_A3]);
+        expect(itemsOf(outcome.result)).toHaveLength(1);
+      }),
+  );
+
+  it.effect(
+    'COLUMN GATE (mirror): INVISIBLE owner group + visible member group returns not_found',
+    () =>
+      Effect.gen(function* () {
+        const event = buildEvent({
+          id: EVENT_A2,
+          member_group_id: Option.some(GROUP_A1),
+          owner_group_id: Option.some(GROUP_A2),
+        });
+        const attendance = makeAttendanceLayer(new Map([[EVENT_A2, [buildAttendanceRow({})]]]));
+        const ctx = buildCtx({ canSeeGroup: canSeeOnlyGroup(GROUP_A1) });
+        const outcome = yield* listEventAttendance({ eventId: EVENT_A2 }, ctx).pipe(
+          Effect.provide(Layer.mergeAll(makeEventsLayer([event]), attendance.layer)),
+        );
+
+        expect(attendance.calls).toEqual([]);
+        expect(outcome.result).toEqual({ error: 'not_found' });
+      }),
+  );
+
+  it.effect('model-facing row is { displayName, present } and carries no PII', () =>
+    Effect.gen(function* () {
+      const event = buildEvent({ id: EVENT_A1 });
+      const attendance = makeAttendanceLayer(
+        new Map([
+          [EVENT_A1, [buildAttendanceRow({ member_name: Option.some('Alice'), present: true })]],
+        ]),
+      );
+      const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
+      const outcome = yield* listEventAttendance({ eventId: EVENT_A1 }, ctx).pipe(
+        Effect.provide(Layer.mergeAll(makeEventsLayer([event]), attendance.layer)),
+      );
+
+      const [item] = itemsOf(outcome.result);
+      expect(item).toBeDefined();
+      expectNoPii(item ?? {});
+      expect(Object.keys(item ?? {}).sort()).toEqual(['displayName', 'present']);
+      expect(item?.displayName).toBe('Alice');
+      expect(item?.present).toBe(true);
+      expect(outcome.hits).toEqual([]);
+    }),
+  );
+});
+
 // ---------------------------------------------------------------------------
 // visibleTools + registry parity + current_datetime wiring
 // ---------------------------------------------------------------------------
@@ -807,10 +1698,18 @@ describe('visibleTools', () => {
         expect(playerNames).not.toContain('list_rosters');
         expect(playerNames).not.toContain('list_groups');
         expect(playerNames).not.toContain('propose_create_event');
+        // Neither fixture holds `finance:view`.
+        expect(playerNames).not.toContain('list_fees');
+        expect(playerNames).not.toContain('get_finance_overview');
         expect([...playerNames].sort()).toEqual([
           'current_datetime',
+          'list_activity_logs',
+          'list_event_attendance',
+          'list_event_rsvps',
           'list_events',
+          'list_membership_plans',
           'list_training_types',
+          'search_docs',
         ]);
 
         // Neither fixture holds `event:create` — `propose_create_event` is built FROM the
@@ -819,11 +1718,16 @@ describe('visibleTools', () => {
         expect(adminNames).not.toContain('propose_create_event');
         expect([...adminNames].sort()).toEqual([
           'current_datetime',
+          'list_activity_logs',
+          'list_event_attendance',
+          'list_event_rsvps',
           'list_events',
           'list_groups',
           'list_members',
+          'list_membership_plans',
           'list_rosters',
           'list_training_types',
+          'search_docs',
         ]);
       }),
   );
@@ -837,16 +1741,49 @@ describe('visibleTools', () => {
       expect(names).toContain('propose_create_event');
     }),
   );
+
+  it.effect('includes the finance:view tools only for a caller holding finance:view', () =>
+    Effect.sync(() => {
+      const treasurer = buildCtx({
+        membership: buildMembership({ permissions: ['finance:view'] }),
+      });
+      const names = visibleTools(treasurer).map((t) => t.name);
+      expect(names).toContain('list_fees');
+      expect(names).toContain('get_finance_overview');
+    }),
+  );
+
+  it.effect('search_docs is UNGATED — offered to a caller holding zero permissions', () =>
+    Effect.sync(() => {
+      const player = buildCtx({ membership: buildMembership({ permissions: [] }) });
+      expect(visibleTools(player).map((t) => t.name)).toContain('search_docs');
+      const def = ALL_TOOLS.find((t) => t.name === 'search_docs');
+      expect(def).toBeDefined();
+      expect(Option.isNone(def?.requiredPermission ?? Option.some('team:manage'))).toBe(true);
+    }),
+  );
 });
 
 describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3/10)', () => {
   it.effect('every tool has a well-formed, unique, flat, additionalProperties:false schema', () =>
     Effect.sync(() => {
-      // 6 read tools + 1 `propose_<action>` per `ACTION_REGISTRY` entry (currently just
+      // 13 read tools (the original 6, plus `search_docs` and the six database read tools of
+      // `.dev-loop/plan.md`) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (currently just
       // `propose_create_event`) — built FROM the registry (`registry.ts`), so this count moves
       // in lockstep with `AiActionName.literals`.
-      expect(ALL_TOOLS.length).toBe(7);
+      expect(ALL_TOOLS.length).toBe(14);
       expect(ALL_TOOLS.map((t) => t.name)).toContain('propose_create_event');
+      for (const added of [
+        'search_docs',
+        'list_fees',
+        'get_finance_overview',
+        'list_event_rsvps',
+        'list_event_attendance',
+        'list_activity_logs',
+        'list_membership_plans',
+      ]) {
+        expect(ALL_TOOLS.map((t) => t.name)).toContain(added);
+      }
       const seenNames = new Set<string>();
       for (const tool of ALL_TOOLS) {
         expect((tool.parameters as Record<string, unknown>).additionalProperties).toBe(false);
@@ -884,6 +1821,29 @@ describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3
         for (const tool of ALL_TOOLS) {
           const recomputed = toToolParameters(tool.schema);
           expect(tool.parameters).toEqual(recomputed);
+        }
+      }),
+  );
+
+  it.effect(
+    // `registry.ts`'s header states it as a doc contract; nothing asserted it. The team, the
+    // caller's permissions and the team's timezone all come from `ToolContext`, resolved in
+    // `api/ai-chat.ts` BEFORE the model runs — the model must have no vocabulary in which to
+    // name another team. One `teamId` parameter on one tool undoes every cross-team test above.
+    'no tool parameter schema contains a teamId (or team_id) field, anywhere in the derived JSON Schema',
+    () =>
+      Effect.sync(() => {
+        for (const tool of ALL_TOOLS) {
+          const properties =
+            ((tool.parameters as Record<string, unknown>).properties as
+              | Record<string, unknown>
+              | undefined) ?? {};
+          expect(Object.keys(properties)).not.toContain('teamId');
+          expect(Object.keys(properties)).not.toContain('team_id');
+          // Nested too — a `Schema.Struct` parameter would hide it from the flat key check.
+          const json = JSON.stringify(tool.parameters);
+          expect(json).not.toContain('teamId');
+          expect(json).not.toContain('team_id');
         }
       }),
   );

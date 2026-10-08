@@ -20,6 +20,7 @@
     "dev": "tsx watch src/run.ts",
     "preview": "node build/esm/run.js",
     "check": "tsc -b tsconfig.json",
+    "codegen": "node scripts/build-docs-index.mjs",
     "test": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "coverage": "vitest --coverage",
