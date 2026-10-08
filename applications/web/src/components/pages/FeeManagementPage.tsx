@@ -1,4 +1,5 @@
 import { type DateTime, Option } from 'effect';
+import { listHeaderClass, listScrollClass } from '~/components/molecules/ListToolbar.js';
 import { Button } from '~/components/ui/button';
 import { formatLocalDate } from '~/lib/datetime.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
@@ -73,9 +74,9 @@ export function FeeManagementPage({
         )}
       </div>
 
-      <div className='overflow-x-auto'>
+      <div className={listScrollClass}>
         <table className='w-full text-sm'>
-          <thead>
+          <thead className={listHeaderClass}>
             <tr className='border-b'>
               <th className='py-2 px-3 text-left font-medium'>{tr('fee_management_colName')}</th>
               <th className='py-2 px-3 text-right font-medium'>{tr('fee_management_colAmount')}</th>

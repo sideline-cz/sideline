@@ -1,6 +1,7 @@
 import type { FeeAssignment } from '@sideline/domain';
 import { Option } from 'effect';
 import React from 'react';
+import { listHeaderClass, listScrollClass } from '~/components/molecules/ListToolbar.js';
 import { PaymentStatusBadge } from '~/components/molecules/PaymentStatusBadge.js';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
@@ -149,9 +150,9 @@ export function AssignmentsTab({
           </Button>
         </div>
       ) : (
-        <div className='overflow-x-auto'>
+        <div className={listScrollClass}>
           <table className='w-full text-sm'>
-            <thead>
+            <thead className={listHeaderClass}>
               <tr className='border-b'>
                 <th className='py-2 px-3 text-left font-medium'>
                   {tr('assignments_tab_colMember')}
