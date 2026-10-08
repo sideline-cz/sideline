@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.72.0
+
+### 🚀 Features
+- make the command palette a menu, and search roles and expenses (#767)
+- richer Overview tab — collection rate, monthly trend, season window (#766)
+
 ## 0.47.0
 
 ### 🚀 Features
