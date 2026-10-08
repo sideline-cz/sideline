@@ -6,6 +6,12 @@
 - make the command palette a menu, and search roles and expenses (#767)
 - richer Overview tab — collection rate, monthly trend, season window (#766)
 
+## 0.62.0
+
+### 🚀 Features
+- make the command palette a menu, and search roles and expenses (#767)
+- richer Overview tab — collection rate, monthly trend, season window (#766)
+
 ## 0.36.1
 
 ### 🐛 Fixes
