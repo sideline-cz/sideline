@@ -1497,7 +1497,8 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                   : Effect.fail(rosterForbidden),
               ),
               Effect.bind('roster', () => members.findRosterByTeam(teamId)),
-              Effect.map(({ roster }) => buildVariableSymbolSuggestions(roster)),
+              Effect.bind('taken', () => members.findTakenVariableSymbols(teamId)),
+              Effect.map(({ roster, taken }) => buildVariableSymbolSuggestions(roster, taken)),
             ),
           )
 
@@ -1822,19 +1823,16 @@ const fetchExportRows = (
 
 const buildVariableSymbolSuggestions = (
   roster: ReadonlyArray<RosterEntry>,
+  takenSymbols: ReadonlyArray<string>,
 ): ReadonlyArray<BankSyncApi.VariableSymbolSuggestion> => {
   const normalize = (vs: string): string => {
     const stripped = vs.trim().replace(/^0+/, '');
     return stripped;
   };
-  const taken = new Set(
-    roster.flatMap((entry) =>
-      Option.match(entry.variable_symbol, {
-        onNone: () => [],
-        onSome: (vs) => [normalize(vs)],
-      }),
-    ),
-  );
+  // `takenSymbols` comes from `findTakenVariableSymbols`, which mirrors the unique index and so
+  // includes DEPARTED members. The roster cannot supply this: it is `WHERE tm.active = true`, so
+  // seeding from it suggested numbers a former member still holds and the assignment 409'd.
+  const taken = new Set(takenSymbols.map(normalize));
   const withoutVs = roster
     .filter((entry) => Option.isNone(entry.variable_symbol))
     .sort((a, b) => (a.joined_at < b.joined_at ? -1 : a.joined_at > b.joined_at ? 1 : 0));

@@ -210,6 +210,45 @@ describe('setVariableSymbol — the holder has left the team', () => {
   );
 });
 
+describe('findTakenVariableSymbols — what a free-number picker must see', () => {
+  // The suggestion endpoint used to build its "taken" set from `findRosterByTeam`, which is
+  // `WHERE tm.active = true`. A departed member keeps their symbol, so the picker happily offered
+  // a number the unique index then rejected — the treasurer hit 409 on a number the UI had just
+  // handed them. This query mirrors the index instead, active members and former members alike.
+  it.effect('includes a departed member, normalised the way the index normalises', () =>
+    Effect.gen(function* () {
+      const { sql, members, team, holder } = yield* twoMembersOneHolding('taken', '2026046');
+      yield* sql`UPDATE team_members SET active = false WHERE id = ${holder.id}`;
+
+      const taken = yield* members.findTakenVariableSymbols(team.id);
+
+      expect(taken).toContain('2026046');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('strips leading zeros so a padded symbol cannot be re-offered', () =>
+    Effect.gen(function* () {
+      const { sql, members, team, holder } = yield* twoMembersOneHolding('zeros-taken', '2026047');
+      yield* sql`UPDATE team_members SET variable_symbol = '02026047', active = false WHERE id = ${holder.id}`;
+
+      const taken = yield* members.findTakenVariableSymbols(team.id);
+
+      expect(taken).toContain('2026047');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('is scoped to the team', () =>
+    Effect.gen(function* () {
+      const { members, team } = yield* twoMembersOneHolding('scope', '2026048');
+      const otherOwner = yield* createUser('other-owner');
+      const otherTeam = yield* createTeam(nextDiscordId(), otherOwner.id);
+
+      expect(yield* members.findTakenVariableSymbols(otherTeam.id)).toEqual([]);
+      expect(yield* members.findTakenVariableSymbols(team.id)).toContain('2026048');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
 describe('setVariableSymbol — conflict with no surrounding transaction', () => {
   it.effect('still reports the holder (the single-member roster path)', () =>
     Effect.gen(function* () {

@@ -469,6 +469,29 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // Every variable symbol the unique index will reject, mirroring
+  // `uq_team_members_team_variable_symbol` exactly — team-wide, normalised, and deliberately NOT
+  // filtered on `active`. A departed member keeps their symbol (see `VariableSymbolConflict`), so
+  // anything that PICKS a free number must see them. The roster cannot answer this: it is
+  // `WHERE tm.active = true`, which is correct for a roster and wrong for "what is taken".
+  const findTakenVariableSymbolsQuery = SqlSchema.findAll({
+    Request: Team.TeamId,
+    Result: Schema.Struct({ vs_norm: Schema.String }),
+    execute: (teamId) => sql`
+      SELECT NULLIF(ltrim(variable_symbol, '0'), '') AS vs_norm
+      FROM team_members
+      WHERE team_id = ${teamId}
+        AND variable_symbol IS NOT NULL
+        AND NULLIF(ltrim(variable_symbol, '0'), '') IS NOT NULL
+    `,
+  });
+
+  const findTakenVariableSymbols = (teamId: Team.TeamId) =>
+    findTakenVariableSymbolsQuery(teamId).pipe(
+      Effect.map((rows) => rows.map((r) => r.vs_norm)),
+      catchSqlErrors,
+    );
+
   const findByTeamAndVariableSymbolQuery = SqlSchema.findOneOption({
     Request: Schema.Struct({ team_id: Team.TeamId, vs_norm: Schema.String }),
     Result: Schema.Struct({
@@ -832,6 +855,7 @@ const make = Effect.gen(function* () {
     setJerseyNumber,
     setVariableSymbol,
     findByTeamAndVariableSymbol,
+    findTakenVariableSymbols,
     resetMissedRsvps,
     hasOtherActiveManager,
     findEventPreferences,
