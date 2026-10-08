@@ -52,6 +52,7 @@ type MemberOverviewRow = {
   totalPaidMinor: number;
   overdueCount: number;
   pendingCount: number;
+  partialCount: number;
   paidCount: number;
   creditMinor: number;
 };
@@ -68,6 +69,7 @@ const MEMBER_A_CZK: MemberOverviewRow = {
   totalPaidMinor: 50000, // 500 CZK paid
   overdueCount: 0,
   pendingCount: 1,
+  partialCount: 0,
   paidCount: 1,
   creditMinor: 0,
 };
@@ -80,6 +82,7 @@ const MEMBER_B_CZK: MemberOverviewRow = {
   totalPaidMinor: 0,
   overdueCount: 1,
   pendingCount: 0,
+  partialCount: 0,
   paidCount: 0,
   creditMinor: 0,
 };
@@ -209,6 +212,7 @@ describe('FinancesOverviewPage — KPI currency vote excludes credit-only rows',
       totalPaidMinor: 0,
       overdueCount: 1,
       pendingCount: 0,
+      partialCount: 0,
       paidCount: 0,
       creditMinor: 0,
     };
@@ -220,6 +224,7 @@ describe('FinancesOverviewPage — KPI currency vote excludes credit-only rows',
       totalPaidMinor: 0,
       overdueCount: 0,
       pendingCount: 0,
+      partialCount: 0,
       paidCount: 0,
       creditMinor: 50000, // €500 credit, no assignments at all
     }));
@@ -254,6 +259,7 @@ describe('FinancesOverviewPage — an all-waived team is not the "no fees" empty
       totalPaidMinor: 0,
       overdueCount: 0,
       pendingCount: 0,
+      partialCount: 0,
       paidCount: 0,
       creditMinor: 0,
     };
@@ -278,6 +284,7 @@ describe('FinancesOverviewPage — an all-waived team is not the "no fees" empty
       totalPaidMinor: 0,
       overdueCount: 0,
       pendingCount: 0,
+      partialCount: 0,
       paidCount: 0,
       creditMinor: 0,
     };
@@ -326,5 +333,36 @@ describe('formatMoney', () => {
     const result = formatMoney(5000, 'CZK', 'cs');
     // Should not contain ".00" for CZK
     expect(result).not.toMatch(/50\.00/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// "Partial" means ONE fee half-settled — not "some fees paid, some not"
+// ---------------------------------------------------------------------------
+
+describe('FinancesOverviewPage — partial badge', () => {
+  it('a member with one fee settled and the next untouched is pending, not partial', () => {
+    // MEMBER_A_CZK: 500 of 1000 CZK paid, but as one cleared fee + one untouched fee
+    // (paidCount 1, pendingCount 1, partialCount 0). Reading totalPaidMinor badged this
+    // "Partial"; only a half-settled fee may.
+    render(<FinancesOverviewPage rows={[MEMBER_A_CZK, MEMBER_B_CZK]} />);
+
+    expect(document.querySelector('[data-status="partial"]')).toBeNull();
+    expect(document.querySelector('[data-status="pending"]')).not.toBeNull();
+  });
+
+  it('a member with a half-settled fee is partial', () => {
+    const halfSettled: MemberOverviewRow = {
+      ...MEMBER_A_CZK,
+      teamMemberId: 'member-partial',
+      memberName: 'Partially Paid',
+      paidCount: 0,
+      pendingCount: 1,
+      partialCount: 1,
+    };
+
+    render(<FinancesOverviewPage rows={[halfSettled, MEMBER_B_CZK]} />);
+
+    expect(document.querySelector('[data-status="partial"]')).not.toBeNull();
   });
 });

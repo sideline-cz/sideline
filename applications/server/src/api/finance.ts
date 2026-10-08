@@ -709,6 +709,7 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
                     totalPaidMinor: row.totalPaidMinor,
                     overdueCount: row.overdueCount,
                     pendingCount: row.pendingCount,
+                    partialCount: row.partialCount,
                     paidCount: row.paidCount,
                     creditMinor: row.creditMinor,
                   }),

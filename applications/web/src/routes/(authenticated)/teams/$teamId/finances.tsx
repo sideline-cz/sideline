@@ -102,6 +102,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances')(
       totalPaidMinor: r.totalPaidMinor,
       overdueCount: r.overdueCount,
       pendingCount: r.pendingCount,
+      partialCount: r.partialCount,
       paidCount: r.paidCount,
       creditMinor: r.creditMinor,
     }));

@@ -21,7 +21,10 @@ export type MemberOverviewRow = {
   totalDueMinor: number;
   totalPaidMinor: number;
   overdueCount: number;
+  /** Outstanding and not overdue — includes the partially paid. */
   pendingCount: number;
+  /** Subset of pendingCount: assignments paid in part. */
+  partialCount: number;
   paidCount: number;
   // This row's currency, 0 when the member holds no credit in it.
   creditMinor: number;
@@ -84,7 +87,9 @@ function worstStatus(row: MemberOverviewRow): WorstStatus {
   if (row.overdueCount > 0) return 'overdue';
   const outstandingMinor = row.totalDueMinor - row.totalPaidMinor;
   if (outstandingMinor <= 0 && row.paidCount > 0) return 'paid';
-  if (row.totalPaidMinor > 0) return 'partial';
+  // Partial means a single fee is half-settled — not "some fees paid, some not". Reading
+  // totalPaidMinor here badged a member with one fee cleared and the next untouched as partial.
+  if (row.partialCount > 0) return 'partial';
   if (row.pendingCount > 0) return 'pending';
   if (row.paidCount > 0) return 'paid';
   return 'pending';
