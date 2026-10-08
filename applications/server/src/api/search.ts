@@ -1,12 +1,13 @@
 /**
  * The command-palette search endpoint (`.work-plans/command-palette-search.md` §A). Calls the
- * same five AI read-tool executors the in-app assistant uses
+ * same AI read-tool executors the in-app assistant uses
  * (`applications/server/src/services/ai/readTools.ts`) — the permission gates are therefore the
  * same function calls, not a second copy that could drift. `search` never passes
  * `includeAllGroups` to `listAllEvents`, so a `team:manage` caller is group-filtered exactly like
  * everyone else (mirrors `GET /events` without `?all=1`) — do not "fix" that later, see the plan.
  *
- * A missing per-kind gate (`group:manage`, `member:view`, `roster:view`) is never a 403 for the
+ * A missing per-kind gate (`group:manage`, `member:view`, `roster:view`, `role:view`,
+ * `finance:view`) is never a 403 for the
  * whole query: `forbiddenResult` already returns empty `hits`, so the kind is simply absent from
  * the response. The only 403 is `requireMembership` failing for a non-member.
  */
@@ -19,16 +20,22 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import {
   listAllEvents,
+  listExpenses,
   listGroups,
   listMembers,
+  listRoles,
   listRosters,
   listTrainingTypes,
 } from '~/services/ai/readTools.js';
 import { type EntityReadContext, makeCanSeeGroup } from '~/services/ai/toolTypes.js';
 
-// Exported for `test/unit/searchRanking.test.ts` — with 5 kinds and `PER_KIND_LIMIT` 5, per-kind
-// capping alone already bounds any input to `PER_KIND_LIMIT * 5 = 25`, so `TOTAL_LIMIT`'s own
-// value can never be distinguished from a larger one by behavior alone; the test pins it directly.
+// Exported for `test/unit/searchRanking.test.ts`. Both values are unchanged from when there were
+// five kinds, but the reasoning that justified them is NOT: at five kinds per-kind capping alone
+// bounded any input to `PER_KIND_LIMIT * 5 = 25`, so `TOTAL_LIMIT` was never reachable and its
+// value was unobservable. With seven kinds it IS reachable — and reaching it by truncating a
+// kind-ordered list would make the last kinds unreachable whenever the first ones saturate
+// (7 kinds x 5 = 35 > 25, so `expense` could never appear alongside five full earlier kinds).
+// `rankAndCap` therefore fills interleaved rather than sequentially; see below.
 export const PER_KIND_LIMIT = 5;
 export const TOTAL_LIMIT = 25;
 
@@ -38,6 +45,8 @@ const KIND_ORDER: ReadonlyArray<AiChatApi.SearchHit['kind']> = [
   'group',
   'roster',
   'trainingType',
+  'role',
+  'expense',
 ];
 
 const addDaysIso = (iso: string, days: number): string => {
@@ -61,7 +70,12 @@ const eventStartDateOf = (hit: AiChatApi.SearchHit & { readonly kind: 'event' })
  *    // around midnight ever matters more than a query does.
  * 3. Within every other kind: prefix matches on `searchHitLabel` first, then everything else,
  *    stable within each bucket.
- * 4. Capped at `PER_KIND_LIMIT` per kind (applied after ranking), then `TOTAL_LIMIT` overall.
+ * 4. Capped at `PER_KIND_LIMIT` per kind (applied after ranking), then filled INTERLEAVED up to
+ *    `TOTAL_LIMIT`: pass 1 takes each kind's top row in `KIND_ORDER`, pass 2 each kind's second,
+ *    and so on until the budget runs out. A plain `slice(0, TOTAL_LIMIT)` over the kind-ordered
+ *    list would spend the whole budget on the earliest kinds and make the last ones unreachable
+ *    (see `TOTAL_LIMIT` above). The survivors are then re-grouped into `KIND_ORDER` so the wire
+ *    order is still grouped-by-kind, which is what the palette renders from.
  */
 export const rankAndCap = (
   hits: ReadonlyArray<AiChatApi.SearchHit>,
@@ -95,12 +109,20 @@ export const rankAndCap = (
       .map(({ hit }) => hit);
   };
 
-  const capped = KIND_ORDER.flatMap((kind) => {
-    const kindHits = hits.filter((h) => h.kind === kind);
-    return sortWithin(kindHits).slice(0, PER_KIND_LIMIT);
-  });
+  const byKind = KIND_ORDER.map((kind) =>
+    sortWithin(hits.filter((h) => h.kind === kind)).slice(0, PER_KIND_LIMIT),
+  );
 
-  return capped.slice(0, TOTAL_LIMIT);
+  const kept = new Set<AiChatApi.SearchHit>();
+  for (let rank = 0; rank < PER_KIND_LIMIT && kept.size < TOTAL_LIMIT; rank += 1) {
+    for (const kindHits of byKind) {
+      if (kept.size >= TOTAL_LIMIT) break;
+      const hit = kindHits[rank];
+      if (hit !== undefined) kept.add(hit);
+    }
+  }
+
+  return byKind.flat().filter((hit) => kept.has(hit));
 };
 
 const forbidden = new SearchApi.SearchForbidden();
@@ -111,12 +133,12 @@ export const SearchApiLive = HttpApiBuilder.group(Api, 'search', (handlers) =>
     Effect.bind('groups', () => GroupsRepository.asEffect()),
     Effect.map(({ members, groups }) =>
       handlers.handle('search', ({ params: { teamId }, query: { q } }) =>
-        // ponytail: five unbounded team-wide SELECTs + in-memory substring match per keystroke,
+        // ponytail: seven unbounded team-wide SELECTs + in-memory substring match per keystroke,
         // reusing the AI read tools so the permission gates cannot drift. Move to per-kind SQL
         // `ILIKE … LIMIT` (or a pg_trgm index) if p95 search latency or DB load becomes visible.
         // Abuse vector, not just latency: unlike `/teams/:teamId/ai-chat` (guarded by
         // `ChatRateLimiter`), this endpoint has no rate limit, so any team member can loop
-        // `?q=a` to force five unbounded team-wide `SELECT`s plus a recursive CTE per distinct
+        // `?q=a` to force seven unbounded team-wide `SELECT`s plus a recursive CTE per distinct
         // event group on every request. Deferred for parity with `/events` (also unrate-limited)
         // — add a limiter here (or in front of both) if that gets exploited.
         Effect.Do.pipe(
@@ -132,11 +154,15 @@ export const SearchApiLive = HttpApiBuilder.group(Api, 'search', (handlers) =>
               canSeeGroup: makeCanSeeGroup(groups, membership.id),
             }),
           ),
-          // The five executors run concurrently: `listAllEvents` is the only one that touches
-          // the memoized `canSeeGroup` `Map` (`makeCanSeeGroup` in `toolTypes.ts`), and its own
+          // The executors run concurrently: `listAllEvents` is the only one that touches the
+          // memoized `canSeeGroup` `Map` (`makeCanSeeGroup` in `toolTypes.ts`), and its own
           // internal `Effect.filter` already forces `{ concurrency: 1 }` around every read of
-          // that `Map` (`readTools.ts`), so running it alongside the other four — which never
-          // touch `canSeeGroup` at all — cannot race on shared mutable state.
+          // that `Map` (`readTools.ts`), so running it alongside the others — which never touch
+          // `canSeeGroup` at all — cannot race on shared mutable state. That is a constraint on
+          // what may be ADDED here, not just a note: `listEventRsvps`/`listEventAttendance` both
+          // reach `canSeeGroup` through `resolveVisibleEvent`, so neither may join this set
+          // without first giving that `Map` a `Ref` (they are not text-searchable anyway — both
+          // take an `eventId`, not a query).
           Effect.bind('results', ({ ctx }) =>
             Effect.all(
               {
@@ -145,13 +171,23 @@ export const SearchApiLive = HttpApiBuilder.group(Api, 'search', (handlers) =>
                 groupResult: listGroups({ query: q }, ctx),
                 rosterResult: listRosters({ query: q }, ctx),
                 trainingTypeResult: listTrainingTypes({ query: q }, ctx),
+                roleResult: listRoles({ query: q }, ctx),
+                expenseResult: listExpenses({ query: q }, ctx),
               },
               { concurrency: 'unbounded' },
             ),
           ),
           Effect.map(
             ({
-              results: { eventResult, memberResult, groupResult, rosterResult, trainingTypeResult },
+              results: {
+                eventResult,
+                memberResult,
+                groupResult,
+                rosterResult,
+                trainingTypeResult,
+                roleResult,
+                expenseResult,
+              },
             }) =>
               rankAndCap(
                 [
@@ -160,6 +196,8 @@ export const SearchApiLive = HttpApiBuilder.group(Api, 'search', (handlers) =>
                   ...groupResult.hits,
                   ...rosterResult.hits,
                   ...trainingTypeResult.hits,
+                  ...roleResult.hits,
+                  ...expenseResult.hits,
                 ],
                 q,
                 DateTime.formatIsoDateUtc(DateTime.nowUnsafe()),

@@ -13,6 +13,7 @@ import {
   type AiChatApi,
   EventApi,
   GroupApi,
+  RoleApi,
   Roster,
   SearchApi,
   TrainingTypeApi,
@@ -225,6 +226,32 @@ function rosterHit(name: string): AiChatApi.SearchHit {
   };
 }
 
+function roleHit(name: string): AiChatApi.SearchHit {
+  return {
+    kind: 'role',
+    role: new RoleApi.RoleInfo({
+      roleId: nextId('role') as any,
+      teamId: TEAM_ID as any,
+      name,
+      isBuiltIn: false,
+      permissionCount: 3,
+      isArchived: false,
+    }),
+  };
+}
+
+function expenseHit(description: string): AiChatApi.SearchHit {
+  return {
+    kind: 'expense',
+    expenseId: nextId('expense') as any,
+    description,
+    amountMinor: 125000,
+    currency: 'CZK',
+    spentAt: DateTime.makeUnsafe('2026-05-02T00:00:00.000Z'),
+    category: 'equipment',
+  };
+}
+
 function trainingTypeHit(name: string): AiChatApi.SearchHit {
   return {
     kind: 'trainingType',
@@ -338,6 +365,20 @@ describe('AuthenticatedLayout', () => {
         to: '/teams/$teamId/training-types/$trainingTypeId',
         idField: 'trainingTypeId',
       },
+      {
+        kind: 'role',
+        build: () => roleHit('Layout role'),
+        label: 'Layout role',
+        to: '/teams/$teamId/roles/$roleId',
+        idField: 'roleId',
+      },
+      {
+        kind: 'expense',
+        build: () => expenseHit('Layout expense'),
+        label: 'Layout expense',
+        to: '/teams/$teamId/finances/expenses/$expenseId',
+        idField: 'expenseId',
+      },
     ];
 
     for (const { kind, build, label, to, idField } of kindCases) {
@@ -376,6 +417,12 @@ describe('AuthenticatedLayout', () => {
             break;
           case 'trainingType':
             expectedId = wired.trainingType.trainingTypeId;
+            break;
+          case 'role':
+            expectedId = wired.role.roleId;
+            break;
+          case 'expense':
+            expectedId = wired.expenseId;
             break;
         }
         expect(call.params).toEqual({ teamId: TEAM_ID, [idField]: expectedId });

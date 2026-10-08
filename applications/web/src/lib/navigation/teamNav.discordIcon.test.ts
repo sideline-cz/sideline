@@ -1,7 +1,10 @@
 // A source-text invariant, not a render test — see `check-workspace-deps.mjs` for the
 // precedent of guarding an invariant by scanning source text when a full render is impractical
-// (`AppSidebar` needs `SidebarProvider` context plus `TeamSwitcher`/`NavUser`'s own data
-// dependencies, none of which this invariant is about).
+// (rendering the entries needs `SidebarProvider` context plus `TeamSwitcher`/`NavUser`'s own
+// data dependencies, none of which this invariant is about).
+//
+// Moved here with `getTeamNavGroups` when the entries were lifted out of `AppSidebar.tsx` so
+// the command palette could render the same list under the same gates.
 //
 // "Also fix" item (whole-series review, fix/discord-onboarding-webapp): the Discord nav item
 // pairs `DiscordIcon` with the adjacent visible label `tr('discord_navTitle')`
@@ -15,12 +18,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const SOURCE = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), 'AppSidebar.tsx'),
-  'utf8',
-);
+const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'teamNav.tsx'), 'utf8');
 
-describe('AppSidebar Discord nav icon', () => {
+describe('team nav Discord icon', () => {
   it('wires the Discord nav item through the aria-hidden wrapper, not the bare icon', () => {
     expect(SOURCE).toContain('icon: DiscordNavIcon');
     expect(SOURCE).not.toContain('icon: DiscordIcon');
@@ -29,7 +29,7 @@ describe('AppSidebar Discord nav icon', () => {
   it('the wrapper actually renders DiscordIcon with aria-hidden', () => {
     const wrapper = SOURCE.slice(
       SOURCE.indexOf('function DiscordNavIcon'),
-      SOURCE.indexOf('interface NavItem'),
+      SOURCE.indexOf('export interface NavItem'),
     );
     expect(wrapper).toContain('<DiscordIcon aria-hidden />');
   });

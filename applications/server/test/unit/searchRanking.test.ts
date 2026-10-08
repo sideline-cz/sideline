@@ -20,16 +20,18 @@
 import type {
   AiChatApi,
   Event,
+  Expense,
   GroupModel,
+  Role,
   RosterModel,
   Team,
   TeamMember,
   TrainingType,
 } from '@sideline/domain';
-import { EventApi, GroupApi, Roster, TrainingTypeApi } from '@sideline/domain';
+import { EventApi, GroupApi, RoleApi, Roster, TrainingTypeApi } from '@sideline/domain';
 import { DateTime, Option } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { rankAndCap, TOTAL_LIMIT } from '~/api/search.js';
+import { PER_KIND_LIMIT, rankAndCap, TOTAL_LIMIT } from '~/api/search.js';
 
 // ---------------------------------------------------------------------------
 // Fixture builders — one per `SearchHit` kind. Event/group/roster/trainingType use the real
@@ -143,6 +145,36 @@ const makeTrainingTypeHit = (name: string): AiChatApiSearchHit => ({
     ownerGroupName: Option.none(),
     memberGroupName: Option.none(),
   }),
+});
+
+let roleSeq = 0;
+const nextRoleId = () =>
+  `00000000-0000-0000-0000-00000000r${String(roleSeq++).padStart(3, '0')}` as Role.RoleId;
+
+const makeRoleHit = (name: string): AiChatApiSearchHit => ({
+  kind: 'role',
+  role: new RoleApi.RoleInfo({
+    roleId: nextRoleId(),
+    teamId: 'team-a' as Team.TeamId,
+    name,
+    isBuiltIn: false,
+    permissionCount: 0,
+    isArchived: false,
+  }),
+});
+
+let expenseSeq = 0;
+const nextExpenseId = () =>
+  `00000000-0000-0000-0000-00000000x${String(expenseSeq++).padStart(3, '0')}` as Expense.ExpenseId;
+
+const makeExpenseHit = (description: string): AiChatApiSearchHit => ({
+  kind: 'expense',
+  expenseId: nextExpenseId(),
+  description,
+  amountMinor: 1000,
+  currency: 'CZK',
+  spentAt: DateTime.makeUnsafe('2026-06-01T00:00:00.000Z'),
+  category: 'other',
 });
 
 // The fixture builders are typed against the real `AiChatApi.SearchHit` — importing it as a
@@ -284,6 +316,53 @@ describe('rankAndCap — total cap', () => {
       ...Array(5).fill('roster'),
       ...Array(5).fill('trainingType'),
     ]);
+  });
+});
+
+describe('rankAndCap — interleaved fill across kinds', () => {
+  it('keeps the last kind reachable when the earlier kinds would exhaust TOTAL_LIMIT', () => {
+    // THE regression this fill exists to prevent. Seven kinds x PER_KIND_LIMIT = 35 > 25, so a
+    // sequential `flatMap(kind => take 5).slice(0, 25)` would spend the entire budget on the
+    // first five kinds and drop `role` and `expense` ENTIRELY — even though both matched. The
+    // interleaved fill takes each kind's top row before any kind's second, so every kind that
+    // matched is represented.
+    const five = <T>(make: (label: string) => T, prefix: string) =>
+      Array.from({ length: PER_KIND_LIMIT }, (_, i) => make(`${prefix} ${i}`));
+
+    const result = rankAndCap(
+      [
+        ...five((l) => makeEventHit(l, TODAY), 'Match'),
+        ...five(makeMemberHit, 'Match'),
+        ...five(makeGroupHit, 'Match'),
+        ...five(makeRosterHit, 'Match'),
+        ...five(makeTrainingTypeHit, 'Match'),
+        ...five(makeRoleHit, 'Match'),
+        ...five(makeExpenseHit, 'Match'),
+      ],
+      'match',
+      TODAY,
+    );
+
+    expect(result).toHaveLength(TOTAL_LIMIT);
+    const counts = (kind: string) => result.filter((h: any) => h.kind === kind).length;
+    // 25 budget over 7 kinds: three full passes (21), then four more in KIND_ORDER.
+    expect(counts('role')).toBeGreaterThan(0);
+    expect(counts('expense')).toBeGreaterThan(0);
+    expect(
+      ['event', 'member', 'group', 'roster', 'trainingType', 'role', 'expense'].map(counts),
+    ).toEqual([4, 4, 4, 4, 3, 3, 3]);
+  });
+
+  it('still groups the survivors by kind on the wire', () => {
+    // The fill is interleaved, the OUTPUT is not — the palette renders grouped-by-kind from the
+    // array order, so the survivors are re-grouped into KIND_ORDER before returning.
+    const result = rankAndCap(
+      [makeExpenseHit('Match a'), makeRoleHit('Match b'), makeEventHit('Match c', TODAY)],
+      'match',
+      TODAY,
+    );
+
+    expect(result.map((h: any) => h.kind)).toEqual(['event', 'role', 'expense']);
   });
 });
 

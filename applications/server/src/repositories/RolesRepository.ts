@@ -10,7 +10,7 @@ export class RoleNameAlreadyTakenError extends Schema.TaggedErrorClass<RoleNameA
   {},
 ) {}
 
-class RoleWithPermissionCount extends Schema.Class<RoleWithPermissionCount>(
+export class RoleWithPermissionCount extends Schema.Class<RoleWithPermissionCount>(
   'RoleWithPermissionCount',
 )({
   id: Role.RoleId,

@@ -59,6 +59,7 @@ import type {
   Auth,
   Discord,
   Event,
+  Expense,
   GroupModel,
   Role,
   RosterModel,
@@ -89,6 +90,7 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository, EventWithDetails } from '~/repositories/EventsRepository.js';
+import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
@@ -144,6 +146,8 @@ const USER_GROUP_MANAGE = '00000000-0000-0000-0000-000000001004' as Auth.UserId;
 const USER_ROSTER_VIEW = '00000000-0000-0000-0000-000000001005' as Auth.UserId;
 const USER_NON_MEMBER = '00000000-0000-0000-0000-000000001006' as Auth.UserId;
 const USER_TEAM_B = '00000000-0000-0000-0000-000000001007' as Auth.UserId;
+const USER_ROLE_VIEW = '00000000-0000-0000-0000-000000001008' as Auth.UserId;
+const USER_FINANCE_VIEW = '00000000-0000-0000-0000-000000001009' as Auth.UserId;
 
 const MEMBER_PLAIN = '00000000-0000-0000-0000-000000002001' as TeamMember.TeamMemberId;
 const MEMBER_ADMIN = '00000000-0000-0000-0000-000000002002' as TeamMember.TeamMemberId;
@@ -151,6 +155,8 @@ const MEMBER_MEMBER_VIEW = '00000000-0000-0000-0000-000000002003' as TeamMember.
 const MEMBER_GROUP_MANAGE = '00000000-0000-0000-0000-000000002004' as TeamMember.TeamMemberId;
 const MEMBER_ROSTER_VIEW = '00000000-0000-0000-0000-000000002005' as TeamMember.TeamMemberId;
 const MEMBER_TEAM_B = '00000000-0000-0000-0000-000000002007' as TeamMember.TeamMemberId;
+const MEMBER_ROLE_VIEW = '00000000-0000-0000-0000-000000002008' as TeamMember.TeamMemberId;
+const MEMBER_FINANCE_VIEW = '00000000-0000-0000-0000-000000002009' as TeamMember.TeamMemberId;
 // Someone in GROUP_RESTRICTED, but never a token holder in this suite — exists purely so the
 // group is non-empty; no persona below is ever a member of it (that's the point of cases 10/11).
 const MEMBER_IN_RESTRICTED_GROUP =
@@ -167,6 +173,10 @@ const EVENT_B = '00000000-0000-0000-0000-0000000e4003' as Event.EventId;
 const TT_ALPHA = '00000000-0000-0000-0000-0000000t5001' as TrainingType.TrainingTypeId;
 const TT_ALPHA_B = '00000000-0000-0000-0000-0000000t5002' as TrainingType.TrainingTypeId;
 
+const ROLE_ALPHA = '00000000-0000-0000-0000-00000000r801' as Role.RoleId;
+const ROLE_ALPHA_ARCHIVED = '00000000-0000-0000-0000-00000000r802' as Role.RoleId;
+const EXPENSE_ALPHA = '00000000-0000-0000-0000-00000000x901' as Expense.ExpenseId;
+
 const ROSTER_ALPHA = '00000000-0000-0000-0000-0000000r6001' as RosterModel.RosterId;
 const ROSTER_ALPHA_B = '00000000-0000-0000-0000-0000000r6002' as RosterModel.RosterId;
 
@@ -182,10 +192,17 @@ const PERM_ADMIN: readonly Role.Permission[] = [
   'group:manage',
   'member:view',
   'roster:view',
+  'role:view',
+  'finance:view',
 ];
 const PERM_MEMBER_VIEW: readonly Role.Permission[] = ['member:view'];
 const PERM_GROUP_MANAGE: readonly Role.Permission[] = ['group:manage'];
 const PERM_ROSTER_VIEW: readonly Role.Permission[] = ['roster:view'];
+// `role:view`, NOT `role:manage` — the sidebar gates the roles PAGE on `role:manage`, but the
+// `listRoles` endpoint this executor mirrors only needs `role:view` (api/role.ts:42). A
+// `role:manage` gate here would be stricter than the endpoint it claims to copy.
+const PERM_ROLE_VIEW: readonly Role.Permission[] = ['role:view'];
+const PERM_FINANCE_VIEW: readonly Role.Permission[] = ['finance:view'];
 const PERM_NONE: readonly Role.Permission[] = [];
 
 // ---------------------------------------------------------------------------
@@ -200,6 +217,8 @@ const sessionsStore = new Map<string, Auth.UserId>([
   ['roster-view-token', USER_ROSTER_VIEW],
   ['non-member-token', USER_NON_MEMBER],
   ['team-b-token', USER_TEAM_B],
+  ['role-view-token', USER_ROLE_VIEW],
+  ['finance-view-token', USER_FINANCE_VIEW],
 ]);
 
 const membership = (
@@ -229,6 +248,11 @@ const membersStore = new Map<TeamMember.TeamMemberId, MembershipWithRole>([
   ],
   [MEMBER_ROSTER_VIEW, membership(MEMBER_ROSTER_VIEW, TEAM_A, USER_ROSTER_VIEW, PERM_ROSTER_VIEW)],
   [MEMBER_TEAM_B, membership(MEMBER_TEAM_B, TEAM_B, USER_TEAM_B, PERM_ADMIN)],
+  [MEMBER_ROLE_VIEW, membership(MEMBER_ROLE_VIEW, TEAM_A, USER_ROLE_VIEW, PERM_ROLE_VIEW)],
+  [
+    MEMBER_FINANCE_VIEW,
+    membership(MEMBER_FINANCE_VIEW, TEAM_A, USER_FINANCE_VIEW, PERM_FINANCE_VIEW),
+  ],
 ]);
 
 const MockSessionsRepositoryLayer = Layer.succeed(SessionsRepository, {
@@ -625,8 +649,32 @@ const MockLeaderboardRepositoryLayer = Layer.succeed(LeaderboardRepository, {
   getLeaderboard: () => Effect.succeed([]),
 } as never);
 
+// `findRolesByTeamId` returns archived roles too (the roles page offers a "show archived"
+// toggle), so the fixture includes one — `listRoles` must drop it: an archived role grants
+// nothing and is not a destination.
+const ALPHA_ROLES = [
+  {
+    id: ROLE_ALPHA,
+    team_id: TEAM_A,
+    name: 'Alpha Role',
+    is_built_in: false,
+    is_default: false,
+    permission_count: 2,
+    is_archived: false,
+  },
+  {
+    id: ROLE_ALPHA_ARCHIVED,
+    team_id: TEAM_A,
+    name: 'Alpha Role Retired',
+    is_built_in: false,
+    is_default: false,
+    permission_count: 0,
+    is_archived: true,
+  },
+];
+
 const MockRolesRepositoryLayer = Layer.succeed(RolesRepository, {
-  findRolesByTeamId: () => Effect.succeed([]),
+  findRolesByTeamId: (teamId: Team.TeamId) => Effect.succeed(teamId === TEAM_A ? ALPHA_ROLES : []),
   findRoleById: () => Effect.succeed(Option.none()),
   getPermissionsForRoleId: () => Effect.succeed([]),
   insertRole: () => Effect.die(new Error('Not implemented')),
@@ -640,6 +688,34 @@ const MockRolesRepositoryLayer = Layer.succeed(RolesRepository, {
   findGroupsForRole: () => Effect.succeed([]),
   assignRoleToGroup: () => Effect.void,
   unassignRoleFromGroup: () => Effect.void,
+} as never);
+
+const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
+  listByTeam: (teamId: Team.TeamId) =>
+    Effect.succeed(
+      teamId === TEAM_A
+        ? [
+            {
+              id: EXPENSE_ALPHA,
+              team_id: TEAM_A,
+              amount_minor: 125000,
+              currency: 'CZK',
+              spent_at: DateTime.makeUnsafe('2026-05-02T00:00:00.000Z'),
+              category: 'equipment',
+              description: 'Alpha Expense',
+              bank_transaction_id: Option.none(),
+              created_by_user_id: USER_ADMIN,
+              updated_by_user_id: USER_ADMIN,
+              created_at: DateTime.makeUnsafe('2026-05-02T00:00:00.000Z'),
+              updated_at: DateTime.makeUnsafe('2026-05-02T00:00:00.000Z'),
+              created_by_name: Option.none(),
+              updated_by_name: Option.none(),
+              attachments: [],
+            },
+          ]
+        : [],
+    ),
+  findById: () => Effect.succeed(Option.none()),
 } as never);
 
 const MockAgeThresholdRepositoryLayer = Layer.succeed(AgeThresholdRepository, {
@@ -842,7 +918,9 @@ const CommonLayers = ApiLive.pipe(
       ),
     ),
   ),
-  Layer.provide(MockRolesRepositoryLayer),
+  // Merged, not a 21st `Layer.provide` — this `.pipe()` is already at the 20-argument overload
+  // cliff (same limit `api/index.ts` hit; see its "Third block" comment).
+  Layer.provide(Layer.merge(MockRolesRepositoryLayer, MockExpensesRepositoryLayer)),
   Layer.provide(MockGroupsRepositoryLayer),
   Layer.provide(MockTrainingTypesRepositoryLayer),
   Layer.provide(MockHttpClientLayer),
@@ -965,11 +1043,11 @@ describe('Search API', () => {
   });
 
   // Case 3
-  it('admin (all permissions), q=alpha: at least one hit of each of the five kinds', async () => {
+  it('admin (all permissions), q=alpha: at least one hit of each kind', async () => {
     const response = await search(TEAM_A, 'admin-token', 'alpha');
     expect(response.status).toBe(200);
     const body = (await response.json()) as ReadonlyArray<{ kind: string }>;
-    for (const kind of ['event', 'member', 'group', 'roster', 'trainingType']) {
+    for (const kind of ['event', 'member', 'group', 'roster', 'trainingType', 'role', 'expense']) {
       expect(hasKind(body, kind)).toBe(true);
     }
     expect(JSON.stringify(body)).not.toContain(B_ONLY_MARKER);
@@ -1027,6 +1105,53 @@ describe('Search API', () => {
       expect(response.status).toBe(200);
       const body = (await response.json()) as ReadonlyArray<{ kind: string }>;
       expect(hasKind(body, 'roster')).toBe(false);
+      expect(hasKind(body, 'event')).toBe(true);
+      expect(hasKind(body, 'trainingType')).toBe(true);
+    });
+  });
+
+  describe('role:view gate (paired)', () => {
+    it('WITH role:view, the matching role hit is present', async () => {
+      const response = await search(TEAM_A, 'role-view-token', 'alpha');
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReadonlyArray<{ kind: string }>;
+      expect(hasKind(body, 'role')).toBe(true);
+    });
+
+    it('WITHOUT role:view (same query/fixtures): 200, zero role hits, other kinds present', async () => {
+      const response = await search(TEAM_A, 'plain-token', 'alpha');
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReadonlyArray<{ kind: string }>;
+      expect(hasKind(body, 'role')).toBe(false);
+      expect(hasKind(body, 'event')).toBe(true);
+      expect(hasKind(body, 'trainingType')).toBe(true);
+    });
+
+    it('an archived role never appears, even for a caller who holds role:view', async () => {
+      const response = await search(TEAM_A, 'role-view-token', 'alpha');
+      const body = (await response.json()) as ReadonlyArray<{
+        kind: string;
+        role?: { name: string };
+      }>;
+      const names = body.filter((h) => h.kind === 'role').map((h) => h.role?.name);
+      expect(names).toContain('Alpha Role');
+      expect(names).not.toContain('Alpha Role Retired');
+    });
+  });
+
+  describe('finance:view gate (paired)', () => {
+    it('WITH finance:view, the matching expense hit is present', async () => {
+      const response = await search(TEAM_A, 'finance-view-token', 'alpha');
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReadonlyArray<{ kind: string }>;
+      expect(hasKind(body, 'expense')).toBe(true);
+    });
+
+    it('WITHOUT finance:view (same query/fixtures): 200, zero expense hits, other kinds present', async () => {
+      const response = await search(TEAM_A, 'plain-token', 'alpha');
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReadonlyArray<{ kind: string }>;
+      expect(hasKind(body, 'expense')).toBe(false);
       expect(hasKind(body, 'event')).toBe(true);
       expect(hasKind(body, 'trainingType')).toBe(true);
     });

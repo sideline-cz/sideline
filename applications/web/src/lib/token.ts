@@ -1,6 +1,7 @@
 import { BrowserKeyValueStore } from '@effect/platform-browser';
 import { Effect, Option } from 'effect';
 import { KeyValueStore } from 'effect/unstable/persistence';
+import { clearRecents } from '~/lib/palette/recents.js';
 
 const TOKEN = 'api-token';
 const PENDING_INVITE = 'pending-invite';
@@ -37,7 +38,13 @@ export const finishLogin = (token: string) => set(TOKEN, token);
 
 export const getToken = get(TOKEN);
 
-export const logout = Effect.all([remove(TOKEN), remove(LAST_TEAM)]).pipe(Effect.asVoid);
+// `clearRecents` rides along here rather than at either call site: the command palette's
+// history holds member display names, and there are two logout paths (the team route and the
+// no-team page). One place, every caller — see `lib/palette/recents.ts` on why it must go.
+export const logout = Effect.all([remove(TOKEN), remove(LAST_TEAM)]).pipe(
+  Effect.tap(() => Effect.sync(clearRecents)),
+  Effect.asVoid,
+);
 
 export const setPendingInvite = (code: string) => set(PENDING_INVITE, code);
 

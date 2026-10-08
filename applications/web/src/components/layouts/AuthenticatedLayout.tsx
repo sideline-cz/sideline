@@ -17,6 +17,8 @@ import { Button } from '~/components/ui/button';
 import { Separator } from '~/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '~/components/ui/sidebar';
 import { ENTITY_ROUTE } from '~/lib/assistant/entityRoutes.js';
+import { filterNavGroups, getTeamNavGroups, type NavItem } from '~/lib/navigation/teamNav.js';
+import { pushRecent, type RecentEntry, readRecents } from '~/lib/palette/recents.js';
 import { tr } from '~/lib/translations.js';
 
 // `navigator.userAgent.includes('Mac')` (design §3.2), computed once per module — not per
@@ -129,6 +131,22 @@ function AuthenticatedLayoutContent({
 
   const [searchOpen, setSearchOpen] = React.useState(false);
 
+  const navGroups = React.useMemo(
+    () =>
+      filterNavGroups(
+        getTeamNavGroups(teamId, activeTeam.discordJoined === 'not_connected'),
+        activeTeam.permissions,
+      ),
+    [teamId, activeTeam.discordJoined, activeTeam.permissions],
+  );
+
+  // Read once per open, not on every render: `localStorage` is synchronous and the list only
+  // changes when this component writes it.
+  const [recents, setRecents] = React.useState<ReadonlyArray<RecentEntry>>([]);
+  React.useEffect(() => {
+    if (searchOpen) setRecents(readRecents(teamId));
+  }, [searchOpen, teamId]);
+
   React.useEffect(() => {
     const unsubscribe = router.subscribe('onBeforeLoad', () => {
       setOpenMobile(false);
@@ -138,7 +156,7 @@ function AuthenticatedLayoutContent({
 
   // The per-kind switch (plan §C "Navigation per result kind"). `ENTITY_ROUTE` keeps every
   // branch typed — no inlined route strings.
-  const onSelectHit = (hit: AiChatApi.SearchHit) => {
+  const navigateToHit = (hit: AiChatApi.SearchHit) => {
     switch (hit.kind) {
       case 'event':
         void navigate({ to: ENTITY_ROUTE.event, params: { teamId, eventId: hit.event.eventId } });
@@ -160,7 +178,38 @@ function AuthenticatedLayoutContent({
           to: ENTITY_ROUTE.trainingType,
           params: { teamId, trainingTypeId: hit.trainingType.trainingTypeId },
         });
+        return;
+      case 'role':
+        void navigate({ to: ENTITY_ROUTE.role, params: { teamId, roleId: hit.role.roleId } });
+        return;
+      case 'expense':
+        void navigate({ to: ENTITY_ROUTE.expense, params: { teamId, expenseId: hit.expenseId } });
     }
+  };
+
+  const onSelectHit = (hit: AiChatApi.SearchHit) => {
+    setRecents(pushRecent(teamId, { type: 'hit', hit }));
+    navigateToHit(hit);
+  };
+
+  const onSelectNav = (item: NavItem) => {
+    setRecents(pushRecent(teamId, { type: 'nav', to: item.to }));
+    // `item.to`/`item.params` come from `teamNav.ts` — typed route literals at the only place
+    // they are constructed, never user input or a server value. `NavItem.to` widens them to
+    // `string` for the list, which is what this cast re-narrows for the router.
+    void navigate({ to: item.to, params: item.params } as never);
+  };
+
+  const onSelectRecent = (entry: RecentEntry) => {
+    if (entry.type === 'hit') {
+      onSelectHit(entry.hit);
+      return;
+    }
+    // Re-resolve through the permission-filtered groups: a stored route whose entry is no
+    // longer visible must not navigate. The palette already declines to render such a row; this
+    // is the second half of the same guard, for a row rendered before a permission change.
+    const item = navGroups.flatMap((group) => group.items).find((i) => i.to === entry.to);
+    if (item !== undefined) onSelectNav(item);
   };
 
   const onAskAssistant = (question: string) => {
@@ -228,6 +277,10 @@ function AuthenticatedLayoutContent({
         onOpenChange={setSearchOpen}
         onSelectHit={onSelectHit}
         onAskAssistant={onAskAssistant}
+        navGroups={navGroups}
+        onSelectNav={onSelectNav}
+        recents={recents}
+        onSelectRecent={onSelectRecent}
       />
     </>
   );

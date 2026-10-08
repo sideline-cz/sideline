@@ -11,10 +11,12 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/ht
 import { AuthMiddleware } from '~/api/Auth.js';
 import * as EventApi from '~/api/EventApi.js';
 import * as GroupApi from '~/api/GroupApi.js';
+import * as RoleApi from '~/api/RoleApi.js';
 import * as Roster from '~/api/Roster.js';
 import * as TrainingTypeApi from '~/api/TrainingTypeApi.js';
 import { AiActionName, AiActionProposalId } from '~/models/AiActionProposal.js';
 import { EventType } from '~/models/Event.js';
+import { ExpenseCategory, ExpenseId } from '~/models/Expense.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
@@ -66,7 +68,7 @@ export const RefToken = Schema.String.pipe(
 export type RefToken = typeof RefToken.Type;
 
 /**
- * The five `EntityRef`/`SearchHit` variants' fields, hoisted out so both unions are built from
+ * The `EntityRef`/`SearchHit` variants' fields, hoisted out so both unions are built from
  * the same records — `EntityRef` is a `SearchHit` plus the per-turn `ref` token, and there is no
  * other way for the two to drift apart. `kind` is the discriminant, precedent
  * `TeamGenerationApi.GenerationWarning`, with `kind` in place of `_tag`. Each variant carries
@@ -98,6 +100,19 @@ const trainingTypeFields = {
   kind: Schema.Literal('trainingType'),
   trainingType: TrainingTypeApi.TrainingTypeInfo,
 } as const;
+const roleFields = { kind: Schema.Literal('role'), role: RoleApi.RoleInfo } as const;
+// Bespoke, allow-listed — NOT `ExpensesApi`'s view DTO, which also carries `createdByName`,
+// `updatedByName` and attachment metadata. A search row shows what it takes to recognise the
+// expense; who last touched it and what is filed against it belong on the detail page.
+const expenseFields = {
+  kind: Schema.Literal('expense'),
+  expenseId: ExpenseId,
+  description: Schema.String,
+  amountMinor: Schema.Number,
+  currency: Schema.String,
+  spentAt: Schema.DateTimeUtc,
+  category: ExpenseCategory,
+} as const;
 
 /**
  * Every variant of `EntityRef` minus the per-turn `ref` token — what a read tool emits before
@@ -111,6 +126,8 @@ export const SearchHit = Schema.Union([
   Schema.Struct(groupFields),
   Schema.Struct(rosterFields),
   Schema.Struct(trainingTypeFields),
+  Schema.Struct(roleFields),
+  Schema.Struct(expenseFields),
 ]);
 export type SearchHit = Schema.Schema.Type<typeof SearchHit>;
 
@@ -126,6 +143,8 @@ export const EntityRef = Schema.Union([
   Schema.Struct({ ...groupFields, ref: RefToken }),
   Schema.Struct({ ...rosterFields, ref: RefToken }),
   Schema.Struct({ ...trainingTypeFields, ref: RefToken }),
+  Schema.Struct({ ...roleFields, ref: RefToken }),
+  Schema.Struct({ ...expenseFields, ref: RefToken }),
 ]);
 export type EntityRef = Schema.Schema.Type<typeof EntityRef>;
 

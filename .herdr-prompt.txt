@@ -1,24 +1,17 @@
-/work 3f393506-0818-8048-a35e-dec4aa1d94e6
+/work 3f393506-0818-81fd-a9e2-ca2205e4daf9
 
-STOP AT THE PLAN. The body lists six things but says nothing about scope, and scope is the whole decision here. Propose and WAIT.
+STOP AT THE PLAN. The ticket is detailed — read it fully. Two halves, several open questions. Propose and WAIT.
 
-THE BODY:
-- add filter and sorting to list
-- make them scrollable (not with the rest of the page)
-- add searching there
-- always have a filter there whether to show all or only active
-- for users also always display: groups, roles
+THE KEY FACT, verify it on your branch: applications/server/src/api/search.ts imports FIVE executors from services/ai/readTools.ts (listAllEvents, listGroups, listMembers, listRosters, listTrainingTypes), but readTools.ts now exports THIRTEEN. Fees, finance overview, membership plans, RSVPs, attendance and activity logs are ALREADY implemented and ALREADY permission-gated — search simply does not call them. PR 760 added several of them for the assistant. So "search everything" is mostly wiring, not new data access.
 
-THE SCOPE DECISION, which is yours to propose and the human's to settle: there are SEVEN list pages and NO shared table primitive today —
-EventsListPage, ExpensesListPage, GroupsListPage, RolesListPage, RostersListPage, TrainingTypesListPage, plus the member list on TeamMembersPage.
-So this is either seven separate edits or the introduction of a shared list component. Those are very different sizes of change and have different review risk. Recommend one, with reasoning, and say what you would NOT do.
+NON-NEGOTIABLE: do NOT hand-roll a search query against a table. SearchApi.ts's own header says search reuses the assistant's executors so the permission gates are THE SAME FUNCTION CALLS, NOT A SECOND COPY. That property is what makes widening safe. If something you want is missing, add an executor to readTools.ts so the assistant and the palette stay on one gate.
 
-DO NOT REINVENT WHAT EXISTS. FinancesOverviewPage already implements search + a status filter + empty states over a member table — read ByMemberContent in applications/web/src/components/pages/FinancesOverviewPage.tsx before designing anything. If a shared component is the answer, that page is the closest thing to a reference implementation and its filter semantics are already agreed. There is also EffectiveRolesList.tsx, which likely covers part of displaying roles.
+THE CAPS NEED RE-DERIVING, NOT RAISING: PER_KIND_LIMIT is 5, and the code comment justifies the total bound by saying there are 5 kinds (5 x 5 = 25). Going to ten-plus kinds invalidates that reasoning. Rethink ranking and capping rather than bumping a constant. Also re-read the note about the five executors running concurrently and listAllEvents being the only one touching a particular Map — adding concurrent calls means re-checking whether that still holds.
 
-HARD CONFLICT — DO NOT TOUCH ExpensesListPage.tsx OR THE EXPENSES TABLE. Another agent is live right now on branch feat/attach-invoices-to-expenses, adding invoice attachment to expenses, which will very likely change that table. If your plan needs that page, say so and leave it out of this branch; two agents reshaping one table on separate branches produces a merge conflict in JSX that is easy to resolve wrongly and only the build catches.
+FOR THE STATIC MENU HALF: the sidebar (applications/web/src/components/layouts/AppSidebar.tsx) already encodes which entries exist, how they group, and which are permission-gated — including a DELIBERATELY UNGATED membership-plans entry, because every member picks their own plan. Reuse that gating; do not re-derive it, or you will hide an entry from the people who need it.
 
-ALSO RAISE, do not decide alone:
-- show all vs only active: "active" means different things per entity (an archived roster, an inactive team member, an archived role, an archived fee). Confirm per list what the flag filters on rather than assuming one predicate fits all. A recent fix (PR 724) already kept archived rosters out of the roster pickers — be consistent with it, not parallel to it.
-- Client-side or server-side filtering and sorting? Client is simpler and fine for small lists; server is needed if any list can grow unbounded. Check the real row counts before choosing — the member list on a large club is the one to check.
-- "scrollable, not with the rest of the page" implies a fixed-height container with its own scroll. That interacts with mobile layout, and PR 723 recently fixed phone-width pages scrolling sideways. Do not undo that.
-- Roles on a user list are NOT just direct roles: this repo resolves group-inherited roles too, and there is a single resolve expression that must not be hand-rolled a second time. Find it before displaying anything.
+OPEN QUESTIONS to present, not decide: which of the eight unused executors are actually worth surfacing (currentDatetime plainly is not; listActivityLogs could flood results); whether static entries show only on an empty query or rank alongside typed results; whether to add recents (which needs storage and a privacy answer).
+
+CONFLICT NOTE: another agent is live on feat/finance-overview-richer, which touches finance read paths and may add server queries. You are wiring EXISTING executors, so you should not collide — but if your plan needs to change readTools.ts or search.ts in ways that overlap finance aggregation, say so rather than racing it.
+
+Everything is team-scoped and must stay so; the executors handle that, hand-rolled queries would not. Results must stay fast at keystroke rate — consider whether every kind should run on every keypress.

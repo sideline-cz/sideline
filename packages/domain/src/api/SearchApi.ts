@@ -1,6 +1,6 @@
 /**
  * The command-palette search endpoint (`.work-plans/command-palette-search.md` §A). Calls the
- * same five AI read-tool executors the in-app assistant uses (`applications/server/src/services/
+ * same AI read-tool executors the in-app assistant uses (`applications/server/src/services/
  * ai/readTools.ts`), so the permission gates are the same function calls, not a second copy.
  * `SearchHit` is defined in `AiChatApi.ts` and re-exported here, per the shared-schema
  * convention (`packages/domain/AGENTS.md` → "Shared Schemas Across API Contracts").
@@ -29,6 +29,10 @@ export const searchHitLabel = (hit: SearchHit): string => {
       return hit.roster.name;
     case 'trainingType':
       return hit.trainingType.name;
+    case 'role':
+      return hit.role.name;
+    case 'expense':
+      return hit.description;
   }
 };
 
@@ -50,6 +54,10 @@ export const searchHitId = (hit: SearchHit): string => {
       return `roster:${hit.roster.rosterId}`;
     case 'trainingType':
       return `trainingType:${hit.trainingType.trainingTypeId}`;
+    case 'role':
+      return `role:${hit.role.roleId}`;
+    case 'expense':
+      return `expense:${hit.expenseId}`;
   }
 };
 
