@@ -198,12 +198,17 @@ describe('BalanceSummary', () => {
         { category: 'fields', amountMinor: 20000 },
         { category: 'equipment', amountMinor: 10000 },
       ],
+      byMonth: [{ month: '2026-03-01', incomeMinor: 50000, expensesMinor: 30000 }],
+      window: 'all',
+      windowStart: null,
     });
     expect(result.currency).toBe('CZK');
     expect(result.incomeMinor).toBe(50000);
     expect(result.expensesMinor).toBe(30000);
     expect(result.netMinor).toBe(20000);
     expect(result.byCategory).toHaveLength(2);
+    expect(result.byMonth).toHaveLength(1);
+    expect(result.window).toBe('all');
   });
 
   it('decodes EUR entry', () => {
@@ -213,6 +218,9 @@ describe('BalanceSummary', () => {
       expensesMinor: 10000,
       netMinor: 0,
       byCategory: [],
+      byMonth: [],
+      window: 'all',
+      windowStart: null,
     });
     expect(result.currency).toBe('EUR');
     expect(result.netMinor).toBe(0);
@@ -227,7 +235,40 @@ describe('BalanceSummary', () => {
         expensesMinor: 0,
         netMinor: 0,
         byCategory: [],
+        byMonth: [],
+        window: 'all',
+        windowStart: null,
       }),
     ).toThrow();
+  });
+
+  it('rejects a byMonth key that is not a YYYY-MM-DD month key', () => {
+    expect(() =>
+      Schema.decodeUnknownSync(BalanceSummary)({
+        currency: 'CZK',
+        incomeMinor: 0,
+        expensesMinor: 0,
+        netMinor: 0,
+        byCategory: [],
+        byMonth: [{ month: '2026-03', incomeMinor: 0, expensesMinor: 0 }],
+        window: 'all',
+        windowStart: null,
+      }),
+    ).toThrow();
+  });
+
+  it('decodes a season window with its start instant', () => {
+    const result = Schema.decodeUnknownSync(BalanceSummary)({
+      currency: 'CZK',
+      incomeMinor: 0,
+      expensesMinor: 0,
+      netMinor: 0,
+      byCategory: [],
+      byMonth: [],
+      window: 'season',
+      windowStart: '2026-09-01T00:00:00.000Z',
+    });
+    expect(result.window).toBe('season');
+    expect(Option.isSome(result.windowStart)).toBe(true);
   });
 });
