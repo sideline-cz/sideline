@@ -4,6 +4,7 @@
 //   - applications/bot/src/commands/finance/buildFinanceStatusEmbed.ts (or similar)
 
 import type { FeeAssignment } from '@sideline/domain';
+import { Option } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { buildFinanceStatusEmbed } from '~/commands/finance/buildFinanceStatusEmbed.js';
 
@@ -176,5 +177,90 @@ describe('buildFinanceStatusEmbed', () => {
     // If all fees are waived, the embed should show a positive/neutral state
     // OR waived should be labeled clearly
     expect(embed.color === 0x2ecc71 || embedText.match(/waived|exempt|Waived/i)).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Credit netting + the single standing QR (`/finance`, no subcommand)
+// ---------------------------------------------------------------------------
+
+const ACC = 'ACC:CZ6508000000192000145399';
+const spaydWithAmount = `SPD*1.0*${ACC}*AM:400.00*CC:CZK*X-VS:12345`;
+const spaydNoAmount = `SPD*1.0*${ACC}*CC:CZK*X-VS:12345`;
+
+const qrOf = (spayd: string) =>
+  Option.some({ spayd, imageUrl: 'attachment://qr-finance-status.png' });
+
+describe('buildFinanceStatusEmbed — credit and QR', () => {
+  it('nets credit off the summary total, leaving the per-fee amounts gross', () => {
+    const embed = buildFinanceStatusEmbed({
+      assignments: [pendingCzkAssignment], // 500 CZK
+      credits: [{ currency: 'CZK', balanceMinor: 10000 }], // 100 CZK
+      locale: 'en',
+    }).embeds[0];
+
+    // 500 − 100 owed...
+    expect(embed.description).toContain('400');
+    expect(embed.description).not.toContain('500');
+    // ...but the fee itself is still a 500 CZK fee.
+    expect(JSON.stringify(embed.fields)).toContain('500');
+  });
+
+  it('credit covering every open fee reads as covered, not as a debt', () => {
+    const embed = buildFinanceStatusEmbed({
+      assignments: [pendingCzkAssignment],
+      credits: [{ currency: 'CZK', balanceMinor: 50000 }],
+      locale: 'en',
+    }).embeds[0];
+
+    expect(embed.description).toMatch(/covered/i);
+    expect(embed.color).toBe(0x2ecc71); // green, same as all-paid-up
+    // The fees stay listed — the member should still see what the credit is going on.
+    expect((embed.fields ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('credit in another currency never offsets what is owed in this one', () => {
+    const embed = buildFinanceStatusEmbed({
+      assignments: [pendingCzkAssignment], // 500 CZK
+      credits: [{ currency: 'EUR', balanceMinor: 50000 }],
+      locale: 'en',
+    }).embeds[0];
+
+    expect(embed.description).toContain('500');
+    expect(embed.description).not.toMatch(/covered/i);
+  });
+
+  it('attaches the QR and tells the member to scan it for the whole sum', () => {
+    const embed = buildFinanceStatusEmbed({
+      assignments: [pendingCzkAssignment],
+      credits: [{ currency: 'CZK', balanceMinor: 10000 }],
+      qr: qrOf(spaydWithAmount),
+      locale: 'en',
+    }).embeds[0];
+
+    expect(embed.image?.url).toBe('attachment://qr-finance-status.png');
+    expect(embed.description).toMatch(/settle everything at once/i);
+  });
+
+  it('a QR carrying no amount gets the "send any amount" wording, not the pay-it-all one', () => {
+    const embed = buildFinanceStatusEmbed({
+      assignments: [],
+      qr: qrOf(spaydNoAmount),
+      locale: 'en',
+    }).embeds[0];
+
+    expect(embed.image?.url).toBe('attachment://qr-finance-status.png');
+    expect(embed.description).toMatch(/any amount/i);
+    expect(embed.description).not.toMatch(/settle everything at once/i);
+  });
+
+  it('renders exactly as before when the club has no usable QR', () => {
+    const embed = buildFinanceStatusEmbed({
+      assignments: [pendingCzkAssignment],
+      locale: 'en',
+    }).embeds[0];
+
+    expect(embed.image).toBeUndefined();
+    expect(embed.description).not.toMatch(/scan/i);
   });
 });
