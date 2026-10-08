@@ -51,6 +51,21 @@ export class ExpenseView extends Schema.Class<ExpenseView>('ExpenseView')({
   attachments: Schema.Array(ExpenseAttachmentMeta),
 }) {}
 
+// The window a `BalanceSummary` covers. 'all' is every row the team has ever had, which is what
+// the endpoint did before `window` existed and still does when nothing is asked for.
+export const BalanceWindow = Schema.Literals(['all', 'season']);
+export type BalanceWindow = typeof BalanceWindow.Type;
+
+// A team-local month KEY ('2026-10-01'), never an instant. It comes out of
+// `training_period_start(ts, team_id)`, which buckets by `team_settings.timezone`, so the month is
+// already resolved in the team's own zone. Carrying it as a DateTime would re-resolve it in the
+// browser's zone and shift a team west of UTC back into the previous month.
+export const MonthKey = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/)),
+  Schema.brand('MonthKey'),
+);
+export type MonthKey = typeof MonthKey.Type;
+
 export class BalanceSummary extends Schema.Class<BalanceSummary>('BalanceSummary')({
   currency: CurrencyCode,
   incomeMinor: AmountMinor,
@@ -62,6 +77,26 @@ export class BalanceSummary extends Schema.Class<BalanceSummary>('BalanceSummary
       amountMinor: AmountMinor,
     }),
   ),
+  // Cash flow per team-local month, ascending. Only months with activity appear -- a gap means
+  // zero on both sides, and the client fills it so an inactive month reads as 0 rather than absent.
+  byMonth: Schema.Array(
+    Schema.Struct({
+      month: MonthKey,
+      incomeMinor: AmountMinor,
+      expensesMinor: AmountMinor,
+    }),
+  ),
+  // ponytail: window/windowStart are page-level facts repeated on every currency row. The honest
+  // model is `{ window, windowStart, summaries }`, but promoting the success schema from an array
+  // to an object rewrites the handler, the route loader, two component prop types and five test
+  // mock files. Promote it when a second page-level field needs carrying.
+  //
+  // This is the window ACTUALLY applied, which is not always the one requested: a team whose
+  // `governing_season_id` is NULL asks for 'season' and gets 'all'. Label off this, never off the
+  // request, or the heading claims a season the figures do not cover.
+  window: BalanceWindow,
+  // The season's `starts_at`. None whenever `window` is 'all' -- there is no start to show.
+  windowStart: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -279,6 +314,9 @@ export class ExpenseApiGroup extends HttpApiGroup.make('expenses')
       query: {
         from: Schema.OptionFromOptional(Schemas.DateTimeFromIsoString),
         to: Schema.OptionFromOptional(Schemas.DateTimeFromIsoString),
+        // Absent = 'all', which is what every caller got before this param existed. An explicit
+        // `from`/`to` wins over `window` -- it is the more specific request.
+        window: Schema.OptionFromOptional(BalanceWindow),
       },
     }).middleware(AuthMiddleware),
   ) {}

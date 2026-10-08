@@ -3235,5 +3235,17 @@
   "rsvp_lockedJustNow": "Účast se právě uzavřela. Načtěte stránku znovu pro finální soupis.",
   "rsvp_yourAnswerLabel": "Vaše odpověď",
   "rsvp_noAnswerLocked": "Před uzávěrkou jsme od vás nedostali odpověď.",
-  "bot_embed_rsvp_until": "🔒 Účast lze zapsat do {when}"
+  "bot_embed_rsvp_until": "🔒 Účast lze zapsat do {when}",
+  "balance_dashboard_collected": "Vybráno",
+  "balance_dashboard_stillOwed": "zbývá uhradit",
+  "balance_dashboard_trend_title": "Příjmy a výdaje po měsících",
+  "balance_dashboard_trend_income": "Příjmy",
+  "balance_dashboard_trend_expenses": "Výdaje",
+  "balance_dashboard_trend_monthColumn": "Měsíc",
+  "balance_dashboard_window_all": "Celé období",
+  "balance_dashboard_window_season": "Tato sezóna",
+  "finance_window_label": "Časové období",
+  "finance_window_allTime": "Celé období",
+  "finance_window_season": "Tato sezóna",
+  "finance_window_since": "Od {date}"
 }

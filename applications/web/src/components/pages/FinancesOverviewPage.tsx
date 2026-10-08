@@ -61,6 +61,12 @@ interface FinancesOverviewPageProps {
    * Balance summaries for the Overview tab. When provided, the Overview tab is shown.
    */
   balanceSummaries?: ReadonlyArray<ExpenseApi.BalanceSummary>;
+  /** The window the Overview figures ACTUALLY cover, as reported by the server. */
+  balanceWindow?: 'all' | 'season';
+  /** Pre-formatted season start for the Overview heading, e.g. 'Since 1 Sep 2026'. */
+  balanceWindowStartLabel?: string;
+  /** User picked a different window. Omitted → the window control is not rendered. */
+  onBalanceWindowChange?: (window: 'all' | 'season') => void;
   /**
    * Controlled active tab value. When provided together with onTabChange,
    * the component operates in controlled mode (URL-synced).
@@ -385,6 +391,9 @@ export function FinancesOverviewPage({
   assignmentsTabContent,
   createFeeHref,
   balanceSummaries,
+  balanceWindow,
+  balanceWindowStartLabel,
+  onBalanceWindowChange,
   activeTab: controlledActiveTab,
   onTabChange,
   canRecordPayments,
@@ -500,7 +509,34 @@ export function FinancesOverviewPage({
 
       {/* Tab content */}
       {activeTab === 'overview' && hasOverviewTab ? (
-        <BalanceDashboard summaries={balanceSummaries ?? []} />
+        <div className='flex flex-col gap-4'>
+          {/* Deliberately OUTSIDE BalanceDashboard: it early-returns an empty state when a
+              window has no activity, and a control rendered inside it would disappear exactly
+              when the user needs it to get back. */}
+          {onBalanceWindowChange !== undefined && (
+            <fieldset className='flex gap-1 border-0 p-0 m-0'>
+              <legend className='sr-only'>{tr('finance_window_label')}</legend>
+              {(['all', 'season'] as const).map((value) => (
+                <Button
+                  key={value}
+                  type='button'
+                  size='sm'
+                  variant={(balanceWindow ?? 'all') === value ? 'secondary' : 'ghost'}
+                  aria-pressed={(balanceWindow ?? 'all') === value}
+                  onClick={() => onBalanceWindowChange(value)}
+                >
+                  {tr(value === 'all' ? 'finance_window_allTime' : 'finance_window_season')}
+                </Button>
+              ))}
+            </fieldset>
+          )}
+          <BalanceDashboard
+            summaries={balanceSummaries ?? []}
+            rows={rows}
+            window={balanceWindow}
+            windowStartLabel={balanceWindowStartLabel}
+          />
+        </div>
       ) : activeTab === 'by-member' ? (
         <ByMemberContent
           rows={rows}

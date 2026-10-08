@@ -331,15 +331,20 @@ const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
     return Effect.succeed(true);
   },
   balanceSummaryByTeam: (_teamId: string) => {
-    return Effect.succeed([
-      {
-        currency: 'CZK',
-        incomeMinor: 10000,
-        expensesMinor: 5000,
-        netMinor: 5000,
-        byCategory: [],
-      },
-    ]);
+    return Effect.succeed({
+      window: 'all',
+      windowStart: Option.none(),
+      summaries: [
+        {
+          currency: 'CZK',
+          incomeMinor: 10000,
+          expensesMinor: 5000,
+          netMinor: 5000,
+          byCategory: [],
+          byMonth: [],
+        },
+      ],
+    });
   },
   countHistoryRows: () => Effect.succeed(0),
 } as never);

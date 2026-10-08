@@ -107,6 +107,21 @@ const CategoryBreakdownRawRow = Schema.Struct({
   amount_minor: Expense.AmountMinor,
 });
 
+const MonthlyRawRow = Schema.Struct({
+  currency: Expense.CurrencyCode,
+  // `::text` in the query, not a DATE: see `ExpenseApi.MonthKey` for why the team-local month
+  // stays a key and never becomes an instant.
+  month: ExpenseApi.MonthKey,
+  income_minor: Expense.AmountMinor,
+  expenses_minor: Expense.AmountMinor,
+});
+
+const SeasonWindowRawRow = Schema.Struct({
+  starts_at: Schemas.DateTimeFromDate,
+  // NULL = the season never ends on its own, so it runs up to now().
+  expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+});
+
 export interface BalanceSummaryRow {
   readonly currency: Expense.CurrencyCode;
   readonly incomeMinor: Expense.AmountMinor;
@@ -116,6 +131,17 @@ export interface BalanceSummaryRow {
     readonly category: Expense.ExpenseCategory;
     readonly amountMinor: Expense.AmountMinor;
   }>;
+  readonly byMonth: ReadonlyArray<{
+    readonly month: ExpenseApi.MonthKey;
+    readonly incomeMinor: Expense.AmountMinor;
+    readonly expensesMinor: Expense.AmountMinor;
+  }>;
+}
+
+/** What `balanceSummaryByTeam` actually scoped to, which is not always what was asked for. */
+export interface BalanceWindowApplied {
+  readonly window: ExpenseApi.BalanceWindow;
+  readonly windowStart: Option.Option<DateTime.Utc>;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,14 +364,67 @@ const make = Effect.gen(function* () {
       )
       .pipe(catchSqlErrors);
 
+  /**
+   * Turn the caller's request into the concrete `from`/`to` the three aggregates filter on, plus
+   * the window that was ACTUALLY applied.
+   *
+   * A requested season is not always an applied season: `governing_season_id` returns NULL for a
+   * team whose only seasons are closed and in the future (see 1793900000 step 4a), and that team
+   * must get all-time figures under an all-time label rather than an empty page under a season one.
+   */
+  const resolveWindow = (
+    teamId: Team.TeamId,
+    range: {
+      from?: DateTime.Utc | undefined;
+      to?: DateTime.Utc | undefined;
+      window?: ExpenseApi.BalanceWindow | undefined;
+    },
+  ) => {
+    const allTime = {
+      from: Option.fromUndefinedOr(range.from),
+      to: Option.fromUndefinedOr(range.to),
+      // An explicit from/to is a custom range, not a season — it reports as 'all' because the
+      // literal only ever distinguishes "scoped to the governing season" from "not".
+      window: 'all' as const,
+      windowStart: Option.none<DateTime.Utc>(),
+    };
+    if (range.window !== 'season' || range.from !== undefined || range.to !== undefined) {
+      return Effect.succeed(allTime);
+    }
+    return sql`
+      SELECT s.starts_at, s.expires_at
+      FROM seasons s
+      WHERE s.id = governing_season_id(${teamId})
+    `.pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SeasonWindowRawRow))),
+      Effect.map((rows) =>
+        rows.length === 0
+          ? allTime
+          : {
+              from: Option.some(rows[0].starts_at),
+              // None = the season never ends on its own, so it runs to now() — left open rather
+              // than pinned to a timestamp, so the figures stay live as the season continues.
+              to: rows[0].expires_at,
+              window: 'season' as const,
+              windowStart: Option.some(rows[0].starts_at),
+            },
+      ),
+      catchSqlErrors,
+    );
+  };
+
   const balanceSummaryByTeam = (
     teamId: Team.TeamId,
-    range: { from?: DateTime.Utc | undefined; to?: DateTime.Utc | undefined } = {},
+    range: {
+      from?: DateTime.Utc | undefined;
+      to?: DateTime.Utc | undefined;
+      window?: ExpenseApi.BalanceWindow | undefined;
+    } = {},
   ) => {
-    const from = Option.fromUndefinedOr(range.from);
-    const to = Option.fromUndefinedOr(range.to);
     return Effect.Do.pipe(
-      Effect.bind('totals', () =>
+      // Must resolve BEFORE the aggregates — they all read the from/to it produces.
+      Effect.bind('applied', () => resolveWindow(teamId, range)),
+      Effect.bind('totals', ({ applied: { from, to } }) =>
         sql`
           WITH
             income AS (
@@ -383,7 +462,7 @@ const make = Effect.gen(function* () {
           catchSqlErrors,
         ),
       ),
-      Effect.bind('categories', () =>
+      Effect.bind('categories', ({ applied: { from, to } }) =>
         sql`
           SELECT
             currency,
@@ -400,24 +479,86 @@ const make = Effect.gen(function* () {
           catchSqlErrors,
         ),
       ),
-      Effect.map(({ totals, categories }): ReadonlyArray<BalanceSummaryRow> => {
-        return totals.map((row) => {
-          const { income_minor: incomeMinor, expenses_minor: expensesMinor } = row;
-          const byCategory = categories
-            .filter((c) => c.currency === row.currency)
-            .map((c) => ({
-              category: c.category,
-              amountMinor: c.amount_minor,
-            }));
-          return {
-            currency: row.currency,
-            incomeMinor,
-            expensesMinor,
-            netMinor: Schema.decodeSync(ExpenseApi.NetAmountMinor)(incomeMinor - expensesMinor),
-            byCategory,
-          };
-        });
-      }),
+      // Same two sources and the same predicates as `totals`, bucketed per month instead of
+      // collapsed. `training_period_start` (1793200000) is the month key the team already sees on
+      // its fees — reusing it keeps the trend's months aligned with the fee periods and resolves
+      // the bucket in `team_settings.timezone` rather than the server's.
+      Effect.bind('monthly', ({ applied: { from, to } }) =>
+        sql`
+          WITH
+            income AS (
+              SELECT
+                f.currency,
+                training_period_start(p.paid_at, ${teamId})::text AS month,
+                COALESCE(SUM(p.amount_minor), 0)::bigint AS income_minor
+              FROM payments p
+              JOIN fee_assignments fa ON fa.id = p.fee_assignment_id
+              JOIN fees f ON f.id = fa.fee_id
+              WHERE f.team_id = ${teamId}
+                AND p.voided_at IS NULL
+                AND (${Option.isNone(from)} OR p.paid_at >= ${Option.getOrNull(from)})
+                AND (${Option.isNone(to)} OR p.paid_at <= ${Option.getOrNull(to)})
+              GROUP BY 1, 2
+            ),
+            expense_months AS (
+              SELECT
+                currency,
+                training_period_start(spent_at, ${teamId})::text AS month,
+                COALESCE(SUM(amount_minor), 0)::bigint AS expenses_minor
+              FROM expenses
+              WHERE team_id = ${teamId}
+                AND (${Option.isNone(from)} OR spent_at >= ${Option.getOrNull(from)})
+                AND (${Option.isNone(to)} OR spent_at <= ${Option.getOrNull(to)})
+              GROUP BY 1, 2
+            )
+          SELECT
+            COALESCE(i.currency, e.currency) AS currency,
+            COALESCE(i.month, e.month) AS month,
+            COALESCE(i.income_minor, 0)::bigint AS income_minor,
+            COALESCE(e.expenses_minor, 0)::bigint AS expenses_minor
+          FROM income i
+          FULL OUTER JOIN expense_months e ON e.currency = i.currency AND e.month = i.month
+          ORDER BY 1, 2
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(MonthlyRawRow))),
+          catchSqlErrors,
+        ),
+      ),
+      Effect.map(
+        ({
+          totals,
+          categories,
+          monthly,
+          applied,
+        }): BalanceWindowApplied & { readonly summaries: ReadonlyArray<BalanceSummaryRow> } => ({
+          window: applied.window,
+          windowStart: applied.windowStart,
+          summaries: totals.map((row) => {
+            const { income_minor: incomeMinor, expenses_minor: expensesMinor } = row;
+            const byCategory = categories
+              .filter((c) => c.currency === row.currency)
+              .map((c) => ({
+                category: c.category,
+                amountMinor: c.amount_minor,
+              }));
+            const byMonth = monthly
+              .filter((m) => m.currency === row.currency)
+              .map((m) => ({
+                month: m.month,
+                incomeMinor: m.income_minor,
+                expensesMinor: m.expenses_minor,
+              }));
+            return {
+              currency: row.currency,
+              incomeMinor,
+              expensesMinor,
+              netMinor: Schema.decodeSync(ExpenseApi.NetAmountMinor)(incomeMinor - expensesMinor),
+              byCategory,
+              byMonth,
+            };
+          }),
+        }),
+      ),
     );
   };
 

@@ -9,6 +9,7 @@ import { BankTransactionsRepository } from '~/repositories/BankTransactionsRepos
 import { ExpenseAttachmentsRepository } from '~/repositories/ExpenseAttachmentsRepository.js';
 import {
   type BalanceSummaryRow,
+  type BalanceWindowApplied,
   ExpensesRepository,
   type ExpenseWithNamesRow,
 } from '~/repositories/ExpensesRepository.js';
@@ -51,14 +52,20 @@ const fromExpenseRow = (row: ExpenseWithNamesRow): ExpenseApi.ExpenseView =>
     attachments: [...row.attachments],
   });
 
-const toBalanceSummary = (row: BalanceSummaryRow): ExpenseApi.BalanceSummary =>
-  new ExpenseApi.BalanceSummary({
-    currency: row.currency,
-    incomeMinor: row.incomeMinor,
-    expensesMinor: row.expensesMinor,
-    netMinor: row.netMinor,
-    byCategory: row.byCategory,
-  });
+const toBalanceSummary =
+  (applied: BalanceWindowApplied) =>
+  (row: BalanceSummaryRow): ExpenseApi.BalanceSummary =>
+    new ExpenseApi.BalanceSummary({
+      currency: row.currency,
+      incomeMinor: row.incomeMinor,
+      expensesMinor: row.expensesMinor,
+      netMinor: row.netMinor,
+      byCategory: row.byCategory,
+      byMonth: row.byMonth,
+      // Repeated on every currency row -- see the ponytail note on `ExpenseApi.BalanceSummary`.
+      window: applied.window,
+      windowStart: applied.windowStart,
+    });
 
 // `Option.match` boilerplate that maps `None → fail(expenseNotFound)`, `Some → succeed(value)`.
 const requireFound = <A>(option: Option.Option<A>) =>
@@ -258,9 +265,10 @@ export const ExpenseApiLive = HttpApiBuilder.group(Api, 'expenses', (handlers) =
                 expenses.balanceSummaryByTeam(teamId, {
                   from: Option.getOrUndefined(query.from),
                   to: Option.getOrUndefined(query.to),
+                  window: Option.getOrUndefined(query.window),
                 }),
               ),
-              Effect.map(({ summary }) => summary.map(toBalanceSummary)),
+              Effect.map(({ summary }) => summary.summaries.map(toBalanceSummary(summary))),
             ),
           )
           // ------------------------------------------------------------------
