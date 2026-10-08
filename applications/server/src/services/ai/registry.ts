@@ -1,7 +1,7 @@
 /**
  * The tool registry — plan `.work-plans/ai-app-interaction.md` §8 / §13.3.
  *
- * `ALL_TOOLS` is the single catalogue of the six read tools: name,
+ * `ALL_TOOLS` is the single catalogue of every read tool: name,
  * model-facing description, the derived JSON Schema (`parameters`, built
  * once, eagerly, via `toToolParameters`) and the Effect `schema` it was
  * derived from (kept alongside `parameters` so the no-drift test can
@@ -34,6 +34,21 @@ const QUERY_MAX_LENGTH = 200;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const QueryParam = Schema.String.pipe(Schema.check(Schema.isMaxLength(QUERY_MAX_LENGTH)));
+/**
+ * Every id-shaped tool parameter must carry this.
+ *
+ * `Event.EventId` and `TeamMember.TeamMemberId` are `Schema.String.pipe(Schema.brand(...))` with
+ * NO format check, while the columns behind them are Postgres `uuid`. A model that invents or
+ * mistypes an id — and it has no way to obtain a real one, since tool results expose a 4-char
+ * `ref` token rather than a UUID — therefore decoded cleanly, reached the query, and raised
+ * `22P02 invalid input syntax for type uuid`. `catchSqlErrors` converts that into a `LogicError`
+ * DEFECT, which `ChatAgent`'s `catchCause` turns into a degraded turn: one guessed id and the
+ * user's whole question fails with `provider_error`.
+ *
+ * Rejecting it here makes the model's own tool call fail validation instead, which it can see and
+ * correct. Applied to `list_events` too — that tool shipped with the same hazard.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DateParam = Schema.String.pipe(Schema.check(Schema.isPattern(DATE_PATTERN)));
 /** The row cap every list tool accepts, verbatim-identical across all five — `readTools.ts`'s
  * `applyLimit`/`filterEventRows` rely on it having been validated to 1..50 before they slice. */
@@ -53,7 +68,7 @@ const LimitParam = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, m
 export const CurrentDatetimeSchema = Schema.Struct({});
 
 export const ListEventsSchema = Schema.Struct({
-  eventId: Schema.optionalKey(Event.EventId),
+  eventId: Schema.optionalKey(Event.EventId.pipe(Schema.check(Schema.isPattern(UUID_PATTERN)))),
   from: Schema.optionalKey(DateParam),
   to: Schema.optionalKey(DateParam),
   status: Schema.optionalKey(Event.EventStatus),
@@ -80,6 +95,44 @@ export const ListMembersSchema = Schema.Struct({
 
 export const ListRostersSchema = Schema.Struct({
   query: Schema.optionalKey(QueryParam),
+  limit: Schema.optionalKey(LimitParam),
+});
+
+// --- the six database read tools + search_docs (`.dev-loop/plan.md`) -------
+
+export const ListFeesSchema = Schema.Struct({
+  query: Schema.optionalKey(QueryParam),
+  limit: Schema.optionalKey(LimitParam),
+});
+
+export const GetFinanceOverviewSchema = Schema.Struct({
+  limit: Schema.optionalKey(LimitParam),
+});
+
+export const ListEventRsvpsSchema = Schema.Struct({
+  eventId: Event.EventId.pipe(Schema.check(Schema.isPattern(UUID_PATTERN))),
+  limit: Schema.optionalKey(LimitParam),
+});
+
+export const ListEventAttendanceSchema = Schema.Struct({
+  eventId: Event.EventId.pipe(Schema.check(Schema.isPattern(UUID_PATTERN))),
+  limit: Schema.optionalKey(LimitParam),
+});
+
+/** No `memberId`: `api/activity-logs.ts:37-41` is self-only, so the assistant answers for the
+ *  caller and nobody else. See the header comment on `listActivityLogs` in `readTools.ts`. */
+export const ListActivityLogsSchema = Schema.Struct({
+  limit: Schema.optionalKey(LimitParam),
+});
+
+export const ListMembershipPlansSchema = Schema.Struct({
+  limit: Schema.optionalKey(LimitParam),
+});
+
+/** `query` is REQUIRED here, unlike every list tool's optional free-text filter: a docs search
+ *  with no query has nothing to rank and would return the first N sections of the corpus. */
+export const SearchDocsSchema = Schema.Struct({
+  query: QueryParam,
   limit: Schema.optionalKey(LimitParam),
 });
 
@@ -154,6 +207,60 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'matched against the name, and/or cap the number of rows returned with `limit` (1-50).',
     ListRostersSchema,
     Option.some('roster:view'),
+  ),
+  define(
+    'list_fees',
+    'Lists the team fees (name, description, amount in minor units, currency, due date, whether ' +
+      'archived). Filter with a free-text `query` matched against the fee name, and/or cap the ' +
+      'number of rows with `limit` (1-50). Only available to callers who can see finances.',
+    ListFeesSchema,
+    Option.some('finance:view'),
+  ),
+  define(
+    'get_finance_overview',
+    "Returns the team's finance overview: one row per member and currency with the total due, " +
+      'the total paid, any credit, and how many of their fees are overdue, pending or paid. Use ' +
+      'it for "who still owes money" questions. Only available to callers who can see finances.',
+    GetFinanceOverviewSchema,
+    Option.some('finance:view'),
+  ),
+  define(
+    'list_event_rsvps',
+    'Lists who answered an event invitation and how (yes/no/maybe) plus any message they left. ' +
+      'Requires the `eventId` of an event you can already see — get it from `list_events`.',
+    ListEventRsvpsSchema,
+  ),
+  define(
+    'list_event_attendance',
+    'Lists attendance for a TRAINING, for callers who can take attendance for it or who can see ' +
+      'the team finances. Requires the `eventId` of an event you can already see. Each row has ' +
+      '`present` and `confirmed`: when `confirmed` is false, `present` is only what the member ' +
+      'said they would do in their RSVP, NOT a record that they turned up — never report an ' +
+      'unconfirmed row as actual attendance. Use `list_event_rsvps` for intentions.',
+    ListEventAttendanceSchema,
+  ),
+  define(
+    'list_activity_logs',
+    "Lists the CALLER'S OWN logged training activities (activity type, when, duration in " +
+      "minutes, note). It cannot report anyone else's — training logs are private to the member " +
+      'who wrote them, so if the user asks about another member, say that plainly. Cap the ' +
+      'number of rows with `limit` (1-50).',
+    ListActivityLogsSchema,
+  ),
+  define(
+    'list_membership_plans',
+    "Lists the team's membership plans (name, price in minor units, currency, per-training " +
+      "price, included free trainings, which one is the default) together with the team's " +
+      'current and next season dates. Use it for questions about plans, prices and season dates.',
+    ListMembershipPlansSchema,
+  ),
+  define(
+    'search_docs',
+    'Searches the Sideline product documentation (how-to guides, FAQ, concepts) and returns the ' +
+      'most relevant sections. This is the right tool for "how do I…" and "what does X mean" ' +
+      "questions about the app itself. Do NOT use it for questions about the team's own data — " +
+      'events, members, fees and everything else live in the other tools.',
+    SearchDocsSchema,
   ),
   // Built FROM the action registry (`services/ai/actions.ts`) so a `propose_<action>` tool
   // cannot drift from its entry — adding an action there is enough to offer it here too.

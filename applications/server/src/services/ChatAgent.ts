@@ -21,20 +21,33 @@
 import type { AiActionProposal, AiChatApi } from '@sideline/domain';
 import { Array as Arr, Cause, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { hasPermission } from '~/api/permissions.js';
+import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
+import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { FeesRepository } from '~/repositories/FeesRepository.js';
+import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { ACTION_REGISTRY } from '~/services/ai/actions.js';
 import { computeCurrentDatetime } from '~/services/ai/currentDatetime.js';
+import { searchDocs } from '~/services/ai/docsTools.js';
 import {
   currentDatetime,
+  getFinanceOverview,
+  listActivityLogs,
+  listEventAttendance,
+  listEventRsvps,
   listEvents,
+  listFees,
   listGroups,
   listMembers,
+  listMembershipPlans,
   listRosters,
   listTrainingTypes,
 } from '~/services/ai/readTools.js';
@@ -42,11 +55,18 @@ import { buildTokenMap, entityKeyOf, mintToken } from '~/services/ai/refTokens.j
 import {
   ALL_TOOLS,
   CurrentDatetimeSchema,
+  GetFinanceOverviewSchema,
+  ListActivityLogsSchema,
+  ListEventAttendanceSchema,
+  ListEventRsvpsSchema,
   ListEventsSchema,
+  ListFeesSchema,
   ListGroupsSchema,
+  ListMembershipPlansSchema,
   ListMembersSchema,
   ListRostersSchema,
   ListTrainingTypesSchema,
+  SearchDocsSchema,
   visibleTools,
 } from '~/services/ai/registry.js';
 import { buildSystemPrompt } from '~/services/ai/systemPrompt.js';
@@ -170,6 +190,12 @@ interface AgentDeps {
   readonly members: ServiceMap.Service.Shape<typeof TeamMembersRepository>;
   readonly teams: ServiceMap.Service.Shape<typeof TeamsRepository>;
   readonly proposals: ServiceMap.Service.Shape<typeof AiActionProposalsRepository>;
+  readonly fees: ServiceMap.Service.Shape<typeof FeesRepository>;
+  readonly financeOverview: ServiceMap.Service.Shape<typeof FinanceOverviewRepository>;
+  readonly rsvps: ServiceMap.Service.Shape<typeof EventRsvpsRepository>;
+  readonly attendance: ServiceMap.Service.Shape<typeof EventAttendanceRepository>;
+  readonly activityLogs: ServiceMap.Service.Shape<typeof ActivityLogsRepository>;
+  readonly membershipPlans: ServiceMap.Service.Shape<typeof MembershipPlansRepository>;
 }
 
 // ---------------------------------------------------------------------------
@@ -334,9 +360,53 @@ const executeTool = (
       return decodeAndRun(ListRostersSchema, parsedArgs, (args) =>
         Effect.provideService(listRosters(args, ctx), RostersRepository, deps.rosters),
       );
+    case 'list_fees':
+      return decodeAndRun(ListFeesSchema, parsedArgs, (args) =>
+        Effect.provideService(listFees(args, ctx), FeesRepository, deps.fees),
+      );
+    case 'get_finance_overview':
+      return decodeAndRun(GetFinanceOverviewSchema, parsedArgs, (args) =>
+        Effect.provideService(
+          getFinanceOverview(args, ctx),
+          FinanceOverviewRepository,
+          deps.financeOverview,
+        ),
+      );
+    case 'list_event_rsvps':
+      return decodeAndRun(ListEventRsvpsSchema, parsedArgs, (args) =>
+        listEventRsvps(args, ctx).pipe(
+          Effect.provideService(EventsRepository, deps.events),
+          Effect.provideService(EventRsvpsRepository, deps.rsvps),
+        ),
+      );
+    case 'list_event_attendance':
+      return decodeAndRun(ListEventAttendanceSchema, parsedArgs, (args) =>
+        listEventAttendance(args, ctx).pipe(
+          Effect.provideService(EventsRepository, deps.events),
+          Effect.provideService(EventAttendanceRepository, deps.attendance),
+        ),
+      );
+    case 'list_activity_logs':
+      return decodeAndRun(ListActivityLogsSchema, parsedArgs, (args) =>
+        listActivityLogs(args, ctx).pipe(
+          Effect.provideService(TeamMembersRepository, deps.members),
+          Effect.provideService(ActivityLogsRepository, deps.activityLogs),
+        ),
+      );
+    case 'list_membership_plans':
+      return decodeAndRun(ListMembershipPlansSchema, parsedArgs, (args) =>
+        Effect.provideService(
+          listMembershipPlans(args, ctx),
+          MembershipPlansRepository,
+          deps.membershipPlans,
+        ),
+      );
+    case 'search_docs':
+      // Bundled corpus, no repository and no tenant scope — see `docsTools.ts`.
+      return decodeAndRun(SearchDocsSchema, parsedArgs, (args) => searchDocs(args, ctx));
     default:
       // Unreachable: `executeTool` is only ever called with a name already
-      // confirmed present in `ALL_TOOLS` (module-load invariant: exactly 6).
+      // confirmed present in `ALL_TOOLS`.
       return invalidArguments(`unrecognized tool: ${name}`);
   }
 };
@@ -806,6 +876,12 @@ const make: Effect.Effect<
   | TeamMembersRepository
   | TeamsRepository
   | AiActionProposalsRepository
+  | FeesRepository
+  | FinanceOverviewRepository
+  | EventRsvpsRepository
+  | EventAttendanceRepository
+  | ActivityLogsRepository
+  | MembershipPlansRepository
 > = Effect.Do.pipe(
   Effect.bind('llm', () => LlmClient.asEffect()),
   Effect.bind('events', () => EventsRepository.asEffect()),
@@ -815,6 +891,12 @@ const make: Effect.Effect<
   Effect.bind('members', () => TeamMembersRepository.asEffect()),
   Effect.bind('teams', () => TeamsRepository.asEffect()),
   Effect.bind('proposals', () => AiActionProposalsRepository.asEffect()),
+  Effect.bind('fees', () => FeesRepository.asEffect()),
+  Effect.bind('financeOverview', () => FinanceOverviewRepository.asEffect()),
+  Effect.bind('rsvps', () => EventRsvpsRepository.asEffect()),
+  Effect.bind('attendance', () => EventAttendanceRepository.asEffect()),
+  Effect.bind('activityLogs', () => ActivityLogsRepository.asEffect()),
+  Effect.bind('membershipPlans', () => MembershipPlansRepository.asEffect()),
   Effect.map(
     (deps): ChatAgentService => ({
       respond: (ctx, history) => respond(deps, ctx, history),
