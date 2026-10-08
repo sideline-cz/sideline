@@ -402,8 +402,10 @@ const make = Effect.gen(function* () {
           ? allTime
           : {
               from: Option.some(rows[0].starts_at),
-              // None = the season never ends on its own, so it runs to now() — left open rather
-              // than pinned to a timestamp, so the figures stay live as the season continues.
+              // None = the season never ends on its own, so the window has NO upper bound — not
+              // now(). A future-dated row (a prepaid invoice, an expense entered ahead) is inside
+              // a season that has no end, and counting it matches what the 'all' window has
+              // always done: neither window has ever clamped to the present.
               to: rows[0].expires_at,
               window: 'season' as const,
               windowStart: Option.some(rows[0].starts_at),

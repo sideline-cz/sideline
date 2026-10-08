@@ -61,8 +61,17 @@ interface FinancesOverviewPageProps {
    * Balance summaries for the Overview tab. When provided, the Overview tab is shown.
    */
   balanceSummaries?: ReadonlyArray<ExpenseApi.BalanceSummary>;
-  /** The window the Overview figures ACTUALLY cover, as reported by the server. */
+  /**
+   * The window the user SELECTED. Drives the control's pressed state only — it must not wait on
+   * the refetch, or clicking a window does nothing visible until the response lands.
+   */
   balanceWindow?: 'all' | 'season';
+  /**
+   * The window the figures ACTUALLY cover, per the server. Separate from the selection because
+   * the two legitimately differ: a team with no governing season selects 'season' and is served
+   * 'all'. The heading reads this one so it can never claim a season the figures don't cover.
+   */
+  balanceWindowApplied?: 'all' | 'season';
   /** Pre-formatted season start for the Overview heading, e.g. 'Since 1 Sep 2026'. */
   balanceWindowStartLabel?: string;
   /** User picked a different window. Omitted → the window control is not rendered. */
@@ -392,6 +401,7 @@ export function FinancesOverviewPage({
   createFeeHref,
   balanceSummaries,
   balanceWindow,
+  balanceWindowApplied,
   balanceWindowStartLabel,
   onBalanceWindowChange,
   activeTab: controlledActiveTab,
@@ -533,7 +543,7 @@ export function FinancesOverviewPage({
           <BalanceDashboard
             summaries={balanceSummaries ?? []}
             rows={rows}
-            window={balanceWindow}
+            window={balanceWindowApplied}
             windowStartLabel={balanceWindowStartLabel}
           />
         </div>

@@ -330,10 +330,14 @@ const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
     expensesStore.delete(expenseId);
     return Effect.succeed(true);
   },
-  balanceSummaryByTeam: (_teamId: string) => {
+  balanceSummaryByTeam: (_teamId: string, range?: { window?: 'all' | 'season' }) => {
+    lastBalanceRange = range;
+    // Echoes the requested window so the endpoint test can tell a forwarded param from a
+    // dropped one — the real repo decides this, but the wiring is what's under test here.
+    const window = range?.window ?? 'all';
     return Effect.succeed({
-      window: 'all',
-      windowStart: Option.none(),
+      window,
+      windowStart: window === 'season' ? Option.some(SEASON_START) : Option.none(),
       summaries: [
         {
           currency: 'CZK',
@@ -341,7 +345,7 @@ const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
           expensesMinor: 5000,
           netMinor: 5000,
           byCategory: [],
-          byMonth: [],
+          byMonth: [{ month: '2026-03-01', incomeMinor: 10000, expensesMinor: 5000 }],
         },
       ],
     });
@@ -826,6 +830,26 @@ beforeEach(() => {
 const listUrl = `http://localhost/teams/${TEST_TEAM_ID}/expenses`;
 const createUrl = `http://localhost/teams/${TEST_TEAM_ID}/expenses`;
 const balanceUrl = `http://localhost/teams/${TEST_TEAM_ID}/finances/balance-summary`;
+
+const SEASON_START = DateTime.fromDateUnsafe(new Date('2026-09-01T00:00:00.000Z'));
+
+// `handler`'s Response is typed such that `.json()` widens to `never`; the existing tests above
+// only ever use `toHaveProperty`, which tolerates that. These read fields, so they name the shape.
+type BalanceBody = ReadonlyArray<{
+  window: string;
+  windowStart: string | null;
+  byMonth: ReadonlyArray<{ month: string; incomeMinor: number; expensesMinor: number }>;
+}>;
+
+// What the handler last forwarded to the repo — the point is that `?window=` is not silently
+// dropped between the query schema and the repo call.
+let lastBalanceRange: { window?: 'all' | 'season' } | undefined;
+// Reset through a function, never by assigning `undefined` inline: a direct assignment lets
+// control-flow analysis narrow the variable to `undefined` for the rest of the test, because the
+// mock's write happens in a closure TS cannot see.
+const resetBalanceRange = () => {
+  lastBalanceRange = undefined;
+};
 
 const getUrl = (expenseId: string) =>
   `http://localhost/teams/${TEST_TEAM_ID}/expenses/${expenseId}`;
@@ -1326,6 +1350,44 @@ describe('Expense API — balanceSummary', () => {
       expect(body[0]).toHaveProperty('expensesMinor');
       expect(body[0]).toHaveProperty('netMinor');
     }
+  });
+
+  it('forwards ?window=season to the repository instead of dropping it', async () => {
+    resetBalanceRange();
+    const response = await handler(
+      new Request(`${balanceUrl}?window=season`, {
+        headers: { Authorization: 'Bearer treasurer-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(lastBalanceRange?.window).toBe('season');
+
+    const body = (await response.json()) as BalanceBody;
+    expect(body[0].window).toBe('season');
+    expect(body[0].windowStart).toBe('2026-09-01T00:00:00.000Z');
+  });
+
+  it('defaults to the all-time window when ?window= is absent', async () => {
+    resetBalanceRange();
+    const response = await handler(
+      new Request(balanceUrl, { headers: { Authorization: 'Bearer treasurer-token' } }),
+    );
+    expect(response.status).toBe(200);
+    expect(lastBalanceRange?.window).toBeUndefined();
+
+    const body = (await response.json()) as BalanceBody;
+    expect(body[0].window).toBe('all');
+    expect(body[0].windowStart).toBeNull();
+  });
+
+  it('serves byMonth alongside the totals', async () => {
+    const response = await handler(
+      new Request(balanceUrl, { headers: { Authorization: 'Bearer treasurer-token' } }),
+    );
+    const body = (await response.json()) as BalanceBody;
+    expect(body[0].byMonth).toEqual([
+      { month: '2026-03-01', incomeMinor: 10000, expensesMinor: 5000 },
+    ]);
   });
 
   it('GET /teams/:teamId/finances/balance-summary → 200 for viewer with finance:view', async () => {

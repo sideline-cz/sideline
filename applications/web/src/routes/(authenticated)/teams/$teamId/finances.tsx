@@ -424,7 +424,8 @@ function FinancesRoute() {
         assignmentsTabContent={assignmentsTabContent}
         createFeeHref={`/teams/${teamId}/finances/fees`}
         balanceSummaries={activeSummaries}
-        balanceWindow={appliedWindow}
+        balanceWindow={requestedWindow}
+        balanceWindowApplied={appliedWindow}
         balanceWindowStartLabel={
           appliedWindowStart !== undefined && Option.isSome(appliedWindowStart)
             ? tr('finance_window_since', { date: formatLocalDate(appliedWindowStart.value) })
