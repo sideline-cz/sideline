@@ -95,8 +95,12 @@ const renderPage = (overrides?: {
   );
 };
 
+// The page now holds TWO comboboxes — this control and the list toolbar's sort `<select>` —
+// so every lookup must name the one it means.
+const defaultRoleCombo = () => screen.getByRole('combobox', { name: 'role_defaultForNewMembers' });
+
 const openSelect = () => {
-  fireEvent.click(screen.getByRole('combobox'));
+  fireEvent.click(defaultRoleCombo());
 };
 
 describe('RolesListPage — default role control (T-W1, r3)', () => {
@@ -149,16 +153,16 @@ describe('RolesListPage — default role control (T-W1, r3)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox').textContent).toContain('Role A');
+      expect(defaultRoleCombo().textContent).toContain('Role A');
     });
-    expect(screen.getByRole('combobox').textContent).not.toContain('Role B');
+    expect(defaultRoleCombo().textContent).not.toContain('Role B');
     expect(mockInvalidate).not.toHaveBeenCalled();
   });
 
   it('defaultRoleId: None renders the role_defaultNone placeholder and the destructive alert; "No role" is not a selectable option (F3)', () => {
     renderPage({ defaultRoleId: Option.none() });
 
-    expect(screen.getByRole('combobox').textContent).toContain('role_defaultNone');
+    expect(defaultRoleCombo().textContent).toContain('role_defaultNone');
     expect(screen.getByText('role_defaultBrokenWarning')).toBeTruthy();
     expect(screen.queryByText('role_defaultEscalationWarning')).toBeNull();
 
@@ -197,7 +201,7 @@ describe('RolesListPage — default role control (T-W1, r3)', () => {
 
   it('canManage: false disables the SearchableSelect', () => {
     renderPage({ canManage: false });
-    const combo = screen.getByRole('combobox');
+    const combo = defaultRoleCombo();
     expect(combo.hasAttribute('disabled')).toBe(true);
   });
 

@@ -7,6 +7,7 @@ import { OctagonX, TriangleAlert, UserPlus } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { ListToolbar, listScrollClass } from '~/components/molecules/ListToolbar.js';
 import { NONE_VALUE } from '~/components/organisms/team-settings/shared.js';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Badge } from '~/components/ui/badge';
@@ -24,6 +25,35 @@ import { Label } from '~/components/ui/label';
 import { withFieldErrors } from '~/lib/form';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
+import { useListFilter } from '~/lib/useListFilter.js';
+
+// Module scope, not inline: `useListFilter` memoises on these, so a fresh array each render
+// would recompute the list every time.
+const ROLE_FILTERS = [
+  {
+    value: 'active',
+    labelKey: 'list_filter_active',
+    predicate: (r: RoleApi.RoleInfo) => !r.isArchived,
+  },
+  { value: 'all', labelKey: 'list_filter_all', predicate: () => true },
+] as const;
+
+const ROLE_SORTS = [
+  {
+    value: 'name',
+    labelKey: 'list_sort_name',
+    // Built-ins first, matching the server's ORDER BY, so the default sort is not a reshuffle.
+    compare: (a: RoleApi.RoleInfo, b: RoleApi.RoleInfo) =>
+      Number(b.isBuiltIn) - Number(a.isBuiltIn) || a.name.localeCompare(b.name),
+  },
+  {
+    value: 'permissions',
+    labelKey: 'list_sort_permissions',
+    compare: (a: RoleApi.RoleInfo, b: RoleApi.RoleInfo) => b.permissionCount - a.permissionCount,
+  },
+] as const;
+
+const roleSearchFields = (r: RoleApi.RoleInfo) => [r.name];
 
 const CreateRoleSchema = Schema.Struct({
   name: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
@@ -52,6 +82,11 @@ export function RolesListPage({
   const router = useRouter();
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
   const [savingDefault, setSavingDefault] = React.useState(false);
+  const roleList = useListFilter(roles, {
+    searchOf: roleSearchFields,
+    filters: ROLE_FILTERS,
+    sorts: ROLE_SORTS,
+  });
   // Optimistic echo of the in-flight selection — `SearchableSelect` is fully controlled and
   // renders straight off `value`, so without this it keeps showing the OLD role for the entire
   // round trip (API call + un-awaited `router.invalidate()` refetch). Cleared once the loader
@@ -177,63 +212,86 @@ export function RolesListPage({
       {roles.length === 0 ? (
         <p className='text-muted-foreground'>{tr('role_noRoles')}</p>
       ) : (
-        <div className='overflow-x-auto'>
-          <table className='w-full'>
-            <tbody>
-              {roles.map((role) => (
-                <tr key={role.roleId} className='border-b'>
-                  <td className='py-2 px-4'>
-                    <Link
-                      to='/teams/$teamId/roles/$roleId'
-                      params={{ teamId, roleId: role.roleId }}
-                      className='font-medium hover:underline'
-                    >
-                      {role.name}
-                    </Link>
-                    {Option.contains(defaultRoleId, role.roleId) && (
-                      <Badge
-                        variant='secondary'
-                        className='ml-2 align-middle'
-                        aria-label={tr('role_defaultForNewMembers')}
-                      >
-                        <UserPlus className='size-3' aria-hidden='true' />
-                        {tr('role_default')}
-                      </Badge>
-                    )}
-                    {/* Show permission count inline on mobile */}
-                    <p className='text-xs text-muted-foreground sm:hidden'>
-                      {tr('role_permissionCount', { count: String(role.permissionCount) })}
-                    </p>
-                  </td>
-                  <td className='hidden sm:table-cell py-2 px-4'>
-                    <span
-                      className={
-                        role.isBuiltIn
-                          ? 'text-blue-700 font-medium'
-                          : 'text-muted-foreground font-medium'
-                      }
-                    >
-                      {role.isBuiltIn ? tr('role_builtIn') : tr('role_custom')}
-                    </span>
-                  </td>
-                  <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                    {tr('role_permissionCount', { count: String(role.permissionCount) })}
-                  </td>
-                  <td className='py-2 px-4'>
-                    <Button asChild variant='outline' size='sm'>
-                      <Link
-                        to='/teams/$teamId/roles/$roleId'
-                        params={{ teamId, roleId: role.roleId }}
-                      >
-                        View
-                      </Link>
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <ListToolbar
+            className='mb-4'
+            search={roleList.search}
+            onSearchChange={roleList.setSearch}
+            searchPlaceholderKey='roles_searchPlaceholder'
+            filters={ROLE_FILTERS}
+            filter={roleList.filter}
+            onFilterChange={roleList.setFilter}
+            sorts={ROLE_SORTS}
+            sort={roleList.sort}
+            onSortChange={roleList.setSort}
+          />
+          {roleList.filtered.length === 0 ? (
+            <p className='text-muted-foreground'>{tr('list_noMatches')}</p>
+          ) : (
+            <div className={listScrollClass}>
+              <table className='w-full'>
+                <tbody>
+                  {roleList.filtered.map((role) => (
+                    <tr key={role.roleId} className='border-b'>
+                      <td className='py-2 px-4'>
+                        <Link
+                          to='/teams/$teamId/roles/$roleId'
+                          params={{ teamId, roleId: role.roleId }}
+                          className='font-medium hover:underline'
+                        >
+                          {role.name}
+                        </Link>
+                        {role.isArchived && (
+                          <Badge variant='outline' className='ml-2 align-middle'>
+                            {tr('roles_archivedBadge')}
+                          </Badge>
+                        )}
+                        {Option.contains(defaultRoleId, role.roleId) && (
+                          <Badge
+                            variant='secondary'
+                            className='ml-2 align-middle'
+                            aria-label={tr('role_defaultForNewMembers')}
+                          >
+                            <UserPlus className='size-3' aria-hidden='true' />
+                            {tr('role_default')}
+                          </Badge>
+                        )}
+                        {/* Show permission count inline on mobile */}
+                        <p className='text-xs text-muted-foreground sm:hidden'>
+                          {tr('role_permissionCount', { count: String(role.permissionCount) })}
+                        </p>
+                      </td>
+                      <td className='hidden sm:table-cell py-2 px-4'>
+                        <span
+                          className={
+                            role.isBuiltIn
+                              ? 'text-blue-700 font-medium'
+                              : 'text-muted-foreground font-medium'
+                          }
+                        >
+                          {role.isBuiltIn ? tr('role_builtIn') : tr('role_custom')}
+                        </span>
+                      </td>
+                      <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
+                        {tr('role_permissionCount', { count: String(role.permissionCount) })}
+                      </td>
+                      <td className='py-2 px-4'>
+                        <Button asChild variant='outline' size='sm'>
+                          <Link
+                            to='/teams/$teamId/roles/$roleId'
+                            params={{ teamId, roleId: role.roleId }}
+                          >
+                            View
+                          </Link>
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -18,6 +18,11 @@ export class GroupInfo extends Schema.Class<GroupInfo>('GroupInfo')({
   color: Schema.OptionFromNullOr(HexColor),
   memberCount: Schema.Number,
   discordChannelProvisioning: Schema.Boolean,
+  // Archived groups reach the client only from `listGroups`, which asks for them so the page
+  // can offer a "show archived" toggle. Every other reader (`listMemberGroups`, the AI
+  // `list_groups` tool) still gets live groups only. Tolerant decode because web bundles a
+  // FROZEN copy of this schema -- a new bundle must not break against an older server.
+  isArchived: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
 }) {}
 
 export class GroupDetail extends Schema.Class<GroupDetail>('GroupDetail')({

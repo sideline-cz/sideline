@@ -1,12 +1,18 @@
 import type { ExpenseApi } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import React from 'react';
+import {
+  ListToolbar,
+  listHeaderClass,
+  listScrollClass,
+} from '~/components/molecules/ListToolbar.js';
 import { PaymentStatusBadge } from '~/components/molecules/PaymentStatusBadge.js';
 import { BalanceDashboard } from '~/components/organisms/BalanceDashboard.js';
 import { MemberCreditPopover } from '~/components/organisms/MemberCreditPopover.js';
 import { Button } from '~/components/ui/button.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { tr } from '~/lib/translations.js';
+import { useListFilter } from '~/lib/useListFilter.js';
 
 const overviewTabSeenKey = (userId: string) => `sideline:finances-overview-tab-seen:${userId}`;
 
@@ -144,13 +150,35 @@ function KpiCard({ label, value, kpiKey }: KpiCardProps) {
 
 type FilterValue = 'all' | 'overdue' | 'pending' | 'paid' | 'waived';
 
-const FILTERS: ReadonlyArray<{ value: FilterValue; labelKey: string }> = [
-  { value: 'all', labelKey: 'finance_filter_all' },
-  { value: 'overdue', labelKey: 'finance_filter_overdue' },
-  { value: 'pending', labelKey: 'finance_filter_pending' },
-  { value: 'paid', labelKey: 'finance_filter_paid' },
-  { value: 'waived', labelKey: 'finance_filter_waived' },
-];
+// Same five filters and the same semantics as before `ListToolbar` existed — the if-chain that
+// used to live inside `ByMemberContent` is now a `predicate` per entry. Note `pending` still
+// deliberately covers 'partial' too.
+const FILTERS = [
+  { value: 'all', labelKey: 'finance_filter_all', predicate: () => true },
+  {
+    value: 'overdue',
+    labelKey: 'finance_filter_overdue',
+    predicate: (r: MemberOverviewRow) => worstStatus(r) === 'overdue',
+  },
+  {
+    value: 'pending',
+    labelKey: 'finance_filter_pending',
+    predicate: (r: MemberOverviewRow) =>
+      worstStatus(r) === 'pending' || worstStatus(r) === 'partial',
+  },
+  {
+    value: 'paid',
+    labelKey: 'finance_filter_paid',
+    predicate: (r: MemberOverviewRow) => worstStatus(r) === 'paid',
+  },
+  {
+    value: 'waived',
+    labelKey: 'finance_filter_waived',
+    predicate: (r: MemberOverviewRow) => worstStatus(r) === 'waived',
+  },
+] as const satisfies ReadonlyArray<{ value: FilterValue; labelKey: string; predicate: unknown }>;
+
+const memberRowSearchFields = (r: MemberOverviewRow) => [r.memberName ?? ''];
 
 // ---------------------------------------------------------------------------
 // By-member content
@@ -171,8 +199,10 @@ function ByMemberContent({
   onSettleRow?: (row: MemberOverviewRow) => void;
   onCreditVoided?: () => void;
 }) {
-  const [search, setSearch] = React.useState('');
-  const [filter, setFilter] = React.useState<FilterValue>('all');
+  const { search, setSearch, filter, setFilter, filtered } = useListFilter(rows, {
+    searchOf: memberRowSearchFields,
+    filters: FILTERS,
+  });
 
   // [R2] A credit-only row (no assignments, balance > 0) must not get a vote in the currency
   // pick — pickMostFrequentCurrency votes by row COUNT, so one member's EUR credit can flip a
@@ -185,18 +215,6 @@ function ByMemberContent({
   const totalPaidMinor = currencyRows.reduce((s, r) => s + r.totalPaidMinor, 0);
   const totalOutstandingMinor = totalDueMinor - totalPaidMinor;
   const overdueCount = currencyRows.filter((r) => r.overdueCount > 0).length;
-
-  const filtered = rows.filter((row) => {
-    const name = (row.memberName ?? '').toLowerCase();
-    if (search && !name.includes(search.toLowerCase())) return false;
-    if (filter === 'all') return true;
-    const status = worstStatus(row);
-    if (filter === 'overdue') return status === 'overdue';
-    if (filter === 'pending') return status === 'pending' || status === 'partial';
-    if (filter === 'paid') return status === 'paid';
-    if (filter === 'waived') return status === 'waived';
-    return true;
-  });
 
   // Empty state: no rows at all. Deliberately keyed off `rows`, not `kpiRows` — `kpiRows`
   // excludes every row with zero overdue/pending/paid counts (credit-only AND all-waived
@@ -250,37 +268,20 @@ function ByMemberContent({
       />
 
       {/* Search + filter */}
-      <div className='mt-6 flex flex-wrap items-center gap-3'>
-        <input
-          type='search'
-          placeholder={tr('finance_searchPlaceholder')}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className='h-9 rounded-md border bg-background px-3 text-sm w-full sm:max-w-xs'
-        />
-        <div className='flex gap-1 flex-wrap'>
-          {FILTERS.map((f) => (
-            <button
-              key={f.value}
-              type='button'
-              aria-pressed={filter === f.value}
-              onClick={() => setFilter(f.value)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                filter === f.value
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-background text-muted-foreground hover:bg-muted'
-              }`}
-            >
-              {tr(f.labelKey)}
-            </button>
-          ))}
-        </div>
-      </div>
+      <ListToolbar
+        className='mt-6'
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholderKey='finance_searchPlaceholder'
+        filters={FILTERS}
+        filter={filter}
+        onFilterChange={setFilter}
+      />
 
       {/* Table */}
-      <div className='mt-4 overflow-x-auto'>
+      <div className={`mt-4 ${listScrollClass}`}>
         <table className='w-full text-sm'>
-          <thead>
+          <thead className={listHeaderClass}>
             <tr className='border-b'>
               <th className='py-2 px-3 text-left text-xs font-medium text-muted-foreground'>
                 {tr('finance_column_member')}

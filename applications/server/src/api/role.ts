@@ -65,6 +65,7 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                         name: r.name,
                         isBuiltIn: r.is_built_in,
                         permissionCount: r.permission_count,
+                        isArchived: r.is_archived,
                       }),
                   ),
                   defaultRoleId: Option.map(defaultRole, (r) => r.id),

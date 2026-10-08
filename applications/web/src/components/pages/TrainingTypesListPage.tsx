@@ -6,6 +6,11 @@ import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import {
+  ListToolbar,
+  listHeaderClass,
+  listScrollClass,
+} from '~/components/molecules/ListToolbar.js';
 import { Button } from '~/components/ui/button';
 import {
   Form,
@@ -20,6 +25,7 @@ import { withFieldErrors } from '~/lib/form';
 import { toGroupOptions } from '~/lib/group-options';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
+import { useListFilter } from '~/lib/useListFilter.js';
 
 const CreateTrainingTypeSchema = Schema.Struct({
   name: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
@@ -28,6 +34,29 @@ const CreateTrainingTypeSchema = Schema.Struct({
 type CreateTrainingTypeValues = Schema.Schema.Type<typeof CreateTrainingTypeSchema>;
 
 const NONE_VALUE = '__none__';
+
+// Search and sort only -- `training_types` has no archived/active column, so unlike every other
+// list here there is nothing for a "show all vs only active" filter to mean.
+const TRAINING_TYPE_SORTS = [
+  {
+    value: 'name',
+    labelKey: 'list_sort_name',
+    compare: (a: TrainingTypeApi.TrainingTypeInfo, b: TrainingTypeApi.TrainingTypeInfo) =>
+      a.name.localeCompare(b.name),
+  },
+  {
+    value: 'nameDesc',
+    labelKey: 'list_sort_nameDesc',
+    compare: (a: TrainingTypeApi.TrainingTypeInfo, b: TrainingTypeApi.TrainingTypeInfo) =>
+      b.name.localeCompare(a.name),
+  },
+] as const;
+
+const trainingTypeSearchFields = (tt: TrainingTypeApi.TrainingTypeInfo) => [
+  tt.name,
+  Option.getOrUndefined(tt.ownerGroupName),
+  Option.getOrUndefined(tt.memberGroupName),
+];
 
 interface TrainingTypesListPageProps {
   teamId: string;
@@ -46,6 +75,10 @@ export function TrainingTypesListPage({
   const router = useRouter();
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
 
+  const trainingTypeList = useListFilter(trainingTypes, {
+    searchOf: trainingTypeSearchFields,
+    sorts: TRAINING_TYPE_SORTS,
+  });
   const [ownerGroupId, setOwnerGroupId] = React.useState(NONE_VALUE);
   const [memberGroupId, setMemberGroupId] = React.useState(NONE_VALUE);
 
@@ -175,62 +208,78 @@ export function TrainingTypesListPage({
       {trainingTypes.length === 0 ? (
         <p className='text-muted-foreground'>{tr('trainingType_noTrainingTypes')}</p>
       ) : (
-        <div className='overflow-x-auto'>
-          <table className='w-full'>
-            <thead>
-              <tr className='border-b'>
-                <th className='py-2 px-4 text-left text-sm font-medium'>
-                  {tr('trainingType_name')}
-                </th>
-                <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                  {tr('event_ownerGroup')}
-                </th>
-                <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                  {tr('event_memberGroup')}
-                </th>
-                <th className='py-2 px-4' />
-              </tr>
-            </thead>
-            <tbody>
-              {trainingTypes.map((tt) => (
-                <tr key={tt.trainingTypeId} className='border-b'>
-                  <td className='py-2 px-4'>
-                    <Link
-                      to='/teams/$teamId/training-types/$trainingTypeId'
-                      params={{ teamId, trainingTypeId: tt.trainingTypeId }}
-                      className='font-medium hover:underline'
-                    >
-                      {tt.name}
-                    </Link>
-                    {(Option.isSome(tt.ownerGroupName) || Option.isSome(tt.memberGroupName)) && (
-                      <p className='text-xs text-muted-foreground sm:hidden'>
+        <>
+          <ListToolbar
+            className='mb-4'
+            search={trainingTypeList.search}
+            onSearchChange={trainingTypeList.setSearch}
+            searchPlaceholderKey='trainingType_searchPlaceholder'
+            sorts={TRAINING_TYPE_SORTS}
+            sort={trainingTypeList.sort}
+            onSortChange={trainingTypeList.setSort}
+          />
+          {trainingTypeList.filtered.length === 0 ? (
+            <p className='text-muted-foreground'>{tr('list_noMatches')}</p>
+          ) : (
+            <div className={listScrollClass}>
+              <table className='w-full'>
+                <thead className={listHeaderClass}>
+                  <tr className='border-b'>
+                    <th className='py-2 px-4 text-left text-sm font-medium'>
+                      {tr('trainingType_name')}
+                    </th>
+                    <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
+                      {tr('event_ownerGroup')}
+                    </th>
+                    <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
+                      {tr('event_memberGroup')}
+                    </th>
+                    <th className='py-2 px-4' />
+                  </tr>
+                </thead>
+                <tbody>
+                  {trainingTypeList.filtered.map((tt) => (
+                    <tr key={tt.trainingTypeId} className='border-b'>
+                      <td className='py-2 px-4'>
+                        <Link
+                          to='/teams/$teamId/training-types/$trainingTypeId'
+                          params={{ teamId, trainingTypeId: tt.trainingTypeId }}
+                          className='font-medium hover:underline'
+                        >
+                          {tt.name}
+                        </Link>
+                        {(Option.isSome(tt.ownerGroupName) ||
+                          Option.isSome(tt.memberGroupName)) && (
+                          <p className='text-xs text-muted-foreground sm:hidden'>
+                            {Option.getOrElse(tt.ownerGroupName, () => tr('trainingType_noGroup'))}
+                            {' / '}
+                            {Option.getOrElse(tt.memberGroupName, () => tr('trainingType_noGroup'))}
+                          </p>
+                        )}
+                      </td>
+                      <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
                         {Option.getOrElse(tt.ownerGroupName, () => tr('trainingType_noGroup'))}
-                        {' / '}
+                      </td>
+                      <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
                         {Option.getOrElse(tt.memberGroupName, () => tr('trainingType_noGroup'))}
-                      </p>
-                    )}
-                  </td>
-                  <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                    {Option.getOrElse(tt.ownerGroupName, () => tr('trainingType_noGroup'))}
-                  </td>
-                  <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                    {Option.getOrElse(tt.memberGroupName, () => tr('trainingType_noGroup'))}
-                  </td>
-                  <td className='py-2 px-4'>
-                    <Button asChild variant='outline' size='sm'>
-                      <Link
-                        to='/teams/$teamId/training-types/$trainingTypeId'
-                        params={{ teamId, trainingTypeId: tt.trainingTypeId }}
-                      >
-                        View
-                      </Link>
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td className='py-2 px-4'>
+                        <Button asChild variant='outline' size='sm'>
+                          <Link
+                            to='/teams/$teamId/training-types/$trainingTypeId'
+                            params={{ teamId, trainingTypeId: tt.trainingTypeId }}
+                          >
+                            View
+                          </Link>
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

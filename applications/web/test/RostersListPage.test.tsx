@@ -8,7 +8,13 @@ vi.mock('~/lib/translations.js', () => ({
     const map: Record<string, string> = {
       roster_rosters: 'Rosters',
       roster_noRosters: 'No rosters yet.',
-      roster_showInactive: 'Show inactive rosters',
+      list_filter_active: 'Active only',
+      list_filter_all: 'All',
+      list_noMatches: 'Nothing matches your search or filter.',
+      list_sortLabel: 'Sort',
+      list_sort_name: 'Name',
+      list_sort_status: 'Status',
+      roster_searchPlaceholder: 'Search rosters',
       roster_active: 'Active',
       roster_inactive: 'Inactive',
       team_backToTeams: 'Back',
@@ -58,20 +64,28 @@ function renderPage() {
   );
 }
 
-describe('RostersListPage — active/inactive toggle', () => {
-  it('hides inactive rosters until the toggle is switched on', () => {
+describe('RostersListPage — active/inactive filter', () => {
+  it('hides inactive rosters until the All chip is selected', () => {
     renderPage();
 
     expect(screen.queryByText('Alpha')).not.toBeNull();
     expect(screen.queryByText('Archived')).toBeNull();
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Show inactive rosters' }));
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
 
     expect(screen.queryByText('Alpha')).not.toBeNull();
     expect(screen.queryByText('Archived')).not.toBeNull();
   });
 
-  it('shows the empty state — with the toggle still reachable — when every roster is inactive', () => {
+  it('defaults to Active only, so the chip reflects what is on screen', () => {
+    renderPage();
+    expect(screen.getByRole('button', { name: 'Active only' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('says nothing matches — not "no rosters yet" — when every roster is inactive', () => {
     render(
       <RostersListPage
         teamId='team-1'
@@ -81,11 +95,32 @@ describe('RostersListPage — active/inactive toggle', () => {
       />,
     );
 
-    expect(screen.queryByText('No rosters yet.')).not.toBeNull();
-
-    fireEvent.click(screen.getByRole('switch', { name: 'Show inactive rosters' }));
-
+    // The team HAS a roster; it is only filtered out. Claiming "No rosters yet." here sent the
+    // reader off to create one they already had.
     expect(screen.queryByText('No rosters yet.')).toBeNull();
+    expect(screen.queryByText('Nothing matches your search or filter.')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+
+    expect(screen.queryByText('Nothing matches your search or filter.')).toBeNull();
     expect(screen.queryByText('Archived')).not.toBeNull();
+  });
+
+  it('still shows the real empty state when the team genuinely has no rosters', () => {
+    render(<RostersListPage teamId='team-1' rosters={[]} canManage={false} userId='u-1' />);
+    expect(screen.queryByText('No rosters yet.')).not.toBeNull();
+  });
+
+  it('filters by name, keeping the active-only filter applied', () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Search rosters'), {
+      target: { value: 'arch' },
+    });
+    // 'Archived' matches the query but is inactive, and the default chip is "Active only".
+    expect(screen.queryByText('Archived')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    expect(screen.queryByText('Archived')).not.toBeNull();
+    expect(screen.queryByText('Alpha')).toBeNull();
   });
 });

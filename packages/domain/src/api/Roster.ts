@@ -47,6 +47,11 @@ export class RosterPlayer extends Schema.Class<RosterPlayer>('RosterPlayer')({
    * and `GuildRpcGroup.ts` `is_community_enabled`).
    */
   effectiveRoles: Schema.Array(EffectiveRole).pipe(Schema.withDecodingDefaultKey(() => [])),
+  // Groups the member belongs to DIRECTLY, name-sorted, archived groups excluded. Distinct from
+  // `effectiveRoles[].groupNames`, which lists only the groups that GRANT a given role -- a
+  // member of a group holding no roles appears in `groupNames` and nowhere in `effectiveRoles`.
+  // Tolerant decode for the reason on `effectiveRoles` above.
+  groupNames: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultKey(() => [])),
   permissions: Schema.Array(Permission),
   name: Schema.OptionFromNullOr(Schema.String),
   birthDate: Schema.OptionFromNullOr(Schema.String),

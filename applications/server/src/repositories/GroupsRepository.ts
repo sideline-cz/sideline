@@ -9,6 +9,14 @@ export class GroupNameAlreadyTakenError extends Schema.TaggedErrorClass<GroupNam
   {},
 ) {}
 
+// `Schema.Struct`, not `Schema.Class`: `SqlSchema` ENCODES the request, and a class schema only
+// accepts an instance of itself -- passing a plain object fails with "Expected FindGroupsQuery".
+// Every other Request in these repositories is a Struct for the same reason.
+const FindGroupsQuery = Schema.Struct({
+  team_id: Team.TeamId,
+  include_archived: Schema.Boolean,
+});
+
 class GroupWithCount extends Schema.Class<GroupWithCount>('GroupWithCount')({
   id: GroupModel.GroupId,
   team_id: Team.TeamId,
@@ -18,6 +26,7 @@ class GroupWithCount extends Schema.Class<GroupWithCount>('GroupWithCount')({
   color: Schema.OptionFromNullOr(Schema.String),
   created_at: Schema.Date,
   member_count: Schema.Number,
+  is_archived: Schema.Boolean,
 }) {}
 
 class GroupRow extends Schema.Class<GroupRow>('GroupRow')({
@@ -86,9 +95,9 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const findByTeamId = SqlSchema.findAll({
-    Request: Schema.String,
+    Request: FindGroupsQuery,
     Result: GroupWithCount,
-    execute: (teamId) => sql`
+    execute: ({ team_id: teamId, include_archived: includeArchived }) => sql`
             -- depth is the cycle bound required of every recursive groups.parent_id walk (see
             -- applications/server/AGENTS.md). Nothing in the schema prevents a cycle and
             -- moveGroup's check only stops NEW ones, so a pre-existing or direct-SQL row would
@@ -112,11 +121,12 @@ const make = Effect.gen(function* () {
               GROUP BY gt.root_id
             )
             SELECT g.id, g.team_id, g.parent_id, g.name, g.emoji, g.color, g.created_at,
+                   g.is_archived,
                    COALESCE(mc.member_count, 0) AS member_count
             FROM groups g
             LEFT JOIN member_counts mc ON mc.root_id = g.id
-            WHERE g.team_id = ${teamId} AND g.is_archived = false
-            ORDER BY g.name ASC
+            WHERE g.team_id = ${teamId} AND (${includeArchived} OR g.is_archived = false)
+            ORDER BY g.is_archived ASC, g.name ASC
           `,
   });
 
@@ -426,7 +436,15 @@ const make = Effect.gen(function* () {
           `,
   });
 
-  const findGroupsByTeamId = (teamId: Team.TeamId) => findByTeamId(teamId).pipe(catchSqlErrors);
+  /**
+   * `includeArchived` defaults to FALSE on purpose. Only the groups PAGE (`listGroups`) asks for
+   * archived rows, so it can offer a "show archived" toggle. The other two callers --
+   * `listMemberGroups` and the AI `list_groups` tool -- must keep seeing live groups only: an
+   * archived group grants no roles and no channel access, so listing one there would describe
+   * membership the member does not actually have.
+   */
+  const findGroupsByTeamId = (teamId: Team.TeamId, includeArchived = false) =>
+    findByTeamId({ team_id: teamId, include_archived: includeArchived }).pipe(catchSqlErrors);
 
   const findGroupById = (groupId: GroupModel.GroupId) => findById(groupId).pipe(catchSqlErrors);
 

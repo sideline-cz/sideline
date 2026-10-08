@@ -201,6 +201,7 @@ function groupHit(name: string): AiChatApi.SearchHit {
       color: Option.none(),
       memberCount: 10,
       discordChannelProvisioning: false,
+      isArchived: false,
     }),
   };
 }

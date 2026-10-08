@@ -102,6 +102,7 @@ const makeGroupHit = (name: string): AiChatApiSearchHit => ({
     color: Option.none(),
     memberCount: 0,
     discordChannelProvisioning: false,
+    isArchived: false,
   }),
 });
 

@@ -1,0 +1,24 @@
+/work 3f393506-0818-8048-a35e-dec4aa1d94e6
+
+STOP AT THE PLAN. The body lists six things but says nothing about scope, and scope is the whole decision here. Propose and WAIT.
+
+THE BODY:
+- add filter and sorting to list
+- make them scrollable (not with the rest of the page)
+- add searching there
+- always have a filter there whether to show all or only active
+- for users also always display: groups, roles
+
+THE SCOPE DECISION, which is yours to propose and the human's to settle: there are SEVEN list pages and NO shared table primitive today —
+EventsListPage, ExpensesListPage, GroupsListPage, RolesListPage, RostersListPage, TrainingTypesListPage, plus the member list on TeamMembersPage.
+So this is either seven separate edits or the introduction of a shared list component. Those are very different sizes of change and have different review risk. Recommend one, with reasoning, and say what you would NOT do.
+
+DO NOT REINVENT WHAT EXISTS. FinancesOverviewPage already implements search + a status filter + empty states over a member table — read ByMemberContent in applications/web/src/components/pages/FinancesOverviewPage.tsx before designing anything. If a shared component is the answer, that page is the closest thing to a reference implementation and its filter semantics are already agreed. There is also EffectiveRolesList.tsx, which likely covers part of displaying roles.
+
+HARD CONFLICT — DO NOT TOUCH ExpensesListPage.tsx OR THE EXPENSES TABLE. Another agent is live right now on branch feat/attach-invoices-to-expenses, adding invoice attachment to expenses, which will very likely change that table. If your plan needs that page, say so and leave it out of this branch; two agents reshaping one table on separate branches produces a merge conflict in JSX that is easy to resolve wrongly and only the build catches.
+
+ALSO RAISE, do not decide alone:
+- show all vs only active: "active" means different things per entity (an archived roster, an inactive team member, an archived role, an archived fee). Confirm per list what the flag filters on rather than assuming one predicate fits all. A recent fix (PR 724) already kept archived rosters out of the roster pickers — be consistent with it, not parallel to it.
+- Client-side or server-side filtering and sorting? Client is simpler and fine for small lists; server is needed if any list can grow unbounded. Check the real row counts before choosing — the member list on a large club is the one to check.
+- "scrollable, not with the rest of the page" implies a fixed-height container with its own scroll. That interacts with mobile layout, and PR 723 recently fixed phone-width pages scrolling sideways. Do not undo that.
+- Roles on a user list are NOT just direct roles: this repo resolves group-inherited roles too, and there is a single resolve expression that must not be hand-rolled a second time. Find it before displaying anything.

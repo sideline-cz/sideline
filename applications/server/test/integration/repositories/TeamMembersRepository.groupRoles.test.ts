@@ -501,3 +501,132 @@ describe('TeamMembersRepository — group-inherited roles', () => {
     10_000,
   );
 });
+
+// ---------------------------------------------------------------------------
+// `findRosterByTeam` — group names, and who counts as on the team
+// ---------------------------------------------------------------------------
+
+describe('TeamMembersRepository — findRosterByTeam group_names', () => {
+  it.effect('lists the member’s own groups, name-sorted, archived ones excluded', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000071', 'owner71')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('111111111111111171' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('memberId', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+      Effect.bind('zebra', ({ team }) => createGroup(team.id, 'Zebra')),
+      Effect.bind('alpha', ({ team }) => createGroup(team.id, 'Alpha')),
+      Effect.bind('gone', ({ team }) => createGroup(team.id, 'Gone')),
+      Effect.tap(({ zebra, memberId }) => addMemberToGroup(zebra, memberId)),
+      Effect.tap(({ alpha, memberId }) => addMemberToGroup(alpha, memberId)),
+      Effect.tap(({ gone, memberId }) => addMemberToGroup(gone, memberId)),
+      Effect.tap(({ gone }) => archiveGroup(gone)),
+      Effect.bind('roster', ({ team }) =>
+        TeamMembersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findRosterByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ roster }) =>
+        Effect.sync(() => {
+          expect(roster).toHaveLength(1);
+          expect(roster[0]?.group_names).toEqual(['Alpha', 'Zebra']);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('names a group that grants NO role, which effective_roles alone cannot show', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000072', 'owner72')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('111111111111111172' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('memberId', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+      Effect.bind('roleless', ({ team }) => createGroup(team.id, 'Social')),
+      Effect.tap(({ roleless, memberId }) => addMemberToGroup(roleless, memberId)),
+      Effect.bind('roster', ({ team }) =>
+        TeamMembersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findRosterByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ roster }) =>
+        Effect.sync(() => {
+          // This is the whole reason `group_names` exists as its own column: the group grants
+          // nothing, so it appears nowhere in `effective_roles[].group_names`.
+          expect(roster[0]?.effective_roles).toHaveLength(0);
+          expect(roster[0]?.group_names).toEqual(['Social']);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('returns an empty array, not null, for a member in no groups', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000073', 'owner73')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('111111111111111173' as Discord.Snowflake, ownerId),
+      ),
+      Effect.tap(({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+      Effect.bind('roster', ({ team }) =>
+        TeamMembersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findRosterByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ roster }) => Effect.sync(() => expect(roster[0]?.group_names).toEqual([]))),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+describe('TeamMembersRepository — findRosterByTeam includeInactive', () => {
+  const seedWithDepartedMember = Effect.Do.pipe(
+    Effect.bind('stayerId', () => createUser('100000000000000074', 'stayer')),
+    Effect.bind('leaverId', () => createUser('100000000000000075', 'leaver')),
+    Effect.bind('team', ({ stayerId }) =>
+      createTeam('111111111111111174' as Discord.Snowflake, stayerId),
+    ),
+    Effect.tap(({ team, stayerId }) => addTeamMember(team.id, stayerId)),
+    Effect.bind('leaverMemberId', ({ team, leaverId }) => addTeamMember(team.id, leaverId)),
+    Effect.tap(({ leaverMemberId, team }) =>
+      TeamMembersRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.deactivateMemberByIds(team.id, leaverMemberId)),
+      ),
+    ),
+  );
+
+  it.effect('omits departed members by default — bank-sync and the AI tools rely on this', () =>
+    seedWithDepartedMember.pipe(
+      Effect.bind('roster', ({ team }) =>
+        TeamMembersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findRosterByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ roster }) =>
+        Effect.sync(() => {
+          expect(roster.map((r) => r.username)).toEqual(['stayer']);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('returns departed members flagged inactive when asked', () =>
+    seedWithDepartedMember.pipe(
+      Effect.bind('roster', ({ team }) =>
+        TeamMembersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findRosterByTeam(team.id, true)),
+        ),
+      ),
+      Effect.tap(({ roster }) =>
+        Effect.sync(() => {
+          const byName = new Map(roster.map((r) => [r.username, r.active]));
+          expect(byName.get('stayer')).toBe(true);
+          expect(byName.get('leaver')).toBe(false);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

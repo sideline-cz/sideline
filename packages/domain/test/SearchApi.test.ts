@@ -77,6 +77,7 @@ const groupHit = (): AiChatApi.SearchHit => ({
     color: Option.none(),
     memberCount: 12,
     discordChannelProvisioning: false,
+    isArchived: false,
   }),
 });
 

@@ -11,6 +11,11 @@ export class RoleInfo extends Schema.Class<RoleInfo>('RoleInfo')({
   name: Schema.String,
   isBuiltIn: Schema.Boolean,
   permissionCount: Schema.Number,
+  // Archived roles are listed so the page can offer a "show archived" toggle. They grant
+  // nothing -- `effectiveRolesFrom` excludes them on both join paths -- so a listed archived
+  // role is a tombstone, not a grant. Tolerant decode: web bundles a FROZEN copy of this
+  // schema (see `defaultRoleId` below).
+  isArchived: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
 }) {}
 
 export class RoleListResponse extends Schema.Class<RoleListResponse>('RoleListResponse')({

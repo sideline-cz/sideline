@@ -3,12 +3,59 @@ import { Link } from '@tanstack/react-router';
 import { Option } from 'effect';
 import { AlertTriangle } from 'lucide-react';
 import React from 'react';
+import {
+  ListToolbar,
+  listHeaderClass,
+  listScrollClass,
+} from '~/components/molecules/ListToolbar.js';
 import { AssignVariableSymbolsDialog } from '~/components/organisms/AssignVariableSymbolsDialog';
 import { PlayerRow } from '~/components/organisms/PlayerRow';
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
-import { Input } from '~/components/ui/input';
 import { tr } from '~/lib/translations.js';
+import { useListFilter } from '~/lib/useListFilter.js';
+
+// "Active" here is `RosterPlayer.active` — still on the team. `listMembers` is the only caller
+// that asks the server for departed members at all, so this is the one place they surface.
+const MEMBER_FILTERS = [
+  {
+    value: 'active',
+    labelKey: 'list_filter_active',
+    predicate: (p: Roster.RosterPlayer) => p.active,
+  },
+  { value: 'all', labelKey: 'list_filter_all', predicate: () => true },
+] as const;
+
+const MEMBER_SORTS = [
+  {
+    value: 'name',
+    labelKey: 'list_sort_name',
+    compare: (a: Roster.RosterPlayer, b: Roster.RosterPlayer) =>
+      a.displayName.localeCompare(b.displayName),
+  },
+  {
+    value: 'jersey',
+    labelKey: 'list_sort_jersey',
+    // Members with no jersey number sort last rather than colliding at 0.
+    compare: (a: Roster.RosterPlayer, b: Roster.RosterPlayer) =>
+      Option.getOrElse(a.jerseyNumber, () => Number.POSITIVE_INFINITY) -
+      Option.getOrElse(b.jerseyNumber, () => Number.POSITIVE_INFINITY),
+  },
+  {
+    value: 'joined',
+    labelKey: 'list_sort_joined',
+    // `joined_at` is an ISO-8601 UTC string from the server, so lexical order is chronological.
+    compare: (a: Roster.RosterPlayer, b: Roster.RosterPlayer) =>
+      b.joinedAt.localeCompare(a.joinedAt),
+  },
+] as const;
+
+const memberSearchFields = (p: Roster.RosterPlayer) => [
+  p.displayName,
+  p.username,
+  ...p.groupNames,
+  ...p.roleNames,
+];
 
 interface TeamMembersPageProps {
   teamId: string;
@@ -27,18 +74,24 @@ export function TeamMembersPage({
   onDeactivate,
   onMembersAssigned,
 }: TeamMembersPageProps) {
-  const [search, setSearch] = React.useState('');
   const [onlyMissingVs, setOnlyMissingVs] = React.useState(false);
   const [assignOpen, setAssignOpen] = React.useState(false);
 
-  const missingVsCount = players.filter((p) => Option.isNone(p.variableSymbol)).length;
+  // Counted over ACTIVE members only: a departed member keeps their variable symbol on purpose
+  // (it stays reserved), so counting them would nag about rows nobody can act on.
+  const missingVsCount = players.filter((p) => p.active && Option.isNone(p.variableSymbol)).length;
 
-  const filtered = players.filter((p) => {
-    const name = p.displayName.toLowerCase();
-    if (!name.includes(search.toLowerCase())) return false;
-    if (onlyMissingVs && Option.isSome(p.variableSymbol)) return false;
-    return true;
+  const memberList = useListFilter(players, {
+    searchOf: memberSearchFields,
+    filters: MEMBER_FILTERS,
+    sorts: MEMBER_SORTS,
   });
+
+  // The missing-VS toggle stacks ON TOP of the active/all chips rather than being a fourth chip:
+  // it answers a different question, and the VS banner's "show only these" button drives it too.
+  const filtered = onlyMissingVs
+    ? memberList.filtered.filter((p) => Option.isNone(p.variableSymbol))
+    : memberList.filtered;
 
   return (
     <div>
@@ -75,13 +128,18 @@ export function TeamMembersPage({
         </Alert>
       )}
 
-      <div className='flex flex-wrap gap-3 mb-4 items-center'>
-        <Input
-          placeholder={tr('members_searchPlaceholder')}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className='w-full sm:max-w-xs'
-        />
+      <ListToolbar
+        className='mb-4'
+        search={memberList.search}
+        onSearchChange={memberList.setSearch}
+        searchPlaceholderKey='members_searchPlaceholder'
+        filters={MEMBER_FILTERS}
+        filter={memberList.filter}
+        onFilterChange={memberList.setFilter}
+        sorts={MEMBER_SORTS}
+        sort={memberList.sort}
+        onSortChange={memberList.setSort}
+      >
         {missingVsCount > 0 && (
           <button
             type='button'
@@ -96,14 +154,16 @@ export function TeamMembersPage({
             {tr('members_vs_filterMissing')}
           </button>
         )}
-      </div>
+      </ListToolbar>
 
       {filtered.length === 0 ? (
-        <p className='text-muted-foreground'>{tr('members_noPlayers')}</p>
+        <p className='text-muted-foreground'>
+          {players.length === 0 ? tr('members_noPlayers') : tr('list_noMatches')}
+        </p>
       ) : (
-        <div className='overflow-x-auto'>
+        <div className={listScrollClass}>
           <table className='w-full'>
-            <thead>
+            <thead className={listHeaderClass}>
               <tr className='border-b'>
                 <th className='py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
                   {tr('members_player')}
@@ -116,6 +176,9 @@ export function TeamMembersPage({
                 </th>
                 <th className='hidden md:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
                   {tr('members_role')}
+                </th>
+                <th className='hidden md:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
+                  {tr('members_groupsColumn')}
                 </th>
                 <th className='py-2 px-4' />
               </tr>

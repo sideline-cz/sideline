@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { ColorDot } from '~/components/atoms/ColorDot.js';
 import { ColorPicker } from '~/components/atoms/ColorPicker.js';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import {
   Form,
@@ -20,6 +21,8 @@ import {
   FormMessage,
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
+import { Label } from '~/components/ui/label';
+import { Switch } from '~/components/ui/switch';
 import { withFieldErrors } from '~/lib/form';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
@@ -95,6 +98,11 @@ function GroupTreeNode({ node, teamId, depth, onCreateSubgroup }: GroupTreeNodeP
                   ? `${node.group.emoji.value} ${node.group.name}`
                   : node.group.name}
               </Link>
+              {node.group.isArchived && (
+                <Badge variant='outline' className='shrink-0'>
+                  {tr('group_archivedBadge')}
+                </Badge>
+              )}
               <p className='text-xs text-muted-foreground sm:hidden'>
                 {tr('group_memberCount', { count: String(node.group.memberCount) })}
               </p>
@@ -148,8 +156,18 @@ export function GroupsListPage({ teamId, groups, canManage }: GroupsListPageProp
   const [createEmoji, setCreateEmoji] = React.useState('');
   const [createColor, setCreateColor] = React.useState<string | undefined>(undefined);
   const [backfillingRoles, setBackfillingRoles] = React.useState(false);
+  const [showArchived, setShowArchived] = React.useState(false);
 
-  const tree = React.useMemo(() => buildTree(groups), [groups]);
+  const archivedCount = groups.filter((g) => g.isArchived).length;
+
+  // Filtered BEFORE `buildTree`, not after: dropping a node from an already-built tree would
+  // take its live descendants with it. `buildTree` re-roots any child whose parent is missing
+  // from the set, so hiding an archived parent promotes its live children to the top level
+  // instead of hiding them — the same shape the page had when the server filtered these out.
+  const tree = React.useMemo(
+    () => buildTree(showArchived ? groups : groups.filter((g) => !g.isArchived)),
+    [groups, showArchived],
+  );
 
   const handleBackfillRoles = React.useCallback(async () => {
     setBackfillingRoles(true);
@@ -318,6 +336,17 @@ export function GroupsListPage({ teamId, groups, canManage }: GroupsListPageProp
             )}
           </Button>
           <p className='text-xs text-muted-foreground mt-1'>{tr('group_backfillRolesHelp')}</p>
+        </div>
+      )}
+
+      {archivedCount > 0 && (
+        <div className='flex items-center gap-2 mb-4'>
+          <Switch
+            id='groups-show-archived'
+            checked={showArchived}
+            onCheckedChange={setShowArchived}
+          />
+          <Label htmlFor='groups-show-archived'>{tr('group_showArchived')}</Label>
         </div>
       )}
 

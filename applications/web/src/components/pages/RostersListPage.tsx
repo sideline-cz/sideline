@@ -9,6 +9,7 @@ import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { ColorDot } from '~/components/atoms/ColorDot.js';
 import { ColorPicker } from '~/components/atoms/ColorPicker.js';
+import { ListToolbar, listScrollClass } from '~/components/molecules/ListToolbar.js';
 import { Button } from '~/components/ui/button';
 import {
   Form,
@@ -19,10 +20,36 @@ import {
   FormMessage,
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
-import { Label } from '~/components/ui/label';
-import { Switch } from '~/components/ui/switch';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
+import { useListFilter } from '~/lib/useListFilter.js';
+
+// Module scope: `useListFilter` memoises on these.
+const ROSTER_FILTERS = [
+  {
+    value: 'active',
+    labelKey: 'list_filter_active',
+    predicate: (r: RosterDomain.RosterInfo) => r.active,
+  },
+  { value: 'all', labelKey: 'list_filter_all', predicate: () => true },
+] as const;
+
+const ROSTER_SORTS = [
+  {
+    value: 'name',
+    labelKey: 'list_sort_name',
+    compare: (a: RosterDomain.RosterInfo, b: RosterDomain.RosterInfo) =>
+      a.name.localeCompare(b.name),
+  },
+  {
+    value: 'status',
+    labelKey: 'list_sort_status',
+    compare: (a: RosterDomain.RosterInfo, b: RosterDomain.RosterInfo) =>
+      Number(b.active) - Number(a.active) || a.name.localeCompare(b.name),
+  },
+] as const;
+
+const rosterSearchFields = (r: RosterDomain.RosterInfo) => [r.name];
 
 const CreateRosterSchema = Schema.Struct({
   name: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
@@ -44,12 +71,11 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
   const [createEmoji, setCreateEmoji] = React.useState('');
   const [createColor, setCreateColor] = React.useState<string | undefined>(undefined);
   const [backfillingRoles, setBackfillingRoles] = React.useState(false);
-  const [showInactive, setShowInactive] = React.useState(false);
-
-  const visibleRosters = React.useMemo(
-    () => (showInactive ? rosters : rosters.filter((r) => r.active)),
-    [rosters, showInactive],
-  );
+  const rosterList = useListFilter(rosters, {
+    searchOf: rosterSearchFields,
+    filters: ROSTER_FILTERS,
+    sorts: ROSTER_SORTS,
+  });
 
   const handleBackfillRoles = React.useCallback(async () => {
     setBackfillingRoles(true);
@@ -186,77 +212,84 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
         </>
       )}
 
-      {rosters.length > 0 && (
-        <div className='flex items-center gap-2 mb-4'>
-          <Switch
-            id='rosters-show-inactive'
-            checked={showInactive}
-            onCheckedChange={setShowInactive}
-          />
-          <Label htmlFor='rosters-show-inactive'>{tr('roster_showInactive')}</Label>
-        </div>
-      )}
-
-      {visibleRosters.length === 0 ? (
+      {rosters.length === 0 ? (
         <p className='text-muted-foreground'>{tr('roster_noRosters')}</p>
       ) : (
-        <div className='overflow-x-auto'>
-          <table className='w-full'>
-            <tbody>
-              {visibleRosters.map((roster) => (
-                <tr key={roster.rosterId} className='border-b'>
-                  <td className='py-2 px-4'>
-                    <div className='flex items-center gap-2'>
-                      <ColorDot color={Option.getOrUndefined(roster.color)} />
-                      <Link
-                        to='/teams/$teamId/rosters/$rosterId'
-                        params={{ teamId, rosterId: roster.rosterId }}
-                        className='font-medium hover:underline'
-                      >
-                        {Option.isSome(roster.emoji)
-                          ? `${roster.emoji.value} ${roster.name}`
-                          : roster.name}
-                      </Link>
-                    </div>
-                    <p className='text-xs text-muted-foreground sm:hidden'>
-                      <span
-                        className={roster.active ? 'text-green-700 font-medium' : 'font-medium'}
-                      >
-                        {roster.active ? tr('roster_active') : tr('roster_inactive')}
-                      </span>
-                      {' · '}
-                      {tr('roster_memberCount', { count: roster.memberCount })}
-                    </p>
-                  </td>
-                  <td className='hidden sm:table-cell py-2 px-4'>
-                    <span
-                      className={
-                        roster.active
-                          ? 'text-green-700 font-medium'
-                          : 'text-muted-foreground font-medium'
-                      }
-                    >
-                      {roster.active ? tr('roster_active') : tr('roster_inactive')}
-                    </span>
-                  </td>
-                  <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                    {tr('roster_memberCount', { count: roster.memberCount })}
-                  </td>
-                  <td className='py-2 px-4'>
-                    <Button asChild variant='outline' size='sm'>
-                      <Link
-                        to='/teams/$teamId/rosters/$rosterId'
-                        params={{ teamId, rosterId: roster.rosterId }}
-                      >
-                        View
-                      </Link>
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <ListToolbar
+            className='mb-4'
+            search={rosterList.search}
+            onSearchChange={rosterList.setSearch}
+            searchPlaceholderKey='roster_searchPlaceholder'
+            filters={ROSTER_FILTERS}
+            filter={rosterList.filter}
+            onFilterChange={rosterList.setFilter}
+            sorts={ROSTER_SORTS}
+            sort={rosterList.sort}
+            onSortChange={rosterList.setSort}
+          />
+          {rosterList.filtered.length === 0 ? (
+            <p className='text-muted-foreground'>{tr('list_noMatches')}</p>
+          ) : (
+            <div className={listScrollClass}>
+              <table className='w-full'>
+                <tbody>
+                  {rosterList.filtered.map((roster) => (
+                    <tr key={roster.rosterId} className='border-b'>
+                      <td className='py-2 px-4'>
+                        <div className='flex items-center gap-2'>
+                          <ColorDot color={Option.getOrUndefined(roster.color)} />
+                          <Link
+                            to='/teams/$teamId/rosters/$rosterId'
+                            params={{ teamId, rosterId: roster.rosterId }}
+                            className='font-medium hover:underline'
+                          >
+                            {Option.isSome(roster.emoji)
+                              ? `${roster.emoji.value} ${roster.name}`
+                              : roster.name}
+                          </Link>
+                        </div>
+                        <p className='text-xs text-muted-foreground sm:hidden'>
+                          <span
+                            className={roster.active ? 'text-green-700 font-medium' : 'font-medium'}
+                          >
+                            {roster.active ? tr('roster_active') : tr('roster_inactive')}
+                          </span>
+                          {' · '}
+                          {tr('roster_memberCount', { count: roster.memberCount })}
+                        </p>
+                      </td>
+                      <td className='hidden sm:table-cell py-2 px-4'>
+                        <span
+                          className={
+                            roster.active
+                              ? 'text-green-700 font-medium'
+                              : 'text-muted-foreground font-medium'
+                          }
+                        >
+                          {roster.active ? tr('roster_active') : tr('roster_inactive')}
+                        </span>
+                      </td>
+                      <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
+                        {tr('roster_memberCount', { count: roster.memberCount })}
+                      </td>
+                      <td className='py-2 px-4'>
+                        <Button asChild variant='outline' size='sm'>
+                          <Link
+                            to='/teams/$teamId/rosters/$rosterId'
+                            params={{ teamId, rosterId: roster.rosterId }}
+                          >
+                            View
+                          </Link>
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -102,6 +102,11 @@ authedTest.describe('No horizontal overflow on mobile', () => {
     ['team settings', `/teams/${TEAM_ID}/settings`],
     ['roles', `/teams/${TEAM_ID}/roles`],
     ['groups', `/teams/${TEAM_ID}/groups`],
+    // These four gained a search/filter/sort toolbar and an inner scroll container in the
+    // rework-web-lists ticket. The vertical scroller is sm:-gated precisely so it cannot
+    // reintroduce the sideways scroll PR 723 removed — this is what proves it.
+    ['rosters', `/teams/${TEAM_ID}/rosters`],
+    ['training types', `/teams/${TEAM_ID}/training-types`],
     // The by-member table gains an Actions column + a currency code + a credit line in this
     // ticket (settle-all-and-credit) — this is the regression net for it.
     ['finances', `/teams/${TEAM_ID}/finances`],
