@@ -14,6 +14,7 @@ import {
 } from '~/components/ui/alert-dialog';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
+import { vsHolderLabel } from '~/lib/vsHolderLabel.js';
 
 interface AssignVariableSymbolsDialogProps {
   readonly open: boolean;
@@ -84,7 +85,7 @@ export function AssignVariableSymbolsDialog({
         Effect.fail(
           ClientError.make(
             tr('members_vs_assignConflict', {
-              member: Option.getOrElse(e.holderName, () => tr('members_fieldEmpty')),
+              member: vsHolderLabel(Option.getOrNull(e.holderName), e.holderActive),
             }),
           ),
         ),

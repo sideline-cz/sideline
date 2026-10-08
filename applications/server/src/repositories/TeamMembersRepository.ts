@@ -22,6 +22,10 @@ export class MemberAlreadyExistsError extends Schema.TaggedErrorClass<MemberAlre
 export class VariableSymbolConflict extends Data.TaggedError('VariableSymbolConflict')<{
   readonly holderMemberId: TeamMember.TeamMemberId;
   readonly holderName: Option.Option<string>;
+  /** The index deliberately has no `active` predicate: a departed member keeps their symbol so a
+   * late transfer quoting it can never be attributed to whoever came after them. That makes
+   * "taken by someone you don't recognise" a normal state, so the client says who left. */
+  readonly holderActive: boolean;
 }> {}
 
 const VARIABLE_SYMBOL_UNIQUE_CONSTRAINT = 'uq_team_members_team_variable_symbol';
@@ -470,9 +474,11 @@ const make = Effect.gen(function* () {
     Result: Schema.Struct({
       member_id: TeamMember.TeamMemberId,
       name: Schema.OptionFromNullOr(Schema.String),
+      active: Schema.Boolean,
     }),
     execute: (input) => sql`
-      SELECT tm.id AS member_id, u.name
+      SELECT tm.id AS member_id, tm.active,
+             COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS name
       FROM team_members tm
       JOIN users u ON u.id = tm.user_id
       WHERE tm.team_id = ${input.team_id}
@@ -625,6 +631,7 @@ const make = Effect.gen(function* () {
     Option.Option<{
       readonly member_id: TeamMember.TeamMemberId;
       readonly name: Option.Option<string>;
+      readonly active: boolean;
     }>
   > => {
     const vsNorm = normalizeVariableSymbol(variableSymbol);
@@ -672,6 +679,7 @@ const make = Effect.gen(function* () {
                     new VariableSymbolConflict({
                       holderMemberId: memberId,
                       holderName: Option.none(),
+                      holderActive: true,
                     }),
                   ),
                 onSome: (holder) =>
@@ -679,6 +687,7 @@ const make = Effect.gen(function* () {
                     new VariableSymbolConflict({
                       holderMemberId: holder.member_id,
                       holderName: holder.name,
+                      holderActive: holder.active,
                     }),
                   ),
               }),

@@ -229,6 +229,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                       new Roster.VariableSymbolTaken({
                         holderMemberId: e.holderMemberId,
                         holderName: e.holderName,
+                        holderActive: e.holderActive,
                       }),
                     ),
                   ),

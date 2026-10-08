@@ -149,6 +149,7 @@ function MemberDetailRoute() {
   const [vsConflict, setVsConflict] = React.useState<{
     holderMemberId: string;
     holderName: string | null;
+    holderActive: boolean;
   } | null>(null);
 
   const handleSave = React.useCallback(
@@ -173,6 +174,7 @@ function MemberDetailRoute() {
           setVsConflict({
             holderMemberId: e.holderMemberId,
             holderName: Option.getOrNull(e.holderName),
+            holderActive: e.holderActive,
           });
           return Effect.fail(new SilentClientError({ message: 'VariableSymbolTaken' }));
         }),

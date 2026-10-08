@@ -53,7 +53,12 @@ const expectConflict = (result: { readonly _tag: string }, holderMemberId: strin
   expect(result._tag).toBe('Failure');
   const failure = (
     result as unknown as {
-      readonly failure: { _tag: string; holderMemberId: string; holderName: unknown };
+      readonly failure: {
+        _tag: string;
+        holderMemberId: string;
+        holderName: unknown;
+        holderActive: boolean;
+      };
     }
   ).failure;
   expect(failure._tag).toBe('VariableSymbolConflict');
@@ -116,6 +121,91 @@ describe('setVariableSymbol — conflict inside an open transaction', () => {
         readonly variable_symbol: string | null;
       }>`SELECT variable_symbol FROM team_members WHERE id = ${spare.id}`;
       expect(rows[0]?.variable_symbol).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+describe('setVariableSymbol — holder with no `users.name`', () => {
+  // The common case in production: ~72% of symbol holders joined via Discord and never got
+  // `users.name` populated, so the raw `u.name` select reported `None` and the treasurer saw
+  // "— already has this symbol". The fixture here deliberately does NOT set a name.
+  it.effect('falls back down the display-name chain instead of naming nobody', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const members = yield* TeamMembersRepository;
+      const owner = yield* createUser('owner-noname');
+      const team = yield* createTeam(nextDiscordId(), owner.id);
+      const holderUser = yield* createUser('filip28');
+      const claimantUser = yield* createUser('claimant-noname');
+      yield* sql`UPDATE users SET name = NULL, discord_display_name = 'Filip' WHERE id = ${holderUser.id}`;
+      const holder = yield* createTeamMember(team.id, holderUser.id);
+      const claimant = yield* createTeamMember(team.id, claimantUser.id);
+      yield* members.setVariableSymbol(holder.id, team.id, Option.some('2026013'));
+
+      const result = yield* Effect.result(
+        members.setVariableSymbol(claimant.id, team.id, Option.some('2026013')),
+      );
+
+      const failure = expectConflict(result, holder.id);
+      expect(Option.getOrNull(failure.holderName as Option.Option<string>)).toBe('Filip');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('falls all the way back to the Discord username', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const members = yield* TeamMembersRepository;
+      const owner = yield* createUser('owner-username');
+      const team = yield* createTeam(nextDiscordId(), owner.id);
+      const holderUser = yield* createUser('filip28');
+      const claimantUser = yield* createUser('claimant-username');
+      yield* sql`UPDATE users SET name = NULL WHERE id = ${holderUser.id}`;
+      const holder = yield* createTeamMember(team.id, holderUser.id);
+      const claimant = yield* createTeamMember(team.id, claimantUser.id);
+      yield* members.setVariableSymbol(holder.id, team.id, Option.some('2026014'));
+
+      const result = yield* Effect.result(
+        members.setVariableSymbol(claimant.id, team.id, Option.some('2026014')),
+      );
+
+      const failure = expectConflict(result, holder.id);
+      expect(Option.getOrNull(failure.holderName as Option.Option<string>)).toBe('filip28');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+describe('setVariableSymbol — the holder has left the team', () => {
+  // The symbol stays reserved after deactivation on purpose: `uq_team_members_team_variable_symbol`
+  // has no `active` predicate, so a late transfer quoting an old symbol can never be attributed to
+  // whoever came after them. The treasurer therefore needs to be told the blocker has left, or an
+  // unrecognised name reads as a bug rather than a reserved number.
+  it.effect('still conflicts, and reports the holder as inactive', () =>
+    Effect.gen(function* () {
+      const { sql, members, team, holder, claimant } = yield* twoMembersOneHolding(
+        'inactive',
+        '2026001',
+      );
+      yield* sql`UPDATE team_members SET active = false WHERE id = ${holder.id}`;
+
+      const result = yield* Effect.result(
+        members.setVariableSymbol(claimant.id, team.id, Option.some('2026001')),
+      );
+
+      const failure = expectConflict(result, holder.id);
+      expect(Option.getOrNull(failure.holderName as Option.Option<string>)).toBe(HOLDER_NAME);
+      expect(failure.holderActive).toBe(false);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an active holder is reported as active', () =>
+    Effect.gen(function* () {
+      const { members, team, holder, claimant } = yield* twoMembersOneHolding('active', '2026002');
+
+      const result = yield* Effect.result(
+        members.setVariableSymbol(claimant.id, team.id, Option.some('2026002')),
+      );
+
+      expect(expectConflict(result, holder.id).holderActive).toBe(true);
     }).pipe(Effect.provide(TestLayer)),
   );
 });

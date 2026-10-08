@@ -2196,6 +2196,7 @@
   "members_vs_column": "VS",
   "members_vs_duplicate": "{member} already has this symbol.",
   "members_vs_duplicateShow": "Show member",
+  "members_vs_formerMember": "{member} (former member)",
   "members_vs_filterMissing": "Without a VS",
   "members_vs_help": "Used as the VS on fee payments. Must be unique within the team.",
   "members_vs_label": "Variable symbol",

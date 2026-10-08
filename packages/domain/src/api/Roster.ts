@@ -86,6 +86,9 @@ export class VariableSymbolTaken extends Schema.TaggedErrorClass<VariableSymbolT
   {
     holderMemberId: TeamMemberId,
     holderName: Schema.OptionFromNullOr(Schema.String),
+    // False when the holder has left the team. Their symbol stays reserved on purpose, so the
+    // client has to explain why a stranger is blocking the number.
+    holderActive: Schema.Boolean,
   },
 ) {}
 

@@ -54,6 +54,7 @@ import { useFormatDate } from '~/hooks/useFormatDate.js';
 import { resolveEffectiveRoles } from '~/lib/roles/resolveEffectiveRoles.js';
 import { sortEffectiveRoles } from '~/lib/roles/role-order.js';
 import { tr } from '~/lib/translations.js';
+import { vsHolderLabel } from '~/lib/vsHolderLabel.js';
 
 const isNotFutureDate = Schema.makeFilter<string>((value) => {
   const parsed = new Date(value);
@@ -121,7 +122,11 @@ interface PlayerDetailPageProps {
   /** The server's 409 `VariableSymbolTaken` — the route resets it to `null` before every save
    * attempt. Rendered as a field-level message (never a toast, since it names another member and
    * a toast would vanish before that name was read). */
-  variableSymbolConflict?: { holderMemberId: string; holderName: string | null } | null;
+  variableSymbolConflict?: {
+    holderMemberId: string;
+    holderName: string | null;
+    holderActive: boolean;
+  } | null;
   /** Fetches the next free `{year}{seq3}` symbol for this team, or `null` if there is none to
    * offer. Fills the field but does NOT save — the treasurer still reviews and submits. */
   onSuggestVariableSymbol?: () => Promise<string | null>;
@@ -366,7 +371,10 @@ export function PlayerDetailPage({
                         {variableSymbolConflict ? (
                           <p id='variable-symbol-conflict' className='text-sm text-destructive'>
                             {tr('members_vs_duplicate', {
-                              member: variableSymbolConflict.holderName ?? '—',
+                              member: vsHolderLabel(
+                                variableSymbolConflict.holderName,
+                                variableSymbolConflict.holderActive,
+                              ),
                             })}
                           </p>
                         ) : null}
