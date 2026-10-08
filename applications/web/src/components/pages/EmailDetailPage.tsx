@@ -21,8 +21,8 @@ import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
 import { Textarea } from '~/components/ui/textarea';
 import { useFormatDate } from '~/hooks/useFormatDate.js';
+import { downloadAttachment } from '~/lib/downloadAttachment.js';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
-import { getToken } from '~/lib/token';
 import { useServerUrl } from '~/lib/translation-overrides-context.js';
 import { tr } from '~/lib/translations.js';
 
@@ -183,39 +183,8 @@ export function EmailDetailPage({
 
   const handleDownloadAttachment = React.useCallback(
     async (attachmentId: string, filename: string) => {
-      const url = buildAttachmentUrl(attachmentId);
-      const result = await getToken.pipe(
-        Effect.flatMap((tokenOpt) => {
-          const headers: Record<string, string> = {};
-          if (Option.isSome(tokenOpt)) {
-            headers.Authorization = `Bearer ${tokenOpt.value}`;
-          }
-          return Effect.tryPromise({
-            try: () => fetch(url, { headers }),
-            catch: () => ClientError.make(tr('email_detail_attachment_download_error')),
-          });
-        }),
-        Effect.flatMap((response) => {
-          if (!response.ok) {
-            return Effect.fail(ClientError.make(tr('email_detail_attachment_download_error')));
-          }
-          return Effect.tryPromise({
-            try: () => response.blob(),
-            catch: () => ClientError.make(tr('email_detail_attachment_download_error')),
-          });
-        }),
-        Effect.flatMap((blob) =>
-          Effect.sync(() => {
-            const objectUrl = URL.createObjectURL(blob);
-            const anchor = document.createElement('a');
-            anchor.href = objectUrl;
-            anchor.download = filename;
-            document.body.appendChild(anchor);
-            anchor.click();
-            document.body.removeChild(anchor);
-            URL.revokeObjectURL(objectUrl);
-          }),
-        ),
+      const result = await downloadAttachment(buildAttachmentUrl(attachmentId), filename).pipe(
+        Effect.mapError(() => ClientError.make(tr('email_detail_attachment_download_error'))),
         run({}),
       );
       if (Option.isNone(result)) {

@@ -17,6 +17,7 @@ import {
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
+import { attachmentContentDisposition } from '~/utils/contentDisposition.js';
 
 // ---------------------------------------------------------------------------
 // Permission constant — coach/captain authority
@@ -336,13 +337,16 @@ export const EmailForwardingApiLive = HttpApiBuilder.group(Api, 'emailForwarding
                   }),
                 ),
                 Effect.map(({ att }) => {
-                  // Sanitize filename — strip CR/LF/quotes/semicolons/commas
-                  const safeFilename = att.filename.replace(/[\r\n";,]/g, '_');
                   return HttpServerResponse.uint8Array(att.content, {
                     headers: {
                       'content-type': att.contentType,
-                      'content-disposition': `attachment; filename="${safeFilename}"`,
+                      // RFC 6266 — same helper as the expense-attachment download. An IMAP-sourced
+                      // filename is arbitrary UTF-8, so the ASCII-only form threw ERR_INVALID_CHAR.
+                      'content-disposition': attachmentContentDisposition(att.filename),
                       'content-length': String(att.content.byteLength),
+                      // Same gap as the expense-attachment download: these bytes come from an
+                      // IMAP poller, strictly less trusted than a treasurer's upload.
+                      'x-content-type-options': 'nosniff',
                     },
                   });
                 }),

@@ -20,6 +20,20 @@ export const ExpenseCategory = Schema.Literals([
 ]);
 export type ExpenseCategory = typeof ExpenseCategory.Type;
 
+export const ExpenseAttachmentId = Schema.String.pipe(Schema.brand('ExpenseAttachmentId'));
+export type ExpenseAttachmentId = typeof ExpenseAttachmentId.Type;
+
+// Metadata only — the BYTEA payload never travels on a view DTO; it is fetched one file at a
+// time through the download endpoint.
+export class ExpenseAttachmentMeta extends Schema.Class<ExpenseAttachmentMeta>(
+  'ExpenseAttachmentMeta',
+)({
+  attachmentId: ExpenseAttachmentId,
+  filename: Schema.String,
+  contentType: Schema.String,
+  sizeBytes: Schema.Int,
+}) {}
+
 export class Expense extends Model.Class<Expense>('Expense')({
   id: Model.Generated(ExpenseId),
   team_id: TeamId,

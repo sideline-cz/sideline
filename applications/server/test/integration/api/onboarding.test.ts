@@ -29,6 +29,7 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { ExpenseAttachmentsRepository } from '~/repositories/ExpenseAttachmentsRepository.js';
 import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
@@ -629,6 +630,10 @@ const StubRepositoriesLayer = Layer.mergeAll(
   ),
   Layer.succeed(
     ExpensesRepository,
+    new Proxy({} as any, { get: () => () => Effect.succeed([]) }) as any,
+  ),
+  Layer.succeed(
+    ExpenseAttachmentsRepository,
     new Proxy({} as any, { get: () => () => Effect.succeed([]) }) as any,
   ),
   Layer.succeed(AgeCheckService, {

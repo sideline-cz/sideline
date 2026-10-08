@@ -733,6 +733,66 @@ async function setupApiMocks(page: Page) {
     }),
   );
 
+  // Expenses list: one row with an invoice and one without, so the responsive sweep exercises
+  // the real table (toolbar + "No invoice" badge + Actions column), not the empty state. The
+  // long description is the 360px overflow bait.
+  await page.route(
+    '**/teams/*/expenses',
+    apiOnly(async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              expenseId: 'test-expense-00000001',
+              teamId: mock.TEAM_ID,
+              amountMinor: 250000,
+              currency: 'CZK',
+              spentAt: '2025-05-01T12:00:00.000Z',
+              category: 'fields',
+              description: 'Pronájem haly na zimní přípravu včetně šaten a osvětlení',
+              bankTransactionId: null,
+              createdByUserId: mock.USER_ID,
+              createdByName: 'Jan Novák',
+              updatedByUserId: mock.USER_ID,
+              updatedByName: 'Jan Novák',
+              createdAt: '2025-05-01T12:00:00.000Z',
+              updatedAt: '2025-05-01T12:00:00.000Z',
+              attachments: [],
+            },
+            {
+              expenseId: 'test-expense-00000002',
+              teamId: mock.TEAM_ID,
+              amountMinor: 120000,
+              currency: 'CZK',
+              spentAt: '2025-04-20T08:00:00.000Z',
+              category: 'tournaments',
+              description: 'Startovné',
+              bankTransactionId: null,
+              createdByUserId: mock.USER_ID,
+              createdByName: 'Jan Novák',
+              updatedByUserId: mock.USER_ID,
+              updatedByName: 'Jan Novák',
+              createdAt: '2025-04-20T08:00:00.000Z',
+              updatedAt: '2025-04-20T08:00:00.000Z',
+              attachments: [
+                {
+                  attachmentId: 'test-expense-attachment-00000001',
+                  filename: 'faktura.pdf',
+                  contentType: 'application/pdf',
+                  sizeBytes: 1234,
+                },
+              ],
+            },
+          ]),
+        });
+      } else {
+        await route.fallback();
+      }
+    }),
+  );
+
   await page.route(
     '**/teams/*/fees',
     apiOnly(async (route) => {
