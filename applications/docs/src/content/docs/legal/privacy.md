@@ -3,7 +3,7 @@ title: Privacy Policy
 description: What personal data Sideline collects, why, who it goes to, and how to get it removed.
 ---
 
-Last updated: 10 September 2026
+Last updated: 8 October 2026
 
 ## 1. Who we are
 
@@ -37,6 +37,14 @@ Date of birth and gender are used to place you automatically into the right age 
 
 Please note that email sent to a connected team mailbox may contain personal data about people who have no Sideline account and never agreed to any of this. Think carefully before enabling this feature.
 
+**The in-app AI assistant, where it is switched on.** When you ask the assistant a question, your question and the information needed to answer it are sent to an external AI provider.
+
+That information is limited to what your own account can already see — the assistant applies exactly the same permissions as the rest of the app, and refuses anything outside them. Within that limit it can include other members' names, event details, who attended a training, and amounts owed or paid, where you are entitled to see those things.
+
+**We do not store these conversations.** They live in your browser tab while the page is open and are gone when you close or reload it; nothing is written to our database. The AI provider handles the request under its own terms, which may include keeping it for a limited period to monitor abuse.
+
+The assistant also answers questions about how Sideline works, using our public documentation. Those answers involve no personal data at all.
+
 **Technical data.** Session tokens, calendar-feed tokens, Discord OAuth access and refresh tokens, and operational telemetry — performance traces and error reports, including crash reports sent from your browser.
 
 ## 3. Why we use it, and on what legal basis
@@ -44,11 +52,12 @@ Please note that email sent to a connected team mailbox may contain personal dat
 - **To provide the service** — Art. 6(1)(b), performance of a contract. Your account, team membership, events, RSVPs, finances and the Discord integration.
 - **To keep it working and secure** — Art. 6(1)(f), legitimate interest. Telemetry, error reporting, abuse prevention and audit records.
 - **Optional team features** — Art. 6(1)(a), consent given by your team's admin. Email forwarding and AI summarisation.
+- **The AI assistant** — Art. 6(1)(b), performance of a contract. It is a feature of the product rather than a team opt-in, and it processes only data you are already entitled to see.
 
 ## 4. Who we share it with
 
 - **Discord** — the product is built on Discord. Your membership, roles, channels, event posts and direct messages pass through it and are covered by [Discord's privacy policy](https://discord.com/privacy).
-- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — receives email content for summarisation, only where a team has enabled email forwarding.
+- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — receives email content for summarisation where a team has enabled email forwarding, and receives your questions to the in-app AI assistant together with the team data needed to answer them.
 - **An inbound-email delivery provider** — receives and forwards email addressed to a connected team mailbox, where enabled.
 - **Our hosting provider** — runs our servers, database and monitoring.
 
@@ -57,6 +66,8 @@ We do not sell your data and we do not use it for advertising.
 ## 5. How long we keep it
 
 We keep your account data for as long as your account exists.
+
+**AI assistant conversations are not retained by us at all** — see section 2.
 
 Financial records and certain administrative audit entries are retained after account deletion, because an accurate financial history has to stay intact. Where the law allows, we anonymise rather than delete.
 

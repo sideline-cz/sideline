@@ -3,7 +3,7 @@ title: Zásady ochrany osobních údajů
 description: Jaké osobní údaje Sideline sbírá, proč, komu je předává a jak je nechat smazat.
 ---
 
-Poslední aktualizace: 10. září 2026
+Poslední aktualizace: 8. října 2026
 
 ## 1. Kdo jsme
 
@@ -37,6 +37,14 @@ Datum narození a pohlaví slouží k automatickému zařazení do správných v
 
 Pozor: e-mail poslaný do připojené týmové schránky může obsahovat osobní údaje lidí, kteří žádný účet na Sideline nemají a s ničím z tohoto nesouhlasili. Než tuhle funkci zapneš, pořádně to zvaž.
 
+**AI asistent v aplikaci, tam kde je zapnutý.** Když se asistenta na něco zeptáš, tvůj dotaz a údaje potřebné k odpovědi putují externímu poskytovateli AI.
+
+Jsou to vždy jen údaje, které už tvůj účet vidět smí — asistent uplatňuje přesně stejná oprávnění jako zbytek aplikace a cokoli mimo ně odmítne. V těchto mezích to ale mohou být jména dalších členů, podrobnosti o událostech, kdo byl na tréninku a dlužné či zaplacené částky, pokud na ně máš nárok je vidět.
+
+**Tyto konverzace neukládáme.** Žijí jen v záložce tvého prohlížeče, dokud je stránka otevřená, a zavřením nebo načtením stránky zmizí; do naší databáze se nezapisuje nic. Poskytovatel AI zpracovává požadavek podle svých vlastních podmínek, které mohou zahrnovat jeho uchování po omezenou dobu kvůli sledování zneužití.
+
+Asistent také odpovídá na dotazy, jak Sideline funguje, a to z naší veřejné dokumentace. U takových odpovědí nejde o žádné osobní údaje.
+
 **Technické údaje.** Session tokeny, tokeny pro odběr kalendáře, přístupové a obnovovací tokeny k Discordu a provozní telemetrii — výkonnostní trasování a hlášení chyb včetně hlášení pádů odeslaných z tvého prohlížeče.
 
 ## 3. Proč to používáme a na jakém právním základě
@@ -44,11 +52,12 @@ Pozor: e-mail poslaný do připojené týmové schránky může obsahovat osobn�
 - **Abychom službu vůbec poskytli** — čl. 6 odst. 1 písm. b), plnění smlouvy. Účet, členství v týmu, události, RSVP, finance a napojení na Discord.
 - **Abychom ji udrželi funkční a bezpečnou** — čl. 6 odst. 1 písm. f), oprávněný zájem. Telemetrie, hlášení chyb, prevence zneužití a auditní záznamy.
 - **Volitelné týmové funkce** — čl. 6 odst. 1 písm. a), souhlas udělený adminem týmu. Přeposílání e-mailů a jejich shrnování pomocí AI.
+- **AI asistent** — čl. 6 odst. 1 písm. b), plnění smlouvy. Není to týmová volba, ale funkce produktu, a zpracovává jen údaje, které už vidět smíš.
 
 ## 4. Komu je předáváme
 
 - **Discordu** — produkt na něm stojí. Členství, role, kanály, posty k událostem i soukromé zprávy jím procházejí a řídí se [zásadami ochrany osobních údajů Discordu](https://discord.com/privacy).
-- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — dostává obsah e-mailů ke shrnutí, jen u týmů, které si přeposílání zapnuly.
+- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — dostává obsah e-mailů ke shrnutí u týmů, které si přeposílání zapnuly, a dostává tvoje dotazy na AI asistenta spolu s týmovými údaji potřebnými k odpovědi.
 - **Poskytovateli doručování příchozí pošty** — přijímá a předává nám e-maily poslané na připojenou týmovou schránku, tam kde je to zapnuté.
 - **Poskytovateli hostingu** — provozuje naše servery, databázi a monitoring.
 
@@ -57,6 +66,8 @@ Tvoje údaje neprodáváme a nepoužíváme je k reklamě.
 ## 5. Jak dlouho je držíme
 
 Údaje k účtu držíme, dokud účet existuje.
+
+**Konverzace s AI asistentem neuchováváme vůbec** — viz oddíl 2.
 
 Finanční záznamy a některé auditní zápisy zůstávají i po smazání účtu, protože finanční historie musí zůstat nedotčená. Kde to zákon dovolí, raději anonymizujeme než mažeme.
 
