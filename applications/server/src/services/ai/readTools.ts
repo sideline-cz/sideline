@@ -22,7 +22,6 @@ import {
   type GroupModel,
   type RosterModel,
   type Team,
-  type TeamMember,
   type TrainingType,
 } from '@sideline/domain';
 import { DateTime, Effect, Option } from 'effect';
@@ -585,6 +584,24 @@ export interface ListEventAttendanceArgs {
   readonly limit?: number;
 }
 
+/**
+ * The attendance ROW gate, mirroring `api/event-attendance.ts:63-78` exactly:
+ * `canConfirm || finance:view`, where `canConfirm = event:edit && (team:manage || owner-group
+ * member)`. Separate from `resolveVisibleEvent`'s group check, which only decides whether the
+ * EVENT is visible — RSVP has no second gate, attendance does.
+ */
+const attendanceRowGate = (
+  event: EventWithDetails,
+  ctx: EntityReadContext,
+): Effect.Effect<boolean> =>
+  hasPermission(ctx.membership, 'finance:view')
+    ? Effect.succeed(true)
+    : hasPermission(ctx.membership, 'event:edit')
+      ? hasPermission(ctx.membership, 'team:manage')
+        ? Effect.succeed(true)
+        : ctx.canSeeGroup(event.owner_group_id)
+      : Effect.succeed(false);
+
 export const listEventAttendance = (
   args: ListEventAttendanceArgs,
   ctx: EntityReadContext,
@@ -593,36 +610,71 @@ export const listEventAttendance = (
     Effect.flatMap(
       Option.match({
         onNone: () => Effect.succeed(notFoundResult),
-        onSome: () =>
-          Effect.Do.pipe(
-            Effect.bind('attendance', () => EventAttendanceRepository.asEffect()),
-            Effect.bind('list', ({ attendance }) =>
-              attendance.findAttendanceForEvent(args.eventId),
-            ),
-            Effect.map(({ list }) =>
-              itemsResult(
-                applyLimit(list, args.limit).map((row) => ({
-                  displayName: displayNameOfParts(row),
-                  present: row.present,
-                })),
+        onSome: (event) =>
+          // Seeing the EVENT is not seeing its attendance. `api/event-attendance.ts:75-78` gates
+          // the ROWS a second time on `canConfirm || finance:view`, and returns `[]` rather than
+          // 403 for everyone else — a built-in Player (`roster:view`, `member:view`) gets nothing
+          // on the web. Gating on `canSeeGroup` alone handed them the whole list, and because
+          // `makeCanSeeGroup` answers `true` for `Option.none()`, an event with no owner group
+          // had no gate left at all beyond team membership.
+          event.event_type !== 'training'
+            ? // Attendance exists only for trainings; the endpoint answers `notTraining` with no
+              // entries rather than an error, so an empty list is the honest mirror.
+              Effect.succeed(itemsResult([]))
+            : attendanceRowGate(event, ctx).pipe(
+                Effect.flatMap((allowed) =>
+                  allowed
+                    ? Effect.Do.pipe(
+                        Effect.bind('attendance', () => EventAttendanceRepository.asEffect()),
+                        Effect.bind('list', ({ attendance }) =>
+                          attendance.findAttendanceForEvent(args.eventId),
+                        ),
+                        Effect.map(({ list }) =>
+                          itemsResult(
+                            applyLimit(list, args.limit).map((row) => ({
+                              displayName: displayNameOfParts(row),
+                              // `present` is NOT a record of who turned up until a captain has
+                              // confirmed: the repository COALESCEs the stored value with the
+                              // member's RSVP intention and then `false`
+                              // (`EventAttendanceRepository.ts:113`). `confirmed` is the only
+                              // thing separating "was marked present" from "said they would
+                              // come", so the model gets both or it will state the second as
+                              // the first.
+                              present: row.present,
+                              confirmed: Option.isSome(row.confirmed_at),
+                            })),
+                          ),
+                        ),
+                      )
+                    : // The disjunction has no single permission to name; `finance:view` is its
+                      // only static arm (the other depends on this event's owner group), so it is
+                      // the one actionable thing to report.
+                      Effect.succeed(forbiddenResult('finance:view')),
+                ),
               ),
-            ),
-          ),
       }),
     ),
   );
 
 // ---------------------------------------------------------------------------
-// list_activity_logs — membership only (api/activity-logs.ts:35).
+// list_activity_logs — SELF-ONLY (api/activity-logs.ts:37-41).
 //
-// TENANCY: `ActivityLogsRepository.findByMember` is scoped by member id alone, so the member is
+// The endpoint's real gate is `membership.id === memberId`, four lines BELOW the
+// `requireMembership` bind an earlier version of this comment cited. There is no admin branch:
+// nobody can read another member's training log over HTTP, so this tool must not offer one
+// either. A training note is free text a person wrote about their own body ("knee rehab, still
+// painful") — same-team is nowhere near enough.
+//
+// `memberId` is therefore not a parameter at all. The caller's own membership is the only
+// subject, which also removes the id the model had no way to obtain (see `registry.ts`).
+//
+// TENANCY: `ActivityLogsRepository.findByMember` is scoped by member id alone; the membership is
 // resolved through `TeamMembersRepository` against `ctx.teamId` first — same guard as the two
-// event tools. `findByMember` (not `findByTeamMember`): the latter returns a stats row with no
-// `note`. With no `memberId` the tool answers for the CALLER, never the whole team.
+// event tools. `findByMember`, not `findByTeamMember`: the latter returns a stats row with no
+// `note`.
 // ---------------------------------------------------------------------------
 
 export interface ListActivityLogsArgs {
-  readonly memberId?: TeamMember.TeamMemberId;
   readonly limit?: number;
 }
 
@@ -631,7 +683,7 @@ export const listActivityLogs = (
   ctx: EntityReadContext,
 ): Effect.Effect<ToolExecutionResult, never, ActivityLogsRepository | TeamMembersRepository> =>
   Effect.Do.pipe(
-    Effect.let('memberId', () => args.memberId ?? ctx.membership.id),
+    Effect.let('memberId', () => ctx.membership.id),
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('member', ({ members, memberId }) =>
       members.findRosterMemberByIds(ctx.teamId, memberId),

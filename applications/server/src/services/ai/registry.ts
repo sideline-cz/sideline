@@ -22,7 +22,7 @@
  * caller's permissions and the team's timezone all come from `ToolContext`,
  * resolved before the model is ever called (see `toolTypes.ts`).
  */
-import { Event, type Role, TeamMember } from '@sideline/domain';
+import { Event, type Role } from '@sideline/domain';
 import { Option, Schema } from 'effect';
 import { hasPermission } from '~/api/permissions.js';
 import { ACTION_REGISTRY } from '~/services/ai/actions.js';
@@ -34,6 +34,21 @@ const QUERY_MAX_LENGTH = 200;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const QueryParam = Schema.String.pipe(Schema.check(Schema.isMaxLength(QUERY_MAX_LENGTH)));
+/**
+ * Every id-shaped tool parameter must carry this.
+ *
+ * `Event.EventId` and `TeamMember.TeamMemberId` are `Schema.String.pipe(Schema.brand(...))` with
+ * NO format check, while the columns behind them are Postgres `uuid`. A model that invents or
+ * mistypes an id — and it has no way to obtain a real one, since tool results expose a 4-char
+ * `ref` token rather than a UUID — therefore decoded cleanly, reached the query, and raised
+ * `22P02 invalid input syntax for type uuid`. `catchSqlErrors` converts that into a `LogicError`
+ * DEFECT, which `ChatAgent`'s `catchCause` turns into a degraded turn: one guessed id and the
+ * user's whole question fails with `provider_error`.
+ *
+ * Rejecting it here makes the model's own tool call fail validation instead, which it can see and
+ * correct. Applied to `list_events` too — that tool shipped with the same hazard.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DateParam = Schema.String.pipe(Schema.check(Schema.isPattern(DATE_PATTERN)));
 /** The row cap every list tool accepts, verbatim-identical across all five — `readTools.ts`'s
  * `applyLimit`/`filterEventRows` rely on it having been validated to 1..50 before they slice. */
@@ -53,7 +68,7 @@ const LimitParam = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, m
 export const CurrentDatetimeSchema = Schema.Struct({});
 
 export const ListEventsSchema = Schema.Struct({
-  eventId: Schema.optionalKey(Event.EventId),
+  eventId: Schema.optionalKey(Event.EventId.pipe(Schema.check(Schema.isPattern(UUID_PATTERN)))),
   from: Schema.optionalKey(DateParam),
   to: Schema.optionalKey(DateParam),
   status: Schema.optionalKey(Event.EventStatus),
@@ -95,17 +110,18 @@ export const GetFinanceOverviewSchema = Schema.Struct({
 });
 
 export const ListEventRsvpsSchema = Schema.Struct({
-  eventId: Event.EventId,
+  eventId: Event.EventId.pipe(Schema.check(Schema.isPattern(UUID_PATTERN))),
   limit: Schema.optionalKey(LimitParam),
 });
 
 export const ListEventAttendanceSchema = Schema.Struct({
-  eventId: Event.EventId,
+  eventId: Event.EventId.pipe(Schema.check(Schema.isPattern(UUID_PATTERN))),
   limit: Schema.optionalKey(LimitParam),
 });
 
+/** No `memberId`: `api/activity-logs.ts:37-41` is self-only, so the assistant answers for the
+ *  caller and nobody else. See the header comment on `listActivityLogs` in `readTools.ts`. */
 export const ListActivityLogsSchema = Schema.Struct({
-  memberId: Schema.optionalKey(TeamMember.TeamMemberId),
   limit: Schema.optionalKey(LimitParam),
 });
 
@@ -216,16 +232,19 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
   ),
   define(
     'list_event_attendance',
-    'Lists who was actually present at an event, once attendance has been taken. Requires the ' +
-      '`eventId` of an event you can already see — get it from `list_events`. This is the ' +
-      'recorded attendance, not the RSVPs (use `list_event_rsvps` for those).',
+    'Lists attendance for a TRAINING, for callers who can take attendance for it or who can see ' +
+      'the team finances. Requires the `eventId` of an event you can already see. Each row has ' +
+      '`present` and `confirmed`: when `confirmed` is false, `present` is only what the member ' +
+      'said they would do in their RSVP, NOT a record that they turned up — never report an ' +
+      'unconfirmed row as actual attendance. Use `list_event_rsvps` for intentions.',
     ListEventAttendanceSchema,
   ),
   define(
     'list_activity_logs',
-    'Lists logged training activities (activity type, when, duration in minutes, note). With no ' +
-      "`memberId` it returns the caller's OWN logs; pass a `memberId` from `list_members` for " +
-      "another member's. Cap the number of rows with `limit` (1-50).",
+    "Lists the CALLER'S OWN logged training activities (activity type, when, duration in " +
+      "minutes, note). It cannot report anyone else's — training logs are private to the member " +
+      'who wrote them, so if the user asks about another member, say that plainly. Cap the ' +
+      'number of rows with `limit` (1-50).',
     ListActivityLogsSchema,
   ),
   define(

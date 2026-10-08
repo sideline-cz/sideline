@@ -82,7 +82,7 @@ import type {
   TrainingType,
   User,
 } from '@sideline/domain';
-import { DateTime, Effect, Layer, Option, Schema, type ServiceMap } from 'effect';
+import { DateTime, Effect, Exit, Layer, Option, Schema, type ServiceMap } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
 import { toEventInfo } from '~/api/event.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
@@ -148,7 +148,6 @@ const ROSTER_B1 = '00000000-0000-0000-0000-0000000rb001' as RosterModel.RosterId
 // --- ids added for the six database read tools (plan half 2) ---------------
 
 const MEMBER_A2 = '00000000-0000-0000-0000-0000000a0002' as TeamMember.TeamMemberId;
-const MEMBER_B1 = '00000000-0000-0000-0000-0000000b0001' as TeamMember.TeamMemberId;
 const USER_2 = 'user-2' as User.UserId;
 
 const FEE_A1 = '00000000-0000-0000-0000-0000000fa001' as Fee.FeeId;
@@ -159,7 +158,6 @@ const PLAN_B1 = '00000000-0000-0000-0000-0000000pb001' as MembershipPlan.Members
 
 const LOG_A1 = '00000000-0000-0000-0000-0000000la001' as ActivityLog.ActivityLogId;
 const LOG_A2 = '00000000-0000-0000-0000-0000000la002' as ActivityLog.ActivityLogId;
-const LOG_B1 = '00000000-0000-0000-0000-0000000lb001' as ActivityLog.ActivityLogId;
 const ACTIVITY_TYPE_A1 = '00000000-0000-0000-0000-0000000aa001' as ActivityType.ActivityTypeId;
 
 const CZK = 'CZK' as Fee.CurrencyCode;
@@ -1367,41 +1365,48 @@ describe('list_activity_logs', () => {
   );
 
   it.effect(
-    'TENANCY: a memberId from another team returns not_found and the logs repository is NEVER called with it',
+    'SELF-ONLY: a teammate\u2019s id cannot be asked for \u2014 the schema has no memberId at all',
     () =>
       Effect.gen(function* () {
+        // `api/activity-logs.ts:37-41` is `membership.id === memberId` with no admin branch, so
+        // there is no foreign-member path to test: the parameter does not exist. This asserts the
+        // leak cannot be reintroduced by adding it back without anyone noticing.
+        const definition = ALL_TOOLS.find((tool) => tool.name === 'list_activity_logs');
+        expect(definition).toBeDefined();
+        expect(JSON.stringify(definition?.parameters)).not.toContain('memberId');
+
+        // And the executor ignores anything smuggled past the schema by the provider.
         const logs = makeActivityLogsLayer([
+          buildActivityLogRow({ id: LOG_A1, team_member_id: MEMBER_A1, note: Option.some('Mine') }),
           buildActivityLogRow({
-            id: LOG_B1,
-            team_member_id: MEMBER_B1,
-            note: Option.some('Another club’s training'),
+            id: LOG_A2,
+            team_member_id: MEMBER_A2,
+            note: Option.some('Teammate secret'),
           }),
         ]);
         const members = makeMembersLayer(
           new Map([
-            [TEAM_A, [buildRosterEntry({ member_id: MEMBER_A1 })]],
             [
-              TEAM_B,
+              TEAM_A,
               [
+                buildRosterEntry({ member_id: MEMBER_A1, name: Option.some('Alice') }),
                 buildRosterEntry({
-                  member_id: MEMBER_B1,
+                  member_id: MEMBER_A2,
                   user_id: USER_2,
-                  name: Option.some('Foreign Member'),
-                  discord_id: '333333333333333333' as Discord.Snowflake,
+                  name: Option.some('Bob'),
+                  discord_id: '222222222222222222' as Discord.Snowflake,
                 }),
               ],
             ],
           ]),
         );
-        const ctx = buildCtx();
-        const outcome = yield* listActivityLogs({ memberId: MEMBER_B1 }, ctx).pipe(
+        const ctx = buildCtx({ membership: buildMembership({ id: MEMBER_A1, permissions: [] }) });
+        const outcome = yield* listActivityLogs({ memberId: MEMBER_A2 } as never, ctx).pipe(
           Effect.provide(Layer.mergeAll(logs.layer, members)),
         );
 
-        expect(logs.calls).toEqual([]);
-        expect(outcome.result).toEqual({ error: 'not_found' });
-        expect(outcome.hits).toEqual([]);
-        expect(JSON.stringify(outcome.result)).not.toContain('forbidden');
+        expect(logs.calls).toEqual([MEMBER_A1]);
+        expect(JSON.stringify(outcome.result)).not.toContain('Teammate secret');
       }),
   );
 
@@ -1621,7 +1626,12 @@ describe('list_event_attendance', () => {
         const attendance = makeAttendanceLayer(
           new Map([[EVENT_A3, [buildAttendanceRow({ member_name: Option.some('Alice') })]]]),
         );
-        const ctx = buildCtx({ canSeeGroup: canSeeOnlyGroup(GROUP_A1) });
+        // `finance:view` satisfies the row gate (`api/event-attendance.ts:75-78`) without
+        // touching group visibility, so this test still isolates the COLUMN choice.
+        const ctx = buildCtx({
+          canSeeGroup: canSeeOnlyGroup(GROUP_A1),
+          membership: buildMembership({ permissions: ['finance:view'] }),
+        });
         const outcome = yield* listEventAttendance({ eventId: EVENT_A3 }, ctx).pipe(
           Effect.provide(Layer.mergeAll(makeEventsLayer([event]), attendance.layer)),
         );
@@ -1651,26 +1661,105 @@ describe('list_event_attendance', () => {
       }),
   );
 
-  it.effect('model-facing row is { displayName, present } and carries no PII', () =>
+  it.effect('model-facing row is { displayName, present, confirmed } and carries no PII', () =>
     Effect.gen(function* () {
       const event = buildEvent({ id: EVENT_A1 });
       const attendance = makeAttendanceLayer(
         new Map([
-          [EVENT_A1, [buildAttendanceRow({ member_name: Option.some('Alice'), present: true })]],
+          [
+            EVENT_A1,
+            [
+              buildAttendanceRow({ member_name: Option.some('Alice'), present: true }),
+              // Same `present: true`, but nobody has confirmed it — so it is the member's RSVP
+              // pre-tick (`EventAttendanceRepository.ts:113` COALESCEs the two), NOT a record
+              // that they turned up. `confirmed` is the only thing telling them apart.
+              buildAttendanceRow({
+                team_member_id: MEMBER_A2,
+                member_name: Option.some('Bob'),
+                present: true,
+                confirmed_at: Option.none(),
+              }),
+            ],
+          ],
         ]),
+      );
+      const ctx = buildCtx({ membership: buildMembership({ permissions: ['finance:view'] }) });
+      const outcome = yield* listEventAttendance({ eventId: EVENT_A1 }, ctx).pipe(
+        Effect.provide(Layer.mergeAll(makeEventsLayer([event]), attendance.layer)),
+      );
+
+      const [item, unconfirmed] = itemsOf(outcome.result);
+      expect(item).toBeDefined();
+      expectNoPii(item ?? {});
+      expect(Object.keys(item ?? {}).sort()).toEqual(['confirmed', 'displayName', 'present']);
+      expect(item?.displayName).toBe('Alice');
+      expect(item?.present).toBe(true);
+      expect(item?.confirmed).toBe(true);
+
+      expect(unconfirmed?.present).toBe(true);
+      expect(unconfirmed?.confirmed).toBe(false);
+      expect(outcome.hits).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    'ROW GATE: a bare Player who can see the event still gets nothing, and the repository is never called',
+    () =>
+      Effect.gen(function* () {
+        // `api/event-attendance.ts:75-78` gates rows on `canConfirm || finance:view`; the built-in
+        // Player has neither, and the web returns `entries: []` for them. Seeing the event is not
+        // seeing who attended it.
+        const event = buildEvent({ id: EVENT_A1 });
+        const attendance = makeAttendanceLayer(
+          new Map([[EVENT_A1, [buildAttendanceRow({ member_name: Option.some('Alice') })]]]),
+        );
+        const ctx = buildCtx({
+          membership: buildMembership({ permissions: ['roster:view', 'member:view'] }),
+        });
+        const outcome = yield* listEventAttendance({ eventId: EVENT_A1 }, ctx).pipe(
+          Effect.provide(Layer.mergeAll(makeEventsLayer([event]), attendance.layer)),
+        );
+
+        expect(attendance.calls).toEqual([]);
+        expect(outcome.result).toEqual({ error: 'forbidden', permission: 'finance:view' });
+        expect(JSON.stringify(outcome.result)).not.toContain('Alice');
+      }),
+  );
+
+  it.effect('ROW GATE: a null owner_group_id does not become an open door', () =>
+    Effect.gen(function* () {
+      // `makeCanSeeGroup` answers `true` for `Option.none()`, so an event with no owner group
+      // had NO gate left beyond team membership once the row gate was missing.
+      const event = buildEvent({ id: EVENT_A1, owner_group_id: Option.none() });
+      const attendance = makeAttendanceLayer(
+        new Map([[EVENT_A1, [buildAttendanceRow({ member_name: Option.some('Alice') })]]]),
       );
       const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
       const outcome = yield* listEventAttendance({ eventId: EVENT_A1 }, ctx).pipe(
         Effect.provide(Layer.mergeAll(makeEventsLayer([event]), attendance.layer)),
       );
 
-      const [item] = itemsOf(outcome.result);
-      expect(item).toBeDefined();
-      expectNoPii(item ?? {});
-      expect(Object.keys(item ?? {}).sort()).toEqual(['displayName', 'present']);
-      expect(item?.displayName).toBe('Alice');
-      expect(item?.present).toBe(true);
-      expect(outcome.hits).toEqual([]);
+      expect(attendance.calls).toEqual([]);
+      expect(outcome.result).toEqual({ error: 'forbidden', permission: 'finance:view' });
+    }),
+  );
+
+  it.effect('a captain with event:edit on the owner group is allowed', () =>
+    Effect.gen(function* () {
+      const event = buildEvent({ id: EVENT_A3, owner_group_id: Option.some(GROUP_A1) });
+      const attendance = makeAttendanceLayer(
+        new Map([[EVENT_A3, [buildAttendanceRow({ member_name: Option.some('Alice') })]]]),
+      );
+      const ctx = buildCtx({
+        canSeeGroup: canSeeOnlyGroup(GROUP_A1),
+        membership: buildMembership({ permissions: ['event:edit'] }),
+      });
+      const outcome = yield* listEventAttendance({ eventId: EVENT_A3 }, ctx).pipe(
+        Effect.provide(Layer.mergeAll(makeEventsLayer([event]), attendance.layer)),
+      );
+
+      expect(attendance.calls).toEqual([EVENT_A3]);
+      expect(itemsOf(outcome.result)).toHaveLength(1);
     }),
   );
 });
@@ -2065,5 +2154,46 @@ describe('propose_create_event (writeTools.ts#proposeAction)', () => {
         expect(ownerField?.value).toEqual({ type: 'text', value: 'Owner Squad' });
         expect(memberField?.value).toEqual({ type: 'text', value: 'Member Squad' });
       }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Id-shaped parameters must be UUIDs
+//
+// `Event.EventId` is `Schema.String.pipe(Schema.brand(...))` with no format check, but the column
+// behind it is Postgres `uuid`. A guessed id used to decode cleanly, reach the query and raise
+// 22P02, which `catchSqlErrors` turns into a LogicError DEFECT and `ChatAgent`'s `catchCause`
+// turns into a degraded turn — one bad id and the user's whole question fails. The model has no
+// way to obtain a real id either: tool results carry a 4-char `ref` token, never a UUID.
+// ---------------------------------------------------------------------------
+
+describe('id parameter validation', () => {
+  const idTools = ['list_events', 'list_event_rsvps', 'list_event_attendance'] as const;
+
+  it.effect('every id-taking tool rejects a non-UUID eventId at decode time', () =>
+    Effect.sync(() => {
+      for (const name of idTools) {
+        const definition = ALL_TOOLS.find((tool) => tool.name === name);
+        expect(definition, name).toBeDefined();
+        const decode = Schema.decodeUnknownExit(definition?.schema as Schema.Codec<never>);
+        // What a model actually emits when it invents one: a ref token, a label, a near-miss.
+        for (const bogus of ['A7K2', 'next-training', '123', '', 'not-a-uuid']) {
+          expect(
+            Exit.isFailure(decode({ eventId: bogus })),
+            `${name} accepted ${JSON.stringify(bogus)}`,
+          ).toBe(true);
+        }
+      }
+    }),
+  );
+
+  it.effect('a real UUID still decodes', () =>
+    Effect.sync(() => {
+      for (const name of idTools) {
+        const definition = ALL_TOOLS.find((tool) => tool.name === name);
+        const decode = Schema.decodeUnknownExit(definition?.schema as Schema.Codec<never>);
+        expect(Exit.isSuccess(decode({ eventId: EVENT_A1 })), name).toBe(true);
+      }
+    }),
   );
 });
