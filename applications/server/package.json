@@ -15,7 +15,7 @@
     "directory": "dist"
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "build": "node scripts/build-docs-index.mjs && tsc -b tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "postbuild": "node scripts/assert-dist.mjs",
     "dev": "tsx watch src/run.ts",
     "preview": "node build/esm/run.js",

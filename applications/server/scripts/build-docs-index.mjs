@@ -16,6 +16,13 @@
  * The output is gitignored. `applications/server/Dockerfile` copies the docs content into the
  * build stage for this script's sake — the server image otherwise has no reason to know
  * `applications/docs` exists.
+ *
+ * Wired into BOTH `codegen` and `build`, and the duplication is load-bearing: of the five CI jobs
+ * in `.github/workflows/check.yml`, only `Types` runs `pnpm codegen` before `pnpm build`. `Test`,
+ * `Test (Europe/Helsinki)` and `Integration Test` go straight to `pnpm build`, so a `codegen`-only
+ * wiring left them compiling against a module that does not exist (`TS2307`). Having `build`
+ * generate its own input removes the ordering dependency everywhere — CI, Docker and local alike.
+ * Running it twice is harmless; it is deterministic and overwrites.
  */
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
