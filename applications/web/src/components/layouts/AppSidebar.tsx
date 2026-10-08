@@ -96,12 +96,6 @@ function getTeamNavGroups(
           needsAttention: discordNeedsAttention,
         },
         {
-          title: tr('my_payments_navTitle'),
-          icon: CreditCard,
-          to: '/teams/$teamId/my-payments',
-          params: { teamId },
-        },
-        {
           title: tr('event_events'),
           icon: Calendar,
           to: '/teams/$teamId/events',
@@ -198,6 +192,21 @@ function getTeamNavGroups(
           params: { teamId },
           requiredPermission: 'team:manage' satisfies Role.Permission,
         },
+      ],
+    },
+    {
+      // Every entry here is ungated or `finance:*`-gated, so an ordinary member sees this
+      // group reduced to the two personal entries; `getTeamNavGroups`'s caller drops it
+      // entirely if permissions empty it out.
+      id: 'finance',
+      label: tr('sidebar_finance'),
+      items: [
+        {
+          title: tr('my_payments_navTitle'),
+          icon: CreditCard,
+          to: '/teams/$teamId/my-payments',
+          params: { teamId },
+        },
         {
           title: tr('finance_navTitle'),
           icon: Wallet,
@@ -215,8 +224,7 @@ function getTeamNavGroups(
         },
         {
           // Ungated — every member picks their own plan here (Slice 2 of "Setup
-          // memberships"), not just captains. Sits in the `coach` group alongside other
-          // ungated entries (team_members, team_rosters).
+          // memberships"), not just captains.
           title: tr('membershipPlan_title'),
           icon: IdCard,
           to: '/teams/$teamId/membership-plans',
