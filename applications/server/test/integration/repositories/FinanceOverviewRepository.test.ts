@@ -431,3 +431,82 @@ describe('FinanceOverviewRepository — overviewByTeam with credit (6.10, 6.11, 
       ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// partialCount — "partial" is a half-settled FEE, never "some fees paid, some not"
+// ---------------------------------------------------------------------------
+
+/** Raw-SQL bump of one assignment's `paid_minor`. The overview reads `fee_assignment_status_v`,
+ * which derives status from `paid_minor` alone — a real payment row adds nothing to observe. */
+const setPaid = (assignmentId: string, paidMinor: number) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql`UPDATE fee_assignments SET paid_minor = ${paidMinor} WHERE id = ${assignmentId}`,
+    ),
+    Effect.asVoid,
+  );
+
+describe('FinanceOverviewRepository — partialCount', () => {
+  it.effect('one fee fully paid + one untouched → partialCount 0', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('930000000000000020', 'partial-count-1')),
+      Effect.bind('team', ({ user }) =>
+        createTeam('932000000000000000' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
+      Effect.bind('fee1', ({ team }) => createFee(team.id, 500, 'CZK')),
+      Effect.bind('fee2', ({ team }) => createFee(team.id, 700, 'CZK')),
+      Effect.bind('a1', ({ fee1, member }) => assignFee(fee1.id, (member as any).id)),
+      Effect.tap(({ fee2, member }) => assignFee(fee2.id, (member as any).id)),
+      Effect.tap(({ a1 }) => setPaid((a1 as any)[0].id, 500)),
+      Effect.bind('overview', ({ team }) =>
+        FinanceOverviewRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.overviewByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ overview, member }) =>
+        Effect.sync(() => {
+          const row = overview.find(
+            (r) => r.teamMemberId === (member as any).id && r.currency === 'CZK',
+          ) as any;
+          expect(row).toBeDefined();
+          expect(row.totalPaidMinor).toBe(500);
+          expect(row.paidCount).toBe(1);
+          expect(row.pendingCount).toBe(1);
+          expect(row.partialCount).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('one fee half paid → partialCount 1, still inside pendingCount', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('930000000000000021', 'partial-count-2')),
+      Effect.bind('team', ({ user }) =>
+        createTeam('932100000000000000' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('member', ({ team, user }) => addMember(team.id, user.id)),
+      Effect.bind('fee', ({ team }) => createFee(team.id, 500, 'CZK')),
+      Effect.bind('a1', ({ fee, member }) => assignFee(fee.id, (member as any).id)),
+      Effect.tap(({ a1 }) => setPaid((a1 as any)[0].id, 200)),
+      Effect.bind('overview', ({ team }) =>
+        FinanceOverviewRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.overviewByTeam(team.id)),
+        ),
+      ),
+      Effect.tap(({ overview, member }) =>
+        Effect.sync(() => {
+          const row = overview.find(
+            (r) => r.teamMemberId === (member as any).id && r.currency === 'CZK',
+          ) as any;
+          expect(row).toBeDefined();
+          expect(row.partialCount).toBe(1);
+          expect(row.pendingCount).toBe(1);
+          expect(row.paidCount).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

@@ -70,7 +70,11 @@ export class FinanceOverviewMemberRow extends Schema.Class<FinanceOverviewMember
   totalDueMinor: Schema.Number,
   totalPaidMinor: Schema.Number,
   overdueCount: Schema.Number,
+  // pending + partial, i.e. everything still outstanding and not overdue
   pendingCount: Schema.Number,
+  // subset of pendingCount: assignments paid in part. The overview badge reads THIS, never
+  // totalPaidMinor — a member with one fee settled and the next untouched is pending, not partial.
+  partialCount: Schema.Number,
   paidCount: Schema.Number,
   // this row's currency, 0 when none
   creditMinor: Schema.Number,

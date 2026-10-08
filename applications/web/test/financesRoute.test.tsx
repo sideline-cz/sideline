@@ -148,6 +148,7 @@ function row(creditMinor: number) {
     totalPaidMinor: 0,
     overdueCount: 0,
     pendingCount: 1,
+    partialCount: 0,
     paidCount: 0,
     creditMinor,
   };

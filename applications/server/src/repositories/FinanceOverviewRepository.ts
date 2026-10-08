@@ -15,6 +15,7 @@ class OverviewRow extends Schema.Class<OverviewRow>('OverviewRow')({
   totalPaidMinor: Schema.Number,
   overdueCount: Schema.Number,
   pendingCount: Schema.Number,
+  partialCount: Schema.Number,
   paidCount: Schema.Number,
   // this row's currency, 0 when none (§6.3)
   creditMinor: Schema.Number,
@@ -56,6 +57,7 @@ const make = Effect.gen(function* () {
         COALESCE(SUM(v.paid_minor) FILTER (WHERE v.status != 'waived'), 0)::int AS "totalPaidMinor",
         COUNT(v.assignment_id) FILTER (WHERE v.status = 'overdue')::int AS "overdueCount",
         COUNT(v.assignment_id) FILTER (WHERE v.status IN ('pending', 'partial'))::int AS "pendingCount",
+        COUNT(v.assignment_id) FILTER (WHERE v.status = 'partial')::int AS "partialCount",
         COUNT(v.assignment_id) FILTER (WHERE v.status = 'paid')::int AS "paidCount",
         COALESCE(MAX(a.balance_minor), 0)::int AS "creditMinor"
       FROM keys k
