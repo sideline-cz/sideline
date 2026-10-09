@@ -47,6 +47,19 @@ const defaultModeFor = (reason: BankTransaction.BankTransactionMatchReason | nul
   }
 };
 
+/** Split rows outlive the member picker, so every row carries its own label instead of resolving
+ * through whichever member's `candidates` happen to be loaded. */
+const labelsFor = (
+  candidates: ReadonlyArray<BankSyncApi.BankTransactionCandidateAssignment>,
+  memberLabel: string | null,
+): Record<string, string> =>
+  Object.fromEntries(
+    candidates.map((c) => [
+      c.assignmentId,
+      memberLabel === null ? c.feeName : `${memberLabel} · ${c.feeName}`,
+    ]),
+  );
+
 /**
  * The four-mode resolve dialog (design §3.6). Always-mounted, driven by `open={txId !== null}`
  * with the target frozen so the closing animation never blanks (AGENTS.md "Dialogs Must Be
@@ -77,6 +90,9 @@ export function MatchTransactionDialog({
   const [splitRows, setSplitRows] = React.useState<
     ReadonlyArray<{ assignmentId: string; amountStr: string }>
   >([]);
+  // Keyed by assignmentId and only ever merged into, so rows added under one member survive
+  // switching the picker to the next one.
+  const [splitLabels, setSplitLabels] = React.useState<Readonly<Record<string, string>>>({});
   const [otherDescription, setOtherDescription] = React.useState('');
   const [ignoreReason, setIgnoreReason] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
@@ -129,6 +145,7 @@ export function MatchTransactionDialog({
           setSelectedAssignmentId('');
         }
         setSplitRows([]);
+        setSplitLabels(labelsFor(d.candidateAssignments, Option.getOrNull(d.resolvedMemberName)));
         setAmountStr('');
         setPickedMemberId('');
         setMemberCandidates(null);
@@ -174,7 +191,6 @@ export function MatchTransactionDialog({
   const handlePickMember = async (memberId: string) => {
     setPickedMemberId(memberId);
     setSelectedAssignmentId('');
-    setSplitRows([]);
     setError(null);
     if (memberId === '') {
       setMemberCandidates(null);
@@ -210,6 +226,10 @@ export function MatchTransactionDialog({
     setLoadingMemberFees(false);
     if (Option.isSome(result)) {
       setMemberCandidates(result.value);
+      setSplitLabels((prev) => ({
+        ...prev,
+        ...labelsFor(result.value, members.find((m) => m.value === memberId)?.label ?? null),
+      }));
       if (result.value.length === 1) setSelectedAssignmentId(result.value[0].assignmentId);
     }
   };
@@ -273,10 +293,13 @@ export function MatchTransactionDialog({
       return;
     }
     const allocatedMinor = allocations.reduce((sum, a) => sum + a.amountMinor, 0);
-    if (allocatedMinor !== txAmountMinor) {
+    // Under-allocating is deliberate, not an error: `performManualMatch` accepts a transaction in
+    // `partially_matched` and only rejects a running total that EXCEEDS the amount, so one family
+    // transfer can be assigned member by member across several passes.
+    if (allocatedMinor > txAmountMinor) {
       setError(
-        tr('bank_resolve_splitRemaining', {
-          remaining: formatMoney(txAmountMinor - allocatedMinor, detail.currency, 'en'),
+        tr('bank_resolve_splitOver', {
+          over: formatMoney(allocatedMinor - txAmountMinor, detail.currency, 'en'),
         }),
       );
       return;
@@ -508,10 +531,11 @@ export function MatchTransactionDialog({
               {mode === 'split' && (
                 <div className='pl-6 flex flex-col gap-2'>
                   {splitRows.map((row, i) => {
-                    const candidate = candidates.find((c) => c.assignmentId === row.assignmentId);
                     return (
                       <div key={row.assignmentId} className='flex items-center gap-2'>
-                        <span className='text-sm flex-1 truncate'>{candidate?.feeName}</span>
+                        <span className='text-sm flex-1 truncate'>
+                          {splitLabels[row.assignmentId] ?? ''}
+                        </span>
                         <Input
                           inputMode='decimal'
                           className='w-24'
@@ -547,9 +571,13 @@ export function MatchTransactionDialog({
                           allocated: formatMoney(splitTotal, detail.currency, 'en'),
                           total: formatMoney(splitTarget, detail.currency, 'en'),
                         })
-                      : tr('bank_resolve_splitRemaining', {
-                          remaining: formatMoney(splitTarget - splitTotal, detail.currency, 'en'),
-                        })}
+                      : splitTotal > splitTarget
+                        ? tr('bank_resolve_splitOver', {
+                            over: formatMoney(splitTotal - splitTarget, detail.currency, 'en'),
+                          })
+                        : tr('bank_resolve_splitRemaining', {
+                            remaining: formatMoney(splitTarget - splitTotal, detail.currency, 'en'),
+                          })}
                   </p>
                 </div>
               )}
