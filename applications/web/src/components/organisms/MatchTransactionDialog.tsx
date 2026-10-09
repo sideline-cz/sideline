@@ -88,8 +88,9 @@ export function MatchTransactionDialog({
   const [amountStr, setAmountStr] = React.useState('');
   const [overpayChoice, setOverpayChoice] = React.useState<'full' | 'split' | null>(null);
   const [splitRows, setSplitRows] = React.useState<
-    ReadonlyArray<{ assignmentId: string; amountStr: string }>
+    ReadonlyArray<{ id: number; assignmentId: string; amountStr: string }>
   >([]);
+  const nextRowId = React.useRef(0);
   // Keyed by assignmentId and only ever merged into, so rows added under one member survive
   // switching the picker to the next one.
   const [splitLabels, setSplitLabels] = React.useState<Readonly<Record<string, string>>>({});
@@ -240,8 +241,16 @@ export function MatchTransactionDialog({
 
   const selectedCandidate = candidates.find((c) => c.assignmentId === selectedAssignmentId);
   const txAmountMinor = detail ? Math.abs(Number(detail.amountMinor)) : 0;
+  // What is still unallocated. A `partially_matched` transaction comes back with the payments
+  // already booked against it, and the server's guard is `alreadySpent + requested > amount` —
+  // so every "how much can I assign" decision below has to be made against the REMAINDER, not
+  // the transaction total, or a second pass offers money that is already spent.
+  const alreadyMatchedMinor = detail
+    ? detail.matchedPayments.reduce((sum, p) => sum + p.amountMinor, 0)
+    : 0;
+  const remainingMinor = Math.max(0, txAmountMinor - alreadyMatchedMinor);
   const isOverpayment =
-    selectedCandidate !== undefined && txAmountMinor > selectedCandidate.outstandingMinor;
+    selectedCandidate !== undefined && remainingMinor > selectedCandidate.outstandingMinor;
 
   const handleSubmitAssign = async () => {
     if (!detail || !selectedCandidate) return;
@@ -251,12 +260,12 @@ export function MatchTransactionDialog({
         setError(tr('bank_resolve_overChoose'));
         return;
       }
-      amountMinor = txAmountMinor;
+      amountMinor = remainingMinor;
     } else {
       try {
         amountMinor =
           amountStr.trim() === ''
-            ? Math.min(txAmountMinor, selectedCandidate.outstandingMinor)
+            ? Math.min(remainingMinor, selectedCandidate.outstandingMinor)
             : parseAmount(amountStr, detail.currency);
       } catch {
         setError(tr('bank_resolve_error'));
@@ -296,12 +305,18 @@ export function MatchTransactionDialog({
     // Under-allocating is deliberate, not an error: `performManualMatch` accepts a transaction in
     // `partially_matched` and only rejects a running total that EXCEEDS the amount, so one family
     // transfer can be assigned member by member across several passes.
-    if (allocatedMinor > txAmountMinor) {
+    if (allocatedMinor > remainingMinor) {
       setError(
         tr('bank_resolve_splitOver', {
-          over: formatMoney(allocatedMinor - txAmountMinor, detail.currency, 'en'),
+          over: formatMoney(allocatedMinor - remainingMinor, detail.currency, 'en'),
         }),
       );
+      return;
+    }
+    // The server rejects repeated assignmentIds outright; catch it here so the row that needs
+    // changing is still on screen.
+    if (new Set(allocations.map((a) => a.assignmentId)).size !== allocations.length) {
+      setError(tr('bank_resolve_splitDuplicate'));
       return;
     }
     await submitMatch(
@@ -373,14 +388,31 @@ export function MatchTransactionDialog({
     const used = new Set(splitRows.map((r) => r.assignmentId));
     const next = candidates.find((c) => !used.has(c.assignmentId));
     if (!next) return;
-    setSplitRows((prev) => [...prev, { assignmentId: next.assignmentId, amountStr: '' }]);
+    nextRowId.current += 1;
+    setSplitRows((prev) => [
+      ...prev,
+      { id: nextRowId.current, assignmentId: next.assignmentId, amountStr: '' },
+    ]);
+  };
+
+  /** The fees this row may point at: everything open for the member currently picked, plus the
+   * row's own fee so a row entered under an earlier member stays selectable (and visible) after
+   * the picker moves on. */
+  const optionsForRow = (rowAssignmentId: string) => {
+    const opts = candidates.map((c) => ({
+      value: c.assignmentId,
+      label: splitLabels[c.assignmentId] ?? c.feeName,
+    }));
+    return opts.some((o) => o.value === rowAssignmentId)
+      ? opts
+      : [{ value: rowAssignmentId, label: splitLabels[rowAssignmentId] ?? '' }, ...opts];
   };
 
   const splitTotal = splitRows.reduce((sum, r) => {
     const n = Number(r.amountStr.replace(',', '.'));
     return sum + (Number.isFinite(n) ? Math.round(n * 100) : 0);
   }, 0);
-  const splitTarget = txAmountMinor;
+  const splitTarget = remainingMinor;
 
   return (
     <Dialog
@@ -394,6 +426,11 @@ export function MatchTransactionDialog({
           <DialogTitle>
             {tr('bank_resolve_title')}
             {detail ? ` · ${formatMoney(txAmountMinor, detail.currency, 'en')}` : ''}
+            {detail && alreadyMatchedMinor > 0
+              ? ` · ${tr('bank_resolve_remaining', {
+                  remaining: formatMoney(remainingMinor, detail.currency, 'en'),
+                })}`
+              : ''}
           </DialogTitle>
         </DialogHeader>
 
@@ -467,7 +504,7 @@ export function MatchTransactionDialog({
                         inputMode='decimal'
                         value={amountStr}
                         placeholder={String(
-                          Math.min(txAmountMinor, selectedCandidate.outstandingMinor) / 100,
+                          Math.min(remainingMinor, selectedCandidate.outstandingMinor) / 100,
                         )}
                         onChange={(e) => setAmountStr(e.target.value)}
                       />
@@ -486,14 +523,14 @@ export function MatchTransactionDialog({
                         />
                         <span>
                           {tr('bank_resolve_overFull', {
-                            amount: formatMoney(txAmountMinor, detail.currency, 'en'),
+                            amount: formatMoney(remainingMinor, detail.currency, 'en'),
                           })}
                           <br />
                           <span className='text-xs text-muted-foreground'>
                             {tr('bank_resolve_overFullHint', {
                               fee: selectedCandidate.feeName,
                               diff: formatMoney(
-                                txAmountMinor - selectedCandidate.outstandingMinor,
+                                remainingMinor - selectedCandidate.outstandingMinor,
                                 detail.currency,
                                 'en',
                               ),
@@ -532,10 +569,24 @@ export function MatchTransactionDialog({
                 <div className='pl-6 flex flex-col gap-2'>
                   {splitRows.map((row, i) => {
                     return (
-                      <div key={row.assignmentId} className='flex items-center gap-2'>
-                        <span className='text-sm flex-1 truncate'>
-                          {splitLabels[row.assignmentId] ?? ''}
-                        </span>
+                      <div key={row.id} className='flex items-center gap-2'>
+                        <select
+                          aria-label={tr('bank_resolve_fee')}
+                          className='border rounded-md h-9 px-2 text-sm bg-background flex-1 min-w-0'
+                          value={row.assignmentId}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setSplitRows((prev) =>
+                              prev.map((r, idx) => (idx === i ? { ...r, assignmentId: v } : r)),
+                            );
+                          }}
+                        >
+                          {optionsForRow(row.assignmentId).map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
                         <Input
                           inputMode='decimal'
                           className='w-24'
