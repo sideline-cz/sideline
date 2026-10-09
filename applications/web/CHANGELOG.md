@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.62.1
+
+### 🐛 Fixes
+- split one bank transfer across several members (#770)
+
 ## 0.62.0
 
 ### 🚀 Features
