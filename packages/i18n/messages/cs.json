@@ -499,6 +499,8 @@
   "bank_resolve_overTitle": "Částka je vyšší než předpis. Co s tím?",
   "bank_resolve_splitAdd": "Přidat předpis",
   "bank_resolve_splitBalanced": "Rozděleno {allocated} z {total}",
+  "bank_resolve_remaining": "zbývá {remaining}",
+  "bank_resolve_splitDuplicate": "Stejný předpis je uvedený dvakrát — slučte tyto řádky.",
   "bank_resolve_splitOver": "O {over} více, než je částka platby",
   "bank_resolve_splitRemaining": "{remaining} zůstane na platbě — zbytek přiřadíte dalšímu členovi",
   "bank_resolve_submit": "Přiřadit",

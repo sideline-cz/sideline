@@ -10,7 +10,7 @@ import { BankSyncApi } from '@sideline/domain';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Effect, Option, Schema } from 'effect';
 import type React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('~/lib/translations.js', () => ({
   tr: (key: string) => key,
@@ -68,7 +68,7 @@ const candidate = (assignmentId: string, feeName: string, outstandingMinor: numb
 // 4 500,00 Kč — more than any single child's outstanding fee.
 const TX_AMOUNT_MINOR = 450000;
 
-const detail = Schema.decodeUnknownSync(BankSyncApi.BankTransactionDetailView)({
+const rawDetail = {
   id: TX_ID,
   bookedOn: '2026-10-08',
   amountMinor: TX_AMOUNT_MINOR,
@@ -98,7 +98,9 @@ const detail = Schema.decodeUnknownSync(BankSyncApi.BankTransactionDetailView)({
   expenseId: null,
   ingestedAt: '2026-10-08T06:00:00.000Z',
   updatedAt: '2026-10-08T06:00:00.000Z',
-});
+};
+
+const detail = Schema.decodeUnknownSync(BankSyncApi.BankTransactionDetailView)(rawDetail);
 
 // Must be a stable identity: the dialog's loader effect lists `run` in its deps, so a new
 // closure per render would re-fetch forever and `detail` would never settle.
@@ -110,6 +112,8 @@ type Allocation = { readonly assignmentId: string; readonly amountMinor: number 
 // Captured from the call rather than read off `mock.calls`, which is untyped for a zero-arg
 // `vi.fn`. Initialised to [] (never undefined) so TS keeps the array type.
 let submitted: ReadonlyArray<Allocation> = [];
+let currentDetail: BankSyncApi.BankTransactionDetailView;
+
 const matchBankTransaction = vi.fn(
   (req: { readonly payload: { readonly allocations: ReadonlyArray<Allocation> } }) => {
     submitted = req.payload.allocations;
@@ -147,7 +151,7 @@ vi.mock('~/lib/runtime', () => ({
     asEffect: () =>
       Effect.succeed({
         bankSync: {
-          getBankTransaction: () => Effect.succeed(detail),
+          getBankTransaction: () => Effect.succeed(currentDetail),
           matchBankTransaction,
         },
         roster: {
@@ -186,6 +190,16 @@ const { MatchTransactionDialog } = await import('~/components/organisms/MatchTra
 const amountInputs = () =>
   screen.getAllByRole('textbox').filter((el) => el.getAttribute('inputmode') === 'decimal');
 
+const feeSelects = () => screen.getAllByLabelText('bank_resolve_fee');
+
+/** Fill split row `i`: point it at a fee explicitly, then type the amount. Choosing the fee is
+ * the whole point — leaving it on whatever `addSplitRow` defaulted to is what put 1 500 Kč on a
+ * 350 Kč fee in production. */
+const fillRow = (i: number, assignmentId: string, amount: string) => {
+  fireEvent.change(feeSelects()[i], { target: { value: assignmentId } });
+  fireEvent.change(amountInputs()[i], { target: { value: amount } });
+};
+
 // The mode radios sit inside their <label>; clicking the label's text node does not toggle them
 // in jsdom, so reach the input itself.
 const chooseMode = (labelText: string) => {
@@ -195,7 +209,13 @@ const chooseMode = (labelText: string) => {
 };
 
 describe('MatchTransactionDialog — one transfer, several members', () => {
-  it('keeps rows across a member switch and submits a cross-member allocation under the total', async () => {
+  beforeEach(() => {
+    currentDetail = detail;
+    matchBankTransaction.mockClear();
+    submitted = [];
+  });
+
+  const openInSplitMode = async () => {
     render(
       <MatchTransactionDialog
         teamId={TEAM_ID}
@@ -204,63 +224,107 @@ describe('MatchTransactionDialog — one transfer, several members', () => {
         onResolved={vi.fn()}
       />,
     );
-
     await screen.findByText('bank_resolve_modeSplit');
     chooseMode('bank_resolve_modeSplit');
+  };
 
-    // Barča's row, from the VS-resolved candidates.
+  const pickMember = async (memberId: string) => {
+    fireEvent.change(screen.getByTestId('resolve-member'), { target: { value: memberId } });
+    await waitFor(() => expect(listMemberAssignments).toHaveBeenCalled());
+  };
+
+  it('keeps rows across a member switch and submits a cross-member allocation under the total', async () => {
+    await openInSplitMode();
+
     fireEvent.click(screen.getByText('bank_resolve_splitAdd'));
-    await screen.findByText('Barča · Training');
-    fireEvent.change(amountInputs()[0], { target: { value: '1150' } });
+    await waitFor(() => expect(feeSelects()).toHaveLength(1));
+    fillRow(0, A_BARCA_TRAINING, '1150');
 
     // Switching the picker used to wipe splitRows — Barča's row must survive it.
-    fireEvent.change(screen.getByTestId('resolve-member'), { target: { value: FANTA_ID } });
-    await waitFor(() => expect(listMemberAssignments).toHaveBeenCalled());
-    expect(screen.getByText('Barča · Training')).toBeTruthy();
+    await pickMember(FANTA_ID);
+    expect(feeSelects()).toHaveLength(1);
+    expect((feeSelects()[0] as HTMLSelectElement).value).toBe(A_BARCA_TRAINING);
 
     fireEvent.click(screen.getByText('bank_resolve_splitAdd'));
-    await screen.findByText('Fanta · 2026105 · Training');
-    fireEvent.click(screen.getByText('bank_resolve_splitAdd'));
-    await screen.findByText('Fanta · 2026105 · Tournament');
+    await waitFor(() => expect(feeSelects()).toHaveLength(2));
+    fillRow(1, A_FANTA_TRAINING, '1500');
 
-    const inputs = amountInputs();
-    fireEvent.change(inputs[1], { target: { value: '1500' } });
-    fireEvent.change(inputs[2], { target: { value: '350' } });
+    fireEvent.click(screen.getByText('bank_resolve_splitAdd'));
+    await waitFor(() => expect(feeSelects()).toHaveLength(3));
+    fillRow(2, A_FANTA_TOURNAMENT, '350');
 
     fireEvent.click(screen.getByText('bank_resolve_submit'));
 
     await waitFor(() => expect(matchBankTransaction).toHaveBeenCalledTimes(1));
-
     expect(submitted).toEqual([
       { assignmentId: A_BARCA_TRAINING, amountMinor: 115000 },
       { assignmentId: A_FANTA_TRAINING, amountMinor: 150000 },
       { assignmentId: A_FANTA_TOURNAMENT, amountMinor: 35000 },
     ]);
 
-    // 3 000,00 of 4 500,00 — deliberately short. The rest stays on the transaction for the
-    // third sibling, which is the whole point of dropping the equality guard.
-    const total = submitted.reduce((s: number, a: { amountMinor: number }) => s + a.amountMinor, 0);
+    // 3 000,00 of 4 500,00 — deliberately short; the rest stays on the transaction.
+    const total = submitted.reduce((sum, a) => sum + a.amountMinor, 0);
     expect(total).toBeLessThan(TX_AMOUNT_MINOR);
   });
 
-  it('still refuses an allocation that exceeds the transaction', async () => {
-    matchBankTransaction.mockClear();
-    submitted = [];
-    render(
-      <MatchTransactionDialog
-        teamId={TEAM_ID}
-        txId={TX_ID}
-        onCancel={vi.fn()}
-        onResolved={vi.fn()}
-      />,
-    );
+  it('a row can be pointed at a different fee than the one it defaulted to', async () => {
+    await openInSplitMode();
+    await pickMember(FANTA_ID);
 
-    await screen.findByText('bank_resolve_modeSplit');
-    chooseMode('bank_resolve_modeSplit');
     fireEvent.click(screen.getByText('bank_resolve_splitAdd'));
-    await screen.findByText('Barča · Training');
+    await waitFor(() => expect(feeSelects()).toHaveLength(1));
 
-    fireEvent.change(amountInputs()[0], { target: { value: '5000' } });
+    // The default is whatever addSplitRow found first; the treasurer must be able to override it.
+    fillRow(0, A_FANTA_TOURNAMENT, '350');
+    fireEvent.click(screen.getByText('bank_resolve_submit'));
+
+    await waitFor(() => expect(matchBankTransaction).toHaveBeenCalledTimes(1));
+    expect(submitted).toEqual([{ assignmentId: A_FANTA_TOURNAMENT, amountMinor: 35000 }]);
+  });
+
+  it('a partially matched transaction only offers what is left, not the full amount', async () => {
+    // 4 150,00 of 4 500,00 already booked — only 350,00 may still be assigned.
+    currentDetail = Schema.decodeUnknownSync(BankSyncApi.BankTransactionDetailView)({
+      ...rawDetail,
+      matchState: 'partially_matched',
+      matchedPayments: [
+        {
+          paymentId: '99999999-9999-4999-8999-999999999999',
+          feeAssignmentId: A_BARCA_TRAINING,
+          feeName: 'Training',
+          amountMinor: 415000,
+          matchedBy: 'manual',
+          recordedAt: '2026-10-08T07:00:00.000Z',
+        },
+      ],
+    });
+
+    await openInSplitMode();
+    await pickMember(FANTA_ID);
+    fireEvent.click(screen.getByText('bank_resolve_splitAdd'));
+    await waitFor(() => expect(feeSelects()).toHaveLength(1));
+
+    // Would have been accepted against the 4 500 total; must be refused against the 350 left.
+    fillRow(0, A_FANTA_TOURNAMENT, '1500');
+    fireEvent.click(screen.getByText('bank_resolve_submit'));
+
+    const shown = await screen.findAllByText('bank_resolve_splitOver');
+    expect(shown.length).toBeGreaterThan(0);
+    expect(matchBankTransaction).not.toHaveBeenCalled();
+
+    // 350,00 exactly is what remains, and it goes through.
+    fillRow(0, A_FANTA_TOURNAMENT, '350');
+    fireEvent.click(screen.getByText('bank_resolve_submit'));
+    await waitFor(() => expect(matchBankTransaction).toHaveBeenCalledTimes(1));
+    expect(submitted).toEqual([{ assignmentId: A_FANTA_TOURNAMENT, amountMinor: 35000 }]);
+  });
+
+  it('still refuses an allocation that exceeds the transaction', async () => {
+    await openInSplitMode();
+    fireEvent.click(screen.getByText('bank_resolve_splitAdd'));
+    await waitFor(() => expect(feeSelects()).toHaveLength(1));
+
+    fillRow(0, A_BARCA_TRAINING, '5000');
     fireEvent.click(screen.getByText('bank_resolve_submit'));
 
     const shown = await screen.findAllByText('bank_resolve_splitOver');
