@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.62.2
+
+### 🐛 Fixes
+- pick the fee per split row, and allocate against the remainder (#771)
+
 ## 0.62.1
 
 ### 🐛 Fixes
