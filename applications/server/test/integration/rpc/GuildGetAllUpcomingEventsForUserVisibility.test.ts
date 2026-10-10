@@ -36,6 +36,7 @@ import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsReposit
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
+import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
 import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
@@ -92,6 +93,7 @@ const EventsPlainRepositories = Layer.mergeAll(
   RostersRepository.Default,
   ChannelSyncEventsRepository.Default,
   UsersRepository.Default,
+  NotificationsRepository.Default,
 );
 
 const EventsRpcTestLayer = EventsRpcLive.pipe(

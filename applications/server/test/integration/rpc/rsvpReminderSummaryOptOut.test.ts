@@ -25,6 +25,7 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -53,6 +54,7 @@ const PlainRepositories = Layer.mergeAll(
   ChannelSyncEventsRepository.Default,
   UsersRepository.Default,
   RolesRepository.Default,
+  NotificationsRepository.Default,
 );
 
 const RpcTestLayer = EventsRpcLive.pipe(

@@ -73,6 +73,7 @@ import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from '../mocks/emailMocks.js';
 import { MockFinanceLayers } from '../mocks/financeMocks.js';
+import { makeMockNotificationsRepositoryLayer } from '../mocks/notificationMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from '../mocks/onboardingMocks.js';
 import { MockPlayerRatingsRepositoryLayer } from '../mocks/playerRatingMocks.js';
 import { MockRulesAttemptsRepositoryLayer } from '../mocks/rulesTrainerMocks.js';
@@ -1459,6 +1460,7 @@ describe('Event Roster API — web approve/decline (real service, B1 regression)
     .pipe(Layer.provide(MockChatAgentLayer))
     .pipe(Layer.provide(MockChatRateLimiterLayer))
     .pipe(Layer.provide(MockAiActionProposalsRepositoryLayer))
+    .pipe(Layer.provide(makeMockNotificationsRepositoryLayer([])))
     .pipe(Layer.provide(AiChatEnabledConfig.Default))
     .pipe(Layer.provide(LlmClient.Default))
     .pipe(

@@ -1,8 +1,8 @@
-import type { Auth } from '@sideline/domain';
+import { type Auth, Team } from '@sideline/domain';
 import { getLocale, setLocale } from '@sideline/i18n/runtime';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Effect, Exit, Layer, Logger, Option, References } from 'effect';
+import { Effect, Exit, Layer, Logger, Option, References, Schema } from 'effect';
 import { FetchHttpClient } from 'effect/unstable/http';
 import {
   Bell,
@@ -40,7 +40,7 @@ import {
   useSidebar,
 } from '~/components/ui/sidebar';
 import { ClientConfig, client } from '~/lib/client.js';
-import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { ApiClient, ClientError, SilentClientError, useRun } from '~/lib/runtime';
 import { useTheme } from '~/lib/theme.js';
 import { useServerUrl } from '~/lib/translation-overrides-context.js';
 import { tr } from '~/lib/translations.js';
@@ -116,6 +116,29 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
     refetchOnWindowFocus: false,
   });
 
+  // Deliberately off the route loaders: a badge is not worth adding a round trip to the critical
+  // path of every team page. It resolves after paint, and a failure is silent — an unbadged bell
+  // is a better outcome than a toast telling someone their badge did not load.
+  const unreadQuery = useQuery({
+    queryKey: ['notifications', 'unread', activeTeamId],
+    enabled: activeTeamId !== undefined,
+    staleTime: 60_000,
+    queryFn: () =>
+      ApiClient.asEffect()
+        .pipe(
+          Effect.flatMap((api) =>
+            api.notification.unreadCount({
+              query: { teamId: Schema.decodeSync(Team.TeamId)(activeTeamId ?? '') },
+            }),
+          ),
+          Effect.map((result) => result.count),
+          Effect.mapError(() => new SilentClientError({ message: 'unread count' })),
+          run(),
+        )
+        .then(Option.getOrElse(() => 0)),
+  });
+  const unreadCount = unreadQuery.data ?? 0;
+
   const handleLocaleChange = useCallback(
     (locale: 'en' | 'cs') => {
       setLocale(locale);
@@ -189,6 +212,11 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
                   <Link to='/teams/$teamId/notifications' params={{ teamId: activeTeamId }}>
                     <Bell />
                     {tr('nav_notifications')}
+                    {unreadCount > 0 && (
+                      <span className='ml-auto rounded-full bg-primary px-1.5 py-0.5 text-xs font-medium text-primary-foreground'>
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
                   </Link>
                 </DropdownMenuItem>
               )}

@@ -106,7 +106,12 @@
       }
     },
     {
-      "includes": ["applications/bot/**", "packages/i18n/**", "scripts/**"],
+      "includes": [
+        "applications/bot/**",
+        "applications/server/**",
+        "packages/i18n/**",
+        "scripts/**"
+      ],
       "linter": {
         "rules": {
           "style": {
