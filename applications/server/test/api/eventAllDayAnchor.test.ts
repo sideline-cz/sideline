@@ -39,6 +39,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { EventApiLive } from '~/api/event.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -48,6 +49,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { makeMockNotificationsRepositoryLayer } from '../mocks/notificationMocks.js';
 
 // ---------------------------------------------------------------------------
 // A minimal HttpApi containing ONLY the `event` group. `HttpApiGroup.key` is
@@ -367,6 +369,12 @@ const TestLayer = HttpApiBuilder.layer(SmallApi).pipe(
   Layer.provide(MockDiscordChannelMappingRepositoryLayer),
   Layer.provide(MockEventSyncEventsRepositoryLayer),
   Layer.provide(MockEventsRepositoryLayer),
+  Layer.provide(makeMockNotificationsRepositoryLayer([])),
+  Layer.provide(
+    Layer.succeed(EventRsvpsRepository, {
+      findAttendingMemberIdsByEventId: () => Effect.succeed([]),
+    } as any),
+  ),
 );
 
 let handler: (...args: any) => Promise<Response>;

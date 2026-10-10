@@ -1,6 +1,6 @@
 import type { NotificationApi } from '@sideline/domain';
 import { Notification, Team } from '@sideline/domain';
-import { useRouter } from '@tanstack/react-router';
+import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { Button } from '~/components/ui/button';
@@ -69,11 +69,24 @@ export function NotificationsPage({ notifications, teamId }: NotificationsPagePr
               className={`border rounded p-3 ${notification.isRead ? 'opacity-60' : ''}`}
             >
               <div className='flex items-start justify-between gap-2'>
-                <div>
-                  <p className='font-medium'>{notification.title}</p>
-                  <p className='text-sm text-muted-foreground'>{notification.body}</p>
-                  <p className='text-xs text-muted-foreground mt-1'>{notification.createdAt}</p>
-                </div>
+                {/* The four oldest notification types (role / age-group bookkeeping) carry no
+                    link, so the body stays plain text rather than a dead anchor. */}
+                {Option.match(notification.link, {
+                  onNone: () => (
+                    <div>
+                      <p className='font-medium'>{notification.title}</p>
+                      <p className='text-sm text-muted-foreground'>{notification.body}</p>
+                      <p className='text-xs text-muted-foreground mt-1'>{notification.createdAt}</p>
+                    </div>
+                  ),
+                  onSome: (link) => (
+                    <Link to={link} className='min-w-0 hover:underline'>
+                      <p className='font-medium'>{notification.title}</p>
+                      <p className='text-sm text-muted-foreground'>{notification.body}</p>
+                      <p className='text-xs text-muted-foreground mt-1'>{notification.createdAt}</p>
+                    </Link>
+                  ),
+                })}
                 {!notification.isRead && (
                   <Button
                     variant='ghost'

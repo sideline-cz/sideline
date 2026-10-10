@@ -3574,7 +3574,7 @@ Disables the current invite code. The team will have no active invite until a ne
 
 #### Enums
 
-**NotificationType:** `"age_group_added"`, `"age_group_removed"`, `"role_assigned"`, `"role_removed"`
+**NotificationType:** `"age_group_added"`, `"age_group_removed"`, `"role_assigned"`, `"role_removed"`, `"event_cancelled"`, `"fee_assigned"`, `"roster_request_approved"`, `"roster_request_declined"`
 
 ---
 
@@ -3599,8 +3599,31 @@ Lists notifications for the authenticated user in a specific team.
 | `type` | `NotificationType` | No | Type of notification |
 | `title` | `string` | No | Notification title |
 | `body` | `string` | No | Notification body text |
+| `link` | `string` | Yes | Team-relative path to navigate to when the notification is clicked (e.g. `/teams/<id>/finance`); `null` for notification types with nothing to link to |
 | `isRead` | `boolean` | No | Whether the notification has been read |
 | `createdAt` | `string` | No | Creation timestamp |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `NotificationForbidden` | 403 | Not a member of the specified team |
+
+---
+
+#### `GET /notifications/unread-count`
+
+Returns the count of unread notifications for the authenticated user in a specific team.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Query Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `teamId` | `TeamId` | Yes | Team to count unread notifications for |
+
+**Response:** `200 OK` — `{ count: number }`
 
 **Errors:**
 

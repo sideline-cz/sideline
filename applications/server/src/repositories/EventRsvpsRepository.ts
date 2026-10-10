@@ -275,6 +275,19 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // Deliberately NOT `findYesRsvpMemberIds`: that one carries attendance semantics (it drops
+  // members a captain confirmed absent) because it feeds auto-logging. Telling someone their
+  // event was cancelled has no such carve-out — they answered yes, so they get told.
+  const findAttendingMemberIds = SqlSchema.findAll({
+    Request: Event.EventId,
+    Result: Schema.Struct({ team_member_id: TeamMember.TeamMemberId }),
+    execute: (eventId) => sql`
+      SELECT team_member_id
+      FROM event_rsvps
+      WHERE event_id = ${eventId} AND response IN ('yes', 'coming_later')
+    `,
+  });
+
   const findNonResponders = SqlSchema.findAll({
     Request: Schema.Struct({
       event_id: Schema.String,
@@ -451,6 +464,12 @@ const make = Effect.gen(function* () {
   const findYesRsvpMemberIdsByEventId = (eventId: Event.EventId) =>
     findYesRsvpMemberIds(eventId).pipe(catchSqlErrors);
 
+  const findAttendingMemberIdsByEventId = (eventId: Event.EventId) =>
+    findAttendingMemberIds(eventId).pipe(
+      Effect.map((rows) => rows.map((row) => row.team_member_id)),
+      catchSqlErrors,
+    );
+
   return {
     findRsvpsByEventId,
     findRsvpByEventAndMember,
@@ -462,6 +481,7 @@ const make = Effect.gen(function* () {
     countRsvpTotal,
     findYesAttendeesForEmbed,
     findYesRsvpMemberIdsByEventId,
+    findAttendingMemberIdsByEventId,
     incrementMissedForEventNonRespondersByEventId,
   };
 });
