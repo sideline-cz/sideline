@@ -8,6 +8,7 @@ import type { Locale } from '~/locale.js';
 import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { eventTypeKindLabel } from '~/rest/events/eventTypeKindLabel.js';
 import { formatEventWhen } from '~/rest/events/eventWhen.js';
+import { formatRsvpLockOffset } from '~/rest/events/rsvpLockOffset.js';
 import { formatName } from '../utils.js';
 import { locationDisplay } from './locationDisplay.js';
 
@@ -166,7 +167,7 @@ export const buildUpcomingEventEmbed = (params: {
         `${rsvpSummary}\n${m.bot_embed_rsvp_until(
           { when: `${toDiscordTimestamp(closesAt, 'f')} · ${toDiscordTimestamp(closesAt, 'R')}` },
           { locale },
-        )}`,
+        )} ${formatRsvpLockOffset(entry.start_at, closesAt, locale)}`,
     }),
   });
 
