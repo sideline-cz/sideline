@@ -1225,10 +1225,13 @@ In-app alert records scoped to a specific team and user.
 | `type` | TEXT | NOT NULL | — |
 | `title` | TEXT | NOT NULL | — |
 | `body` | TEXT | NOT NULL | — |
+| `link` | TEXT | — | — |
 | `is_read` | BOOLEAN | NOT NULL | `false` |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
 **Indexes**: `idx_notifications_user_unread` — partial index on `(user_id, is_read) WHERE is_read = false`
+
+**Notes**: `link` added in migration `1794200000_add_notification_link`; a team-relative path (e.g. `/teams/<id>/finance`) to navigate to when the notification is clicked, or `NULL` for notification types with nothing to link to (nullable on purpose — the four pre-existing types have no meaningful destination and were not backfilled).
 
 ---
 
@@ -2378,6 +2381,7 @@ All 110 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1793100000 | `create_event_attendance` | Creates `event_attendance` (see [6. Events](#6-events) above) — Slice 3a of "Setup memberships". No seed, no backfill: every pre-existing training simply has zero attendance rows, which reads as "never confirmed", the correct state for history predating this feature. |
 | 1793900000 | `create_seasons` | Creates `seasons` (see [12. Finance](#12-finance) above), seeds every pre-existing team with one season carrying over `teams.membership_selection_deadline` and the `MAX` of its plans' non-expired `expires_at`, and creates `seed_first_season_trg` — an `AFTER INSERT ON teams` trigger seeding one for every future team. Creates `governing_season_id(UUID)` and `selection_is_open(UUID)` (the two-candidate selection gate). Replaces `training_period_charges(UUID, DATE)` to count the free-trainings allowance from the governing season's `starts_at` instead of `membership_plans.free_trainings_anchor_at`; drops that column and its stamping trigger/function. Creates `seasons_recompute_trg` (`AFTER INSERT ON seasons`), recomputing the team's current billing period when a newly inserted season's own period is already open. |
 | 1794000000 | `membership_season_fees` | Adds `season_id`/`membership_plan_id` (both FK RESTRICT) to `fees`, widens `fees.kind` to include `'membership'`, and adds the paired CHECKs `fees_kind_season_check`/`fees_kind_plan_check` plus the partial unique index `idx_fees_team_season_plan_currency` (see [12. Finance](#12-finance) above). Adds `season_id` (FK RESTRICT) to `member_credit_deposits` and redefines `member_credit_deposits_bank_source_pair` to be one-directional. Adds `membership_billing_by_user_id` (FK → `users` SET NULL) to `team_settings` — the opt-in and billing recorder, off by default. Creates `membership_season_charges(UUID, UUID)` (the per-member delta/floor derivation) and `recompute_membership_season_fees(UUID)` (the writer, driven by the new `MembershipBillingCron`, not a trigger). No backfill: production has zero `'membership'` fees by construction. |
+| 1794200000 | `add_notification_link` | Adds nullable `link TEXT` to `notifications` (see [10. Notifications](#10-notifications) above) — no backfill for the four pre-existing notification types, which have no meaningful destination. |
 
 ### After Migrations (seed data)
 

@@ -10,6 +10,7 @@ export class NotificationInfo extends Schema.Class<NotificationInfo>('Notificati
   type: NotificationType,
   title: Schema.String,
   body: Schema.String,
+  link: Schema.OptionFromNullOr(Schema.String),
   isRead: Schema.Boolean,
   createdAt: Schema.String,
 }) {}
@@ -25,6 +26,15 @@ export class NotificationApiGroup extends HttpApiGroup.make('notification')
   .add(
     HttpApiEndpoint.get('listNotifications', '/notifications', {
       success: Schema.Array(NotificationInfo),
+      error: Forbidden.pipe(HttpApiSchema.status(403)),
+      query: {
+        teamId: TeamId,
+      },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get('unreadCount', '/notifications/unread-count', {
+      success: Schema.Struct({ count: Schema.Int }),
       error: Forbidden.pipe(HttpApiSchema.status(403)),
       query: {
         teamId: TeamId,

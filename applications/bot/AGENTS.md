@@ -853,7 +853,7 @@ The bot imports translation functions directly from `@sideline/i18n/messages` (e
 
 Rules:
 
-1. **Always import from `@sideline/i18n/messages`** in bot code. The Biome `style/noRestrictedImports` rule that blocks this path in `applications/web/**` is explicitly overridden for `applications/bot/**` in `biome.json` — do not remove that override.
+1. **Always import from `@sideline/i18n/messages`** in bot code. The Biome `style/noRestrictedImports` rule that blocks this path in `applications/web/**` is explicitly overridden for `applications/bot/**` in `biome.json` — do not remove that override. `applications/server/**` shares the same override entry for the same reason (rendering a notification in one member's `users.locale`); the two are independent consumers, so a change to the bot's localization setup must not assume it is the only one in that entry.
 2. **Never import `tr()` or any helper from `applications/web/src/lib/translations.ts`** in the bot. The web `tr()` helper depends on a React provider and an HTTP polling loop; neither exists in the bot runtime.
 3. **Admin edits to `bot_*` keys via the `/admin/translations` page do NOT take effect in Discord until the bot is redeployed.** This is intentional v1 scope: the bot's localization stays deterministic and offline-safe. Document any user-facing string that an admin might expect to edit live as "requires bot redeploy" in the admin UI (the page already badges `bot_*`-prefixed keys with `requires redeploy`).
 4. **When adding a new translation key consumed by the bot**, prefix it with `bot_` so the admin UI can flag it as redeploy-only. Add the key + English text to `packages/i18n/messages/en.json` and the Czech translation to `cs.json`, then rebuild `@sideline/i18n`.

@@ -1,5 +1,6 @@
 import { Auth, Fee, FinanceApi } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
+import * as m from '@sideline/i18n/messages';
 import { Array, DateTime, Effect, Option, Schema } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
@@ -15,6 +16,7 @@ import {
   MemberCreditsRepository,
   type SettleResult,
 } from '~/repositories/MemberCreditsRepository.js';
+import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentsRepository, type PaymentViewRow } from '~/repositories/PaymentsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 
@@ -167,12 +169,13 @@ const toMemberCreditDepositView = (
 export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
+    Effect.bind('notifications', () => NotificationsRepository.asEffect()),
     Effect.bind('fees', () => FeesRepository.asEffect()),
     Effect.bind('assignments', () => FeeAssignmentsRepository.asEffect()),
     Effect.bind('payments', () => PaymentsRepository.asEffect()),
     Effect.bind('overview', () => FinanceOverviewRepository.asEffect()),
     Effect.bind('credits', () => MemberCreditsRepository.asEffect()),
-    Effect.map(({ members, fees, assignments, payments, overview, credits }) =>
+    Effect.map(({ members, fees, assignments, payments, overview, credits, notifications }) =>
       handlers
         // ------------------------------------------------------------------
         // listFees
@@ -455,6 +458,21 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
                 amountMinorOverride: payload.amountMinorOverride,
                 dueAtOverride: payload.dueAtOverride,
               }),
+            ),
+            // Only manual fees reach here — the endpoint refuses generated ones above — so this
+            // never fires for the membership/training sweeps, which would notify the whole team
+            // on every recompute.
+            Effect.tap(({ fee }) =>
+              notifications.notifyMembers(
+                teamId,
+                payload.memberIds,
+                'fee_assigned',
+                `/teams/${teamId}/my-payments`,
+                (locale) => ({
+                  title: m.notification_feeAssigned_title({}, { locale }),
+                  body: m.notification_feeAssigned_body({ fee: fee.name }, { locale }),
+                }),
+              ),
             ),
             Effect.map(({ inserted }) => Array.map(inserted, toAssignmentView)),
           ),

@@ -27,6 +27,7 @@ import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepositor
 import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
 import { MemberCreditsRepository } from '~/repositories/MemberCreditsRepository.js';
+import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -67,6 +68,7 @@ const RealRepos = Layer.mergeAll(
   PaymentsRepository.Default,
   FinanceOverviewRepository.Default,
   MemberCreditsRepository.Default,
+  NotificationsRepository.Default,
 );
 
 const TestLayer = HttpApiBuilder.layer(SmallApi).pipe(

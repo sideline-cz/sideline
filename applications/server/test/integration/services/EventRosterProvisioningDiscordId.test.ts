@@ -17,6 +17,7 @@ import { EventRostersRepository } from '~/repositories/EventRostersRepository.js
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
@@ -40,6 +41,7 @@ const RepoLayer = Layer.mergeAll(
   TeamMembersRepository.Default,
   TeamsRepository.Default,
   UsersRepository.Default,
+  NotificationsRepository.Default,
 );
 
 // Service layer is provided the repos, repos are provided SqlClient

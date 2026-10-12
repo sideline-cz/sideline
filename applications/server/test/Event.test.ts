@@ -1226,6 +1226,8 @@ const MockNotificationsRepositoryLayer = Layer.succeed(NotificationsRepository, 
   findByUser: () => Effect.succeed([]),
   insert: () => Effect.die(new Error('Not implemented')),
   insertBulk: () => Effect.void,
+  notifyMembers: () => Effect.void,
+  unreadCountForTeam: () => Effect.succeed(0),
   markAsRead: () => Effect.void,
   markAllAsRead: () => Effect.void,
   findById: () => Effect.succeed(Option.none()),
@@ -1291,6 +1293,7 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
 
 const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
   _tag: 'api/EventRsvpsRepository',
+  findAttendingMemberIdsByEventId: () => Effect.succeed([]),
   findByEventId: () => Effect.succeed([]),
   findRsvpsByEventId: () => Effect.succeed([]),
   findByEventAndMember: () => Effect.succeed(Option.none()),

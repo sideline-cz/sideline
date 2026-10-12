@@ -1,12 +1,15 @@
 import { Auth, type Event, EventApi, type EventType } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
+import * as m from '@sideline/i18n/messages';
 import { Array, DateTime, Effect, Option, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
 import { checkCoachScoping, checkGroupAccess, checkTrainingTypeOwnerGroup } from '~/api/scoping.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, type EventWithDetails } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
@@ -178,7 +181,9 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
     Effect.bind('groups', () => GroupsRepository.asEffect()),
     Effect.bind('trainingTypes', () => TrainingTypesRepository.asEffect()),
     Effect.bind('teamSettings', () => TeamSettingsRepository.asEffect()),
-    Effect.map(({ members, events, groups, trainingTypes, teamSettings }) =>
+    Effect.bind('rsvps', () => EventRsvpsRepository.asEffect()),
+    Effect.bind('notifications', () => NotificationsRepository.asEffect()),
+    Effect.map(({ members, events, groups, trainingTypes, teamSettings, rsvps, notifications }) =>
       handlers
         .handle('listEvents', ({ params: { teamId }, query: { all } }) =>
           Effect.Do.pipe(
@@ -583,6 +588,31 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
               ),
             ),
             Effect.tap(() => events.cancelEvent(eventId)),
+            // Only people who said they were coming are told. A "no" or a silence means the
+            // event was already not in their plans, and a cancellation they were never counted
+            // on for is noise.
+            Effect.tap(({ existing }) =>
+              rsvps.findAttendingMemberIdsByEventId(eventId).pipe(
+                Effect.flatMap((memberIds) =>
+                  notifications.notifyMembers(
+                    teamId,
+                    memberIds,
+                    'event_cancelled',
+                    `/teams/${teamId}/events/${eventId}`,
+                    (locale) => ({
+                      title: m.notification_eventCancelled_title({}, { locale }),
+                      body: m.notification_eventCancelled_body(
+                        { title: existing.title },
+                        { locale },
+                      ),
+                    }),
+                  ),
+                ),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning('Failed to notify attendees of cancellation', cause),
+                ),
+              ),
+            ),
             Effect.tap(({ existing }) => markPersonalMessagesDirtyBestEffort(events, existing.id)),
             Effect.asVoid,
           ),

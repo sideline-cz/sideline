@@ -22,6 +22,10 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
+import {
+  makeMockNotificationsRepositoryLayer,
+  type RecordedNotification,
+} from '../mocks/notificationMocks.js';
 
 // ---------------------------------------------------------------------------
 // Test IDs
@@ -373,6 +377,8 @@ const buildTestLayer = (
   channelSyncLayer: Layer.Layer<ChannelSyncEventsRepository>,
   eventSyncLayer: Layer.Layer<EventSyncEventsRepository>,
   groupsLayer: Layer.Layer<GroupsRepository>,
+  // Defaulted so the tests that do not care about notifications keep their six-argument calls.
+  notificationSink: Array<RecordedNotification> = [],
 ) =>
   EventRosterProvisioningService.Default.pipe(
     Layer.provide(eventRostersLayer),
@@ -382,6 +388,7 @@ const buildTestLayer = (
     Layer.provide(eventSyncLayer),
     Layer.provide(groupsLayer),
     Layer.provide(makeTeamMembersRepository()),
+    Layer.provide(makeMockNotificationsRepositoryLayer(notificationSink)),
   );
 
 // ---------------------------------------------------------------------------
@@ -1337,6 +1344,7 @@ describe('EventRosterProvisioningService — onRsvp', () => {
 describe('EventRosterProvisioningService — approve / decline', () => {
   it.effect('T6: approve → member added, gated on returned row from claimDecision', () => {
     const calls = makeCalls();
+    const notified: Array<RecordedNotification> = [];
 
     return Effect.Do.pipe(
       Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
@@ -1351,6 +1359,12 @@ describe('EventRosterProvisioningService — approve / decline', () => {
       Effect.tap(() =>
         Effect.sync(() => {
           expect(calls.rosterMemberAdded).toHaveLength(1);
+          // The decision happens in an owners-only Discord thread, so the in-app notification is
+          // the requester's only view of it.
+          expect(notified).toHaveLength(1);
+          expect(notified[0]?.type).toBe('roster_request_approved');
+          expect(notified[0]?.memberIds).toEqual([MEMBER_ID]);
+          expect(notified[0]?.link).toBe(`/teams/${TEAM_ID}/events/${EVENT_ID}`);
         }),
       ),
       Effect.provide(
@@ -1363,6 +1377,7 @@ describe('EventRosterProvisioningService — approve / decline', () => {
           makeChannelSyncEventsRepository(calls),
           makeEventSyncEventsRepository(calls),
           makeGroupsRepository(),
+          notified,
         ),
       ),
       Effect.asVoid,
@@ -1371,6 +1386,7 @@ describe('EventRosterProvisioningService — approve / decline', () => {
 
   it.effect('T7: decline → no roster add', () => {
     const calls = makeCalls();
+    const notified: Array<RecordedNotification> = [];
 
     return Effect.Do.pipe(
       Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
@@ -1385,6 +1401,11 @@ describe('EventRosterProvisioningService — approve / decline', () => {
       Effect.tap(() =>
         Effect.sync(() => {
           expect(calls.rosterMemberAdded).toHaveLength(0);
+          // A decline is the case with no other signal at all — no role appears, no message is
+          // sent — so losing this notification loses the decision entirely.
+          expect(notified).toHaveLength(1);
+          expect(notified[0]?.type).toBe('roster_request_declined');
+          expect(notified[0]?.memberIds).toEqual([MEMBER_ID]);
         }),
       ),
       Effect.provide(
@@ -1397,6 +1418,7 @@ describe('EventRosterProvisioningService — approve / decline', () => {
           makeChannelSyncEventsRepository(calls),
           makeEventSyncEventsRepository(calls),
           makeGroupsRepository(),
+          notified,
         ),
       ),
       Effect.asVoid,

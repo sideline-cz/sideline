@@ -31,6 +31,7 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
@@ -57,6 +58,7 @@ const PlainRepositories = Layer.mergeAll(
   RostersRepository.Default,
   ChannelSyncEventsRepository.Default,
   UsersRepository.Default,
+  NotificationsRepository.Default,
 );
 
 const RealReposLayer = PlainRepositories.pipe(Layer.provideMerge(TestPgClient));

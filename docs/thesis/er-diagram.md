@@ -930,7 +930,7 @@ erDiagram
 
 ### Notifications
 
-`notifications` are in-app alert records scoped to a specific team and user. The `is_read` flag drives unread badge counts; a partial index on `(user_id, is_read) WHERE is_read = false` makes unread queries efficient.
+`notifications` are in-app alert records scoped to a specific team and user. The `is_read` flag drives unread badge counts; a partial index on `(user_id, is_read) WHERE is_read = false` makes unread queries efficient. The nullable `link` column is a team-relative path the web client navigates to when the notification is clicked; it is `NULL` for notification types with nothing to link to.
 
 ```mermaid
 erDiagram
@@ -941,6 +941,7 @@ erDiagram
         TEXT type
         TEXT title
         TEXT body
+        TEXT link
         BOOLEAN is_read
         TIMESTAMPTZ created_at
     }

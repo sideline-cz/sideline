@@ -619,6 +619,17 @@ async function setupApiMocks(page: Page) {
   );
 
   await page.route(
+    '**/notifications/unread-count*',
+    apiOnly(async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mock.mockNotificationUnreadCount),
+      });
+    }),
+  );
+
+  await page.route(
     '**/notifications*',
     apiOnly(async (route) => {
       if (route.request().method() === 'GET') {

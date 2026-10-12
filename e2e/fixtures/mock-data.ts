@@ -421,10 +421,13 @@ export const mockNotifications = [
     type: 'role_assigned',
     title: 'New Event Created',
     body: 'Weekly Training has been scheduled',
+    link: null,
     isRead: false,
     createdAt: '2026-03-28T10:00:00.000Z',
   },
 ];
+
+export const mockNotificationUnreadCount = { count: 0 };
 
 export const mockInviteInfo = {
   teamName: 'Test Team',

@@ -33,11 +33,24 @@ export const NotificationApiLive = HttpApiBuilder.group(Api, 'notification', (ha
                     type: n.type,
                     title: n.title,
                     body: n.body,
+                    link: Option.fromNullishOr(n.link),
                     isRead: n.is_read,
                     createdAt: n.created_at,
                   }),
               ),
             ),
+          ),
+        )
+        .handle('unreadCount', ({ query }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.tap(({ currentUser }) =>
+              requireMembership(members, query.teamId, currentUser.id, forbidden),
+            ),
+            Effect.bind('count', ({ currentUser }) =>
+              notifications.unreadCountForTeam(currentUser.id, query.teamId),
+            ),
+            Effect.map(({ count }) => ({ count })),
           ),
         )
         .handle('markAsRead', ({ params: { notificationId } }) =>
