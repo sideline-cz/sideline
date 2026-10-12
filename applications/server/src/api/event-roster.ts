@@ -88,6 +88,35 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                     Effect.catchTag('EventRosterAlreadyLinked', () => Effect.fail(alreadyLinked)),
                   ),
               ),
+              // Yes-responders who answered BEFORE the roster existed are invisible to the
+              // approval queue otherwise — `onRsvp` only ever fills it going forward.
+              Effect.tap(({ event, row }) =>
+                rsvps.findRsvpsByEventId(eventId).pipe(
+                  Effect.flatMap((allRsvps) =>
+                    provisioning.seedPending({
+                      eventId,
+                      teamId,
+                      rosterId: row.roster_id,
+                      event: {
+                        owner_group_id: event.owner_group_id,
+                        member_group_id: event.member_group_id,
+                        title: event.title,
+                        start_at: event.start_at,
+                        all_day: event.all_day,
+                      },
+                      yesResponders: allRsvps
+                        .filter((r) => isAttendingRsvpResponse(r.response))
+                        .map((r) => ({
+                          team_member_id: r.team_member_id,
+                          display_name: r.display_name,
+                        })),
+                    }),
+                  ),
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning('Failed seeding roster requests on link', cause),
+                  ),
+                ),
+              ),
               Effect.map(
                 ({ row, roster, event }) =>
                   new EventRosterApi.EventRosterLink({
@@ -150,6 +179,35 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                   .pipe(
                     Effect.catchTag('EventRosterAlreadyLinked', () => Effect.fail(alreadyLinked)),
                   ),
+              ),
+              // Yes-responders who answered BEFORE the roster existed are invisible to the
+              // approval queue otherwise — `onRsvp` only ever fills it going forward.
+              Effect.tap(({ event, row }) =>
+                rsvps.findRsvpsByEventId(eventId).pipe(
+                  Effect.flatMap((allRsvps) =>
+                    provisioning.seedPending({
+                      eventId,
+                      teamId,
+                      rosterId: row.roster_id,
+                      event: {
+                        owner_group_id: event.owner_group_id,
+                        member_group_id: event.member_group_id,
+                        title: event.title,
+                        start_at: event.start_at,
+                        all_day: event.all_day,
+                      },
+                      yesResponders: allRsvps
+                        .filter((r) => isAttendingRsvpResponse(r.response))
+                        .map((r) => ({
+                          team_member_id: r.team_member_id,
+                          display_name: r.display_name,
+                        })),
+                    }),
+                  ),
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning('Failed seeding roster requests on link', cause),
+                  ),
+                ),
               ),
               Effect.map(
                 ({ row, roster, event }) =>
