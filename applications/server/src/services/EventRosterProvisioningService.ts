@@ -91,6 +91,29 @@ type BackfillParams = {
   }>;
 };
 
+/**
+ * `seedPending` works off the event the caller already loaded rather than re-reading it: the
+ * link endpoints have it in hand, and the approval emit needs `title`/`start_at`/`all_day`
+ * anyway. `owner_group_id` is the gate — an event without one cannot route an approval
+ * anywhere, which is the same reason `onRsvp`'s T3 branch gives up.
+ */
+type SeedPendingParams = {
+  readonly eventId: Event.EventId;
+  readonly teamId: Team.TeamId;
+  readonly rosterId: RosterModel.RosterId;
+  readonly event: {
+    readonly owner_group_id: Option.Option<GroupModel.GroupId>;
+    readonly member_group_id: Option.Option<GroupModel.GroupId>;
+    readonly title: string;
+    readonly start_at: import('effect').DateTime.Utc;
+    readonly all_day: boolean;
+  };
+  readonly yesResponders: ReadonlyArray<{
+    readonly team_member_id: TeamMember.TeamMemberId;
+    readonly display_name: Option.Option<string>;
+  }>;
+};
+
 type BackfillResult = {
   readonly added: number;
   readonly cancelled: number;
@@ -539,6 +562,132 @@ const make = Effect.Do.pipe(
       // backfill — T12
       // -------------------------------------------------------------------------
 
+      /**
+       * Seed pending approval requests when a roster is first connected to an event.
+       *
+       * Linking a roster to an event that ALREADY has yes-responders used to strand them: the
+       * approval queue is only ever filled by `onRsvp`, so everyone who answered before the
+       * captain set the roster up was invisible to it — they had said yes, and nothing asked
+       * the owners about them.
+       *
+       * Deliberately the auto-approve-OFF twin of `backfill`, not an extension of it. With
+       * auto-approve ON a pending row is a contradiction (the whole point is that nobody is
+       * asked), so this returns 0 for that case and leaves the approve-and-add behaviour to
+       * `backfill`, which the link endpoints do not call today.
+       *
+       * A member is seeded only when they are a yes-responder, in the event's member-group
+       * scope, NOT already on the roster, and own NO request row for this event beyond a
+       * `cancelled` one. That last clause is the sharp edge — see `findAllByEvent`: keying off
+       * "has no pending row" would reopen decisions an owner already made, because an unlink
+       * leaves decided rows behind and `upsertPending` only refuses to downgrade `approved`.
+       * A `cancelled` row IS re-seeded: that status means a previous unlink withdrew the ask,
+       * not that anyone judged it.
+       *
+       * Never fails: a link must succeed even if the queue cannot be filled.
+       */
+      const seedPending = (params: SeedPendingParams): Effect.Effect<number, never, never> => {
+        const { eventId, teamId, rosterId, event, yesResponders } = params;
+
+        if (yesResponders.length === 0) return Effect.succeed(0);
+
+        return eventRosters.findByEventId(eventId).pipe(
+          Effect.flatMap((linkOption) => {
+            if (Option.isNone(linkOption)) return Effect.succeed(0);
+            const link = linkOption.value;
+
+            // Auto-approve ON is `backfill`'s job, not this one.
+            if (link.auto_approve) return Effect.succeed(0);
+
+            // Same give-up as onRsvp's T3: no owner group, nowhere to send the approval.
+            if (Option.isNone(event.owner_group_id)) {
+              return Effect.logWarning(
+                `Event ${eventId} has no owner group — cannot seed roster approval requests`,
+              ).pipe(Effect.as(0));
+            }
+
+            return Effect.Do.pipe(
+              Effect.bind('eligibleIds', () =>
+                Option.match(safeOption(event.member_group_id), {
+                  onNone: () => Effect.succeed(new Set(yesResponders.map((r) => r.team_member_id))),
+                  onSome: (memberGroupId) =>
+                    groups.getDescendantMemberIds(memberGroupId).pipe(
+                      Effect.map((ids) => new Set(ids)),
+                      Effect.catch(() => Effect.succeed(new Set<TeamMember.TeamMemberId>())),
+                    ),
+                }),
+              ),
+              Effect.bind('rosterMemberIds', () =>
+                rosters.findMemberEntriesById(rosterId).pipe(
+                  Effect.map((entries) => new Set(entries.map((e) => resolveEntryMemberId(e)))),
+                  Effect.catch(() => Effect.succeed(new Set<TeamMember.TeamMemberId>())),
+                ),
+              ),
+              Effect.bind('decidedIds', () =>
+                requests.findAllByEvent(eventId).pipe(
+                  Effect.map(
+                    (rows) =>
+                      new Set(
+                        rows
+                          .filter((row) => row.status !== 'cancelled')
+                          .map((row) => row.team_member_id),
+                      ),
+                  ),
+                  Effect.catch(() => Effect.succeed(new Set<TeamMember.TeamMemberId>())),
+                ),
+              ),
+              Effect.bind('seeded', ({ eligibleIds, rosterMemberIds, decidedIds }) =>
+                Effect.forEach(
+                  yesResponders,
+                  (responder) => {
+                    const memberId = responder.team_member_id;
+                    if (
+                      !eligibleIds.has(memberId) ||
+                      rosterMemberIds.has(memberId) ||
+                      decidedIds.has(memberId)
+                    ) {
+                      return Effect.succeed(false);
+                    }
+
+                    // `wasMemberBefore` is false by construction — the guard above already
+                    // excluded everyone currently on the roster.
+                    return requests.upsertPending(eventId, rosterId, memberId, false).pipe(
+                      Effect.flatMap(() =>
+                        eventSync
+                          .emitEventRosterApprovalRequest(
+                            teamId,
+                            eventId,
+                            link.id,
+                            rosterId,
+                            memberId,
+                            responder.display_name,
+                            event.title,
+                            event.start_at,
+                            safeOption(link.owners_thread_id),
+                            Option.none(),
+                            Option.some(link.roster_name),
+                            event.all_day,
+                          )
+                          .pipe(Effect.ignore),
+                      ),
+                      Effect.as(true),
+                      Effect.catch(() => Effect.succeed(false)),
+                    );
+                  },
+                  // Serial: each seed emits its own owners-thread message, and the bot renders
+                  // one card per request. Concurrency here would race the thread's creation.
+                  { concurrency: 1 },
+                ).pipe(Effect.map((results) => results.filter(Boolean).length)),
+              ),
+              Effect.map(({ seeded }) => seeded),
+              Effect.catch(() => Effect.succeed(0)),
+            );
+          }),
+          Effect.catchCause((cause) =>
+            Effect.logWarning('Failed seeding roster approval requests', cause).pipe(Effect.as(0)),
+          ),
+        );
+      };
+
       const backfill = (params: BackfillParams): Effect.Effect<BackfillResult, never, never> => {
         const { eventId, teamId, rosterId, yesResponders } = params;
 
@@ -671,7 +820,7 @@ const make = Effect.Do.pipe(
         );
       };
 
-      return { onRsvp, approve, decline, backfill };
+      return { onRsvp, approve, decline, backfill, seedPending };
     },
   ),
 );

@@ -33,6 +33,11 @@ class CancelRow extends Schema.Class<CancelRow>('EventRosterCancelRow')({
   was_member_before: Schema.Boolean,
 }) {}
 
+class AnyStatusRow extends Schema.Class<AnyStatusRow>('EventRosterAnyStatusRow')({
+  team_member_id: TeamMember.TeamMemberId,
+  status: EventRosterModel.EventRosterRequestStatus,
+}) {}
+
 class PendingWithMemberRow extends Schema.Class<PendingWithMemberRow>('EventRosterPendingRow')({
   id: EventRosterModel.EventRosterRequestId,
   event_id: Event.EventId,
@@ -185,6 +190,16 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  const _findAllByEvent = SqlSchema.findAll({
+    Request: Event.EventId,
+    Result: AnyStatusRow,
+    execute: (eventId) => sql`
+      SELECT team_member_id, status
+      FROM event_roster_requests
+      WHERE event_id = ${eventId}
+    `,
+  });
+
   const _findPendingByEvent = SqlSchema.findAll({
     Request: Event.EventId,
     Result: PendingWithMemberRow,
@@ -303,6 +318,17 @@ const make = Effect.gen(function* () {
   const findPendingByEvent = (eventId: Event.EventId) =>
     _findPendingByEvent(eventId).pipe(catchSqlErrors);
 
+  /**
+   * Every request row for an event, whatever its status — the decided ones included.
+   *
+   * `findPendingByEvent` cannot answer the question `seedPending` asks. The uniqueness key is
+   * (event_id, team_member_id), so a member who was DECLINED still owns the row; seeding off
+   * "has no pending row" would hand that row straight to `upsertPending`, whose `ON CONFLICT`
+   * only refuses to downgrade an `approved` row and would flip a decline back to pending —
+   * silently reopening a decision an owner already made.
+   */
+  const findAllByEvent = (eventId: Event.EventId) => _findAllByEvent(eventId).pipe(catchSqlErrors);
+
   const findPendingByRoster = (rosterId: RosterModel.RosterId) =>
     _findPendingByRoster(rosterId).pipe(catchSqlErrors);
 
@@ -326,6 +352,7 @@ const make = Effect.gen(function* () {
     cancel,
     saveMessageId,
     findPendingByEvent,
+    findAllByEvent,
     findPendingByRoster,
     wasMemberBefore,
   };

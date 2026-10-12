@@ -13,7 +13,7 @@ import type {
   Team,
   TeamMember,
 } from '@sideline/domain';
-import { Effect, Layer, Option } from 'effect';
+import { DateTime, Effect, Layer, Option } from 'effect';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
 import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
@@ -159,6 +159,11 @@ const makeRequestsRepository = (
       display_name: Option.Option<string>;
       discord_message_id: Option.Option<Discord.Snowflake>;
     }>;
+    allByEvent?: Array<{
+      team_member_id: TeamMember.TeamMemberId;
+      status: EventRosterModel.EventRosterRequestStatus;
+    }>;
+    pendingUpserts?: Array<TeamMember.TeamMemberId>;
   } = {},
 ) => {
   const {
@@ -166,6 +171,8 @@ const makeRequestsRepository = (
     claimDecisionResult = Option.some({ was_member_before: false }),
     cancelResult = Option.none(),
     pendingByEvent = [],
+    allByEvent = [],
+    pendingUpserts,
   } = opts;
 
   return Layer.succeed(EventRosterRequestsRepository, {
@@ -176,16 +183,24 @@ const makeRequestsRepository = (
         status: 'approved' as EventRosterModel.EventRosterRequestStatus,
         was_member_before: wasMember,
       }),
-    upsertPending: () =>
-      Effect.succeed({
+    upsertPending: (
+      _eventId: any,
+      _rosterId: any,
+      memberId: TeamMember.TeamMemberId,
+      _wasMember: boolean,
+    ) => {
+      pendingUpserts?.push(memberId);
+      return Effect.succeed({
         id: REQUEST_ID,
         status: 'pending' as EventRosterModel.EventRosterRequestStatus,
         was_member_before: false,
-      }),
+      });
+    },
     claimDecision: () => Effect.succeed(claimDecisionResult),
     cancel: () => Effect.succeed(cancelResult),
     saveMessageId: () => Effect.void,
     findPendingByEvent: () => Effect.succeed(pendingByEvent),
+    findAllByEvent: () => Effect.succeed(allByEvent),
     wasMemberBefore: () => Effect.succeed(false),
     findPendingByRoster: () => Effect.succeed([]),
   } as any);
@@ -1330,6 +1345,169 @@ describe('EventRosterProvisioningService — onRsvp', () => {
           makeEventSyncEventsRepository(calls),
           makeGroupsRepository(),
         ),
+      ),
+      Effect.asVoid,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// seedPending — filling the approval queue when a roster is first linked
+// ---------------------------------------------------------------------------
+//
+// `onRsvp` only ever fills the queue going forward, so members who answered yes BEFORE the
+// captain linked the roster were invisible to the owners. These pin who gets seeded and, more
+// importantly, who does NOT.
+
+describe('EventRosterProvisioningService — seedPending', () => {
+  const seedEvent = {
+    owner_group_id: Option.some(OWNER_GROUP_ID),
+    member_group_id: Option.none<GroupModel.GroupId>(),
+    title: 'Summer Tournament',
+    start_at: DateTime.makeUnsafe('2099-07-01T10:00:00Z'),
+    all_day: false,
+  };
+
+  const runSeed = (
+    opts: {
+      autoApprove?: boolean;
+      isMember?: boolean;
+      allByEvent?: Array<{
+        team_member_id: TeamMember.TeamMemberId;
+        status: EventRosterModel.EventRosterRequestStatus;
+      }>;
+      ownerGroup?: Option.Option<GroupModel.GroupId>;
+      responders?: Array<TeamMember.TeamMemberId>;
+    },
+    upserts: Array<TeamMember.TeamMemberId>,
+    calls: Calls,
+  ) =>
+    Effect.Do.pipe(
+      Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+      Effect.flatMap(({ service }) =>
+        service.seedPending({
+          eventId: EVENT_ID,
+          teamId: TEAM_ID,
+          rosterId: ROSTER_ID,
+          event: { ...seedEvent, owner_group_id: opts.ownerGroup ?? seedEvent.owner_group_id },
+          yesResponders: (opts.responders ?? [MEMBER_ID]).map((id) => ({
+            team_member_id: id,
+            display_name: Option.some('Player'),
+          })),
+        }),
+      ),
+      Effect.provide(
+        buildTestLayer(
+          makeEventRostersRepository({ autoApprove: opts.autoApprove ?? false }),
+          makeRequestsRepository({ allByEvent: opts.allByEvent ?? [], pendingUpserts: upserts }),
+          makeRostersRepository({ isMember: opts.isMember ?? false }),
+          makeChannelSyncEventsRepository(calls),
+          makeEventSyncEventsRepository(calls),
+          makeGroupsRepository(),
+        ),
+      ),
+    );
+
+  it.effect('seeds a yes-responder who is not on the roster and has no request', () => {
+    const upserts: Array<TeamMember.TeamMemberId> = [];
+    const calls = makeCalls();
+
+    return runSeed({}, upserts, calls).pipe(
+      Effect.tap((seeded) =>
+        Effect.sync(() => {
+          expect(seeded).toBe(1);
+          expect(upserts).toEqual([MEMBER_ID]);
+          // The owners only learn about it through the approval message.
+          expect(calls.approvalRequestEmitted).toHaveLength(1);
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  it.effect('does NOT reopen a declined request', () => {
+    const upserts: Array<TeamMember.TeamMemberId> = [];
+    const calls = makeCalls();
+
+    // The sharp edge. `upsertPending`'s ON CONFLICT only refuses to downgrade `approved`, so
+    // seeding off "has no PENDING row" would flip this decline straight back to pending and
+    // silently undo the owner's decision.
+    return runSeed(
+      { allByEvent: [{ team_member_id: MEMBER_ID, status: 'declined' }] },
+      upserts,
+      calls,
+    ).pipe(
+      Effect.tap((seeded) =>
+        Effect.sync(() => {
+          expect(seeded).toBe(0);
+          expect(upserts).toEqual([]);
+          expect(calls.approvalRequestEmitted).toHaveLength(0);
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  it.effect('re-seeds a cancelled request — an unlink withdrew the ask, nobody judged it', () => {
+    const upserts: Array<TeamMember.TeamMemberId> = [];
+    const calls = makeCalls();
+
+    return runSeed(
+      { allByEvent: [{ team_member_id: MEMBER_ID, status: 'cancelled' }] },
+      upserts,
+      calls,
+    ).pipe(
+      Effect.tap((seeded) =>
+        Effect.sync(() => {
+          expect(seeded).toBe(1);
+          expect(upserts).toEqual([MEMBER_ID]);
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  it.effect('skips a member already on the roster', () => {
+    const upserts: Array<TeamMember.TeamMemberId> = [];
+    const calls = makeCalls();
+
+    return runSeed({ isMember: true }, upserts, calls).pipe(
+      Effect.tap((seeded) =>
+        Effect.sync(() => {
+          expect(seeded).toBe(0);
+          expect(upserts).toEqual([]);
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  it.effect("does nothing when auto-approve is ON — that is backfill's job", () => {
+    const upserts: Array<TeamMember.TeamMemberId> = [];
+    const calls = makeCalls();
+
+    // A pending row under auto-approve is a contradiction: nobody is meant to be asked.
+    return runSeed({ autoApprove: true }, upserts, calls).pipe(
+      Effect.tap((seeded) =>
+        Effect.sync(() => {
+          expect(seeded).toBe(0);
+          expect(upserts).toEqual([]);
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  it.effect('gives up when the event has no owner group — nowhere to route approval', () => {
+    const upserts: Array<TeamMember.TeamMemberId> = [];
+    const calls = makeCalls();
+
+    return runSeed({ ownerGroup: Option.none() }, upserts, calls).pipe(
+      Effect.tap((seeded) =>
+        Effect.sync(() => {
+          expect(seeded).toBe(0);
+          expect(upserts).toEqual([]);
+        }),
       ),
       Effect.asVoid,
     );
