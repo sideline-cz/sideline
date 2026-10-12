@@ -1008,6 +1008,24 @@ describe('buildUpcomingEventEmbed — rsvp_closes_at', () => {
     expect(withDeadline.field?.value.startsWith(without.field?.value ?? '')).toBe(true);
   });
 
+  // The offset is derived from `start_at - rsvp_closes_at` inside the renderer, so this pins
+  // that the two instants reach it in the right order — a swap renders "(at start)" for every
+  // event, which is wrong but entirely plausible-looking on a card.
+  it('case 1b: the deadline line carries the lock offset, derived from start_at', () => {
+    const closesAt = DateTime.subtract(FUTURE_START, { hours: 3 });
+    const { field } = rsvpField(makeEntry({ rsvp_closes_at: Option.some(closesAt) }));
+
+    expect(field?.value).toContain('(3 h before start)');
+  });
+
+  it('case 1c: a whole-day offset reads in days, not hours', () => {
+    const closesAt = DateTime.subtract(FUTURE_START, { hours: 48 });
+    const { field } = rsvpField(makeEntry({ rsvp_closes_at: Option.some(closesAt) }));
+
+    expect(field?.value).toContain('(2 d before start)');
+    expect(field?.value).not.toContain('48 h');
+  });
+
   // Distinct from case 3 below, which covers a DECODED entry (key absent -> Option.none()).
   // This is the HAND-BUILT entry: `rsvp_closes_at` is literally `undefined`, not an Option.
   // `Option.match(undefined, ...)` throws `Cannot read properties of undefined (reading '_tag')`,
