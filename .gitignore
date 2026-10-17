@@ -49,3 +49,7 @@ HANDOVER.md
 
 # Generated docs search index for the assistant (applications/server/scripts/build-docs-index.mjs)
 applications/server/src/services/ai/generated/
+
+# herdr worktree scaffolding — written into a worktree root at launch, never source
+.herdr-launch.sh
+.herdr-prompt.txt
