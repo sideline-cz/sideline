@@ -20,21 +20,10 @@ import { ApiClient, ClientError, NotFound, useRun, warnAndCatchAll } from '~/lib
 import { useServerUrl } from '~/lib/translation-overrides-context.js';
 import { tr } from '~/lib/translations.js';
 
-// Pinned explicitly rather than inferred, for the same reason as `finances.tsx:54`:
-// `Route.useLoaderData()` resolves through the whole registered router type, and that inference
-// collapses to `any` once the generated API client grows past a threshold — which it did when the
-// expenses group gained its attachment endpoints. Left inferred, every line of this route is
-// unchecked while `pnpm check` stays green.
-interface ExpensesLoaderData {
-  readonly expenses: ReadonlyArray<ExpenseApi.ExpenseView>;
-  readonly canManageExpenses: boolean;
-  readonly teamId: Team.TeamId;
-}
-
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances_/expenses')({
   ssr: false,
   component: ExpensesRoute,
-  loader: async ({ params, context }): Promise<ExpensesLoaderData> => {
+  loader: async ({ params, context }) => {
     const teamId = await Schema.decodeEffect(Team.TeamId)(params.teamId).pipe(
       Effect.mapError(NotFound.make),
       context.run,
@@ -60,7 +49,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances_/e
 });
 
 function ExpensesRoute() {
-  const { expenses, canManageExpenses, teamId }: ExpensesLoaderData = Route.useLoaderData();
+  const { expenses, canManageExpenses, teamId } = Route.useLoaderData();
   const router = useRouter();
   const run = useRun();
   const serverUrl = useServerUrl();

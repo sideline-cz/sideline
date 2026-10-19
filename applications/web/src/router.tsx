@@ -14,6 +14,10 @@ import { routeTree } from './routeTree.gen';
  */
 declare module '@tanstack/react-router' {
   interface Register {
+    // Registering the router is what gives `Route.useLoaderData()`, `useParams()` and
+    // `useSearch()` their real types. Without it `RegisteredRouter` falls back to
+    // `AnyRouter` and every route's loader data silently resolves to `any`.
+    router: ReturnType<typeof getRouter>;
     config: {
       '~types': {
         defaultSsr: false;
