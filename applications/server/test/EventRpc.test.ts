@@ -739,6 +739,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       event_type_name: Option.none(),
       event_type_color: Option.none(),
       rsvp_closes_at: Option.none(),
+      attending_gender_counts: Option.none(),
     });
 
     return Effect.sync(() => {
@@ -772,6 +773,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       event_type_name: Option.none(),
       event_type_color: Option.none(),
       rsvp_closes_at: Option.none(),
+      attending_gender_counts: Option.none(),
     });
 
     return Effect.sync(() => {
@@ -811,6 +813,7 @@ describe('UpcomingEventForUserEntry — my_response is Some("coming_later"), not
       event_type_name: Option.none(),
       event_type_color: Option.none(),
       rsvp_closes_at: Option.none(),
+      attending_gender_counts: Option.none(),
     });
 
     return Effect.sync(() => {

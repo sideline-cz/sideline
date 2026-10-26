@@ -6,6 +6,7 @@ import { RsvpResponse } from '~/models/EventRsvp.js';
 import { EventTypeColor, EventTypeId, EventTypeKind } from '~/models/EventType.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 import { TrainingTypeId } from '~/models/TrainingType.js';
+import { GenderCounts } from '~/models/User.js';
 
 // event_type_name/event_type_color are wire-compatible additions to the five RPC entries
 // that already render `event_type`: an old peer on either side of the bot-ships-before-server
@@ -256,6 +257,20 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
    * of them fails NOTHING except `test/integration/rpc/UpcomingEventsLock.test.ts`.
    */
   rsvp_closes_at: Schema.OptionFromOptionalKey(Schemas.DateTimeFromIsoString),
+  /**
+   * Gender split of the members who are GOING, for the `📊 Účast` / `📊 RSVPs` embed field.
+   * Derived from `isAttendingRsvpResponse` server-side, never from `response = 'yes'`.
+   *
+   * `OptionFromOptionalKey`, same rolling-deploy rationale as `rsvp_closes_at` above — and
+   * the SAME hazard: this class has TWO producers (`rpc/event/index.ts`'s
+   * `Event/GetUpcomingEventsForUser` and `rpc/guild/index.ts`'s
+   * `Guild/GetAllUpcomingEventsForUser`, which feeds the personal cards). Wiring only one
+   * leaves the other silently rendering no gender line. Both are wired; both are tested.
+   *
+   * Read it with `?? Option.none()` at the render site — the bot suite hand-builds entries
+   * of this shape and omits optional keys, and `Option.match(undefined, …)` throws.
+   */
+  attending_gender_counts: Schema.OptionFromOptionalKey(GenderCounts),
   ...EventTypeRenderFields,
 }) {}
 

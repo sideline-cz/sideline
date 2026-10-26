@@ -5,7 +5,7 @@ import { Snowflake } from '~/models/Discord.js';
 import { EventId } from '~/models/Event.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
-import { Gender } from '~/models/User.js';
+import { Gender, GenderCounts } from '~/models/User.js';
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -83,12 +83,7 @@ export class GeneratedTeamResponse extends Schema.Class<GeneratedTeamResponse>(
   index: Schema.Int,
   members: Schema.Array(GeneratedTeamMember),
   averageRating: Schema.Number,
-  genderCounts: Schema.Struct({
-    male: Schema.Int,
-    female: Schema.Int,
-    other: Schema.Int,
-    unknown: Schema.Int,
-  }),
+  genderCounts: GenderCounts,
 }) {}
 
 export class GenerateTeamsResponse extends Schema.Class<GenerateTeamsResponse>(

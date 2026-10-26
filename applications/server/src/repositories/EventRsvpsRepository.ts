@@ -1,4 +1,4 @@
-import { Discord, Event, EventRsvp, type Team, TeamMember } from '@sideline/domain';
+import { Discord, Event, EventRsvp, type Team, TeamMember, User } from '@sideline/domain';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
@@ -66,6 +66,23 @@ class TotalCount extends Schema.Class<TotalCount>('TotalCount')({
 
 class ResponseCount extends Schema.Class<ResponseCount>('ResponseCount')({
   response: EventRsvp.RsvpResponse,
+  count: Schema.NumberFromString,
+}) {}
+
+// One row per (event, response, gender) group. Deliberately RAW: the attendance rule is
+// NOT applied here. `event_rsvps.response` and `users.gender` come back unfiltered and
+// unbucketed, and `utils/attendingGenderCounts.ts` folds them through the real
+// `isAttendingRsvpResponse` predicate in TypeScript. Putting `response IN ('yes',
+// 'coming_later')` in this SQL would make a third copy of a rule that is supposed to have
+// exactly one definition.
+class AttendingGenderCountRow extends Schema.Class<AttendingGenderCountRow>(
+  'AttendingGenderCountRow',
+)({
+  event_id: Event.EventId,
+  response: EventRsvp.RsvpResponse,
+  // NULL `users.gender` (no profile, or profile with gender unset) and a missing `users`
+  // row both arrive as `None` and fold into the `unknown` bucket.
+  gender: Schema.OptionFromNullOr(User.Gender),
   count: Schema.NumberFromString,
 }) {}
 
@@ -172,6 +189,19 @@ const make = Effect.gen(function* () {
       FROM event_rsvps
       WHERE event_id = ${eventId}
       GROUP BY response
+    `,
+  });
+
+  const countGendersByEventIds = SqlSchema.findAll({
+    Request: Schema.Struct({ event_ids: Schema.Array(Schema.String) }),
+    Result: AttendingGenderCountRow,
+    execute: (input) => sql`
+      SELECT er.event_id, er.response, u.gender, COUNT(*)::text AS count
+      FROM event_rsvps er
+      JOIN team_members tm ON tm.id = er.team_member_id
+      LEFT JOIN users u ON u.id = tm.user_id
+      WHERE er.event_id = ANY(${input.event_ids}::uuid[])
+      GROUP BY er.event_id, er.response, u.gender
     `,
   });
 
@@ -417,6 +447,14 @@ const make = Effect.gen(function* () {
   const countRsvpsByEventId = (eventId: Event.EventId) =>
     countByEventId(eventId).pipe(catchSqlErrors);
 
+  // Batched on purpose: the Discord card renders a LIST of upcoming events, so a per-event
+  // call would be N round trips. `ANY(…::uuid[])` returns no rows for an empty array, but
+  // the short-circuit skips a pointless query entirely.
+  const countAttendingGendersByEventIds = (eventIds: ReadonlyArray<string>) =>
+    eventIds.length === 0
+      ? Effect.succeed([] as ReadonlyArray<AttendingGenderCountRow>)
+      : countGendersByEventIds({ event_ids: eventIds }).pipe(catchSqlErrors);
+
   const findRsvpAttendeesPage = (eventId: Event.EventId, offset: number, limit: number) =>
     findAttendeesPage({ event_id: eventId, limit, offset }).pipe(catchSqlErrors);
 
@@ -476,6 +514,7 @@ const make = Effect.gen(function* () {
     findRsvpMessageByEventAndDiscordUser,
     upsertRsvp,
     countRsvpsByEventId,
+    countAttendingGendersByEventIds,
     findRsvpAttendeesPage,
     findNonRespondersByEventId,
     countRsvpTotal,

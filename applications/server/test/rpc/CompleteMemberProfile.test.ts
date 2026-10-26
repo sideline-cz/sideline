@@ -21,6 +21,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
@@ -219,6 +220,7 @@ const TestLayer = GuildsRpcLive.pipe(
       Layer.succeed(PersonalEventChannelsRepository, voidProxy()),
       Layer.succeed(PersonalEventOverflowCategoriesRepository, voidProxy()),
       Layer.succeed(EventsRepository, voidProxy()),
+      Layer.succeed(EventRsvpsRepository, voidProxy()),
       Layer.succeed(SudoSessionsRepository, voidProxy()),
     ),
   ),

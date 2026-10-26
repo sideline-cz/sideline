@@ -1,5 +1,5 @@
 import type { EventApi, EventRsvpApi } from '@sideline/domain';
-import { EventRsvp } from '@sideline/domain';
+import { EventRsvp, User } from '@sideline/domain';
 import { DateTime, type Effect, Option } from 'effect';
 import { Check, ChevronDown, CircleHelp, Clock, Loader2, Lock, Play, X } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
@@ -94,6 +94,26 @@ function LockedAnswerRow({
       </span>
       {message !== '' && <span className='text-muted-foreground'> — “{message}”</span>}
     </div>
+  );
+}
+
+// One line accounting for everyone who is going. The total LEADS so the breakdown that
+// follows can never be read as the whole set — a bare "5 male · 6 female" silently omits the
+// 46% of members with no recorded gender, which is the bug this line exists to prevent.
+// Zero buckets are omitted; `more` carries `other` + unrecorded together.
+function GenderSplitLine({ counts }: { counts: User.GenderCounts }) {
+  const split = User.genderSplitDisplay(counts);
+  if (split === null) return null;
+  const parts = [
+    split.male > 0 ? tr('rsvp_genderSplit_male', { count: String(split.male) }) : null,
+    split.female > 0 ? tr('rsvp_genderSplit_female', { count: String(split.female) }) : null,
+    split.more > 0 ? tr('rsvp_genderSplit_more', { count: String(split.more) }) : null,
+  ].filter((p): p is string => p !== null);
+  const total = tr('rsvp_genderSplit_total', { count: String(split.total) });
+  return (
+    <p className='mt-2 text-sm text-muted-foreground'>
+      {parts.length === 0 ? total : `${total} — ${parts.join(' · ')}`}
+    </p>
   );
 }
 
@@ -366,6 +386,10 @@ export function EventRsvpPanel({
           );
         })}
       </div>
+
+      {Option.isSome(rsvpDetail.attendingGenderCounts) && (
+        <GenderSplitLine counts={rsvpDetail.attendingGenderCounts.value} />
+      )}
 
       {belowMinPlayers && (
         <Alert variant='warning' role='status' className='mt-4'>

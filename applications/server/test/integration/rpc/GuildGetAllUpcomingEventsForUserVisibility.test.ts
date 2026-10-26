@@ -67,6 +67,7 @@ const PlainRepositories = Layer.mergeAll(
   PersonalEventChannelsRepository.Default,
   PersonalEventOverflowCategoriesRepository.Default,
   EventsRepository.Default,
+  EventRsvpsRepository.Default,
   SudoSessionsRepository.Default,
 );
 

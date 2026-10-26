@@ -11,7 +11,7 @@ import { LogicError } from '@sideline/effect-lib';
 import { Array, DateTime, Effect, Metric, Option, pipe, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
-import { requireMembership, requirePermission } from '~/api/permissions.js';
+import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
 import { rsvpSubmissionsTotal } from '~/metrics.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -20,6 +20,10 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { eventRsvpOpen, rsvpClosesAtOf } from '~/utils/allDayRsvpWindow.js';
+import {
+  attendingGenderCountsFor,
+  foldAttendingGenderCounts,
+} from '~/utils/attendingGenderCounts.js';
 import { requireCompleteProfile } from '~/utils/requireCompleteProfile.js';
 import {
   isLeavingRequiredNoteResponse,
@@ -79,13 +83,22 @@ const buildRsvpDetail = (
   canRsvp: boolean,
   rsvpClosesAt: Option.Option<DateTime.Utc>,
   minPlayersThreshold: number,
+  // Gender is personal data, so the aggregate rides the same gate as the per-person gender
+  // icon `PlayerCard.tsx` already renders. `false` omits the key entirely rather than
+  // sending zeroes, which would be indistinguishable from "nobody is going".
+  canViewMembers: boolean,
 ) =>
   Effect.Do.pipe(
     Effect.bind('allRsvps', () => rsvps.findRsvpsByEventId(eventId)),
     Effect.bind('myRsvp', () => rsvps.findRsvpByEventAndMember(eventId, myMemberId)),
     Effect.bind('counts', () => rsvps.countRsvpsByEventId(eventId)),
+    Effect.bind('genderRows', () =>
+      canViewMembers
+        ? rsvps.countAttendingGendersByEventIds([eventId])
+        : Effect.succeed([] as const),
+    ),
     Effect.map(
-      ({ allRsvps, myRsvp, counts }) =>
+      ({ allRsvps, myRsvp, counts, genderRows }) =>
         new EventRsvpApi.EventRsvpDetail({
           myResponse: Option.map(myRsvp, (my) => my.response),
           myMessage: Option.flatMap(myRsvp, (my) => my.message),
@@ -116,6 +129,10 @@ const buildRsvpDetail = (
           canRsvp,
           rsvpClosesAt,
           minPlayersThreshold,
+          attendingGenderCounts: attendingGenderCountsFor(
+            foldAttendingGenderCounts(genderRows),
+            eventId,
+          ),
         }),
     ),
   );
@@ -171,6 +188,7 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                   onNone: () => 0,
                   onSome: (s) => s.min_players_threshold,
                 }),
+                hasPermission(membership, 'member:view'),
               ),
             ),
           ),

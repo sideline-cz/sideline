@@ -267,6 +267,7 @@ const makePassThroughRepositories = () =>
       findRsvpsByEventId: () => Effect.succeed([]),
       findRsvpByEventAndMember: () => Effect.succeed(Option.none()),
       upsertRsvp: () => Effect.die(new Error('Not implemented')),
+      countAttendingGendersByEventIds: () => Effect.succeed([]),
       countRsvpsByEventId: () => Effect.succeed([]),
       findNonRespondersByEventId: () => Effect.succeed([]),
       findRsvpAttendeesPage: () => Effect.succeed([]),

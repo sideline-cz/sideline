@@ -805,6 +805,7 @@ const TestLayer = ApiLive.pipe(
           findByEventAndMember: () => Effect.succeed(Option.none()),
           findRsvpByEventAndMember: () => Effect.succeed(Option.none()),
           countByEventId: () => Effect.succeed([]),
+          countAttendingGendersByEventIds: () => Effect.succeed([]),
           countRsvpsByEventId: () => Effect.succeed([]),
         }),
       ),

@@ -205,6 +205,7 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
   findRsvpsByEventId: () => Effect.die(new Error('Not implemented')),
   findRsvpByEventAndMember: () => Effect.die(new Error('Not implemented')),
   upsertRsvp: () => Effect.die(new Error('Not implemented')),
+  countAttendingGendersByEventIds: () => Effect.succeed([]),
   countRsvpsByEventId: () => Effect.die(new Error('Not implemented')),
   findRsvpAttendeesPage: () => Effect.die(new Error('Not implemented')),
   findNonRespondersByEventId: () => Effect.die(new Error('Not implemented')),

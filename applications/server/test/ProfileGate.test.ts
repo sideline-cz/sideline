@@ -438,6 +438,7 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
     });
   },
   countByEventId: () => Effect.succeed([]),
+  countAttendingGendersByEventIds: () => Effect.succeed([]),
   countRsvpsByEventId: () => Effect.succeed([]),
   incrementMissedForEventNonRespondersByEventId: () => Effect.void,
 } as any);
@@ -1180,6 +1181,7 @@ const RpcMockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
     });
   },
   countByEventId: () => Effect.succeed([]),
+  countAttendingGendersByEventIds: () => Effect.succeed([]),
   countRsvpsByEventId: (eventId: Event.EventId) => {
     const rsvps = Array.from(rpcRsvpsStore.values()).filter((r) => r.event_id === eventId);
     const counts = new Map<string, number>();

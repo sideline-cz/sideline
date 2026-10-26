@@ -637,6 +637,7 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
   upsert: () => Effect.die(new Error('Not implemented')),
   upsertRsvp: () => Effect.die(new Error('Not implemented')),
   countByEventId: () => Effect.succeed([]),
+  countAttendingGendersByEventIds: () => Effect.succeed([]),
   countRsvpsByEventId: () => Effect.succeed([]),
 } as any);
 
@@ -1888,6 +1889,7 @@ const makeTgEventRsvpsRepositoryLayer = () =>
     upsert: () => Effect.die(new Error('Not implemented')),
     upsertRsvp: () => Effect.die(new Error('Not implemented')),
     countByEventId: () => Effect.succeed([]),
+    countAttendingGendersByEventIds: () => Effect.succeed([]),
     countRsvpsByEventId: () => Effect.succeed([]),
     // Used by the handler to check RSVP-yes members
     findYesRsvpMemberIdsByEventId: (eventId: Event.EventId) =>

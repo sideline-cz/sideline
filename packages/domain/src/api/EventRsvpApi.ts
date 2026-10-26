@@ -6,6 +6,7 @@ import { EventId } from '~/models/Event.js';
 import { RsvpResponse } from '~/models/EventRsvp.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
+import { GenderCounts } from '~/models/User.js';
 
 export class RsvpEntry extends Schema.Class<RsvpEntry>('RsvpEntry')({
   teamMemberId: TeamMemberId,
@@ -34,6 +35,17 @@ export class EventRsvpDetail extends Schema.Class<EventRsvpDetail>('EventRsvpDet
   // failure: web bundles a FROZEN copy of this schema.
   rsvpClosesAt: Schema.OptionFromOptionalKey(Schemas.DateTimeFromIsoString),
   minPlayersThreshold: Schema.Number,
+  // Gender split of the members who are GOING — the `isAttendingRsvpResponse` set, not
+  // `response = 'yes'`. Computed server-side and shipped as an aggregate only: per-person
+  // gender never enters `RsvpEntry`, so this surface discloses strictly less than the
+  // `member:view`-gated `PlayerCard.tsx`, which already shows a gender icon per player.
+  //
+  // `None` means "do not render", and deliberately collapses two causes: the caller lacks
+  // `member:view`, or an older server hasn't shipped the key. `OptionFromOptionalKey` for
+  // the same reason as `rsvpClosesAt` above — web bundles a FROZEN copy of this schema, so
+  // a required field would fail to decode against a mid-rolling-deploy server rather than
+  // degrading to today's UI.
+  attendingGenderCounts: Schema.OptionFromOptionalKey(GenderCounts),
 }) {}
 
 export const SubmitRsvpRequest = Schema.Struct({

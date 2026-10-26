@@ -10,6 +10,7 @@ import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRep
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
@@ -624,6 +625,7 @@ const TestLayer = GuildsRpcLive.pipe(
       MockRolesRepository,
       MockSqlClientLayer,
       Layer.succeed(EventsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
+      Layer.succeed(EventRsvpsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(DiscordRolesRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(SudoSessionsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       MockRostersRepository,
