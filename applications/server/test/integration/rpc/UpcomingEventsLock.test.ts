@@ -75,6 +75,9 @@ const GuildPlainRepositories = Layer.mergeAll(
   PersonalEventOverflowCategoriesRepository.Default,
   EventsRepository.Default,
   SudoSessionsRepository.Default,
+  // `Guild/GetAllUpcomingEventsForUser` reads RSVP gender counts. Production already
+  // provides this app-wide (`AppLive.ts:148`); this narrower test layer has to say so.
+  EventRsvpsRepository.Default,
 );
 
 const EventsPlainRepositories = Layer.mergeAll(
@@ -382,6 +385,104 @@ describe('rsvp_closes_at — BOTH producers of UpcomingEventForUserEntry', () =>
         Effect.sync(() => {
           expectClosesAt(r.fromEventRpc, 0, 'Event/GetUpcomingEventsForUser');
           expectClosesAt(r.fromGuildRpc, 0, 'Guild/GetAllUpcomingEventsForUser');
+        }),
+      ),
+      Effect.provide(RealReposLayer),
+    ),
+  );
+});
+
+// --- attending_gender_counts, at BOTH producers -----------------------------
+//
+// Same dual-producer hazard as `rsvp_closes_at` above: wiring one and not the other leaves
+// the personal cards silently without a gender line, and nothing else fails. The fixture
+// carries one `'other'` member and one with NO gender recorded — a fixture of only male and
+// female members passes while the production case (46% unrecorded) is broken.
+
+const seedGenderedRsvpsAndReadBoth = (n: string) =>
+  Effect.Do.pipe(
+    Effect.let('discordId', () => `4920000000000000${n}` as Discord.Snowflake),
+    Effect.bind('owner', ({ discordId }) => createUser(discordId, `gender-rpc-${n}`)),
+    Effect.bind('team', ({ owner }) =>
+      createTeam(`4930101010101010${n}` as Discord.Snowflake, owner.id),
+    ),
+    Effect.tap(({ team }) => setLock(team.id, Option.none(), {})),
+    Effect.bind('ownerTm', ({ team, owner }) => addTeamMember(team.id, owner.id)),
+    Effect.bind('startAt', () => nowPlusHours(48)),
+    Effect.bind('event', ({ team, ownerTm, startAt }) =>
+      insertEvent(team.id, (ownerTm as any).id as TeamMember.TeamMemberId, startAt),
+    ),
+    // male yes, female coming_later, other yes, NULL-gender yes, female no (excluded),
+    // male maybe (excluded). Attending total is 4: 1 male, 1 female, 1 other, 1 unrecorded.
+    Effect.tap(({ team, event }) =>
+      Effect.forEach(
+        [
+          { g: 'male', r: 'yes' },
+          { g: 'female', r: 'coming_later' },
+          { g: 'other', r: 'yes' },
+          { g: null, r: 'yes' },
+          { g: 'female', r: 'no' },
+          { g: 'male', r: 'maybe' },
+        ],
+        (spec, i) =>
+          Effect.Do.pipe(
+            Effect.bind('u', () =>
+              createUser(`494000000000000${n}${i}` as Discord.Snowflake, `g-${n}-${i}`),
+            ),
+            Effect.tap(({ u }) =>
+              SqlClient.SqlClient.asEffect().pipe(
+                Effect.andThen(
+                  (sql) => sql`UPDATE users SET gender = ${spec.g} WHERE id = ${u.id}`,
+                ),
+              ),
+            ),
+            Effect.bind('tm', ({ u }) => addTeamMember(team.id, u.id)),
+            Effect.tap(({ tm }) =>
+              EventRsvpsRepository.asEffect().pipe(
+                Effect.andThen((repo) =>
+                  repo.upsertRsvp(
+                    event.id,
+                    (tm as any).id as TeamMember.TeamMemberId,
+                    spec.r as never,
+                    Option.none(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        { discard: true },
+      ),
+    ),
+    Effect.bind('eventResult', ({ team, discordId }) =>
+      callEventProducer({ guild_id: team.guild_id, discord_user_id: discordId }),
+    ),
+    Effect.bind('guildResult', ({ team, discordId }) =>
+      callGuildProducer({ guild_id: team.guild_id, discord_user_id: discordId }),
+    ),
+    Effect.map(({ event, eventResult, guildResult }) => ({
+      fromEventRpc: entryFrom(eventResult, event.id, 'Event/GetUpcomingEventsForUser'),
+      fromGuildRpc: entryFrom(guildResult, event.id, 'Guild/GetAllUpcomingEventsForUser'),
+    })),
+  );
+
+describe('attending_gender_counts — BOTH producers of UpcomingEventForUserEntry', () => {
+  itEffect.effect('both producers return the same counts, with other and NULL preserved', () =>
+    seedGenderedRsvpsAndReadBoth('1').pipe(
+      Effect.tap((r) =>
+        Effect.sync(() => {
+          const expected = { male: 1, female: 1, other: 1, unknown: 1 };
+
+          expect(
+            Option.isSome(r.fromEventRpc.attending_gender_counts),
+            'Event/GetUpcomingEventsForUser must send attending_gender_counts',
+          ).toBe(true);
+          expect(
+            Option.isSome(r.fromGuildRpc.attending_gender_counts),
+            'Guild/GetAllUpcomingEventsForUser (personal cards) must send it too',
+          ).toBe(true);
+
+          expect(Option.getOrThrow(r.fromEventRpc.attending_gender_counts)).toEqual(expected);
+          expect(Option.getOrThrow(r.fromGuildRpc.attending_gender_counts)).toEqual(expected);
         }),
       ),
       Effect.provide(RealReposLayer),

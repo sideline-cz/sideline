@@ -22,6 +22,7 @@ import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { eventDayOrder, eventVisibleNow } from '~/repositories/eventVisibility.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -38,6 +39,10 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { rsvpClosesAtOf } from '~/utils/allDayRsvpWindow.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
+import {
+  attendingGenderCountsFor,
+  foldAttendingGenderCounts,
+} from '~/utils/attendingGenderCounts.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 import { emitMemberGroupChannelRoles } from '~/utils/emitMemberGroupChannelRoles.js';
 
@@ -133,6 +138,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
   Effect.bind('personalChannels', () => PersonalEventChannelsRepository.asEffect()),
   Effect.bind('overflowCategories', () => PersonalEventOverflowCategoriesRepository.asEffect()),
   Effect.bind('events', () => EventsRepository.asEffect()),
+  Effect.bind('rsvps', () => EventRsvpsRepository.asEffect()),
   Effect.bind('sudoSessions', () => SudoSessionsRepository.asEffect()),
   Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
   Effect.map((deps) => {
@@ -1654,8 +1660,21 @@ export const GuildsRpcLive = Effect.Do.pipe(
               ),
             ),
           ),
+          // Second of the TWO producers of `UpcomingEventForUserEntry` (the other is
+          // `rpc/event/index.ts`'s `Event/GetUpcomingEventsForUser`). This one feeds the
+          // PERSONAL cards. Batched across every row so the card list costs one extra query,
+          // not one per event.
+          // `deps.rsvps`, not an in-handler `EventRsvpsRepository.asEffect()`: acquiring a
+          // service inside a handler leaks its requirement into the RPC group's `R`, which
+          // `toLayer` cannot discharge and which surfaces as an `unknown` R mismatch in
+          // `run.ts`, nowhere near this file.
+          Effect.bind('genderCounts', ({ rows }) =>
+            deps.rsvps
+              .countAttendingGendersByEventIds(rows.map((r) => r.event_id))
+              .pipe(Effect.map(foldAttendingGenderCounts)),
+          ),
           Effect.map(
-            ({ rows, team, member }) =>
+            ({ rows, team, member, genderCounts }) =>
               new EventRpcModels.UpcomingEventsForUserResult({
                 events: Array.map(
                   rows,
@@ -1686,6 +1705,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       // `repositories/lockResolution.ts`); the arithmetic and every comparison
                       // against `now` live in `utils/allDayRsvpWindow.ts`.
                       rsvp_closes_at: rsvpClosesAtOf(row),
+                      attending_gender_counts: attendingGenderCountsFor(genderCounts, row.event_id),
                       // ponytail: this raw inline query isn't joined to `event_types` — add
                       // the join here if this surface needs the name/color.
                       event_type_name: Option.none(),

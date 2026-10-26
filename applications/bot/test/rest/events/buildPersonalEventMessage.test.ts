@@ -41,6 +41,7 @@ const makeEntry = (
     start_date: Option.none(),
     end_date: Option.none(),
     rsvp_closes_at: Option.none(),
+    attending_gender_counts: Option.none(),
     ...overrides,
   });
 

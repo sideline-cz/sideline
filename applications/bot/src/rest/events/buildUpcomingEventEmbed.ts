@@ -1,5 +1,5 @@
 import type { EventRpcModels } from '@sideline/domain';
-import { EventRsvp, EventType } from '@sideline/domain';
+import { EventRsvp, EventType, User } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
@@ -127,6 +127,37 @@ export const buildUpcomingEventEmbed = (params: {
       fields.push({ name: m.bot_embed_where({}, { locale }), value, inline: false }),
   });
 
+  // The gender split of everyone GOING, as a second line inside the Attendance field rather
+  // than a field of its own — a fourth field costs real width on a Discord card, a line does
+  // not. The total LEADS so the breakdown cannot be read as the whole set.
+  //
+  // `?? Option.none()` for the same reason as `rsvp_closes_at` below: the bot suite builds
+  // `UpcomingEventForUserEntry`-shaped objects by hand and omits optional keys, and
+  // `Option.match(undefined, …)` throws rather than reading as "no counts".
+  const genderSplitLine = Option.match(entry.attending_gender_counts ?? Option.none(), {
+    onNone: () => Option.none<string>(),
+    onSome: (counts) => {
+      const split = User.genderSplitDisplay(counts);
+      if (split === null) return Option.none<string>();
+      // `flatMap`, not `filter` with a type predicate: these are branded `LocalizedString`s,
+      // so `p is string` would assert the assignable direction backwards.
+      const parts = [
+        split.male > 0 ? m.rsvp_genderSplit_male({ count: String(split.male) }, { locale }) : null,
+        split.female > 0
+          ? m.rsvp_genderSplit_female({ count: String(split.female) }, { locale })
+          : null,
+        split.more > 0 ? m.rsvp_genderSplit_more({ count: String(split.more) }, { locale }) : null,
+      ].flatMap((p) => (p === null ? [] : [p]));
+      const total = m.rsvp_genderSplit_total({ count: String(split.total) }, { locale });
+      return Option.some(
+        m.bot_embed_gender_split(
+          { value: parts.length === 0 ? total : `${total} — ${parts.join(' · ')}` },
+          { locale },
+        ),
+      );
+    },
+  });
+
   const rsvpSummary = m.bot_embed_rsvp_summary(
     {
       yes: String(entry.yes_count),
@@ -136,6 +167,11 @@ export const buildUpcomingEventEmbed = (params: {
     },
     { locale },
   );
+  // Counts first, gender split second, deadline appended last by the block below.
+  const rsvpCountLines = Option.match(genderSplitLine, {
+    onNone: () => rsvpSummary,
+    onSome: (line) => `${rsvpSummary}\n${line}`,
+  });
   fields.push({
     name: m.bot_embed_rsvps({}, { locale }),
     /* The deadline is APPENDED to this field's value rather than added as its own field,
@@ -162,9 +198,9 @@ export const buildUpcomingEventEmbed = (params: {
      * in `server/src/utils/allDayRsvpWindow.ts#rsvpClosesAtOf` and the `!!event.all_day`
      * truthy check above it. */
     value: Option.match(entry.rsvp_closes_at ?? Option.none(), {
-      onNone: () => rsvpSummary,
+      onNone: () => rsvpCountLines,
       onSome: (closesAt) =>
-        `${rsvpSummary}\n${m.bot_embed_rsvp_until(
+        `${rsvpCountLines}\n${m.bot_embed_rsvp_until(
           { when: `${toDiscordTimestamp(closesAt, 'f')} · ${toDiscordTimestamp(closesAt, 'R')}` },
           { locale },
         )} ${formatRsvpLockOffset(entry.start_at, closesAt, locale)}`,

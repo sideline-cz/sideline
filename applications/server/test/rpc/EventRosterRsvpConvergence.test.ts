@@ -206,6 +206,7 @@ const MockRpcEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
     });
   },
   countByEventId: () => Effect.succeed([]),
+  countAttendingGendersByEventIds: () => Effect.succeed([]),
   countRsvpsByEventId: () => Effect.succeed([]),
   findNonResponders: () => Effect.succeed([]),
   findNonRespondersByEventId: () => Effect.succeed([]),

@@ -687,6 +687,7 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
   upsert: () => Effect.die(new Error('Not implemented')),
   upsertRsvp: () => Effect.die(new Error('Not implemented')),
   countByEventId: () => Effect.succeed([]),
+  countAttendingGendersByEventIds: () => Effect.succeed([]),
   countRsvpsByEventId: () => Effect.succeed([]),
 } as never);
 

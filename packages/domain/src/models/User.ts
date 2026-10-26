@@ -9,6 +9,54 @@ export type UserId = typeof UserId.Type;
 export const Gender = Schema.Literals(['male', 'female', 'other']);
 export type Gender = typeof Gender.Type;
 
+// Aggregate head-count by gender. `unknown` is the bucket for members with no recorded
+// gender — `users.gender` is NULLABLE and in production it is the LARGEST bucket (46% of
+// active members on the reference team), so it is a first-class category here, never an
+// omission. Mirrors the `GenderCounts` interface in `models/TeamGenerator.ts`, which is a
+// pure no-Effect algorithm module and therefore cannot hold a Schema itself; the four keys
+// must stay in step with `GenderValue` there.
+// Line comments, not JSDoc: the barrel codegen hoists a file's first doc block onto its
+// `export * as` re-export.
+export const GenderCounts = Schema.Struct({
+  male: Schema.Int,
+  female: Schema.Int,
+  other: Schema.Int,
+  unknown: Schema.Int,
+});
+export type GenderCounts = typeof GenderCounts.Type;
+
+// The three numbers a gender split actually renders, shared by the web RSVP panel and the
+// Discord embed so the two can never disagree. Pure arithmetic; each surface formats it with
+// its own i18n runtime.
+export interface GenderSplitDisplay {
+  readonly total: number;
+  readonly male: number;
+  readonly female: number;
+  readonly more: number;
+}
+
+// `more` is DERIVED (total minus the two named buckets), never summed from stored buckets.
+// That is what guarantees the rendered numbers always account for everyone: `other` and
+// `unknown` both land in it today, and a gender value added later lands in it automatically
+// instead of silently vanishing from a breakdown that still reads as complete.
+//
+// `null` means render nothing at all. Two cases reach it:
+//   - nobody is going, so there is no split to show;
+//   - nobody going has a recorded gender, where "3 going — 3 more" would be nonsense ("more"
+//     than what?). The caller shows the bare total instead, which is exactly what is true.
+// Zero buckets are the formatter's job to omit, not this function's.
+export const genderSplitDisplay = (counts: GenderCounts): GenderSplitDisplay | null => {
+  const total = counts.male + counts.female + counts.other + counts.unknown;
+  if (total === 0) return null;
+  if (counts.male === 0 && counts.female === 0) return { total, male: 0, female: 0, more: 0 };
+  return {
+    total,
+    male: counts.male,
+    female: counts.female,
+    more: total - counts.male - counts.female,
+  };
+};
+
 export const Locale = Schema.Literals(['en', 'cs']);
 export type Locale = typeof Locale.Type;
 

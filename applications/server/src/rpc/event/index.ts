@@ -45,6 +45,10 @@ import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
 import { eventRsvpOpen, rsvpClosesAtOf } from '~/utils/allDayRsvpWindow.js';
+import {
+  attendingGenderCountsFor,
+  foldAttendingGenderCounts,
+} from '~/utils/attendingGenderCounts.js';
 import { requireCompleteProfile } from '~/utils/requireCompleteProfile.js';
 import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 import {
@@ -1127,8 +1131,16 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               Effect.map((r) => r.count),
             ),
           ),
+          // First of the TWO producers of `UpcomingEventForUserEntry` (the other is
+          // `rpc/guild/index.ts`'s `Guild/GetAllUpcomingEventsForUser`). Batched across every
+          // row so the card list costs one extra query, not one per event.
+          Effect.bind('genderCounts', ({ rows }) =>
+            svc.rsvps
+              .countAttendingGendersByEventIds(rows.map((r) => r.event_id))
+              .pipe(Effect.map(foldAttendingGenderCounts)),
+          ),
           Effect.map(
-            ({ rows, total, teamId, member }) =>
+            ({ rows, total, teamId, member, genderCounts }) =>
               new EventRpcModels.UpcomingEventsForUserResult({
                 events: Array.map(
                   rows,
@@ -1159,6 +1171,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       // `repositories/lockResolution.ts`); the arithmetic and every comparison
                       // against `now` live in `utils/allDayRsvpWindow.ts`.
                       rsvp_closes_at: rsvpClosesAtOf(row),
+                      attending_gender_counts: attendingGenderCountsFor(genderCounts, row.event_id),
                       // ponytail: this raw inline query isn't one of task 3's six
                       // render-feeding `EventsRepository` queries and isn't joined to
                       // `event_types` — add the join here if this surface needs the name/color.

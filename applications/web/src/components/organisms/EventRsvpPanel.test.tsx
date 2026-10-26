@@ -42,6 +42,10 @@ vi.mock('~/lib/translations.js', () => ({
       rsvp_noResponses: 'No responses yet.',
       rsvp_belowMinPlayers: 'Only {count} confirmed, need {threshold}.',
       rsvp_nonRespondersTitle: 'Not yet responded',
+      rsvp_genderSplit_male: '{count} male',
+      rsvp_genderSplit_female: '{count} female',
+      rsvp_genderSplit_more: '{count} more',
+      rsvp_genderSplit_total: '{count} going',
       rsvp_saveNote: 'Save note',
       rsvp_savingNote: 'Saving...',
       event_rsvpSubmitted: 'RSVP submitted',
@@ -96,6 +100,14 @@ type RsvpDetailView = {
   // T7 — `OptionFromOptionalKey` on the wire, so `None` is both "no lock
   // configured" and "an older server that has never heard of one".
   rsvpClosesAt: Option.Option<DateTime.Utc>;
+  // Aggregate only — per-person gender never reaches this component. `None` is both "the
+  // viewer lacks `member:view`" and "an older server that never sent the key".
+  attendingGenderCounts: Option.Option<{
+    male: number;
+    female: number;
+    other: number;
+    unknown: number;
+  }>;
 };
 
 function makeRsvpEntry(overrides: Partial<RsvpEntryView> = {}): RsvpEntryView {
@@ -122,6 +134,7 @@ function makeRsvpDetail(overrides: Partial<RsvpDetailView> = {}): RsvpDetailView
     canRsvp: true,
     minPlayersThreshold: 0,
     rsvpClosesAt: Option.none(),
+    attendingGenderCounts: Option.none(),
     ...overrides,
   };
 }
@@ -918,5 +931,69 @@ describe('EventRsvpPanel — RSVP deadline notice', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// The gender split line. Its one job is that the numbers shown account for EVERY person
+// going: in production 46% of members have no recorded gender, so a bare "5 male · 6 female"
+// reads as a complete breakdown while omitting nearly half the people.
+describe('EventRsvpPanel — gender split', () => {
+  const splitText = () =>
+    screen.queryByText((_, node) => {
+      const t = node?.textContent ?? '';
+      return node?.tagName === 'P' && t.includes('going');
+    })?.textContent ?? '';
+
+  it('shows male, female and a remainder that sums to the going total', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        attendingGenderCounts: Option.some({ male: 3, female: 4, other: 1, unknown: 5 }),
+      }),
+    });
+
+    const text = splitText();
+    expect(text).toContain('13 going');
+    expect(text).toContain('3 male');
+    expect(text).toContain('4 female');
+    // `other` (1) + unrecorded (5): visible, not dropped.
+    expect(text).toContain('6 more');
+  });
+
+  it('omits a zero bucket rather than printing "0 more"', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        attendingGenderCounts: Option.some({ male: 2, female: 3, other: 0, unknown: 0 }),
+      }),
+    });
+
+    expect(splitText()).toContain('5 going');
+    expect(splitText()).not.toContain('0 more');
+  });
+
+  it('shows the bare total when nobody going has a recorded gender', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        attendingGenderCounts: Option.some({ male: 0, female: 0, other: 0, unknown: 4 }),
+      }),
+    });
+
+    expect(splitText()).toContain('4 going');
+    expect(splitText()).not.toContain('more');
+  });
+
+  it('renders no line at all when nobody is going', () => {
+    renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        attendingGenderCounts: Option.some({ male: 0, female: 0, other: 0, unknown: 0 }),
+      }),
+    });
+
+    expect(splitText()).toBe('');
+  });
+
+  it('renders no line when the viewer may not see it (None)', () => {
+    renderPanel({ rsvpDetail: makeRsvpDetail({ attendingGenderCounts: Option.none() }) });
+
+    expect(splitText()).toBe('');
   });
 });

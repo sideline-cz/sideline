@@ -606,6 +606,7 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
       })),
     );
   },
+  countAttendingGendersByEventIds: () => Effect.succeed([]),
   countRsvpsByEventId: (eventId: Event.EventId) => {
     const rsvps = Array.from(rsvpsStore.values()).filter((r) => r.event_id === eventId);
     const counts = new Map<string, number>();
@@ -2017,6 +2018,7 @@ const MockRpcEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
     });
   },
   countByEventId: () => Effect.succeed([]),
+  countAttendingGendersByEventIds: () => Effect.succeed([]),
   countRsvpsByEventId: (eventId: Event.EventId) => {
     const rsvps = Array.from(rpcRsvpsStore.values()).filter((r) => r.event_id === eventId);
     const counts = new Map<string, number>();
@@ -3162,6 +3164,7 @@ describe('Event/GetRsvpAttendees RPC — coming_later surfaces its true response
         upsert: () => Effect.die(new Error('Not implemented')),
         upsertRsvp: () => Effect.die(new Error('Not implemented')),
         countByEventId: () => Effect.succeed([]),
+        countAttendingGendersByEventIds: () => Effect.succeed([]),
         countRsvpsByEventId: () => Effect.succeed([]),
         findNonResponders: () => Effect.succeed([]),
         findNonRespondersByEventId: () => Effect.succeed([]),

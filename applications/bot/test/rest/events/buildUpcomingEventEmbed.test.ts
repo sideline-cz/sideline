@@ -38,6 +38,7 @@ const makeEntry = (
     // T8 — `OptionFromOptionalKey`, so `None` is both "no lock" and "an older
     // server that never sent the key".
     rsvp_closes_at: Option.none(),
+    attending_gender_counts: Option.none(),
     ...overrides,
   });
 
@@ -1103,5 +1104,86 @@ describe('buildUpcomingEventEmbed — rsvp_closes_at', () => {
       // 50035 also rejects the whole card for an id over 100 chars.
       for (const id of ids) expect(id.length).toBeLessThanOrEqual(100);
     }
+  });
+});
+
+// The gender split lives INSIDE the Attendance field (`📊 RSVPs` / `📊 Účast`), as a line
+// between the count strip and the appended deadline — never as a fourth field, which costs
+// real width on a Discord card.
+describe('buildUpcomingEventEmbed — attending_gender_counts', () => {
+  const rsvpField = (entry: EventRpcModels.UpcomingEventForUserEntry) => {
+    const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+    const fields = embeds[0].fields as ReadonlyArray<{ name: string; value: string }>;
+    const field = fields.find((f) => f.name === m.bot_embed_rsvps({}, { locale: 'en' }));
+    return { field, fields };
+  };
+
+  it('renders male, female and a remainder that makes the three sum to the total', () => {
+    const { field } = rsvpField(
+      makeEntry({
+        attending_gender_counts: Option.some({ male: 3, female: 4, other: 1, unknown: 5 }),
+      }),
+    );
+
+    expect(field?.value).toContain('13 going');
+    expect(field?.value).toContain('3 male');
+    expect(field?.value).toContain('4 female');
+    // `other` (1) + unrecorded (5) — the 46% case, visible rather than dropped.
+    expect(field?.value).toContain('6 more');
+  });
+
+  it('adds a LINE to the Attendance field, never a fourth field', () => {
+    const withSplit = rsvpField(
+      makeEntry({
+        attending_gender_counts: Option.some({ male: 1, female: 1, other: 0, unknown: 0 }),
+      }),
+    );
+    const without = rsvpField(makeEntry({ attending_gender_counts: Option.none() }));
+
+    expect(withSplit.fields.length).toBe(without.fields.length);
+    expect(withSplit.field?.value.split('\n').length).toBe(
+      (without.field?.value.split('\n').length ?? 0) + 1,
+    );
+  });
+
+  it('omits a zero bucket instead of printing "0 more"', () => {
+    const { field } = rsvpField(
+      makeEntry({
+        attending_gender_counts: Option.some({ male: 2, female: 3, other: 0, unknown: 0 }),
+      }),
+    );
+
+    expect(field?.value).toContain('5 going');
+    expect(field?.value).not.toContain('0 more');
+  });
+
+  it('shows the bare total when nobody going has a recorded gender', () => {
+    const { field } = rsvpField(
+      makeEntry({
+        attending_gender_counts: Option.some({ male: 0, female: 0, other: 0, unknown: 4 }),
+      }),
+    );
+
+    expect(field?.value).toContain('4 going');
+    expect(field?.value).not.toContain('4 more');
+  });
+
+  it('renders no gender line when nobody is going', () => {
+    const { field } = rsvpField(
+      makeEntry({
+        attending_gender_counts: Option.some({ male: 0, female: 0, other: 0, unknown: 0 }),
+      }),
+    );
+
+    expect(field?.value).not.toContain('going');
+  });
+
+  it('does not throw when the key is absent — the hand-built-entry / old-server case', () => {
+    const entry = makeEntry();
+    // The suite builds these by hand; `Option.match(undefined, …)` would throw without the
+    // `?? Option.none()` guard in the renderer.
+    const withoutKey = { ...entry, attending_gender_counts: undefined } as unknown as typeof entry;
+
+    expect(() => buildUpcomingEventEmbed({ ...baseParams, entry: withoutKey })).not.toThrow();
   });
 });
