@@ -1127,15 +1127,16 @@ describe('buildUpcomingEventEmbed — attending_gender_counts in the Going field
     return fields.find((f) => f.name === m.bot_embed_rsvps({}, { locale: 'en' }))?.value;
   };
 
-  it('leads with the total and makes the glyphs sum to it', () => {
+  it('shows the three buckets, which sum to everyone going', () => {
     const name = goingName(
       makeEntry({
         attending_gender_counts: Option.some({ male: 2, female: 2, other: 1, unknown: 4 }),
       }),
     );
 
-    // 2 + 2 + 5 = 9. `other` (1) + unrecorded (4) ride together in 👤.
-    expect(name).toBe('✅ Going · 9 · 2 🚹 · 2 🚺 · 5 👤');
+    // 2 + 2 + 5 = 9 going. `other` (1) + unrecorded (4) ride together in 👤, so no one
+    // is dropped even though the total is no longer printed.
+    expect(name).toBe('✅ Going · 2 🚹 · 2 🚺 · 5 👤');
   });
 
   it('uses unicode glyphs, never :mens:/:womens: shortcodes Discord will not expand', () => {
@@ -1158,17 +1159,29 @@ describe('buildUpcomingEventEmbed — attending_gender_counts in the Going field
       }),
     );
 
-    expect(name).toBe('✅ Going · 5 · 2 🚹 · 3 🚺');
+    expect(name).toBe('✅ Going · 2 🚹 · 3 🚺');
   });
 
-  it('shows the bare total when nobody going has a recorded gender', () => {
+  it('keeps the 👤 bucket when nobody going has a recorded gender', () => {
+    // The web line would read "4 more" here and drops to a bare total instead; `4 👤` says
+    // "four unspecified" and is worth printing, so this surface keeps it.
     const name = goingName(
       makeEntry({
         attending_gender_counts: Option.some({ male: 0, female: 0, other: 0, unknown: 4 }),
       }),
     );
 
-    expect(name).toBe('✅ Going · 4');
+    expect(name).toBe('✅ Going · 4 👤');
+  });
+
+  it('never prints a bare headcount — the field name carries no total', () => {
+    const name = goingName(
+      makeEntry({
+        attending_gender_counts: Option.some({ male: 2, female: 2, other: 1, unknown: 4 }),
+      }),
+    );
+
+    expect(name).not.toMatch(/·\s9(\s|$)/);
   });
 
   it('leaves the field name untouched when the counts are absent', () => {

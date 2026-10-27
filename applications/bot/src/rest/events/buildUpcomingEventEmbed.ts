@@ -66,18 +66,23 @@ const buildYourRsvpValue = (
 
 /**
  * The gender split of everyone GOING, appended to the `✅ Jdou` / `✅ Going` field NAME as
- * ` · 9 · 2 🚹 · 2 🚺 · 5 👤`.
+ * ` · 2 🚹 · 2 🚺 · 5 👤`.
  *
- * The total LEADS and `👤` carries `other` + unrecorded, so the glyphs always account for
- * everyone: in production 46% of members have no gender recorded, and a bare `2 🚹 · 2 🚺`
- * on an event of nine would read as a complete breakdown while dropping five people.
+ * No leading total: the three buckets already sum to everyone going, and the name list under
+ * this very field carries the headcount. `👤` is what makes that true — it holds `other` plus
+ * everyone with no gender recorded, which in production is 46% of members. Dropping it to show
+ * a tidy `2 🚹 · 2 🚺` would turn an event of nine into a line accounting for four.
+ *
+ * All-unrecorded renders `9 👤`, NOT nothing: unlike the web line's "9 more", the glyph says
+ * "nine unspecified" and is worth showing. `genderSplitDisplay` reports the true remainder and
+ * leaves that call to each surface.
  *
  * Unicode glyphs, never `:mens:`/`:womens:` — Discord does not expand emoji shortcodes inside
  * embed field names, so a shortcode would render as the literal text `:mens:`.
  *
- * The total counts `yes` + `coming_later`, matching the name list this field already shows
- * (`findYesAttendeesWithLimit`). It therefore differs from the Attendance field's `✅` count,
- * which is `yes` alone — that is correct, not a drift.
+ * The buckets count `yes` + `coming_later`, matching the name list this field already shows
+ * (`findYesAttendeesWithLimit`). They therefore sum to more than the Attendance field's `✅`
+ * count, which is `yes` alone — correct, not drift.
  *
  * Only reachable from inside the `yesAttendees.length > 0` branch, deliberately: callers blank
  * that array when the member set `show_attendee_list` off (`reorderPersonalChannel.ts:120`,
@@ -103,7 +108,7 @@ const goingSplitSuffix = (
           : null,
         split.more > 0 ? m.bot_embed_going_other({ count: String(split.more) }, { locale }) : null,
       ].flatMap((x) => (x === null ? [] : [x]));
-      return ` · ${[String(split.total), ...parts].join(' · ')}`;
+      return parts.length === 0 ? '' : ` · ${parts.join(' · ')}`;
     },
   });
 
