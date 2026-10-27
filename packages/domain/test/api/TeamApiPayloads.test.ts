@@ -18,24 +18,36 @@ import * as TeamApi from '~/api/TeamApi.js';
 
 describe('UpdateMemberEventPreferences — encodes the plain object the client sends', () => {
   it('encodes a plain object literal (fails against a Schema.Class payload)', () => {
-    const encoded = Schema.encodeSync(TeamApi.UpdateMemberEventPreferences)({
+    const payload = {
       showAttendeeList: false,
-      rsvpReminderDms: true,
+      rsvpDmsTraining: true,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: true,
       personalChannelsSplit: true,
-    });
+    };
+    expect(Schema.encodeSync(TeamApi.UpdateMemberEventPreferences)(payload)).toEqual(payload);
+  });
 
-    expect(encoded).toEqual({
-      showAttendeeList: false,
-      rsvpReminderDms: true,
-      personalChannelsSplit: true,
-    });
+  it('still accepts the legacy payload a web build from before the bucket split sends', () => {
+    const legacy = { showAttendeeList: true, rsvpReminderDms: false, personalChannelsSplit: false };
+    expect(
+      Schema.decodeUnknownSync(TeamApi.UpdateMemberEventPreferences)(
+        Schema.encodeSync(TeamApi.UpdateMemberEventPreferences)(legacy),
+      ),
+    ).toEqual(legacy);
   });
 
   it('round-trips every boolean combination', () => {
     for (const showAttendeeList of [true, false]) {
-      for (const rsvpReminderDms of [true, false]) {
+      for (const rsvpDmsTournament of [true, false]) {
         for (const personalChannelsSplit of [true, false]) {
-          const payload = { showAttendeeList, rsvpReminderDms, personalChannelsSplit };
+          const payload = {
+            showAttendeeList,
+            rsvpDmsTraining: !rsvpDmsTournament,
+            rsvpDmsTournament,
+            rsvpDmsOther: true,
+            personalChannelsSplit,
+          };
           const decoded = Schema.decodeUnknownSync(TeamApi.UpdateMemberEventPreferences)(
             Schema.encodeSync(TeamApi.UpdateMemberEventPreferences)(payload),
           );
@@ -49,16 +61,23 @@ describe('UpdateMemberEventPreferences — encodes the plain object the client s
     expect(() =>
       Schema.decodeUnknownSync(TeamApi.UpdateMemberEventPreferences)({
         showAttendeeList: 'yes',
-        rsvpReminderDms: true,
+        rsvpDmsTraining: true,
         personalChannelsSplit: false,
       }),
     ).toThrow();
   });
 
   it('does NOT carry personalChannelsAvailable — that field is response-only', () => {
-    // The response schema has four fields; the payload has three. Keeping the extra field
+    // personalChannelsAvailable is response-only. Keeping that field
     // out of the payload is what stops a client from claiming a team-level capability.
     const keys = Object.keys(TeamApi.UpdateMemberEventPreferences.fields).sort();
-    expect(keys).toEqual(['personalChannelsSplit', 'rsvpReminderDms', 'showAttendeeList']);
+    expect(keys).toEqual([
+      'personalChannelsSplit',
+      'rsvpDmsOther',
+      'rsvpDmsTournament',
+      'rsvpDmsTraining',
+      'rsvpReminderDms',
+      'showAttendeeList',
+    ]);
   });
 });

@@ -802,10 +802,10 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   )
                   // Setting 2: this RPC exists solely to drive the reminder DM
                   // (handleRsvpReminder.ts is its only consumer). Members who opted out
-                  // of reminder DMs are dropped HERE, not in findNonResponders — the
-                  // admin-facing getNonResponders endpoint and the missed-RSVP
-                  // accounting must keep seeing them. See plan §6.7.
-                  .pipe(Effect.map(Array.filter((nr) => nr.rsvp_reminder_dms)))
+                  // of reminder DMs (for this event's bucket) are dropped HERE, not in
+                  // findNonResponders — the admin-facing getNonResponders endpoint and the
+                  // missed-RSVP accounting must keep seeing them. See plan §6.7.
+                  .pipe(Effect.map(Array.filter((nr) => nr.reminder_dms_enabled)))
               : Effect.succeed([]),
           ),
           Effect.bind('yesAttendees', ({ event }) =>

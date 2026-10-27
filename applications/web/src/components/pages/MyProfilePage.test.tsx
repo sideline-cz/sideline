@@ -88,6 +88,9 @@ const notConnectedTeam = {
 const basePrefs = {
   showAttendeeList: true,
   rsvpReminderDms: true,
+  rsvpDmsTraining: true,
+  rsvpDmsTournament: true,
+  rsvpDmsOther: true,
   personalChannelsSplit: false,
   personalChannelsAvailable: true,
 };
