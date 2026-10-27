@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -28,6 +29,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { GuildsRpcLive } from '~/rpc/guild/index.js';
+import { LoginLinkRateLimiter } from '~/services/LoginLinkRateLimiter.js';
 import { cleanDatabase, TestPgClient } from '../integration/helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -124,6 +126,8 @@ const makeTestLayer = () =>
         PersonalEventChannelsRepository.Default,
         PersonalEventOverflowCategoriesRepository.Default,
         SudoSessionsRepository.Default,
+        DiscordLoginTokensRepository.Default,
+        LoginLinkRateLimiter.Default,
         TeamInvitesRepository.Default,
         TeamMembersRepository.Default,
         TeamSettingsRepository.Default,

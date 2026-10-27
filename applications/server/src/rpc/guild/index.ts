@@ -16,11 +16,13 @@ import { LogicError, Schemas } from '@sideline/effect-lib';
 import { applyTemplate, sanitizeHexColor, sanitizeRendered } from '@sideline/template-renderer';
 import { Array, DateTime, Effect, Option, pipe, Schema } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
+import { env } from '~/env.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -37,6 +39,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { LoginLinkRateLimiter } from '~/services/LoginLinkRateLimiter.js';
 import { rsvpClosesAtOf } from '~/utils/allDayRsvpWindow.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 import {
@@ -45,8 +48,24 @@ import {
 } from '~/utils/attendingGenderCounts.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 import { emitMemberGroupChannelRoles } from '~/utils/emitMemberGroupChannelRoles.js';
+import { generateUrlToken } from '~/utils/urlToken.js';
 
 const toSnowflake = Schema.decodeSync(Discord.Snowflake);
+
+/** How long a `/login` link stays redeemable. The user typed the command seconds ago, so
+ * five minutes only has to cover "I got distracted". A Discord DM is readable forever —
+ * anything longer is a password parked in chat history. */
+const LOGIN_LINK_TTL_MINUTES = 5;
+
+/** Both `IssueLoginLink` refusals, widened to the handler's full error union.
+ * Without this the two `Option.match` branches infer disjoint error types and TS refuses
+ * to unify them into the Rpc's declared `error:` union. */
+const failLoginLink = (
+  error: GuildRpcModels.LoginLinkRateLimited | GuildRpcModels.LoginLinkUserNotFound,
+): Effect.Effect<
+  { readonly url: string; readonly expires_at: DateTime.Utc },
+  GuildRpcModels.LoginLinkRateLimited | GuildRpcModels.LoginLinkUserNotFound
+> => Effect.fail(error);
 
 type IdentifyEventsChannelResult = {
   readonly kind: 'global' | 'personal' | 'none';
@@ -140,6 +159,16 @@ export const GuildsRpcLive = Effect.Do.pipe(
   Effect.bind('events', () => EventsRepository.asEffect()),
   Effect.bind('rsvps', () => EventRsvpsRepository.asEffect()),
   Effect.bind('sudoSessions', () => SudoSessionsRepository.asEffect()),
+  // Both `/login` services arrive in ONE bind on purpose. This `Effect.Do` chain is at
+  // the depth where TypeScript gives up: 17 binds infers `deps`, 19 collapses it to
+  // `unknown` and buries this file in ~90 errors that name neither the new binds nor
+  // the real cause. Bundle, don't lengthen.
+  Effect.bind('login', () =>
+    Effect.Do.pipe(
+      Effect.bind('tokens', () => DiscordLoginTokensRepository.asEffect()),
+      Effect.bind('limiter', () => LoginLinkRateLimiter.asEffect()),
+    ),
+  ),
   Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
   Effect.map((deps) => {
     const setupNewMember = (
@@ -1371,6 +1400,81 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     started_at,
                   })
                   .pipe(Effect.as({})),
+            }),
+          ),
+        ),
+
+      // Mints a single-use login link. Identity FIRST, then the rate limit, then the
+      // write — that order is forced, not chosen: the limiter is keyed by `Auth.UserId`,
+      // which does not exist until `findByDiscordId` resolves. Keying it on the Discord
+      // snowflake instead would let an unregistered caller be throttled before the
+      // lookup, but it is not worth it: the lookup is one indexed read, and the real
+      // bound on this endpoint is not the counter at all.
+      //
+      // That bound is `issue`, which revokes every outstanding link for this user in the
+      // same transaction. However fast the command is spammed, exactly ONE live token
+      // exists per user — which is why the limiter here only has to keep log and row
+      // churn finite, not hold the security property.
+      'Guild/IssueLoginLink': ({
+        discord_user_id,
+        guild_id,
+      }: {
+        readonly discord_user_id: Discord.Snowflake;
+        readonly guild_id: Option.Option<Discord.Snowflake>;
+      }) =>
+        deps.users.findByDiscordId(discord_user_id).pipe(
+          Effect.flatMap(
+            Option.match({
+              // Fail closed. Minting a `users` row from a login request is a different
+              // trust decision than handing an existing user a session, and this
+              // endpoint is not the place to make it.
+              onNone: () => failLoginLink(new GuildRpcModels.LoginLinkUserNotFound()),
+              onSome: (user) =>
+                deps.login.limiter.check(user.id).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onSome: (retryAfterSeconds) =>
+                        failLoginLink(
+                          new GuildRpcModels.LoginLinkRateLimited({
+                            retry_after_seconds: retryAfterSeconds,
+                          }),
+                        ),
+                      onNone: () =>
+                        Effect.Do.pipe(
+                          Effect.bind('generated', () => generateUrlToken()),
+                          Effect.bind('now', () => DateTime.now),
+                          Effect.let('expiresAt', ({ now }) =>
+                            DateTime.add(now, { minutes: LOGIN_LINK_TTL_MINUTES }),
+                          ),
+                          Effect.tap(({ generated, expiresAt }) =>
+                            deps.login.tokens.issue({
+                              token_hash: generated.hash,
+                              user_id: user.id,
+                              issued_from_guild_id: guild_id,
+                              expires_at: DateTime.toDateUtc(expiresAt),
+                            }),
+                          ),
+                          // The audit record. Deliberately NOT a system-channel message,
+                          // unlike `/sudo`: sudo elevates one person over other people's
+                          // team and the team deserves to see it, while this is someone
+                          // reaching their own account. Announcing it would also tell a
+                          // channel the exact moment a fresh credential exists.
+                          Effect.tap(({ expiresAt }) =>
+                            Effect.logInfo('auth.discord_link.issued', {
+                              userId: user.id,
+                              discordUserId: discord_user_id,
+                              guildId: Option.getOrNull(guild_id),
+                              expiresAt: DateTime.formatIso(expiresAt),
+                            }),
+                          ),
+                          Effect.map(({ generated, expiresAt }) => ({
+                            url: `${env.SERVER_URL.toString().replace(/\/$/, '')}/auth/link/${generated.token}`,
+                            expires_at: expiresAt,
+                          })),
+                        ),
+                    }),
+                  ),
+                ),
             }),
           ),
         ),

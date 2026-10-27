@@ -35,6 +35,7 @@ import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDivid
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
 import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
@@ -57,6 +58,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { EventsRpcLive } from '~/rpc/event/index.js';
 import { GuildsRpcLive } from '~/rpc/guild/index.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
+import { LoginLinkRateLimiter } from '~/services/LoginLinkRateLimiter.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
 const GuildPlainRepositories = Layer.mergeAll(
@@ -75,6 +77,8 @@ const GuildPlainRepositories = Layer.mergeAll(
   PersonalEventOverflowCategoriesRepository.Default,
   EventsRepository.Default,
   SudoSessionsRepository.Default,
+  DiscordLoginTokensRepository.Default,
+  LoginLinkRateLimiter.Default,
   // `Guild/GetAllUpcomingEventsForUser` reads RSVP gender counts. Production already
   // provides this app-wide (`AppLive.ts:148`); this narrower test layer has to say so.
   EventRsvpsRepository.Default,

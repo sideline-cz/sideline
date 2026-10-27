@@ -202,6 +202,17 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
     drop('Live login credentials. Erasure must end every session.'),
     ['token'],
   ),
+  // Same disposition as `sessions`, and for the same reason: an unredeemed row is a
+  // live credential, so the hash must never travel in a file the person downloads and
+  // mails to themselves. Erasure deletes rather than keeps — the row exists only to
+  // serve this person, and `ON DELETE CASCADE` would take it anyway.
+  own(
+    'discord_login_tokens',
+    'users',
+    ['user_id'],
+    drop('Login links minted for this person. Erasure must invalidate every outstanding one.'),
+    ['token_hash'],
+  ),
   own('team_invites', 'users', ['created_by'], authorship),
   own('team_members', 'users', ['user_id'], pseudonymised),
   own('team_onboarding_tokens', 'users', ['created_by', 'consumed_by'], authorship, ['token_hash']),

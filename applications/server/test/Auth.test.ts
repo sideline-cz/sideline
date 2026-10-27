@@ -60,6 +60,7 @@ import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMock
 import { MockEmailLayers } from './mocks/emailMocks.js';
 import { MockEventRosterLayers } from './mocks/eventRosterMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
+import { MockDiscordLoginTokensRepositoryLayer } from './mocks/loginLinkMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockPlayerRatingsRepositoryLayer } from './mocks/playerRatingMocks.js';
 import { MockRulesAttemptsRepositoryLayer } from './mocks/rulesTrainerMocks.js';
@@ -582,6 +583,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockFinanceLayers))
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+  .pipe(Layer.provide(MockDiscordLoginTokensRepositoryLayer))
   .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
   .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
   .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
@@ -792,6 +794,7 @@ describe('Auth API — isGlobalAdmin flag on GET /auth/me (TDD: first registered
       .pipe(Layer.provide(MockFinanceLayers))
       .pipe(Layer.provide(MockTranslationsLayers))
       .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+      .pipe(Layer.provide(MockDiscordLoginTokensRepositoryLayer))
       .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
       .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
       .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
@@ -1162,6 +1165,7 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
       .pipe(Layer.provide(MockFinanceLayers))
       .pipe(Layer.provide(MockTranslationsLayers))
       .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+      .pipe(Layer.provide(MockDiscordLoginTokensRepositoryLayer))
       .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
       .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
       .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
@@ -1731,6 +1735,7 @@ describe('Global admin read access', () => {
       .pipe(Layer.provide(MockFinanceLayers))
       .pipe(Layer.provide(MockTranslationsLayers))
       .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+      .pipe(Layer.provide(MockDiscordLoginTokensRepositoryLayer))
       .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
       .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
       .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
@@ -1985,6 +1990,7 @@ describe('Auth API — requeueFailedForUser widening (TDD: PR-4 CC-6/S5)', () =>
     .pipe(Layer.provide(MockFinanceLayers))
     .pipe(Layer.provide(MockTranslationsLayers))
     .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+    .pipe(Layer.provide(MockDiscordLoginTokensRepositoryLayer))
     .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
     .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
     .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))

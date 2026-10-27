@@ -86,6 +86,9 @@ describe('GDPR export manifest', () => {
     // Checked as a literal list rather than by pattern: a new secret column
     // should have to be thought about, not silently matched by a regex.
     expect([...NEVER_EXPORT_COLUMNS].sort()).toEqual([
+      // An unredeemed `/login` link is a live credential; an export is a file the
+      // person downloads and mails to themselves.
+      'discord_login_tokens.token_hash',
       'ical_tokens.token',
       'oauth_connections.access_token',
       'oauth_connections.refresh_token',

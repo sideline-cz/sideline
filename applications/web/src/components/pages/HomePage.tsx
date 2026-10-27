@@ -32,6 +32,9 @@ const reasonMessages: Record<string, () => string> = {
   oauth_failed: () => tr('auth_errors_oauthFailed'),
   profile_failed: () => tr('auth_errors_profileFailed'),
   internal_error: () => tr('auth_errors_internalError'),
+  // Every rejection of a Discord `/login` link lands here — unknown, used, revoked or
+  // expired. The server deliberately does not say which.
+  link_invalid: () => tr('auth_errors_linkInvalid'),
 };
 
 interface HomePageProps {

@@ -9,6 +9,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -26,6 +27,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { GuildsRpcLive } from '~/rpc/guild/index.js';
+import { LoginLinkRateLimiter } from '~/services/LoginLinkRateLimiter.js';
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -628,6 +630,11 @@ const TestLayer = GuildsRpcLive.pipe(
       Layer.succeed(EventRsvpsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(DiscordRolesRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(SudoSessionsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
+      Layer.succeed(
+        DiscordLoginTokensRepository,
+        new Proxy({} as any, { get: () => () => Effect.void }),
+      ),
+      Layer.succeed(LoginLinkRateLimiter, new Proxy({} as any, { get: () => () => Effect.void })),
       MockRostersRepository,
       // Records instead of swallowing. Stays a Proxy so EVERY ChannelSyncEventsRepository method
       // keeps existing — `deactivateMemberAndCascade` calls `emitRosterMemberRemoved` and

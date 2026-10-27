@@ -159,6 +159,17 @@ export class AuthApiGroup extends HttpApiGroup.make('auth')
       },
     }),
   )
+  // Redeems a `/login` exchange token from Discord. Always a 302, never a body: on
+  // success to the frontend carrying a freshly minted SESSION token (which
+  // `routes/index.tsx` stores and then strips from the address bar), on any failure to
+  // the frontend's existing `?error=&reason=` surface. Unknown / used / revoked /
+  // expired all collapse to one reason on purpose — the endpoint must not report WHICH.
+  .add(
+    HttpApiEndpoint.get('discordLink', '/link/:token', {
+      success: Schema.Void.pipe(HttpApiSchema.status(302)),
+      params: { token: Schema.String },
+    }),
+  )
   .add(
     HttpApiEndpoint.get('me', '/me', {
       success: CurrentUser,

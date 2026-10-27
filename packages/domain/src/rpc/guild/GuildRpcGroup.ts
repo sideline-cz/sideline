@@ -15,6 +15,8 @@ import {
   CompleteProfileGuildNotFound,
   CompleteProfileInvalidInput,
   CompleteProfileNotMember,
+  LoginLinkRateLimited,
+  LoginLinkUserNotFound,
 } from './GuildRpcModels.js';
 
 export const PendingOnboardingSyncEntry = Schema.Struct({
@@ -486,5 +488,20 @@ export const GuildRpcGroup = RpcGroup.make(
       CompleteProfileNotMember,
       CompleteProfileInvalidInput,
     ]),
+  }),
+  // Mints a single-use exchange token for the bot's `/login` command and returns the
+  // plaintext ONCE. Issuing revokes every outstanding unconsumed link for that user, so
+  // at most one live token exists per user at any moment — that, not the rate limiter,
+  // is what bounds a spammed command.
+  //
+  // The returned token is a credential. The bot may only ever put it into an interaction
+  // response that was already deferred EPHEMERAL (see `commands/login/handler.ts`).
+  Rpc.make('IssueLoginLink', {
+    payload: {
+      discord_user_id: Discord.Snowflake,
+      guild_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    },
+    success: Schema.Struct({ url: Schema.String, expires_at: Schema.DateTimeUtc }),
+    error: Schema.Union([LoginLinkUserNotFound, LoginLinkRateLimited]),
   }),
 ).prefix('Guild/');
