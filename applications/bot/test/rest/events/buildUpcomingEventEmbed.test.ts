@@ -1107,83 +1107,111 @@ describe('buildUpcomingEventEmbed — rsvp_closes_at', () => {
   });
 });
 
-// The gender split lives INSIDE the Attendance field (`📊 RSVPs` / `📊 Účast`), as a line
-// between the count strip and the appended deadline — never as a fourth field, which costs
-// real width on a Discord card.
-describe('buildUpcomingEventEmbed — attending_gender_counts', () => {
-  const rsvpField = (entry: EventRpcModels.UpcomingEventForUserEntry) => {
-    const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+// The gender split lives in the `✅ Going` field NAME, as glyphs: `✅ Going · 9 · 2 🚹 · 2 🚺 · 5 👤`.
+// Its one job is that the glyphs account for EVERY person going — in production 46% of members
+// have no recorded gender, so `2 🚹 · 2 🚺` alone would read as a complete breakdown of nine.
+describe('buildUpcomingEventEmbed — attending_gender_counts in the Going field name', () => {
+  const goingName = (entry: EventRpcModels.UpcomingEventForUserEntry) => {
+    const { embeds } = buildUpcomingEventEmbed({
+      ...baseParams,
+      entry,
+      yesAttendees: [makeAttendee('Alice')],
+    });
     const fields = embeds[0].fields as ReadonlyArray<{ name: string; value: string }>;
-    const field = fields.find((f) => f.name === m.bot_embed_rsvps({}, { locale: 'en' }));
-    return { field, fields };
+    return fields.find((f) => f.name.startsWith(m.bot_embed_going({}, { locale: 'en' })))?.name;
   };
 
-  it('renders male, female and a remainder that makes the three sum to the total', () => {
-    const { field } = rsvpField(
+  const rsvpFieldValue = (entry: EventRpcModels.UpcomingEventForUserEntry) => {
+    const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+    const fields = embeds[0].fields as ReadonlyArray<{ name: string; value: string }>;
+    return fields.find((f) => f.name === m.bot_embed_rsvps({}, { locale: 'en' }))?.value;
+  };
+
+  it('leads with the total and makes the glyphs sum to it', () => {
+    const name = goingName(
       makeEntry({
-        attending_gender_counts: Option.some({ male: 3, female: 4, other: 1, unknown: 5 }),
+        attending_gender_counts: Option.some({ male: 2, female: 2, other: 1, unknown: 4 }),
       }),
     );
 
-    expect(field?.value).toContain('13 going');
-    expect(field?.value).toContain('3 male');
-    expect(field?.value).toContain('4 female');
-    // `other` (1) + unrecorded (5) — the 46% case, visible rather than dropped.
-    expect(field?.value).toContain('6 more');
+    // 2 + 2 + 5 = 9. `other` (1) + unrecorded (4) ride together in 👤.
+    expect(name).toBe('✅ Going · 9 · 2 🚹 · 2 🚺 · 5 👤');
   });
 
-  it('adds a LINE to the Attendance field, never a fourth field', () => {
-    const withSplit = rsvpField(
+  it('uses unicode glyphs, never :mens:/:womens: shortcodes Discord will not expand', () => {
+    const name = goingName(
       makeEntry({
         attending_gender_counts: Option.some({ male: 1, female: 1, other: 0, unknown: 0 }),
       }),
     );
-    const without = rsvpField(makeEntry({ attending_gender_counts: Option.none() }));
 
-    expect(withSplit.fields.length).toBe(without.fields.length);
-    expect(withSplit.field?.value.split('\n').length).toBe(
-      (without.field?.value.split('\n').length ?? 0) + 1,
-    );
+    expect(name).toContain('🚹');
+    expect(name).toContain('🚺');
+    expect(name).not.toContain(':mens:');
+    expect(name).not.toContain(':womens:');
   });
 
-  it('omits a zero bucket instead of printing "0 more"', () => {
-    const { field } = rsvpField(
+  it('omits a zero bucket instead of printing "0 👤"', () => {
+    const name = goingName(
       makeEntry({
         attending_gender_counts: Option.some({ male: 2, female: 3, other: 0, unknown: 0 }),
       }),
     );
 
-    expect(field?.value).toContain('5 going');
-    expect(field?.value).not.toContain('0 more');
+    expect(name).toBe('✅ Going · 5 · 2 🚹 · 3 🚺');
   });
 
   it('shows the bare total when nobody going has a recorded gender', () => {
-    const { field } = rsvpField(
+    const name = goingName(
       makeEntry({
         attending_gender_counts: Option.some({ male: 0, female: 0, other: 0, unknown: 4 }),
       }),
     );
 
-    expect(field?.value).toContain('4 going');
-    expect(field?.value).not.toContain('4 more');
+    expect(name).toBe('✅ Going · 4');
   });
 
-  it('renders no gender line when nobody is going', () => {
-    const { field } = rsvpField(
-      makeEntry({
-        attending_gender_counts: Option.some({ male: 0, female: 0, other: 0, unknown: 0 }),
-      }),
-    );
-
-    expect(field?.value).not.toContain('going');
+  it('leaves the field name untouched when the counts are absent', () => {
+    expect(goingName(makeEntry({ attending_gender_counts: Option.none() }))).toBe('✅ Going');
   });
 
   it('does not throw when the key is absent — the hand-built-entry / old-server case', () => {
     const entry = makeEntry();
-    // The suite builds these by hand; `Option.match(undefined, …)` would throw without the
-    // `?? Option.none()` guard in the renderer.
     const withoutKey = { ...entry, attending_gender_counts: undefined } as unknown as typeof entry;
 
-    expect(() => buildUpcomingEventEmbed({ ...baseParams, entry: withoutKey })).not.toThrow();
+    expect(() =>
+      buildUpcomingEventEmbed({
+        ...baseParams,
+        entry: withoutKey,
+        yesAttendees: [makeAttendee('Alice')],
+      }),
+    ).not.toThrow();
+  });
+
+  it('is absent entirely when the attendee list is hidden (yesAttendees blanked)', () => {
+    // `reorderPersonalChannel.ts:120` / `handleReconcile.ts:113` pass [] when the member set
+    // show_attendee_list off, so the whole Going field — split included — does not render.
+    const { embeds } = buildUpcomingEventEmbed({
+      ...baseParams,
+      entry: makeEntry({
+        attending_gender_counts: Option.some({ male: 2, female: 2, other: 0, unknown: 5 }),
+      }),
+      yesAttendees: [],
+    });
+    const fields = embeds[0].fields as ReadonlyArray<{ name: string; value: string }>;
+
+    expect(fields.find((f) => f.name.startsWith('✅ Going'))).toBeUndefined();
+    expect(fields.some((f) => f.name.includes('🚹'))).toBe(false);
+  });
+
+  it('no longer adds a line to the Attendance field', () => {
+    const value = rsvpFieldValue(
+      makeEntry({
+        attending_gender_counts: Option.some({ male: 2, female: 2, other: 0, unknown: 5 }),
+      }),
+    );
+
+    expect(value).not.toContain('🚹');
+    expect(value).not.toContain('going');
   });
 });
