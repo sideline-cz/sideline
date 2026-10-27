@@ -834,8 +834,12 @@ const make = Effect.gen(function* () {
       personal_channels_available: Schema.Boolean,
     }),
     execute: (input) => sql`
+      -- Buckets are read as their EFFECTIVE value: an opt-out an old server pod wrote only
+      -- to rsvp_reminder_dms must show as off, or the member's next save turns it back on.
       SELECT tm.show_attendee_list, tm.rsvp_reminder_dms,
-        tm.rsvp_dms_training, tm.rsvp_dms_tournament, tm.rsvp_dms_other,
+        tm.rsvp_reminder_dms AND tm.rsvp_dms_training AS rsvp_dms_training,
+        tm.rsvp_reminder_dms AND tm.rsvp_dms_tournament AS rsvp_dms_tournament,
+        tm.rsvp_reminder_dms AND tm.rsvp_dms_other AS rsvp_dms_other,
         tm.personal_channels_split,
         (ts.discord_personal_events_category_id IS NOT NULL) AS personal_channels_available
       FROM team_members tm

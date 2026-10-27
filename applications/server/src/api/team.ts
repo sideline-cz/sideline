@@ -260,15 +260,19 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
               ),
             ),
             // A bucket the payload omits falls back to the legacy single switch (a web build
-            // from before the split), then to the stored value.
-            Effect.let('next', ({ current }) => ({
+            // from before the split), then to the stored value. The legacy switch counts only
+            // when it CHANGES: an old tab resends the value it loaded with every save, and
+            // copying that `true` onto all three would undo a single-bucket opt-out.
+            Effect.let('legacy', ({ current }) =>
+              payload.rsvpReminderDms !== current.rsvp_reminder_dms
+                ? payload.rsvpReminderDms
+                : undefined,
+            ),
+            Effect.let('next', ({ current, legacy }) => ({
               showAttendeeList: payload.showAttendeeList,
-              rsvpDmsTraining:
-                payload.rsvpDmsTraining ?? payload.rsvpReminderDms ?? current.rsvp_dms_training,
-              rsvpDmsTournament:
-                payload.rsvpDmsTournament ?? payload.rsvpReminderDms ?? current.rsvp_dms_tournament,
-              rsvpDmsOther:
-                payload.rsvpDmsOther ?? payload.rsvpReminderDms ?? current.rsvp_dms_other,
+              rsvpDmsTraining: payload.rsvpDmsTraining ?? legacy ?? current.rsvp_dms_training,
+              rsvpDmsTournament: payload.rsvpDmsTournament ?? legacy ?? current.rsvp_dms_tournament,
+              rsvpDmsOther: payload.rsvpDmsOther ?? legacy ?? current.rsvp_dms_other,
               personalChannelsSplit: payload.personalChannelsSplit,
             })),
             Effect.tap(({ membership, next }) =>

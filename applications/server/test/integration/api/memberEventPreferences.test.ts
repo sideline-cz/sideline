@@ -611,4 +611,61 @@ describe('PATCH /teams/:teamId/me/event-preferences — reminder DM buckets', ()
       rsvpDmsOther: true,
     });
   });
+
+  it('an old web tab resending rsvpReminderDms: true does NOT undo a single-bucket opt-out', async () => {
+    const seed = await seedMember('921', 'prefs-stale-tab');
+    sessionsStore.set('token-b4', seed.userId);
+
+    await patch(seed.team.id, 'token-b4', {
+      showAttendeeList: true,
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: true,
+      rsvpDmsOther: true,
+      personalChannelsSplit: false,
+    });
+    // The old tab loaded rsvpReminderDms: true (the OR) and resends it while changing
+    // something else entirely.
+    await patch(seed.team.id, 'token-b4', {
+      showAttendeeList: false,
+      rsvpReminderDms: true,
+      personalChannelsSplit: false,
+    });
+
+    expect(await get(seed.team.id, 'token-b4')).toMatchObject({
+      showAttendeeList: false,
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: true,
+      rsvpDmsOther: true,
+    });
+  });
+
+  it('an opt-out written only to the legacy column (old server pod) reads as all buckets off and survives the next save', async () => {
+    const seed = await seedMember('922', 'prefs-old-pod');
+    sessionsStore.set('token-b5', seed.userId);
+    await SqlClient.SqlClient.asEffect().pipe(
+      Effect.flatMap(
+        (sql) =>
+          sql`UPDATE team_members SET rsvp_reminder_dms = false WHERE team_id = ${seed.team.id}`,
+      ),
+      Effect.provide(SeedLayer),
+      Effect.runPromise,
+    );
+
+    const loaded = await get(seed.team.id, 'token-b5');
+    expect(loaded).toMatchObject({
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: false,
+    });
+
+    // The new web saves an unrelated change, echoing the loaded bucket values.
+    await patch(seed.team.id, 'token-b5', {
+      showAttendeeList: false,
+      rsvpDmsTraining: loaded.rsvpDmsTraining,
+      rsvpDmsTournament: loaded.rsvpDmsTournament,
+      rsvpDmsOther: loaded.rsvpDmsOther,
+      personalChannelsSplit: false,
+    });
+    expect(await readLegacyFlag(seed.team.id)).toBe(false);
+  });
 });
