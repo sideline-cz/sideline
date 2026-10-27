@@ -34,6 +34,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -51,6 +52,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { GuildsRpcLive } from '~/rpc/guild/index.js';
+import { LoginLinkRateLimiter } from '~/services/LoginLinkRateLimiter.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
 // See `registerMemberGroupInviteRoleSync.test.ts` for why every requirement of `GuildsRpcLive`
@@ -72,6 +74,8 @@ const PlainRepositories = Layer.mergeAll(
   EventsRepository.Default,
   EventRsvpsRepository.Default,
   SudoSessionsRepository.Default,
+  DiscordLoginTokensRepository.Default,
+  LoginLinkRateLimiter.Default,
   RolesRepository.Default,
   RostersRepository.Default,
   ChannelSyncEventsRepository.Default,

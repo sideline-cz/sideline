@@ -1404,12 +1404,17 @@ export const GuildsRpcLive = Effect.Do.pipe(
           ),
         ),
 
-      // Mints a single-use login link. Three gates, in this order and for a reason:
-      // rate limit first (cheapest, and a throttled caller must not even cause a user
-      // lookup), then identity, then the write.
+      // Mints a single-use login link. Identity FIRST, then the rate limit, then the
+      // write — that order is forced, not chosen: the limiter is keyed by `Auth.UserId`,
+      // which does not exist until `findByDiscordId` resolves. Keying it on the Discord
+      // snowflake instead would let an unregistered caller be throttled before the
+      // lookup, but it is not worth it: the lookup is one indexed read, and the real
+      // bound on this endpoint is not the counter at all.
       //
-      // `issue` revokes every outstanding link for this user inside the same
-      // transaction, so a spammed command still leaves exactly ONE live token.
+      // That bound is `issue`, which revokes every outstanding link for this user in the
+      // same transaction. However fast the command is spammed, exactly ONE live token
+      // exists per user — which is why the limiter here only has to keep log and row
+      // churn finite, not hold the security property.
       'Guild/IssueLoginLink': ({
         discord_user_id,
         guild_id,
