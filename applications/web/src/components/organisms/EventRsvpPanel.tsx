@@ -104,11 +104,18 @@ function LockedAnswerRow({
 function GenderSplitLine({ counts }: { counts: User.GenderCounts }) {
   const split = User.genderSplitDisplay(counts);
   if (split === null) return null;
-  const parts = [
-    split.male > 0 ? tr('rsvp_genderSplit_male', { count: String(split.male) }) : null,
-    split.female > 0 ? tr('rsvp_genderSplit_female', { count: String(split.female) }) : null,
-    split.more > 0 ? tr('rsvp_genderSplit_more', { count: String(split.more) }) : null,
-  ].filter((p): p is string => p !== null);
+  // Nobody going has a recorded gender. "3 going — 3 more" is nonsense in words — more than
+  // what? — so this surface drops to the bare total, which is exactly what is true. The
+  // Discord title keeps the bucket instead, because `3 👤` reads fine; that divergence is why
+  // the rule lives here and not in `genderSplitDisplay`.
+  const allUnrecorded = split.male === 0 && split.female === 0;
+  const parts = allUnrecorded
+    ? []
+    : [
+        split.male > 0 ? tr('rsvp_genderSplit_male', { count: String(split.male) }) : null,
+        split.female > 0 ? tr('rsvp_genderSplit_female', { count: String(split.female) }) : null,
+        split.more > 0 ? tr('rsvp_genderSplit_more', { count: String(split.more) }) : null,
+      ].filter((p): p is string => p !== null);
   const total = tr('rsvp_genderSplit_total', { count: String(split.total) });
   return (
     <p className='mt-2 text-sm text-muted-foreground'>

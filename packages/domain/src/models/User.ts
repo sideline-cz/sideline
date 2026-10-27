@@ -40,15 +40,17 @@ export interface GenderSplitDisplay {
 // `unknown` both land in it today, and a gender value added later lands in it automatically
 // instead of silently vanishing from a breakdown that still reads as complete.
 //
-// `null` means render nothing at all. Two cases reach it:
-//   - nobody is going, so there is no split to show;
-//   - nobody going has a recorded gender, where "3 going — 3 more" would be nonsense ("more"
-//     than what?). The caller shows the bare total instead, which is exactly what is true.
-// Zero buckets are the formatter's job to omit, not this function's.
+// `null` means there is nothing to render, and reaches exactly one case: nobody is going.
+//
+// Everything else is PRESENTATION and belongs to each formatter, not here. In particular the
+// all-unrecorded case (male and female both 0) differs by surface: the web line reads "3 going
+// — 3 more", which is nonsense ("more" than what?), so it drops to the bare total; the Discord
+// title reads `3 👤`, which is meaningful, so it keeps the bucket. This function reports the
+// true remainder in both cases and lets them decide. Zero buckets are the formatter's job to
+// omit too.
 export const genderSplitDisplay = (counts: GenderCounts): GenderSplitDisplay | null => {
   const total = counts.male + counts.female + counts.other + counts.unknown;
   if (total === 0) return null;
-  if (counts.male === 0 && counts.female === 0) return { total, male: 0, female: 0, more: 0 };
   return {
     total,
     male: counts.male,

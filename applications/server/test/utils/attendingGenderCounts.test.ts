@@ -115,14 +115,16 @@ describe('genderSplitDisplay', () => {
     expect(split?.total).toBe(10);
   });
 
-  it('reports only the total when nobody going has a recorded gender', () => {
-    // "3 going — 3 more" would be nonsense: more than what? The caller renders the bare
-    // total, which is exactly what is true.
+  it('reports the TRUE remainder when nobody going has a recorded gender', () => {
+    // Presentation of this case diverges by surface — the web line drops to a bare total
+    // because "3 more" is nonsense in words, the Discord title prints `3 👤` because the
+    // glyph is not — so the shared helper reports the truth and leaves the choice to each
+    // formatter. It must never zero the bucket here.
     expect(User.genderSplitDisplay({ male: 0, female: 0, other: 0, unknown: 3 })).toEqual({
       total: 3,
       male: 0,
       female: 0,
-      more: 0,
+      more: 3,
     });
   });
 
