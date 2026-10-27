@@ -698,6 +698,7 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockTeamsRepositoryLayer),
   Layer.provide(MockTeamMembersRepositoryLayer),
   Layer.provide(MockTeamOnboardingTokensRepositoryLayer),
+  Layer.provide(MockDiscordLoginTokensRepositoryLayer),
   Layer.provide(MockRolesRepositoryLayer),
   Layer.provide(MockHttpClientLayer),
   Layer.provide(MockSqlClientLayer),
@@ -1220,3 +1221,4 @@ describe('listOnboardingTokens', () => {
 // Needed for TypeScript to recognize TeamOnboardingToken namespace
 import type { TeamOnboardingToken } from '@sideline/domain';
 import { MockBankSyncLayers } from '../../mocks/bankSyncMocks.js';
+import { MockDiscordLoginTokensRepositoryLayer } from '../../mocks/loginLinkMocks.js';

@@ -59,6 +59,7 @@ import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
+import { MockDiscordLoginTokensRepositoryLayer } from './mocks/loginLinkMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockPlayerRatingsRepositoryLayer } from './mocks/playerRatingMocks.js';
 import { MockRulesAttemptsRepositoryLayer } from './mocks/rulesTrainerMocks.js';
@@ -896,6 +897,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockFinanceLayers))
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+  .pipe(Layer.provide(MockDiscordLoginTokensRepositoryLayer))
   .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
   .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
   .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))

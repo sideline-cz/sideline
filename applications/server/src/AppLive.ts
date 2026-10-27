@@ -26,6 +26,7 @@ import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsR
 import { DashboardLayoutsRepository } from '~/repositories/DashboardLayoutsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsRepository.js';
@@ -101,6 +102,7 @@ import { EventRosterProvisioningService } from '~/services/EventRosterProvisioni
 import { FioSecretCrypto } from '~/services/FioSecretCrypto.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
+import { LoginLinkRateLimiter } from '~/services/LoginLinkRateLimiter.js';
 import { TranslationCache } from '~/services/TranslationCache.js';
 import { env } from './env.js';
 import { HttpLogger } from './middleware/HttpLogger.js';
@@ -125,6 +127,7 @@ const RpcLive = RpcServer.layer(ObservableSyncRpcs).pipe(
 export const Repositories = Layer.mergeAll(
   UsersRepository.Default,
   SessionsRepository.Default,
+  DiscordLoginTokensRepository.Default,
   TeamsRepository.Default,
   BotGuildsRepository.Default,
   TeamMembersRepository.Default,
@@ -224,6 +227,7 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(DiscordJoinEnforcementConfig.Default),
   Layer.provide(AiChatEnabledConfig.Default),
   Layer.provide(ChatRateLimiter.Default),
+  Layer.provide(LoginLinkRateLimiter.Default),
   Layer.provide(
     ChatAgent.Default.pipe(Layer.provide(Repositories), Layer.provide(LlmClient.Default)),
   ),

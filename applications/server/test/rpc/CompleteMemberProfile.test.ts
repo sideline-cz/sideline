@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -34,6 +35,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { GuildsRpcLive } from '~/rpc/guild/index.js';
+import { LoginLinkRateLimiter } from '~/services/LoginLinkRateLimiter.js';
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -222,6 +224,8 @@ const TestLayer = GuildsRpcLive.pipe(
       Layer.succeed(EventsRepository, voidProxy()),
       Layer.succeed(EventRsvpsRepository, voidProxy()),
       Layer.succeed(SudoSessionsRepository, voidProxy()),
+      Layer.succeed(DiscordLoginTokensRepository, voidProxy()),
+      Layer.succeed(LoginLinkRateLimiter, voidProxy()),
     ),
   ),
 );

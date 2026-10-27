@@ -22,6 +22,7 @@ import { Redirect } from '~/api/index.js';
 import { env } from '~/env.js';
 import { buildExport } from '~/gdpr/buildExport.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -33,6 +34,7 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { deriveDiscordJoined } from '~/utils/discordJoinedState.js';
 import { provisionNewTeam } from '~/utils/provisionNewTeam.js';
 import { toCurrentUser } from '~/utils/toCurrentUser.js';
+import { generateUrlToken, hashToken } from '~/utils/urlToken.js';
 
 class AuthError extends Schema.TaggedErrorClass<AuthError>()('AuthError', {
   error: Schema.Literal('auth_failed'),
@@ -45,6 +47,11 @@ class AuthError extends Schema.TaggedErrorClass<AuthError>()('AuthError', {
       Effect.flatMap(() => Effect.fail(this.withReason('oauth_failed'))),
     );
 }
+
+/** Lifetime of a session minted from a Discord link. Shorter than the OAuth path's 30
+ * days on purpose: this path has no interactive consent step, and re-running `/login`
+ * costs the user seconds. */
+const LINK_SESSION_TTL_DAYS = 7;
 
 const CustomClient = HttpClient.HttpClient.asEffect().pipe(
   Effect.bindTo('client'),
@@ -300,6 +307,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
     Effect.bind('discord', () => DiscordOAuth.asEffect()),
     Effect.bind('users', () => UsersRepository.asEffect()),
     Effect.bind('sessions', () => SessionsRepository.asEffect()),
+    Effect.bind('loginTokens', () => DiscordLoginTokensRepository.asEffect()),
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('teams', () => TeamsRepository.asEffect()),
     Effect.bind('botGuilds', () => BotGuildsRepository.asEffect()),
@@ -315,6 +323,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
         discord,
         users,
         sessions,
+        loginTokens,
         members,
         teams,
         botGuilds,
@@ -392,6 +401,57 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                   Redirect.toResponse,
                   Effect.succeed,
                 ),
+              ),
+            ),
+          )
+          // Redeem a `/login` exchange token. The token in this URL is NOT a credential
+          // the API accepts — `AuthMiddlewareLive` only honours rows in `sessions`. It is
+          // swapped here, once, and the real bearer leaves in the redirect, where
+          // `routes/index.tsx` stores it and immediately strips it from the address bar.
+          //
+          // Every failure — unknown, already used, revoked, expired — redirects to the
+          // SAME reason. Distinguishing them would turn this into an oracle, and the user
+          // has one remedy for all four anyway: run `/login` again.
+          .handle('discordLink', ({ params: { token } }) =>
+            Effect.Do.pipe(
+              Effect.bind('now', () => DateTime.now),
+              // 256-bit, the same primitive as the link itself. The OAuth path's
+              // `crypto.randomUUID()` (122 bits, also a CSPRNG) is fine and is left alone;
+              // using one primitive here just means a reviewer has one thing to check.
+              Effect.bind('generated', () => generateUrlToken()),
+              Effect.bind('redeemed', ({ now, generated }) =>
+                loginTokens.redeem({
+                  token_hash: hashToken(token),
+                  session_token: generated.token,
+                  session_expires_at: DateTime.toDateUtc(
+                    DateTime.add(now, { days: LINK_SESSION_TTL_DAYS }),
+                  ),
+                }),
+              ),
+              Effect.flatMap(({ redeemed, generated }) =>
+                Option.match(redeemed, {
+                  onNone: () =>
+                    Effect.logInfo('auth.discord_link.rejected').pipe(
+                      Effect.as(
+                        pipe(
+                          Redirect.fromUrl(env.FRONTEND_URL),
+                          Redirect.withSearchParam('error', 'auth_failed'),
+                          Redirect.withSearchParam('reason', 'link_invalid'),
+                          Redirect.toResponse,
+                        ),
+                      ),
+                    ),
+                  onSome: (row) =>
+                    Effect.logInfo('auth.discord_link.redeemed', { userId: row.user_id }).pipe(
+                      Effect.as(
+                        pipe(
+                          Redirect.fromUrl(env.FRONTEND_URL),
+                          Redirect.withSearchParam('token', generated.token),
+                          Redirect.toResponse,
+                        ),
+                      ),
+                    ),
+                }),
               ),
             ),
           )
