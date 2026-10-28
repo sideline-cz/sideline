@@ -433,7 +433,10 @@ Returns the calling member's own event preferences for this team (Nastavitelná 
 | Field | Type | Nullable | Description |
 |---|---|---|---|
 | `showAttendeeList` | `boolean` | No | When `false`, hides the "Going" attendee-name list on the member's own event card (personal-channel embed and `/event list`); RSVP counts and the Attendees button are unaffected |
-| `rsvpReminderDms` | `boolean` | No | When `false`, the member is excluded from the RSVP reminder DM; does not affect the organiser-facing non-responders view or `missed_rsvps` accounting |
+| `rsvpDmsTraining` | `boolean` | No | When `false`, no RSVP reminder DM for `training` events. Buckets match the personal-channel split; none of them affect the organiser-facing non-responders view or `missed_rsvps` accounting |
+| `rsvpDmsTournament` | `boolean` | No | Same, for `tournament` and `match` events |
+| `rsvpDmsOther` | `boolean` | No | Same, for `meeting`, `social` and `other` events |
+| `rsvpReminderDms` | `boolean` | No | Legacy (removed after one release): `true` when any bucket is on |
 | `personalChannelsSplit` | `boolean` | No | When `true`, the member's personal Discord events channel is split into three (training / tournament / other) instead of one combined channel |
 | `personalChannelsAvailable` | `boolean` | No | `true` when the team has a `discord_personal_events_category_id` configured (i.e. personal channels exist at all for this team); response-only, advisory — a `PATCH` with `personalChannelsSplit` set is accepted even when this is `false` |
 
@@ -447,7 +450,7 @@ Returns the calling member's own event preferences for this team (Nastavitelná 
 
 #### `PATCH /teams/:teamId/me/event-preferences`
 
-Updates the calling member's own event preferences for this team. All three fields are required (full replace, not a partial patch).
+Updates the calling member's own event preferences for this team. `showAttendeeList` and `personalChannelsSplit` are required. Each reminder bucket takes its own field, else the legacy `rsvpReminderDms` (sent by a web build from before the split; applied to all three), else keeps its stored value.
 
 **Auth:** Bearer token (AuthMiddleware)
 
@@ -462,12 +465,15 @@ Updates the calling member's own event preferences for this team. All three fiel
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `showAttendeeList` | `boolean` | Yes | See `GET` above |
-| `rsvpReminderDms` | `boolean` | Yes | See `GET` above |
+| `rsvpDmsTraining` | `boolean` | No | See `GET` above |
+| `rsvpDmsTournament` | `boolean` | No | See `GET` above |
+| `rsvpDmsOther` | `boolean` | No | See `GET` above |
+| `rsvpReminderDms` | `boolean` | No | Legacy: applied to every bucket the payload does not name |
 | `personalChannelsSplit` | `boolean` | Yes | See `GET` above. Toggling this destroys the member's now-undesired personal channel(s) — and anything written in them — once the newly-desired channel(s) are provisioned; see `docs/discord-bot.md`'s Personal Events Provisioning Worker section |
 
 **Response:** `200 OK` — `MemberEventPreferences` (see `GET` above for field descriptions)
 
-Only a change to `showAttendeeList` marks the team's upcoming events' personal-channel messages dirty (`markTeamUpcomingEventsPersonalMessagesDirty`) so open event cards re-render without their attendee list; `rsvpReminderDms` and `personalChannelsSplit` take effect on the next reminder send / provisioning tick respectively, with no dirty-mark needed.
+Only a change to `showAttendeeList` marks the team's upcoming events' personal-channel messages dirty (`markTeamUpcomingEventsPersonalMessagesDirty`) so open event cards re-render without their attendee list; the reminder buckets and `personalChannelsSplit` take effect on the next reminder send / provisioning tick respectively, with no dirty-mark needed.
 
 **Errors:**
 

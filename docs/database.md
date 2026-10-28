@@ -163,6 +163,9 @@ Membership record joining a user to a team, carrying per-team profile data.
 | `joined_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `show_attendee_list` | BOOLEAN | NOT NULL | `true` |
 | `rsvp_reminder_dms` | BOOLEAN | NOT NULL | `true` |
+| `rsvp_dms_training` | BOOLEAN | NOT NULL | `true` |
+| `rsvp_dms_tournament` | BOOLEAN | NOT NULL | `true` |
+| `rsvp_dms_other` | BOOLEAN | NOT NULL | `true` |
 | `personal_channels_split` | BOOLEAN | NOT NULL | `false` |
 | `membership_plan_id` | UUID | FK → `membership_plans(id)` ON DELETE SET NULL | `NULL` |
 
@@ -2382,6 +2385,7 @@ All 110 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1793900000 | `create_seasons` | Creates `seasons` (see [12. Finance](#12-finance) above), seeds every pre-existing team with one season carrying over `teams.membership_selection_deadline` and the `MAX` of its plans' non-expired `expires_at`, and creates `seed_first_season_trg` — an `AFTER INSERT ON teams` trigger seeding one for every future team. Creates `governing_season_id(UUID)` and `selection_is_open(UUID)` (the two-candidate selection gate). Replaces `training_period_charges(UUID, DATE)` to count the free-trainings allowance from the governing season's `starts_at` instead of `membership_plans.free_trainings_anchor_at`; drops that column and its stamping trigger/function. Creates `seasons_recompute_trg` (`AFTER INSERT ON seasons`), recomputing the team's current billing period when a newly inserted season's own period is already open. |
 | 1794000000 | `membership_season_fees` | Adds `season_id`/`membership_plan_id` (both FK RESTRICT) to `fees`, widens `fees.kind` to include `'membership'`, and adds the paired CHECKs `fees_kind_season_check`/`fees_kind_plan_check` plus the partial unique index `idx_fees_team_season_plan_currency` (see [12. Finance](#12-finance) above). Adds `season_id` (FK RESTRICT) to `member_credit_deposits` and redefines `member_credit_deposits_bank_source_pair` to be one-directional. Adds `membership_billing_by_user_id` (FK → `users` SET NULL) to `team_settings` — the opt-in and billing recorder, off by default. Creates `membership_season_charges(UUID, UUID)` (the per-member delta/floor derivation) and `recompute_membership_season_fees(UUID)` (the writer, driven by the new `MembershipBillingCron`, not a trigger). No backfill: production has zero `'membership'` fees by construction. |
 | 1794200000 | `add_notification_link` | Adds nullable `link TEXT` to `notifications` (see [10. Notifications](#10-notifications) above) — no backfill for the four pre-existing notification types, which have no meaningful destination. |
+| 1794400000 | `split_rsvp_reminder_dms` | Adds `rsvp_dms_training`, `rsvp_dms_tournament`, `rsvp_dms_other` (`BOOLEAN NOT NULL DEFAULT true`) to `team_members` — reminder DMs per personal-channel bucket, same kind mapping as `eventBucketSql` (`match` routes to `tournament`). Every member with `rsvp_reminder_dms = false` gets all three set to `false`, so no opt-out is re-subscribed. `rsvp_reminder_dms` stays for one release as the OR of the three and is ANDed into the reminder filter, so an opt-out written by an old server pod during the rollout still silences every bucket. |
 
 ### After Migrations (seed data)
 

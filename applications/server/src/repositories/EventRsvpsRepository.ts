@@ -3,6 +3,7 @@ import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import { effectiveRolesFrom, holdsRsvpEligibleRoleWhere } from '~/repositories/effectiveRoles.js';
+import { eventBucketSql } from '~/repositories/personalChannelBucket.js';
 
 class RsvpWithMemberName extends Schema.Class<RsvpWithMemberName>('RsvpWithMemberName')({
   id: EventRsvp.EventRsvpId,
@@ -56,8 +57,9 @@ class NonResponderRow extends Schema.Class<NonResponderRow>('NonResponderRow')({
   discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
   // Nastavitelná docházka (plan §6.7): carried through so the reminder-DM handler
   // (and only that handler) can filter opt-outs. No filtering happens here — this
-  // query is shared with the event:edit-gated organiser view.
-  rsvp_reminder_dms: Schema.Boolean,
+  // query is shared with the event:edit-gated organiser view. True when the member
+  // allows reminder DMs for this event's bucket (see `findNonResponders`).
+  reminder_dms_enabled: Schema.Boolean,
 }) {}
 
 class TotalCount extends Schema.Class<TotalCount>('TotalCount')({
@@ -328,7 +330,16 @@ const make = Effect.gen(function* () {
     Result: NonResponderRow,
     execute: (input) => sql`
       WITH eligible_members AS (
-        SELECT tm.id AS team_member_id, tm.user_id, tm.rsvp_reminder_dms
+        SELECT tm.id AS team_member_id, tm.user_id,
+          -- The legacy master switch is ANDed in for one release: an opt-out written by an
+          -- old server pod after the split migration only reaches that column.
+          tm.rsvp_reminder_dms AND CASE (
+            SELECT ${sql.unsafe(eventBucketSql('e'))} FROM events e WHERE e.id = ${input.event_id}
+          )
+            WHEN 'training' THEN tm.rsvp_dms_training
+            WHEN 'tournament' THEN tm.rsvp_dms_tournament
+            ELSE tm.rsvp_dms_other
+          END AS reminder_dms_enabled
         FROM team_members tm
         WHERE tm.team_id = ${input.team_id}
           AND tm.active = true
@@ -355,7 +366,7 @@ const make = Effect.gen(function* () {
               AND ${sql.unsafe(holdsRsvpEligibleRoleWhere('eff'))}
           )
       )
-      SELECT em.team_member_id, u.name AS member_name, u.discord_nickname AS nickname, u.username, u.discord_display_name AS display_name, u.discord_id, em.rsvp_reminder_dms
+      SELECT em.team_member_id, u.name AS member_name, u.discord_nickname AS nickname, u.username, u.discord_display_name AS display_name, u.discord_id, em.reminder_dms_enabled
       FROM eligible_members em
       LEFT JOIN users u ON u.id = em.user_id
       LEFT JOIN event_rsvps er ON er.team_member_id = em.team_member_id AND er.event_id = ${input.event_id}

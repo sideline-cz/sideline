@@ -497,3 +497,175 @@ describe('PATCH /teams/:teamId/me/event-preferences', () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe('PATCH /teams/:teamId/me/event-preferences — reminder DM buckets', () => {
+  const seedMember = (prefix: string, name: string) =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser(`${prefix}000000000000001`, name)),
+      Effect.bind('team', ({ userId }) =>
+        createTeam(`${prefix}000000000000010` as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.provide(SeedLayer),
+      Effect.runPromise,
+    );
+
+  const patch = (teamId: Team.TeamId, token: string, body: Record<string, unknown>) =>
+    handler(
+      new Request(`http://localhost/teams/${teamId}/me/event-preferences`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  const get = (teamId: Team.TeamId, token: string) =>
+    handler(
+      new Request(`http://localhost/teams/${teamId}/me/event-preferences`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ).then((r) => r.json());
+
+  const readLegacyFlag = (teamId: Team.TeamId) =>
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.flatMap(
+        (sql) => sql<{ rsvp_reminder_dms: boolean }>`
+          SELECT rsvp_reminder_dms FROM team_members WHERE team_id = ${teamId}
+        `,
+      ),
+      Effect.map((rows) => rows[0]?.rsvp_reminder_dms),
+      Effect.provide(SeedLayer),
+      Effect.runPromise,
+    );
+
+  it('persists each bucket independently; the legacy flag stays the OR of the three', async () => {
+    const seed = await seedMember('917', 'prefs-buckets');
+    sessionsStore.set('token-b1', seed.userId);
+
+    const response = await patch(seed.team.id, 'token-b1', {
+      showAttendeeList: true,
+      rsvpDmsTraining: true,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: false,
+      personalChannelsSplit: false,
+    });
+    expect(response.status).toBe(200);
+    expect(await get(seed.team.id, 'token-b1')).toMatchObject({
+      rsvpDmsTraining: true,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: false,
+      rsvpReminderDms: true,
+    });
+    expect(await readLegacyFlag(seed.team.id)).toBe(true);
+
+    await patch(seed.team.id, 'token-b1', {
+      showAttendeeList: true,
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: false,
+      personalChannelsSplit: false,
+    });
+    expect((await get(seed.team.id, 'token-b1')).rsvpReminderDms).toBe(false);
+    expect(await readLegacyFlag(seed.team.id)).toBe(false);
+  });
+
+  it('a legacy payload (web build from before the split) applies rsvpReminderDms to all three buckets', async () => {
+    const seed = await seedMember('918', 'prefs-legacy');
+    sessionsStore.set('token-b2', seed.userId);
+
+    const response = await patch(seed.team.id, 'token-b2', {
+      showAttendeeList: true,
+      rsvpReminderDms: false,
+      personalChannelsSplit: false,
+    });
+    expect(response.status).toBe(200);
+    expect(await get(seed.team.id, 'token-b2')).toMatchObject({
+      rsvpReminderDms: false,
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: false,
+    });
+  });
+
+  it('a payload with no reminder fields at all keeps the stored buckets', async () => {
+    const seed = await seedMember('919', 'prefs-omitted');
+    sessionsStore.set('token-b3', seed.userId);
+
+    await patch(seed.team.id, 'token-b3', {
+      showAttendeeList: true,
+      rsvpDmsTraining: true,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: true,
+      personalChannelsSplit: false,
+    });
+    await patch(seed.team.id, 'token-b3', {
+      showAttendeeList: false,
+      personalChannelsSplit: false,
+    });
+
+    expect(await get(seed.team.id, 'token-b3')).toMatchObject({
+      showAttendeeList: false,
+      rsvpDmsTraining: true,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: true,
+    });
+  });
+
+  it('an old web tab resending rsvpReminderDms: true does NOT undo a single-bucket opt-out', async () => {
+    const seed = await seedMember('921', 'prefs-stale-tab');
+    sessionsStore.set('token-b4', seed.userId);
+
+    await patch(seed.team.id, 'token-b4', {
+      showAttendeeList: true,
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: true,
+      rsvpDmsOther: true,
+      personalChannelsSplit: false,
+    });
+    // The old tab loaded rsvpReminderDms: true (the OR) and resends it while changing
+    // something else entirely.
+    await patch(seed.team.id, 'token-b4', {
+      showAttendeeList: false,
+      rsvpReminderDms: true,
+      personalChannelsSplit: false,
+    });
+
+    expect(await get(seed.team.id, 'token-b4')).toMatchObject({
+      showAttendeeList: false,
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: true,
+      rsvpDmsOther: true,
+    });
+  });
+
+  it('an opt-out written only to the legacy column (old server pod) reads as all buckets off and survives the next save', async () => {
+    const seed = await seedMember('922', 'prefs-old-pod');
+    sessionsStore.set('token-b5', seed.userId);
+    await SqlClient.SqlClient.asEffect().pipe(
+      Effect.flatMap(
+        (sql) =>
+          sql`UPDATE team_members SET rsvp_reminder_dms = false WHERE team_id = ${seed.team.id}`,
+      ),
+      Effect.provide(SeedLayer),
+      Effect.runPromise,
+    );
+
+    const loaded = await get(seed.team.id, 'token-b5');
+    expect(loaded).toMatchObject({
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: false,
+    });
+
+    // The new web saves an unrelated change, echoing the loaded bucket values.
+    await patch(seed.team.id, 'token-b5', {
+      showAttendeeList: false,
+      rsvpDmsTraining: loaded.rsvpDmsTraining,
+      rsvpDmsTournament: loaded.rsvpDmsTournament,
+      rsvpDmsOther: loaded.rsvpDmsOther,
+      personalChannelsSplit: false,
+    });
+    expect(await readLegacyFlag(seed.team.id)).toBe(false);
+  });
+});

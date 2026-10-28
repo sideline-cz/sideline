@@ -25,9 +25,18 @@ import { useCardForm } from './team-settings/useCardForm';
 
 type ChannelMode = 'one' | 'split';
 
+// Same buckets, in the same order, as the three personal channels.
+const REMINDER_BUCKETS = [
+  { field: 'rsvpDmsTraining', label: 'eventPrefs_remindersTraining' },
+  { field: 'rsvpDmsTournament', label: 'eventPrefs_remindersTournament' },
+  { field: 'rsvpDmsOther', label: 'eventPrefs_remindersOther' },
+] as const;
+
 interface EventPreferencesFormValues extends Record<string, boolean | string> {
   readonly showAttendeeList: boolean;
-  readonly rsvpReminderDms: boolean;
+  readonly rsvpDmsTraining: boolean;
+  readonly rsvpDmsTournament: boolean;
+  readonly rsvpDmsOther: boolean;
   readonly channelMode: ChannelMode;
 }
 
@@ -46,7 +55,9 @@ interface EventPreferencesCardProps {
 function valuesFromPrefs(prefs: TeamApi.MemberEventPreferences): EventPreferencesFormValues {
   return {
     showAttendeeList: prefs.showAttendeeList,
-    rsvpReminderDms: prefs.rsvpReminderDms,
+    rsvpDmsTraining: prefs.rsvpDmsTraining,
+    rsvpDmsTournament: prefs.rsvpDmsTournament,
+    rsvpDmsOther: prefs.rsvpDmsOther,
     channelMode: prefs.personalChannelsSplit ? 'split' : 'one',
   };
 }
@@ -98,7 +109,7 @@ export function EventPreferencesCard({ teamId, prefs, onRefresh }: EventPreferen
 
   const attendeesId = `event-prefs-attendees-${teamId}`;
   const attendeesHelpId = `event-prefs-attendees-help-${teamId}`;
-  const remindersId = `event-prefs-reminders-${teamId}`;
+  const remindersLabelId = `event-prefs-reminders-${teamId}`;
   const remindersHelpId = `event-prefs-reminders-help-${teamId}`;
   const channelsLabelId = `event-prefs-channels-label-${teamId}`;
   const channelsHelpId = `event-prefs-channels-help-${teamId}`;
@@ -111,7 +122,9 @@ export function EventPreferencesCard({ teamId, prefs, onRefresh }: EventPreferen
           params: { teamId: Schema.decodeSync(Team.TeamId)(teamId) },
           payload: {
             showAttendeeList: form.values.showAttendeeList,
-            rsvpReminderDms: form.values.rsvpReminderDms,
+            rsvpDmsTraining: form.values.rsvpDmsTraining,
+            rsvpDmsTournament: form.values.rsvpDmsTournament,
+            rsvpDmsOther: form.values.rsvpDmsOther,
             personalChannelsSplit: form.values.channelMode === 'split',
           },
         }),
@@ -163,23 +176,29 @@ export function EventPreferencesCard({ teamId, prefs, onRefresh }: EventPreferen
 
             <Separator />
 
-            <div className='flex items-start justify-between gap-4'>
-              <div>
-                <Label htmlFor={remindersId} className='text-sm font-medium block'>
-                  {tr('eventPrefs_reminders')}
-                </Label>
-                <p id={remindersHelpId} className='text-xs text-muted-foreground mt-1'>
-                  {tr('eventPrefs_remindersHelp')}
-                </p>
+            <fieldset aria-describedby={remindersHelpId} className='m-0 min-w-0 border-0 p-0'>
+              <legend id={remindersLabelId} className='text-sm font-medium block p-0'>
+                {tr('eventPrefs_reminders')}
+              </legend>
+              <p id={remindersHelpId} className='text-xs text-muted-foreground mt-1'>
+                {tr('eventPrefs_remindersHelp')}
+              </p>
+              <div className='flex flex-col gap-3 mt-3'>
+                {REMINDER_BUCKETS.map(({ field, label }) => (
+                  <div key={field} className='flex items-center justify-between gap-4'>
+                    <Label htmlFor={`${remindersLabelId}-${field}`} className='text-sm'>
+                      {tr(label)}
+                    </Label>
+                    <Switch
+                      id={`${remindersLabelId}-${field}`}
+                      checked={form.values[field]}
+                      disabled={saving}
+                      onCheckedChange={(checked) => setField(field, checked)}
+                    />
+                  </div>
+                ))}
               </div>
-              <Switch
-                id={remindersId}
-                checked={form.values.rsvpReminderDms}
-                aria-describedby={remindersHelpId}
-                disabled={saving}
-                onCheckedChange={(checked) => setField('rsvpReminderDms', checked)}
-              />
-            </div>
+            </fieldset>
 
             {personalChannelsAvailable && (
               <>

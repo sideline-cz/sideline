@@ -45,7 +45,9 @@ type UpdatePrefsResult =
   | {
       _tag: 'success';
       showAttendeeList: unknown;
-      rsvpReminderDms: unknown;
+      rsvpDmsTraining: unknown;
+      rsvpDmsTournament: unknown;
+      rsvpDmsOther: unknown;
       personalChannelsSplit: unknown;
       personalChannelsAvailable: boolean;
     }
@@ -56,7 +58,9 @@ const { updateMyEventPreferencesSpy } = vi.hoisted(() => ({
     (args: { payload: Record<string, unknown> }): UpdatePrefsResult => ({
       _tag: 'success',
       showAttendeeList: args.payload.showAttendeeList,
-      rsvpReminderDms: args.payload.rsvpReminderDms,
+      rsvpDmsTraining: args.payload.rsvpDmsTraining,
+      rsvpDmsTournament: args.payload.rsvpDmsTournament,
+      rsvpDmsOther: args.payload.rsvpDmsOther,
       personalChannelsSplit: args.payload.personalChannelsSplit,
       personalChannelsAvailable: true,
     }),
@@ -97,6 +101,9 @@ const { EventPreferencesCard, EventPreferencesLoadFailed } = await import(
 const basePrefs = {
   showAttendeeList: true,
   rsvpReminderDms: true,
+  rsvpDmsTraining: true,
+  rsvpDmsTournament: true,
+  rsvpDmsOther: true,
   personalChannelsSplit: false,
   personalChannelsAvailable: true,
 };
@@ -104,11 +111,11 @@ const basePrefs = {
 const onRefresh = vi.fn();
 
 describe('EventPreferencesCard', () => {
-  it('renders two Switches and a ToggleGroup reflecting the passed prefs; the ToggleGroup root has role="radiogroup" and an accessible name', () => {
+  it('renders four Switches (attendees + three reminder buckets) and a ToggleGroup reflecting the passed prefs; the ToggleGroup root has role="radiogroup" and an accessible name', () => {
     render(<EventPreferencesCard teamId='team-1' prefs={basePrefs} onRefresh={onRefresh} />);
 
     const switches = screen.getAllByRole('switch');
-    expect(switches).toHaveLength(2);
+    expect(switches).toHaveLength(4);
 
     const radiogroup = screen.getByRole('radiogroup');
     expect(radiogroup).not.toBeNull();
@@ -140,13 +147,38 @@ describe('EventPreferencesCard', () => {
     const call = updateMyEventPreferencesSpy.mock.calls[0]?.[0] as {
       payload: Record<string, unknown>;
     };
-    expect(call.payload).toMatchObject({
+    expect(call.payload).toEqual({
       showAttendeeList: false,
-      rsvpReminderDms: true,
+      rsvpDmsTraining: true,
+      rsvpDmsTournament: true,
+      rsvpDmsOther: true,
       personalChannelsSplit: false,
     });
 
     // No confirm dialog — the channel-mode field never changed.
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('turning off ONE reminder bucket sends only that bucket false; no AlertDialog', async () => {
+    render(<EventPreferencesCard teamId='team-1' prefs={basePrefs} onRefresh={onRefresh} />);
+
+    // Order matches the personal channels: trainings, tournaments and matches, everything else.
+    const tournamentSwitch = screen.getByRole('switch', { name: 'eventPrefs_remindersTournament' });
+    fireEvent.click(tournamentSwitch);
+
+    fireEvent.click(screen.getByRole('button', { name: 'profile_saveChanges' }));
+
+    await waitFor(() => expect(updateMyEventPreferencesSpy).toHaveBeenCalledTimes(1));
+    const call = updateMyEventPreferencesSpy.mock.calls[0]?.[0] as {
+      payload: Record<string, unknown>;
+    };
+    expect(call.payload).toMatchObject({
+      rsvpDmsTraining: true,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: true,
+    });
+    // The legacy single switch is never sent by this build — the server would apply it to all three.
+    expect(call.payload).not.toHaveProperty('rsvpReminderDms');
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
@@ -219,7 +251,7 @@ describe('EventPreferencesCard', () => {
     render(<EventPreferencesCard teamId='team-1' prefs={basePrefs} onRefresh={onRefresh} />);
 
     const switches = screen.getAllByRole('switch');
-    fireEvent.click(switches[1]); // flip rsvpReminderDms — no dialog involved
+    fireEvent.click(switches[1]); // flip the trainings reminder — no dialog involved
 
     const saveButton = screen.getByRole('button', { name: 'profile_saveChanges' });
     fireEvent.click(saveButton);
@@ -229,7 +261,7 @@ describe('EventPreferencesCard', () => {
     await waitFor(() => expect(screen.getByText('teamSettings_unsavedChanges')).not.toBeNull());
   });
 
-  it('personalChannelsAvailable: false → the channel-mode block is absent; both switches still render', () => {
+  it('personalChannelsAvailable: false → the channel-mode block is absent; all four switches still render', () => {
     render(
       <EventPreferencesCard
         teamId='team-1'
@@ -238,7 +270,7 @@ describe('EventPreferencesCard', () => {
       />,
     );
 
-    expect(screen.getAllByRole('switch')).toHaveLength(2);
+    expect(screen.getAllByRole('switch')).toHaveLength(4);
     expect(screen.queryByRole('radiogroup')).toBeNull();
   });
 
@@ -286,6 +318,9 @@ describe('EventPreferencesCard', () => {
     const loaded = {
       showAttendeeList: false,
       rsvpReminderDms: false,
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: false,
       personalChannelsSplit: true,
       personalChannelsAvailable: true,
     } as unknown as typeof basePrefs;
@@ -298,6 +333,8 @@ describe('EventPreferencesCard', () => {
     const switches = screen.getAllByRole('switch');
     expect(switches[0]?.getAttribute('aria-checked')).toBe('false');
     expect(switches[1]?.getAttribute('aria-checked')).toBe('false');
+    expect(switches[2]?.getAttribute('aria-checked')).toBe('false');
+    expect(switches[3]?.getAttribute('aria-checked')).toBe('false');
     expect(
       screen.getByRole('radio', { name: 'eventPrefs_channelsSplit' }).getAttribute('aria-checked'),
     ).toBe('true');

@@ -233,6 +233,9 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
                 new TeamApi.MemberEventPreferences({
                   showAttendeeList: prefs.show_attendee_list,
                   rsvpReminderDms: prefs.rsvp_reminder_dms,
+                  rsvpDmsTraining: prefs.rsvp_dms_training,
+                  rsvpDmsTournament: prefs.rsvp_dms_tournament,
+                  rsvpDmsOther: prefs.rsvp_dms_other,
                   personalChannelsSplit: prefs.personal_channels_split,
                   personalChannelsAvailable: prefs.personal_channels_available,
                 }),
@@ -256,7 +259,25 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
                 ),
               ),
             ),
-            Effect.tap(({ membership }) => members.updateEventPreferences(membership.id, payload)),
+            // A bucket the payload omits falls back to the legacy single switch (a web build
+            // from before the split), then to the stored value. The legacy switch counts only
+            // when it CHANGES: an old tab resends the value it loaded with every save, and
+            // copying that `true` onto all three would undo a single-bucket opt-out.
+            Effect.let('legacy', ({ current }) =>
+              payload.rsvpReminderDms !== current.rsvp_reminder_dms
+                ? payload.rsvpReminderDms
+                : undefined,
+            ),
+            Effect.let('next', ({ current, legacy }) => ({
+              showAttendeeList: payload.showAttendeeList,
+              rsvpDmsTraining: payload.rsvpDmsTraining ?? legacy ?? current.rsvp_dms_training,
+              rsvpDmsTournament: payload.rsvpDmsTournament ?? legacy ?? current.rsvp_dms_tournament,
+              rsvpDmsOther: payload.rsvpDmsOther ?? legacy ?? current.rsvp_dms_other,
+              personalChannelsSplit: payload.personalChannelsSplit,
+            })),
+            Effect.tap(({ membership, next }) =>
+              members.updateEventPreferences(membership.id, next),
+            ),
             // Only `showAttendeeList` changes a rendered card — dirtying every upcoming
             // event of the whole team for the other two toggles would be ~1200 pointless
             // reconcile round trips per toggle (plan §6.5/S6).
@@ -266,11 +287,11 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
                 : Effect.void,
             ),
             Effect.map(
-              ({ current }) =>
+              ({ current, next }) =>
                 new TeamApi.MemberEventPreferences({
-                  showAttendeeList: payload.showAttendeeList,
-                  rsvpReminderDms: payload.rsvpReminderDms,
-                  personalChannelsSplit: payload.personalChannelsSplit,
+                  ...next,
+                  rsvpReminderDms:
+                    next.rsvpDmsTraining || next.rsvpDmsTournament || next.rsvpDmsOther,
                   personalChannelsAvailable: current.personal_channels_available,
                 }),
             ),

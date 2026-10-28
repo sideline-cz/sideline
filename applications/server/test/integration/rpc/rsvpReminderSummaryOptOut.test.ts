@@ -149,12 +149,28 @@ const setReminderDms = (memberId: TeamMember.TeamMemberId, value: boolean) =>
     ),
   );
 
-const createEvent = (teamId: Team.TeamId, createdBy: TeamMember.TeamMemberId) =>
+const setBucketDms = (
+  memberId: TeamMember.TeamMemberId,
+  column: 'rsvp_dms_training' | 'rsvp_dms_tournament' | 'rsvp_dms_other',
+) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) =>
+      sql
+        .unsafe(`UPDATE team_members SET ${column} = false WHERE id = '${memberId}'`)
+        .pipe(Effect.asVoid),
+    ),
+  );
+
+const createEvent = (
+  teamId: Team.TeamId,
+  createdBy: TeamMember.TeamMemberId,
+  eventType: Event.EventType = 'training',
+) =>
   EventsRepository.asEffect().pipe(
     Effect.andThen((repo) =>
       repo.insertEvent({
         teamId,
-        eventType: 'training',
+        eventType,
         title: 'Reminder Opt-out Test Event',
         description: Option.none(),
         startAt: DateTime.fromDateUnsafe(new Date('2099-12-31T18:00:00Z')),
@@ -316,5 +332,75 @@ describe('Event/GetRsvpReminderSummary — Setting 2 (rsvp_reminder_dms opt-out)
       // this asserts the opt-out does not leak into the counts at all.
       expect(summary.maybeCount).toBe(0);
     }),
+  );
+});
+
+// The same kind → bucket mapping as the personal-channel split (`eventBucketSql`). Every one
+// of the six kinds is listed so a kind routed somewhere nobody decided fails here.
+const KIND_TO_BUCKET: ReadonlyArray<{
+  readonly kind: Event.EventType;
+  readonly bucket: 'rsvp_dms_training' | 'rsvp_dms_tournament' | 'rsvp_dms_other';
+}> = [
+  { kind: 'training', bucket: 'rsvp_dms_training' },
+  { kind: 'match', bucket: 'rsvp_dms_tournament' },
+  { kind: 'tournament', bucket: 'rsvp_dms_tournament' },
+  { kind: 'meeting', bucket: 'rsvp_dms_other' },
+  { kind: 'social', bucket: 'rsvp_dms_other' },
+  { kind: 'other', bucket: 'rsvp_dms_other' },
+];
+
+describe('Event/GetRsvpReminderSummary — per-bucket reminder DMs', () => {
+  itEffect.effect.each(KIND_TO_BUCKET)(
+    'kind=$kind is silenced by $bucket and by no other bucket',
+    ({ kind, bucket }) =>
+      Effect.gen(function* () {
+        const seed = yield* Effect.promise(() => seedTeamWithPlayers('05', 3));
+        const [offTraining, offTournament, offOther] = seed.players;
+        yield* Effect.all([
+          setBucketDms(offTraining.id, 'rsvp_dms_training'),
+          setBucketDms(offTournament.id, 'rsvp_dms_tournament'),
+          setBucketDms(offOther.id, 'rsvp_dms_other'),
+        ]).pipe(Effect.provide(SetupLayer));
+        const event = yield* createEvent(seed.team.id, offTraining.id, kind).pipe(
+          Effect.provide(SetupLayer),
+        );
+
+        const exit = yield* callGetRsvpReminderSummary(event.id);
+        const summary = Option.getOrThrowWith(
+          Exit.getSuccess(exit),
+          () => new Error('Expected RPC exit success'),
+        );
+
+        const silenced = {
+          rsvp_dms_training: offTraining.discordId,
+          rsvp_dms_tournament: offTournament.discordId,
+          rsvp_dms_other: offOther.discordId,
+        };
+        const ids = summary.nonResponders.map((r: any) => Option.getOrNull(r.discord_id));
+        expect(ids).not.toContain(silenced[bucket]);
+        expect(ids).toHaveLength(2);
+      }),
+  );
+
+  itEffect.effect(
+    'legacy rsvp_reminder_dms = false silences every kind even with all buckets on (opt-out written by an old server pod)',
+    () =>
+      Effect.gen(function* () {
+        const seed = yield* Effect.promise(() => seedTeamWithPlayers('06', 1));
+        const [member] = seed.players;
+        yield* setReminderDms(member.id, false).pipe(Effect.provide(SetupLayer));
+
+        for (const { kind } of KIND_TO_BUCKET) {
+          const event = yield* createEvent(seed.team.id, member.id, kind).pipe(
+            Effect.provide(SetupLayer),
+          );
+          const exit = yield* callGetRsvpReminderSummary(event.id);
+          const summary = Option.getOrThrowWith(
+            Exit.getSuccess(exit),
+            () => new Error('Expected RPC exit success'),
+          );
+          expect(summary.nonResponders).toHaveLength(0);
+        }
+      }),
   );
 });
