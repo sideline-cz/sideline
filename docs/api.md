@@ -436,7 +436,7 @@ Returns the calling member's own event preferences for this team (Nastavitelná 
 | `rsvpDmsTraining` | `boolean` | No | When `false`, no RSVP reminder DM for `training` events. Buckets match the personal-channel split; none of them affect the organiser-facing non-responders view or `missed_rsvps` accounting |
 | `rsvpDmsTournament` | `boolean` | No | Same, for `tournament` and `match` events |
 | `rsvpDmsOther` | `boolean` | No | Same, for `meeting`, `social` and `other` events |
-| `rsvpReminderDms` | `boolean` | No | Legacy (removed after one release): `true` when any bucket is on |
+| `rsvpReminderDms` | `boolean` | No | Legacy, read-only: `true` when any bucket is on. Removed together with the `rsvp_reminder_dms` column |
 | `personalChannelsSplit` | `boolean` | No | When `true`, the member's personal Discord events channel is split into three (training / tournament / other) instead of one combined channel |
 | `personalChannelsAvailable` | `boolean` | No | `true` when the team has a `discord_personal_events_category_id` configured (i.e. personal channels exist at all for this team); response-only, advisory — a `PATCH` with `personalChannelsSplit` set is accepted even when this is `false` |
 
@@ -450,7 +450,7 @@ Returns the calling member's own event preferences for this team (Nastavitelná 
 
 #### `PATCH /teams/:teamId/me/event-preferences`
 
-Updates the calling member's own event preferences for this team. `showAttendeeList` and `personalChannelsSplit` are required. Each reminder bucket takes its own field, else the legacy `rsvpReminderDms` (sent by a web build from before the split; applied to all three), else keeps its stored value.
+Updates the calling member's own event preferences for this team. All fields are required. The legacy `rsvpReminderDms` field is no longer accepted: a payload without the three buckets is rejected with `400`.
 
 **Auth:** Bearer token (AuthMiddleware)
 
@@ -465,10 +465,9 @@ Updates the calling member's own event preferences for this team. `showAttendeeL
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `showAttendeeList` | `boolean` | Yes | See `GET` above |
-| `rsvpDmsTraining` | `boolean` | No | See `GET` above |
-| `rsvpDmsTournament` | `boolean` | No | See `GET` above |
-| `rsvpDmsOther` | `boolean` | No | See `GET` above |
-| `rsvpReminderDms` | `boolean` | No | Legacy: applied to every bucket the payload does not name |
+| `rsvpDmsTraining` | `boolean` | Yes | See `GET` above |
+| `rsvpDmsTournament` | `boolean` | Yes | See `GET` above |
+| `rsvpDmsOther` | `boolean` | Yes | See `GET` above |
 | `personalChannelsSplit` | `boolean` | Yes | See `GET` above. Toggling this destroys the member's now-undesired personal channel(s) — and anything written in them — once the newly-desired channel(s) are provisioned; see `docs/discord-bot.md`'s Personal Events Provisioning Worker section |
 
 **Response:** `200 OK` — `MemberEventPreferences` (see `GET` above for field descriptions)

@@ -6,7 +6,7 @@
 //   2b. personalChannelsAvailable is advisory — GET/PATCH keep working when it's false.
 //   3. PATCH persists all three fields; response is a real MemberEventPreferences.
 //   4. PATCH changing showAttendeeList dirties upcoming/active events, not past/cancelled.
-//   5. PATCH changing only rsvpReminderDms/personalChannelsSplit leaves the dirty mark alone (S6).
+//   5. PATCH changing only the DM buckets/personalChannelsSplit leaves the dirty mark alone (S6).
 //   6. Non-member → 403; cross-team isolation.
 //
 // Real HTTP handler, real Postgres — the "SmallApi" pattern.
@@ -331,7 +331,9 @@ describe('GET /teams/:teamId/me/event-preferences', () => {
         headers: { Authorization: 'Bearer token-3', 'Content-Type': 'application/json' },
         body: JSON.stringify({
           showAttendeeList: false,
-          rsvpReminderDms: false,
+          rsvpDmsTraining: false,
+          rsvpDmsTournament: false,
+          rsvpDmsOther: false,
           personalChannelsSplit: true,
         }),
       }),
@@ -366,7 +368,9 @@ describe('PATCH /teams/:teamId/me/event-preferences', () => {
         headers: { Authorization: 'Bearer token-4', 'Content-Type': 'application/json' },
         body: JSON.stringify({
           showAttendeeList: false,
-          rsvpReminderDms: false,
+          rsvpDmsTraining: false,
+          rsvpDmsTournament: false,
+          rsvpDmsOther: false,
           personalChannelsSplit: true,
         }),
       }),
@@ -411,7 +415,9 @@ describe('PATCH /teams/:teamId/me/event-preferences', () => {
         headers: { Authorization: 'Bearer token-5', 'Content-Type': 'application/json' },
         body: JSON.stringify({
           showAttendeeList: false, // changed from the default true
-          rsvpReminderDms: true,
+          rsvpDmsTraining: true,
+          rsvpDmsTournament: true,
+          rsvpDmsOther: true,
           personalChannelsSplit: false,
         }),
       }),
@@ -436,7 +442,7 @@ describe('PATCH /teams/:teamId/me/event-preferences', () => {
     expect(cancelledDirty).toBeNull();
   });
 
-  it('S6: changing ONLY rsvpReminderDms or ONLY personalChannelsSplit leaves personal_messages_dirty_at untouched', async () => {
+  it('S6: changing ONLY the DM buckets or ONLY personalChannelsSplit leaves personal_messages_dirty_at untouched', async () => {
     const seed = await Effect.Do.pipe(
       Effect.bind('userId', () => createUser('915000000000000001', 'prefs-s6')),
       Effect.bind('team', ({ userId }) =>
@@ -456,7 +462,9 @@ describe('PATCH /teams/:teamId/me/event-preferences', () => {
         headers: { Authorization: 'Bearer token-6', 'Content-Type': 'application/json' },
         body: JSON.stringify({
           showAttendeeList: true,
-          rsvpReminderDms: false,
+          rsvpDmsTraining: false,
+          rsvpDmsTournament: false,
+          rsvpDmsOther: false,
           personalChannelsSplit: true,
         }),
       }),
@@ -527,19 +535,7 @@ describe('PATCH /teams/:teamId/me/event-preferences — reminder DM buckets', ()
       }),
     ).then((r) => r.json());
 
-  const readLegacyFlag = (teamId: Team.TeamId) =>
-    SqlClient.SqlClient.asEffect().pipe(
-      Effect.flatMap(
-        (sql) => sql<{ rsvp_reminder_dms: boolean }>`
-          SELECT rsvp_reminder_dms FROM team_members WHERE team_id = ${teamId}
-        `,
-      ),
-      Effect.map((rows) => rows[0]?.rsvp_reminder_dms),
-      Effect.provide(SeedLayer),
-      Effect.runPromise,
-    );
-
-  it('persists each bucket independently; the legacy flag stays the OR of the three', async () => {
+  it('persists each bucket independently; rsvpReminderDms reads as the OR of the three', async () => {
     const seed = await seedMember('917', 'prefs-buckets');
     sessionsStore.set('token-b1', seed.userId);
 
@@ -557,7 +553,6 @@ describe('PATCH /teams/:teamId/me/event-preferences — reminder DM buckets', ()
       rsvpDmsOther: false,
       rsvpReminderDms: true,
     });
-    expect(await readLegacyFlag(seed.team.id)).toBe(true);
 
     await patch(seed.team.id, 'token-b1', {
       showAttendeeList: true,
@@ -567,105 +562,23 @@ describe('PATCH /teams/:teamId/me/event-preferences — reminder DM buckets', ()
       personalChannelsSplit: false,
     });
     expect((await get(seed.team.id, 'token-b1')).rsvpReminderDms).toBe(false);
-    expect(await readLegacyFlag(seed.team.id)).toBe(false);
   });
 
-  it('a legacy payload (web build from before the split) applies rsvpReminderDms to all three buckets', async () => {
+  it('a payload without the buckets (web build from before the split) is rejected and changes nothing', async () => {
     const seed = await seedMember('918', 'prefs-legacy');
     sessionsStore.set('token-b2', seed.userId);
 
     const response = await patch(seed.team.id, 'token-b2', {
-      showAttendeeList: true,
+      showAttendeeList: false,
       rsvpReminderDms: false,
       personalChannelsSplit: false,
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
     expect(await get(seed.team.id, 'token-b2')).toMatchObject({
-      rsvpReminderDms: false,
-      rsvpDmsTraining: false,
-      rsvpDmsTournament: false,
-      rsvpDmsOther: false,
-    });
-  });
-
-  it('a payload with no reminder fields at all keeps the stored buckets', async () => {
-    const seed = await seedMember('919', 'prefs-omitted');
-    sessionsStore.set('token-b3', seed.userId);
-
-    await patch(seed.team.id, 'token-b3', {
       showAttendeeList: true,
       rsvpDmsTraining: true,
-      rsvpDmsTournament: false,
-      rsvpDmsOther: true,
-      personalChannelsSplit: false,
-    });
-    await patch(seed.team.id, 'token-b3', {
-      showAttendeeList: false,
-      personalChannelsSplit: false,
-    });
-
-    expect(await get(seed.team.id, 'token-b3')).toMatchObject({
-      showAttendeeList: false,
-      rsvpDmsTraining: true,
-      rsvpDmsTournament: false,
-      rsvpDmsOther: true,
-    });
-  });
-
-  it('an old web tab resending rsvpReminderDms: true does NOT undo a single-bucket opt-out', async () => {
-    const seed = await seedMember('921', 'prefs-stale-tab');
-    sessionsStore.set('token-b4', seed.userId);
-
-    await patch(seed.team.id, 'token-b4', {
-      showAttendeeList: true,
-      rsvpDmsTraining: false,
-      rsvpDmsTournament: true,
-      rsvpDmsOther: true,
-      personalChannelsSplit: false,
-    });
-    // The old tab loaded rsvpReminderDms: true (the OR) and resends it while changing
-    // something else entirely.
-    await patch(seed.team.id, 'token-b4', {
-      showAttendeeList: false,
-      rsvpReminderDms: true,
-      personalChannelsSplit: false,
-    });
-
-    expect(await get(seed.team.id, 'token-b4')).toMatchObject({
-      showAttendeeList: false,
-      rsvpDmsTraining: false,
       rsvpDmsTournament: true,
       rsvpDmsOther: true,
     });
-  });
-
-  it('an opt-out written only to the legacy column (old server pod) reads as all buckets off and survives the next save', async () => {
-    const seed = await seedMember('922', 'prefs-old-pod');
-    sessionsStore.set('token-b5', seed.userId);
-    await SqlClient.SqlClient.asEffect().pipe(
-      Effect.flatMap(
-        (sql) =>
-          sql`UPDATE team_members SET rsvp_reminder_dms = false WHERE team_id = ${seed.team.id}`,
-      ),
-      Effect.provide(SeedLayer),
-      Effect.runPromise,
-    );
-
-    const loaded = await get(seed.team.id, 'token-b5');
-    expect(loaded).toMatchObject({
-      rsvpDmsTraining: false,
-      rsvpDmsTournament: false,
-      rsvpDmsOther: false,
-    });
-
-    // The new web saves an unrelated change, echoing the loaded bucket values.
-    await patch(seed.team.id, 'token-b5', {
-      showAttendeeList: false,
-      rsvpDmsTraining: loaded.rsvpDmsTraining,
-      rsvpDmsTournament: loaded.rsvpDmsTournament,
-      rsvpDmsOther: loaded.rsvpDmsOther,
-      personalChannelsSplit: false,
-    });
-    expect(await readLegacyFlag(seed.team.id)).toBe(false);
   });
 });

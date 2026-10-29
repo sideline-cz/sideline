@@ -28,13 +28,9 @@ describe('UpdateMemberEventPreferences — encodes the plain object the client s
     expect(Schema.encodeSync(TeamApi.UpdateMemberEventPreferences)(payload)).toEqual(payload);
   });
 
-  it('still accepts the legacy payload a web build from before the bucket split sends', () => {
+  it('rejects the legacy payload a web build from before the bucket split sends', () => {
     const legacy = { showAttendeeList: true, rsvpReminderDms: false, personalChannelsSplit: false };
-    expect(
-      Schema.decodeUnknownSync(TeamApi.UpdateMemberEventPreferences)(
-        Schema.encodeSync(TeamApi.UpdateMemberEventPreferences)(legacy),
-      ),
-    ).toEqual(legacy);
+    expect(() => Schema.decodeUnknownSync(TeamApi.UpdateMemberEventPreferences)(legacy)).toThrow();
   });
 
   it('round-trips every boolean combination', () => {
@@ -62,6 +58,8 @@ describe('UpdateMemberEventPreferences — encodes the plain object the client s
       Schema.decodeUnknownSync(TeamApi.UpdateMemberEventPreferences)({
         showAttendeeList: 'yes',
         rsvpDmsTraining: true,
+        rsvpDmsTournament: true,
+        rsvpDmsOther: true,
         personalChannelsSplit: false,
       }),
     ).toThrow();
@@ -76,7 +74,6 @@ describe('UpdateMemberEventPreferences — encodes the plain object the client s
       'rsvpDmsOther',
       'rsvpDmsTournament',
       'rsvpDmsTraining',
-      'rsvpReminderDms',
       'showAttendeeList',
     ]);
   });

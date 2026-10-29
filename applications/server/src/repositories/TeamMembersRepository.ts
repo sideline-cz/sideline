@@ -826,7 +826,6 @@ const make = Effect.gen(function* () {
     Request: Schema.Struct({ member_id: Schema.String }),
     Result: Schema.Struct({
       show_attendee_list: Schema.Boolean,
-      rsvp_reminder_dms: Schema.Boolean,
       rsvp_dms_training: Schema.Boolean,
       rsvp_dms_tournament: Schema.Boolean,
       rsvp_dms_other: Schema.Boolean,
@@ -834,13 +833,8 @@ const make = Effect.gen(function* () {
       personal_channels_available: Schema.Boolean,
     }),
     execute: (input) => sql`
-      -- Buckets are read as their EFFECTIVE value: an opt-out an old server pod wrote only
-      -- to rsvp_reminder_dms must show as off, or the member's next save turns it back on.
-      SELECT tm.show_attendee_list, tm.rsvp_reminder_dms,
-        tm.rsvp_reminder_dms AND tm.rsvp_dms_training AS rsvp_dms_training,
-        tm.rsvp_reminder_dms AND tm.rsvp_dms_tournament AS rsvp_dms_tournament,
-        tm.rsvp_reminder_dms AND tm.rsvp_dms_other AS rsvp_dms_other,
-        tm.personal_channels_split,
+      SELECT tm.show_attendee_list, tm.rsvp_dms_training, tm.rsvp_dms_tournament,
+        tm.rsvp_dms_other, tm.personal_channels_split,
         (ts.discord_personal_events_category_id IS NOT NULL) AS personal_channels_available
       FROM team_members tm
       LEFT JOIN team_settings ts ON ts.team_id = tm.team_id
@@ -860,15 +854,12 @@ const make = Effect.gen(function* () {
       rsvp_dms_other: Schema.Boolean,
       personal_channels_split: Schema.Boolean,
     }),
-    // rsvp_reminder_dms is the legacy master switch: kept as the OR of the buckets for one
-    // release, so an old server pod (or a rollback) still sends whatever a bucket allows.
     execute: (input) => sql`
       UPDATE team_members
       SET show_attendee_list = ${input.show_attendee_list},
           rsvp_dms_training = ${input.rsvp_dms_training},
           rsvp_dms_tournament = ${input.rsvp_dms_tournament},
           rsvp_dms_other = ${input.rsvp_dms_other},
-          rsvp_reminder_dms = ${input.rsvp_dms_training || input.rsvp_dms_tournament || input.rsvp_dms_other},
           personal_channels_split = ${input.personal_channels_split}
       WHERE id = ${input.member_id}
     `,

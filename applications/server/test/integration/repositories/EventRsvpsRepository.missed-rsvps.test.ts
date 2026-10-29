@@ -618,7 +618,7 @@ describe('EventRsvpsRepository — incrementMissedForEventNonRespondersByEventId
 
 // ---------------------------------------------------------------------------
 // Nastavitelná docházka (plan §6.8, §10.2, Setting 2 accounting). The
-// `rsvp_reminder_dms` opt-out is a DM-delivery preference (§6.7) — it must NOT
+// `rsvp_dms_*` opt-out is a DM-delivery preference (§6.7) — it must NOT
 // change who accrues `missed_rsvps`. `incrementMissedForEventNonResponders`
 // is a standalone re-derivation (`EventRsvpsRepository.ts:288`) that never
 // calls `findNonResponders` and shares no code with the reminder-summary
@@ -628,15 +628,17 @@ describe('EventRsvpsRepository — incrementMissedForEventNonRespondersByEventId
 const setReminderDms = (memberId: TeamMember.TeamMemberId, value: boolean) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen((sql) =>
-      sql`UPDATE team_members SET rsvp_reminder_dms = ${value} WHERE id = ${memberId}`.pipe(
-        Effect.asVoid,
-      ),
+      sql`
+        UPDATE team_members
+        SET rsvp_dms_training = ${value}, rsvp_dms_tournament = ${value}, rsvp_dms_other = ${value}
+        WHERE id = ${memberId}
+      `.pipe(Effect.asVoid),
     ),
   );
 
-describe('EventRsvpsRepository — incrementMissedForEventNonRespondersByEventId is unaffected by rsvp_reminder_dms (Setting 2 accounting)', () => {
+describe('EventRsvpsRepository — incrementMissedForEventNonRespondersByEventId is unaffected by rsvp_dms_* (Setting 2 accounting)', () => {
   it.effect(
-    'a Player non-responder with rsvp_reminder_dms = false still gets missed_rsvps + 1, identical to an opted-in member',
+    'a Player non-responder with rsvp_dms_* = false still gets missed_rsvps + 1, identical to an opted-in member',
     () =>
       seedTeamWithRoles('20').pipe(
         Effect.tap(({ playerMember }) => setReminderDms(playerMember.id, false)),
