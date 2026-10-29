@@ -33,8 +33,6 @@ export class TeamMember extends Model.Class<TeamMember>('TeamMember')({
   // always set afterwards via TeamMembersRepository.updateEventPreferences. Mirrors
   // jersey_number / variable_symbol / discord_joined_at above.
   show_attendee_list: Model.FieldExcept(['insert'])(Schema.Boolean),
-  // Legacy master switch, kept for one release as the OR of the three buckets below.
-  rsvp_reminder_dms: Model.FieldExcept(['insert'])(Schema.Boolean),
   // Reminder DMs per personal-channel bucket (same kind mapping as the channel split).
   rsvp_dms_training: Model.FieldExcept(['insert'])(Schema.Boolean),
   rsvp_dms_tournament: Model.FieldExcept(['insert'])(Schema.Boolean),

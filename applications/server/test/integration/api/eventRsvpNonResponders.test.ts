@@ -1,7 +1,7 @@
 // Nastavitelná docházka (plan §6.7, §10.2, Setting 2 non-interference). The
 // `event:edit`-gated `getNonResponders` endpoint (`api/event-rsvp.ts:290`)
 // shares `findNonResponders` with `Event/GetRsvpReminderSummary`, but the
-// `rsvp_reminder_dms` opt-out filter lives ONLY in the reminder-summary
+// `rsvp_dms_*` opt-out filter lives ONLY in the reminder-summary
 // handler (plan §6.7). This test is the guard that fails if someone later
 // "DRYs" that filter down into `findNonResponders` itself: the organiser must
 // still see BOTH the opted-out and the opted-in non-responder.
@@ -193,9 +193,11 @@ const createEventEditRole = (teamId: Team.TeamId) =>
 const setReminderDms = (memberId: TeamMember.TeamMemberId, value: boolean) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen((sql) =>
-      sql`UPDATE team_members SET rsvp_reminder_dms = ${value} WHERE id = ${memberId}`.pipe(
-        Effect.asVoid,
-      ),
+      sql`
+        UPDATE team_members
+        SET rsvp_dms_training = ${value}, rsvp_dms_tournament = ${value}, rsvp_dms_other = ${value}
+        WHERE id = ${memberId}
+      `.pipe(Effect.asVoid),
     ),
   );
 

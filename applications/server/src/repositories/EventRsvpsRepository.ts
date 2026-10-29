@@ -331,9 +331,7 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       WITH eligible_members AS (
         SELECT tm.id AS team_member_id, tm.user_id,
-          -- The legacy master switch is ANDed in for one release: an opt-out written by an
-          -- old server pod after the split migration only reaches that column.
-          tm.rsvp_reminder_dms AND CASE (
+          CASE (
             SELECT ${sql.unsafe(eventBucketSql('e'))} FROM events e WHERE e.id = ${input.event_id}
           )
             WHEN 'training' THEN tm.rsvp_dms_training

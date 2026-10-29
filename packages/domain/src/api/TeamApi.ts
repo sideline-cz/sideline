@@ -69,8 +69,8 @@ export class MemberEventPreferences extends Schema.Class<MemberEventPreferences>
   'MemberEventPreferences',
 )({
   showAttendeeList: Schema.Boolean,
-  // Legacy: true when any bucket below is on. Kept for one release so a web build from
-  // before the split can still decode this response during a rolling deploy.
+  // Legacy: true when any bucket below is on. Web v0.66 still decodes it as required;
+  // remove it together with the team_members.rsvp_reminder_dms column.
   rsvpReminderDms: Schema.Boolean,
   // Reminder DMs per personal-channel bucket: trainings / tournaments and matches / the rest.
   rsvpDmsTraining: Schema.Boolean,
@@ -89,16 +89,11 @@ export class MemberEventPreferences extends Schema.Class<MemberEventPreferences>
 // the effect errors out, and NO network request is ever sent. The symptom is a generic
 // save-failed toast with nothing in the Network tab, which looks like a server problem
 // and is not one. Response schemas may stay classes; only payloads are affected.
-//
-// The DM fields are all optional for one release: a web build from before the split sends
-// only `rsvpReminderDms` (applied to all three buckets), the current one sends only the
-// three buckets. A bucket absent from both keeps its stored value.
 export const UpdateMemberEventPreferences = Schema.Struct({
   showAttendeeList: Schema.Boolean,
-  rsvpReminderDms: Schema.optionalKey(Schema.Boolean),
-  rsvpDmsTraining: Schema.optionalKey(Schema.Boolean),
-  rsvpDmsTournament: Schema.optionalKey(Schema.Boolean),
-  rsvpDmsOther: Schema.optionalKey(Schema.Boolean),
+  rsvpDmsTraining: Schema.Boolean,
+  rsvpDmsTournament: Schema.Boolean,
+  rsvpDmsOther: Schema.Boolean,
   personalChannelsSplit: Schema.Boolean,
 });
 export type UpdateMemberEventPreferences = Schema.Schema.Type<typeof UpdateMemberEventPreferences>;

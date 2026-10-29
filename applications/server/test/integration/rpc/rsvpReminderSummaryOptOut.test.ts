@@ -1,13 +1,13 @@
 // Nastavitelná docházka (plan §6.7, §10.2, Setting 2). `Event/GetRsvpReminderSummary`
 // is the sole consumer feeding `handleRsvpReminder.ts`'s DM loop — the opt-out
-// (`team_members.rsvp_reminder_dms`) must be filtered HERE, and only here, so a
+// (`team_members.rsvp_dms_*`) must be filtered HERE, and only here, so a
 // member who muted the reminder DM stops receiving it while every other reader
 // of non-responder data (the organiser's admin view, the missed-RSVP
 // accounting) keeps seeing them in full (§6.7/§6.8, covered by sibling files).
 //
 // Real Postgres (testcontainers) — a mocked SqlClient cannot exercise the
 // `eligible_members` CTE's role/group/missed_rsvps predicates or the new
-// `rsvp_reminder_dms` column read.
+// `rsvp_dms_*` column read.
 
 import { it as itEffect } from '@effect/vitest';
 import type { Discord, Event, Role, Team, TeamMember, User } from '@sideline/domain';
@@ -143,9 +143,11 @@ const assignRole = (memberId: TeamMember.TeamMemberId, roleId: Role.RoleId) =>
 const setReminderDms = (memberId: TeamMember.TeamMemberId, value: boolean) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen((sql) =>
-      sql`UPDATE team_members SET rsvp_reminder_dms = ${value} WHERE id = ${memberId}`.pipe(
-        Effect.asVoid,
-      ),
+      sql`
+        UPDATE team_members
+        SET rsvp_dms_training = ${value}, rsvp_dms_tournament = ${value}, rsvp_dms_other = ${value}
+        WHERE id = ${memberId}
+      `.pipe(Effect.asVoid),
     ),
   );
 
@@ -249,7 +251,7 @@ const callGetRsvpReminderSummary = (eventId: Event.EventId) =>
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Event/GetRsvpReminderSummary — Setting 2 (rsvp_reminder_dms opt-out)', () => {
+describe('Event/GetRsvpReminderSummary — Setting 2 (rsvp_dms_* opt-out)', () => {
   itEffect.effect(
     'opted-out member is not DMed: two eligible non-responders, one opted out → exactly one nonResponders entry, the opted-in one',
     () =>
@@ -275,7 +277,7 @@ describe('Event/GetRsvpReminderSummary — Setting 2 (rsvp_reminder_dms opt-out)
   itEffect.effect('opted-in member (relying on the column default) is still DMed', () =>
     Effect.gen(function* () {
       const seed = yield* Effect.promise(() => seedTeamWithPlayers('02', 2));
-      // Neither player's rsvp_reminder_dms is touched — both rely on the DEFAULT true.
+      // Neither player's rsvp_dms_* is touched — both rely on the DEFAULT true.
 
       const exit = yield* callGetRsvpReminderSummary(seed.event.id);
       const summary = Option.getOrThrowWith(
@@ -290,7 +292,7 @@ describe('Event/GetRsvpReminderSummary — Setting 2 (rsvp_reminder_dms opt-out)
     }),
   );
 
-  itEffect.effect('a member who has responded never appears, regardless of rsvp_reminder_dms', () =>
+  itEffect.effect('a member who has responded never appears, regardless of rsvp_dms_*', () =>
     Effect.gen(function* () {
       const seed = yield* Effect.promise(() => seedTeamWithPlayers('03', 2));
       const [responded, optedOut] = seed.players;
@@ -379,28 +381,6 @@ describe('Event/GetRsvpReminderSummary — per-bucket reminder DMs', () => {
         const ids = summary.nonResponders.map((r: any) => Option.getOrNull(r.discord_id));
         expect(ids).not.toContain(silenced[bucket]);
         expect(ids).toHaveLength(2);
-      }),
-  );
-
-  itEffect.effect(
-    'legacy rsvp_reminder_dms = false silences every kind even with all buckets on (opt-out written by an old server pod)',
-    () =>
-      Effect.gen(function* () {
-        const seed = yield* Effect.promise(() => seedTeamWithPlayers('06', 1));
-        const [member] = seed.players;
-        yield* setReminderDms(member.id, false).pipe(Effect.provide(SetupLayer));
-
-        for (const { kind } of KIND_TO_BUCKET) {
-          const event = yield* createEvent(seed.team.id, member.id, kind).pipe(
-            Effect.provide(SetupLayer),
-          );
-          const exit = yield* callGetRsvpReminderSummary(event.id);
-          const summary = Option.getOrThrowWith(
-            Exit.getSuccess(exit),
-            () => new Error('Expected RPC exit success'),
-          );
-          expect(summary.nonResponders).toHaveLength(0);
-        }
       }),
   );
 });
