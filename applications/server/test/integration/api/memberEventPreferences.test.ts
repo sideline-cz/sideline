@@ -262,7 +262,7 @@ describe('GET /teams/:teamId/me/event-preferences', () => {
     const body = await response.json();
     expect(body).toMatchObject({
       showAttendeeList: true,
-      rsvpReminderDms: true,
+      rsvpDmsTraining: true,
       personalChannelsSplit: false,
       personalChannelsAvailable: true,
     });
@@ -302,7 +302,7 @@ describe('GET /teams/:teamId/me/event-preferences', () => {
     expect((await withCategoryResponse.json()).personalChannelsAvailable).toBe(true);
   });
 
-  it('personalChannelsAvailable: false → GET still returns showAttendeeList/rsvpReminderDms, and PATCH still persists all three fields (advisory only, plan §6.5)', async () => {
+  it('personalChannelsAvailable: false → GET still returns showAttendeeList/rsvpDmsTraining, and PATCH still persists all three fields (advisory only, plan §6.5)', async () => {
     const seed = await Effect.Do.pipe(
       Effect.bind('userId', () => createUser('912000000000000001', 'prefs-noavail')),
       Effect.bind('team', ({ userId }) =>
@@ -323,7 +323,7 @@ describe('GET /teams/:teamId/me/event-preferences', () => {
     const getBody = await getResponse.json();
     expect(getBody.personalChannelsAvailable).toBe(false);
     expect(getBody.showAttendeeList).toBe(true);
-    expect(getBody.rsvpReminderDms).toBe(true);
+    expect(getBody.rsvpDmsTraining).toBe(true);
 
     const patchResponse = await handler(
       new Request(`http://localhost/teams/${seed.team.id}/me/event-preferences`, {
@@ -342,7 +342,7 @@ describe('GET /teams/:teamId/me/event-preferences', () => {
     const patchBody = await patchResponse.json();
     expect(patchBody).toMatchObject({
       showAttendeeList: false,
-      rsvpReminderDms: false,
+      rsvpDmsTraining: false,
       personalChannelsSplit: true,
       personalChannelsAvailable: false,
     });
@@ -378,7 +378,7 @@ describe('PATCH /teams/:teamId/me/event-preferences', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.showAttendeeList).toBe(false);
-    expect(body.rsvpReminderDms).toBe(false);
+    expect(body.rsvpDmsTraining).toBe(false);
     expect(body.personalChannelsSplit).toBe(true);
 
     // Persisted, not just echoed — a subsequent GET reads the same values back.
@@ -390,7 +390,7 @@ describe('PATCH /teams/:teamId/me/event-preferences', () => {
     );
     const getBody = await getResponse.json();
     expect(getBody.showAttendeeList).toBe(false);
-    expect(getBody.rsvpReminderDms).toBe(false);
+    expect(getBody.rsvpDmsTraining).toBe(false);
     expect(getBody.personalChannelsSplit).toBe(true);
   });
 
@@ -535,7 +535,7 @@ describe('PATCH /teams/:teamId/me/event-preferences — reminder DM buckets', ()
       }),
     ).then((r) => r.json());
 
-  it('persists each bucket independently; rsvpReminderDms reads as the OR of the three', async () => {
+  it('persists each bucket independently', async () => {
     const seed = await seedMember('917', 'prefs-buckets');
     sessionsStore.set('token-b1', seed.userId);
 
@@ -551,7 +551,6 @@ describe('PATCH /teams/:teamId/me/event-preferences — reminder DM buckets', ()
       rsvpDmsTraining: true,
       rsvpDmsTournament: false,
       rsvpDmsOther: false,
-      rsvpReminderDms: true,
     });
 
     await patch(seed.team.id, 'token-b1', {
@@ -561,7 +560,13 @@ describe('PATCH /teams/:teamId/me/event-preferences — reminder DM buckets', ()
       rsvpDmsOther: false,
       personalChannelsSplit: false,
     });
-    expect((await get(seed.team.id, 'token-b1')).rsvpReminderDms).toBe(false);
+    const after = await get(seed.team.id, 'token-b1');
+    expect(after).toMatchObject({
+      rsvpDmsTraining: false,
+      rsvpDmsTournament: false,
+      rsvpDmsOther: false,
+    });
+    expect(after).not.toHaveProperty('rsvpReminderDms');
   });
 
   it('a payload without the buckets (web build from before the split) is rejected and changes nothing', async () => {

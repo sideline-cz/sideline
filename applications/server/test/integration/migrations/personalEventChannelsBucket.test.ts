@@ -49,25 +49,23 @@ describe('team_members event-preference columns (1792200000)', () => {
 
       const rows = yield* sql<{
         show_attendee_list: boolean;
-        rsvp_reminder_dms: boolean;
         personal_channels_split: boolean;
-      }>`SELECT show_attendee_list, rsvp_reminder_dms, personal_channels_split
+      }>`SELECT show_attendee_list, personal_channels_split
            FROM team_members WHERE id = ${member.id}`;
 
       // Defaults must preserve today's behaviour for every existing member: the
-      // attendee list is shown, reminder DMs are sent, and channels stay combined.
+      // attendee list is shown and channels stay combined.
       expect(rows[0]?.show_attendee_list).toBe(true);
-      expect(rows[0]?.rsvp_reminder_dms).toBe(true);
       expect(rows[0]?.personal_channels_split).toBe(false);
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  it.effect('all three columns are NOT NULL', () =>
+  it.effect('the preference columns are NOT NULL', () =>
     Effect.gen(function* () {
       const { member } = yield* seedMember;
       const sql = yield* SqlClient.SqlClient.asEffect();
 
-      for (const column of ['show_attendee_list', 'rsvp_reminder_dms', 'personal_channels_split']) {
+      for (const column of ['show_attendee_list', 'personal_channels_split']) {
         const result = yield* Effect.result(
           sql.unsafe(`UPDATE team_members SET ${column} = NULL WHERE id = '${member.id}'`),
         );

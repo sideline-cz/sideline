@@ -69,9 +69,6 @@ export class MemberEventPreferences extends Schema.Class<MemberEventPreferences>
   'MemberEventPreferences',
 )({
   showAttendeeList: Schema.Boolean,
-  // Legacy: true when any bucket below is on. Web v0.66 still decodes it as required;
-  // remove it together with the team_members.rsvp_reminder_dms column.
-  rsvpReminderDms: Schema.Boolean,
   // Reminder DMs per personal-channel bucket: trainings / tournaments and matches / the rest.
   rsvpDmsTraining: Schema.Boolean,
   rsvpDmsTournament: Schema.Boolean,
