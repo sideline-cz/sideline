@@ -436,7 +436,6 @@ Returns the calling member's own event preferences for this team (Nastavitelná 
 | `rsvpDmsTraining` | `boolean` | No | When `false`, no RSVP reminder DM for `training` events. Buckets match the personal-channel split; none of them affect the organiser-facing non-responders view or `missed_rsvps` accounting |
 | `rsvpDmsTournament` | `boolean` | No | Same, for `tournament` and `match` events |
 | `rsvpDmsOther` | `boolean` | No | Same, for `meeting`, `social` and `other` events |
-| `rsvpReminderDms` | `boolean` | No | Legacy, read-only: `true` when any bucket is on. Removed together with the `rsvp_reminder_dms` column |
 | `personalChannelsSplit` | `boolean` | No | When `true`, the member's personal Discord events channel is split into three (training / tournament / other) instead of one combined channel |
 | `personalChannelsAvailable` | `boolean` | No | `true` when the team has a `discord_personal_events_category_id` configured (i.e. personal channels exist at all for this team); response-only, advisory — a `PATCH` with `personalChannelsSplit` set is accepted even when this is `false` |
 

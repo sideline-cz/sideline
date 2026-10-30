@@ -100,7 +100,6 @@ const { EventPreferencesCard, EventPreferencesLoadFailed } = await import(
 
 const basePrefs = {
   showAttendeeList: true,
-  rsvpReminderDms: true,
   rsvpDmsTraining: true,
   rsvpDmsTournament: true,
   rsvpDmsOther: true,
@@ -313,11 +312,10 @@ describe('EventPreferencesCard', () => {
     // loaded state were the same component at the same position, React preserved the
     // instance across the retry, so the form kept the defaults it was seeded with while
     // the baseline became the member's real prefs — dirty, Save armed, and one click
-    // would have written showAttendeeList/rsvpReminderDms true and personalChannelsSplit
+    // would have written showAttendeeList and the DM buckets true and personalChannelsSplit
     // false, deleting the member's three Discord channels and their history.
     const loaded = {
       showAttendeeList: false,
-      rsvpReminderDms: false,
       rsvpDmsTraining: false,
       rsvpDmsTournament: false,
       rsvpDmsOther: false,

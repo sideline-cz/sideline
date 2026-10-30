@@ -87,7 +87,6 @@ const notConnectedTeam = {
 // every team down the failure path. Supply real prefs for every team id used in this file.
 const basePrefs = {
   showAttendeeList: true,
-  rsvpReminderDms: true,
   rsvpDmsTraining: true,
   rsvpDmsTournament: true,
   rsvpDmsOther: true,

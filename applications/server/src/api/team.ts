@@ -232,8 +232,6 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
               ({ prefs }) =>
                 new TeamApi.MemberEventPreferences({
                   showAttendeeList: prefs.show_attendee_list,
-                  rsvpReminderDms:
-                    prefs.rsvp_dms_training || prefs.rsvp_dms_tournament || prefs.rsvp_dms_other,
                   rsvpDmsTraining: prefs.rsvp_dms_training,
                   rsvpDmsTournament: prefs.rsvp_dms_tournament,
                   rsvpDmsOther: prefs.rsvp_dms_other,
@@ -273,8 +271,6 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
               ({ current }) =>
                 new TeamApi.MemberEventPreferences({
                   ...payload,
-                  rsvpReminderDms:
-                    payload.rsvpDmsTraining || payload.rsvpDmsTournament || payload.rsvpDmsOther,
                   personalChannelsAvailable: current.personal_channels_available,
                 }),
             ),
