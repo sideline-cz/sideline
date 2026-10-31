@@ -93,7 +93,7 @@ const CreateSeriesFields = Schema.Struct({
   title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   trainingTypeId: Schema.String,
   description: Schema.String,
-  ...recurrenceFormFields,
+  ...recurrenceFormFields(),
   locationUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>

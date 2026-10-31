@@ -45,7 +45,7 @@ import { tr } from '~/lib/translations.js';
 const CreateScheduleFields = Schema.Struct({
   title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   description: Schema.String,
-  ...recurrenceFormFields,
+  ...recurrenceFormFields(),
   locationUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>

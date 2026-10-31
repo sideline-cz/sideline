@@ -8,9 +8,14 @@ import {
   recurrenceLabel,
 } from '~/lib/recurrence.js';
 
-const Fields = Schema.Struct(recurrenceFormFields);
-const FormSchema = Fields.pipe(Schema.check(recurrenceCheck<typeof Fields.Type>()));
-const decode = Schema.decodeUnknownExit(FormSchema);
+// Built per call: `recurrenceFormFields()` runs `tr`, which needs the localStorage polyfill that
+// test/setup.ts installs in `beforeAll` — after this module's top level has already run.
+const decode = (input: unknown) => {
+  const Fields = Schema.Struct(recurrenceFormFields());
+  return Schema.decodeUnknownExit(Fields.pipe(Schema.check(recurrenceCheck<typeof Fields.Type>())))(
+    input,
+  );
+};
 
 describe('recurrence form schema', () => {
   it('rejects weekly with no days and accepts it with one', () => {
@@ -41,7 +46,8 @@ describe('recurrence form schema', () => {
 });
 
 describe('recurrenceFields', () => {
-  const values = Schema.decodeUnknownSync(Fields);
+  const values = (input: unknown) =>
+    Schema.decodeUnknownSync(Schema.Struct(recurrenceFormFields()))(input);
 
   it('sends only the fields the frequency uses and drops the hidden weekly days', () => {
     const hidden = { ...recurrenceFormDefaults, daysOfWeek: [1, 3], dayOfMonth: 15, dayOfWeek: 2 };

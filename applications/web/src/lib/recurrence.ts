@@ -4,17 +4,18 @@ import { tr } from '~/lib/translations.js';
 
 // Form-side recurrence fields shared by the two series forms. `dayOfMonth`, `weekOfMonth` and
 // `dayOfWeek` always hold a value; `recurrenceFields` picks the ones the frequency uses.
-export const recurrenceFormFields = {
+// A function so `tr` runs when a form schema is built, not when this module is imported.
+export const recurrenceFormFields = () => ({
   frequency: EventSeries.RecurrenceFrequency.annotate({ message: tr('validation_invalidOption') }),
   daysOfWeek: Schema.Array(EventSeries.DayOfWeek),
   dayOfMonth: EventSeries.DayOfMonth,
   weekOfMonth: EventSeries.WeekOfMonth,
   dayOfWeek: EventSeries.DayOfWeek,
-};
+});
 
-const RecurrenceFormValues = Schema.Struct(recurrenceFormFields);
-type RecurrenceFormValues = typeof RecurrenceFormValues.Type;
-export type RecurrenceFormInput = typeof RecurrenceFormValues.Encoded;
+type RecurrenceFormStruct = Schema.Struct<ReturnType<typeof recurrenceFormFields>>;
+type RecurrenceFormValues = RecurrenceFormStruct['Type'];
+export type RecurrenceFormInput = RecurrenceFormStruct['Encoded'];
 
 export const recurrenceFormDefaults: RecurrenceFormInput = {
   frequency: 'weekly',

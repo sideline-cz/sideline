@@ -24,7 +24,7 @@ interface RecurrenceFormFieldsProps {
 }
 
 // The per-frequency fields below the frequency select. Must render inside a `<Form>` whose
-// values spread `recurrenceFormFields`.
+// values spread `recurrenceFormFields()`.
 export function RecurrenceFormFields({ frequency, itemClassName }: RecurrenceFormFieldsProps) {
   const { control } = useFormContext<RecurrenceFormInput>();
   return (
