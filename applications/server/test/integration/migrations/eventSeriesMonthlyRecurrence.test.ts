@@ -115,10 +115,14 @@ describe('event_series chk_event_series_recurrence', () => {
         // The pg error naming the constraint sits under the SqlError's own wrapper cause.
         const chain: string[] = [];
         let current: unknown = error;
-        while (current !== undefined && current !== null) {
-          const e = current as { message?: string; constraint?: string; cause?: unknown };
-          chain.push(e.message ?? '', e.constraint ?? '');
-          current = e.cause;
+        for (
+          let depth = 0;
+          depth < 10 && typeof current === 'object' && current !== null;
+          depth++
+        ) {
+          if ('message' in current) chain.push(String(current.message));
+          if ('constraint' in current) chain.push(String(current.constraint));
+          current = 'cause' in current ? current.cause : undefined;
         }
         expect(chain.join(' ')).toContain('chk_event_series_recurrence');
       }).pipe(Effect.provide(TestLayer)),

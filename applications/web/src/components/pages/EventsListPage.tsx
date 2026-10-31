@@ -8,6 +8,7 @@ import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { EventTypePicker } from '~/components/molecules/EventTypePicker';
+import { RecurrenceFormFields } from '~/components/molecules/RecurrenceFormFields';
 import { EventCalendarView } from '~/components/organisms/EventCalendarView';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -38,25 +39,15 @@ import {
   formatUtcDate,
   localToUtc,
 } from '~/lib/datetime.js';
-import {
-  DAY_ORDER,
-  dayFullLabels,
-  dayShortLabels,
-  eventStatusClasses,
-  eventStatusLabels,
-  eventTypeName,
-  sortDays,
-} from '~/lib/event-labels';
+import { eventStatusClasses, eventStatusLabels, eventTypeName } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
 import {
-  DAYS_OF_MONTH,
-  isMonthly,
+  FREQUENCY_ORDER,
+  frequencyLabel,
   recurrenceCheck,
   recurrenceFields,
   recurrenceFormDefaults,
   recurrenceFormFields,
-  WEEK_OF_MONTH_ORDER,
-  weekOfMonthLabels,
 } from '~/lib/recurrence';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
@@ -744,18 +735,11 @@ export function EventsListPage({
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value='weekly'>
-                                    {tr('event_frequency_weekly')}
-                                  </SelectItem>
-                                  <SelectItem value='biweekly'>
-                                    {tr('event_frequency_biweekly')}
-                                  </SelectItem>
-                                  <SelectItem value='monthly_by_date'>
-                                    {tr('event_frequency_monthly_by_date')}
-                                  </SelectItem>
-                                  <SelectItem value='monthly_by_weekday'>
-                                    {tr('event_frequency_monthly_by_weekday')}
-                                  </SelectItem>
+                                  {FREQUENCY_ORDER.map((f) => (
+                                    <SelectItem key={f} value={f}>
+                                      {frequencyLabel(f)}
+                                    </SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
                               <FormMessage />
@@ -763,135 +747,7 @@ export function EventsListPage({
                           )}
                         />
                       </div>
-                      {seriesFrequency === 'monthly_by_date' && (
-                        <FormField
-                          {...seriesForm.register('dayOfMonth')}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{tr('event_dayOfMonth')}</FormLabel>
-                              <Select
-                                onValueChange={(v) => field.onChange(Number(v))}
-                                value={String(field.value)}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {DAYS_OF_MONTH.map((d) => (
-                                    <SelectItem key={d} value={String(d)}>
-                                      {d}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              {field.value >= 29 && (
-                                <p className='text-xs text-muted-foreground'>
-                                  {tr('event_dayOfMonth_clampHint')}
-                                </p>
-                              )}
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      )}
-                      {seriesFrequency === 'monthly_by_weekday' && (
-                        <>
-                          <FormField
-                            {...seriesForm.register('weekOfMonth')}
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>{tr('event_weekOfMonth')}</FormLabel>
-                                <Select
-                                  onValueChange={(v) => field.onChange(Number(v))}
-                                  value={String(field.value)}
-                                >
-                                  <FormControl>
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                  </FormControl>
-                                  <SelectContent>
-                                    {WEEK_OF_MONTH_ORDER.map((w) => (
-                                      <SelectItem key={w} value={String(w)}>
-                                        {weekOfMonthLabels[w]()}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            {...seriesForm.register('dayOfWeek')}
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>{tr('event_dayOfWeek')}</FormLabel>
-                                <Select
-                                  onValueChange={(v) => field.onChange(Number(v))}
-                                  value={String(field.value)}
-                                >
-                                  <FormControl>
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                  </FormControl>
-                                  <SelectContent>
-                                    {DAY_ORDER.map((d) => (
-                                      <SelectItem key={d} value={String(d)}>
-                                        {dayFullLabels[d]()}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </>
-                      )}
-                      {!isMonthly(seriesFrequency) && (
-                        <FormField
-                          name='daysOfWeek'
-                          control={seriesForm.control}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{tr('event_daysOfWeek')}</FormLabel>
-                              <div className='flex gap-1'>
-                                {DAY_ORDER.map((d) => {
-                                  const selected = (field.value as number[]).includes(d);
-                                  return (
-                                    <Button
-                                      key={d}
-                                      type='button'
-                                      size='sm'
-                                      variant={selected ? 'default' : 'outline'}
-                                      className='w-10'
-                                      aria-pressed={selected}
-                                      aria-label={dayFullLabels[d]()}
-                                      onClick={() => {
-                                        const current = field.value as number[];
-                                        field.onChange(
-                                          sortDays(
-                                            selected
-                                              ? current.filter((v) => v !== d)
-                                              : [...current, d],
-                                          ),
-                                        );
-                                      }}
-                                    >
-                                      {dayShortLabels[d]()}
-                                    </Button>
-                                  );
-                                })}
-                              </div>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      )}
+                      <RecurrenceFormFields frequency={seriesFrequency} />
                       <div className='flex flex-col gap-4 sm:flex-row'>
                         <FormField
                           {...seriesForm.register('startDate')}

@@ -14,8 +14,9 @@ export const recurrenceFormFields = {
 
 const RecurrenceFormValues = Schema.Struct(recurrenceFormFields);
 type RecurrenceFormValues = typeof RecurrenceFormValues.Type;
+export type RecurrenceFormInput = typeof RecurrenceFormValues.Encoded;
 
-export const recurrenceFormDefaults: typeof RecurrenceFormValues.Encoded = {
+export const recurrenceFormDefaults: RecurrenceFormInput = {
   frequency: 'weekly',
   daysOfWeek: [],
   dayOfMonth: 1,
@@ -47,16 +48,9 @@ export const recurrenceCheck = <T extends RecurrenceFormValues>() =>
   Schema.makeFilter<T>((v) =>
     Option.isSome(EventSeries.toRecurrence({ frequency: v.frequency, ...recurrenceFields(v) }))
       ? true
-      : {
-          path: [
-            v.frequency === 'weekly' || v.frequency === 'biweekly' ? 'daysOfWeek' : 'frequency',
-          ],
-          message: tr('validation_required'),
-        },
+      : // The monthly fields always hold valid values, so only the weekly days can fail here.
+        { path: ['daysOfWeek'], message: tr('validation_required') },
   );
-
-export const isMonthly = (frequency: EventSeries.RecurrenceFrequency): boolean =>
-  frequency === 'monthly_by_date' || frequency === 'monthly_by_weekday';
 
 export const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
 
@@ -89,6 +83,8 @@ const frequencyLabels: Record<EventSeries.RecurrenceFrequency, () => string> = {
 
 export const frequencyLabel = (frequency: EventSeries.RecurrenceFrequency): string =>
   frequencyLabels[frequency]();
+
+export const FREQUENCY_ORDER = EventSeries.RecurrenceFrequency.literals;
 
 interface SeriesRecurrence {
   readonly frequency: EventSeries.RecurrenceFrequency;

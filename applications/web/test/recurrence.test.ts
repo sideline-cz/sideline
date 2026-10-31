@@ -2,6 +2,7 @@ import { Option, Schema } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
   recurrenceCheck,
+  recurrenceFields,
   recurrenceFormDefaults,
   recurrenceFormFields,
   recurrenceLabel,
@@ -36,6 +37,29 @@ describe('recurrence form schema', () => {
     expect(
       decode({ ...recurrenceFormDefaults, frequency: 'monthly_by_date', dayOfMonth: 32 })._tag,
     ).toBe('Failure');
+  });
+});
+
+describe('recurrenceFields', () => {
+  const values = Schema.decodeUnknownSync(Fields);
+
+  it('sends only the fields the frequency uses and drops the hidden weekly days', () => {
+    const hidden = { ...recurrenceFormDefaults, daysOfWeek: [1, 3], dayOfMonth: 15, dayOfWeek: 2 };
+    expect(recurrenceFields(values({ ...hidden, frequency: 'monthly_by_weekday' }))).toEqual({
+      daysOfWeek: [2],
+      dayOfMonth: Option.none(),
+      weekOfMonth: Option.some(1),
+    });
+    expect(recurrenceFields(values({ ...hidden, frequency: 'monthly_by_date' }))).toEqual({
+      daysOfWeek: [],
+      dayOfMonth: Option.some(15),
+      weekOfMonth: Option.none(),
+    });
+    expect(recurrenceFields(values({ ...hidden, frequency: 'weekly' }))).toEqual({
+      daysOfWeek: [1, 3],
+      dayOfMonth: Option.none(),
+      weekOfMonth: Option.none(),
+    });
   });
 });
 

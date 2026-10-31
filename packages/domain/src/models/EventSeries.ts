@@ -47,6 +47,20 @@ export type Recurrence =
       readonly weekOfMonth: WeekOfMonth;
     };
 
+export type MonthlyRecurrence = Extract<
+  Recurrence,
+  { readonly frequency: 'monthly_by_date' | 'monthly_by_weekday' }
+>;
+
+// The one "is monthly" predicate; a new frequency is added here, not at each call site.
+export const isMonthlyFrequency = (
+  frequency: RecurrenceFrequency,
+): frequency is MonthlyRecurrence['frequency'] =>
+  frequency === 'monthly_by_date' || frequency === 'monthly_by_weekday';
+
+export const isMonthlyRecurrence = (r: Recurrence): r is MonthlyRecurrence =>
+  isMonthlyFrequency(r.frequency);
+
 const isDaysOfWeek = Schema.is(DaysOfWeek);
 const isDayOfWeek = Schema.is(DayOfWeek);
 const isDayOfMonth = Schema.is(DayOfMonth);

@@ -1,4 +1,4 @@
-import { Auth, EventApi, EventSeriesApi } from '@sideline/domain';
+import { Auth, EventApi, EventSeries, EventSeriesApi } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Array, DateTime, Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -463,8 +463,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   teamId,
                 ),
                 () =>
-                  (existing.frequency === 'monthly_by_date' ||
-                    existing.frequency === 'monthly_by_weekday') &&
+                  EventSeries.isMonthlyFrequency(existing.frequency) &&
                   Option.isSome(payload.daysOfWeek)
                     ? Effect.fail(new EventSeriesApi.EventSeriesRecurrenceNotEditable())
                     : Effect.void,

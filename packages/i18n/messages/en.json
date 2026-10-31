@@ -1565,7 +1565,7 @@
   "event_frequency_monthly_by_date": "Monthly (by date)",
   "event_frequency_monthly_by_weekday": "Monthly (by weekday)",
   "event_frequency_weekly": "Weekly",
-  "event_weekOfMonth": "Week of month",
+  "event_weekOfMonth": "Occurrence in month",
   "event_weekOfMonth_1": "1st",
   "event_weekOfMonth_2": "2nd",
   "event_weekOfMonth_3": "3rd",
