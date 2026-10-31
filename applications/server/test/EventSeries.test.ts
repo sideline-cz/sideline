@@ -245,8 +245,10 @@ type SeriesRecord = {
   end_time: Option.Option<string>;
   location: Option.Option<string>;
   location_url: Option.Option<string>;
-  frequency: 'weekly' | 'biweekly';
+  frequency: EventSeries.RecurrenceFrequency;
   days_of_week: number[];
+  day_of_month: Option.Option<number>;
+  week_of_month: Option.Option<number>;
   start_date: DateTime.Utc;
   end_date: Option.Option<DateTime.Utc>;
   status: 'active' | 'cancelled';
@@ -263,6 +265,14 @@ type SeriesRecord = {
 };
 
 let seriesStore: Map<EventSeries.EventSeriesId, SeriesRecord>;
+
+// Monthly recurrence instrumentation: what the create handler hands the repository, and
+// whether the update handler reached the write at all.
+let capturedInsertEventSeriesInputs: Array<{
+  dayOfMonth?: Option.Option<number>;
+  weekOfMonth?: Option.Option<number>;
+}>;
+let updateEventSeriesCallCount: number;
 
 // --- In-memory events store ---
 type EventRecord = {
@@ -357,6 +367,8 @@ const recomputeStartAt = (
 const resetStores = () => {
   teamSettingsTimezoneOverride = Option.none();
   capturedUpdateFutureUnmodifiedCalls = [];
+  capturedInsertEventSeriesInputs = [];
+  updateEventSeriesCallCount = 0;
   seriesStore = new Map();
   seriesStore.set(TEST_SERIES_1, {
     id: TEST_SERIES_1,
@@ -370,6 +382,8 @@ const resetStores = () => {
     location_url: Option.none(),
     frequency: 'weekly',
     days_of_week: [2],
+    day_of_month: Option.none(),
+    week_of_month: Option.none(),
     start_date: DateTime.makeUnsafe('2026-03-03T00:00:00Z'),
     end_date: Option.some(DateTime.makeUnsafe('2026-06-30T00:00:00Z')),
     status: 'active',
@@ -740,8 +754,10 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       end_time: input.end_time,
       location: input.location,
       location_url: Option.none(),
-      frequency: input.frequency as 'weekly' | 'biweekly',
+      frequency: input.frequency as SeriesRecord['frequency'],
       days_of_week: input.days_of_week,
+      day_of_month: Option.none(),
+      week_of_month: Option.none(),
       start_date: input.start_date,
       end_date: input.end_date,
       status: 'active',
@@ -769,6 +785,8 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       location_url: record.location_url,
       frequency: record.frequency,
       days_of_week: record.days_of_week,
+      day_of_month: record.day_of_month,
+      week_of_month: record.week_of_month,
       start_date: record.start_date,
       end_date: record.end_date,
       status: record.status,
@@ -788,6 +806,8 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
     location: Option.Option<string>;
     frequency: string;
     daysOfWeek: number[];
+    dayOfMonth?: Option.Option<number>;
+    weekOfMonth?: Option.Option<number>;
     startDate: DateTime.Utc;
     endDate: Option.Option<DateTime.Utc>;
     createdBy: string;
@@ -795,6 +815,7 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
     memberGroupId?: Option.Option<string>;
     timesAreTeamLocal: boolean;
   }) => {
+    capturedInsertEventSeriesInputs.push(input);
     const id = crypto.randomUUID() as EventSeries.EventSeriesId;
     const record: SeriesRecord = {
       id,
@@ -806,8 +827,10 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       end_time: input.endTime,
       location: input.location,
       location_url: Option.none(),
-      frequency: input.frequency as 'weekly' | 'biweekly',
+      frequency: input.frequency as SeriesRecord['frequency'],
       days_of_week: input.daysOfWeek,
+      day_of_month: input.dayOfMonth ?? Option.none(),
+      week_of_month: input.weekOfMonth ?? Option.none(),
       start_date: input.startDate,
       end_date: input.endDate,
       status: 'active',
@@ -840,6 +863,8 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       location_url: record.location_url,
       frequency: record.frequency,
       days_of_week: record.days_of_week,
+      day_of_month: record.day_of_month,
+      week_of_month: record.week_of_month,
       start_date: record.start_date,
       end_date: record.end_date,
       status: record.status,
@@ -906,6 +931,8 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       location_url: updated.location_url,
       frequency: updated.frequency,
       days_of_week: updated.days_of_week,
+      day_of_month: updated.day_of_month,
+      week_of_month: updated.week_of_month,
       start_date: updated.start_date,
       end_date: updated.end_date,
       status: updated.status,
@@ -926,6 +953,7 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
   }) => {
+    updateEventSeriesCallCount += 1;
     const s = seriesStore.get(input.id);
     if (!s) return Effect.die(new Error('Not found'));
     const updated = {
@@ -953,6 +981,8 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       location_url: updated.location_url,
       frequency: updated.frequency,
       days_of_week: updated.days_of_week,
+      day_of_month: updated.day_of_month,
+      week_of_month: updated.week_of_month,
       start_date: updated.start_date,
       end_date: updated.end_date,
       status: updated.status,
@@ -2013,6 +2043,101 @@ describe('Event Series API', () => {
         }),
       );
       expect(response.status).toBe(400);
+    });
+  });
+
+  // Monthly recurrence (`.dev-loop/plan.md` Task 5).
+  describe('monthly recurrence', () => {
+    const MONTHLY_SERIES = '00000000-0000-0000-0000-000000000079' as EventSeries.EventSeriesId;
+
+    const seedMonthlySeries = () => {
+      const base = seriesStore.get(TEST_SERIES_1);
+      if (!base) throw new Error('TEST_SERIES_1 not seeded');
+      seriesStore.set(MONTHLY_SERIES, {
+        ...base,
+        id: MONTHLY_SERIES,
+        title: 'Monthly Training',
+        frequency: 'monthly_by_weekday',
+        days_of_week: [2],
+        day_of_month: Option.none(),
+        week_of_month: Option.some(-1),
+      });
+    };
+
+    const patch = (seriesId: EventSeries.EventSeriesId, body: unknown) =>
+      handler(
+        new Request(`${BASE}/${seriesId}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    it('should pass dayOfMonth to the repository and return it when creating a monthly_by_date series', async () => {
+      const response = await handler(
+        new Request(BASE, {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...createPayload,
+            title: 'Monthly Training',
+            frequency: 'monthly_by_date',
+            daysOfWeek: [],
+            dayOfMonth: 15,
+            startDate: '2026-03-01',
+            endDate: '2026-05-31',
+          }),
+        }),
+      );
+      expect(response.status).toBe(201);
+      expect(capturedInsertEventSeriesInputs).toHaveLength(1);
+      expect(capturedInsertEventSeriesInputs[0]?.dayOfMonth).toEqual(Option.some(15));
+      expect(capturedInsertEventSeriesInputs[0]?.weekOfMonth).toEqual(Option.none());
+
+      const body = await response.json();
+      expect(body.frequency).toBe('monthly_by_date');
+      expect(body.daysOfWeek).toEqual([]);
+      expect(body.dayOfMonth).toBe(15);
+
+      // The whole series lies in the past, so the horizon is capped at end_date and every
+      // 15th between start and end is materialised — one per month.
+      const materialised = Array.from(eventsStore.values())
+        .filter((e) => Option.getOrUndefined(e.series_id) === body.seriesId)
+        .map((e) => DateTime.formatIsoDateUtc(e.start_at))
+        .sort();
+      expect(materialised).toEqual(['2026-03-15', '2026-04-15', '2026-05-15']);
+    });
+
+    it('should return 400 EventSeriesRecurrenceNotEditable and not write when PATCHing daysOfWeek on a monthly series', async () => {
+      seedMonthlySeries();
+      const response = await patch(MONTHLY_SERIES, { daysOfWeek: [3] });
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body._tag).toBe('EventSeriesRecurrenceNotEditable');
+      expect(updateEventSeriesCallCount).toBe(0);
+      expect(seriesStore.get(MONTHLY_SERIES)?.days_of_week).toEqual([2]);
+    });
+
+    it('should still allow a title-only PATCH on a monthly series', async () => {
+      seedMonthlySeries();
+      const response = await patch(MONTHLY_SERIES, { title: 'Renamed Monthly' });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.title).toBe('Renamed Monthly');
+      expect(body.weekOfMonth).toBe(-1);
+      expect(updateEventSeriesCallCount).toBe(1);
+    });
+
+    it('should accept a daysOfWeek PATCH on a weekly series as before', async () => {
+      const response = await patch(TEST_SERIES_1, { daysOfWeek: [3] });
+      expect(response.status).toBe(200);
+      expect(updateEventSeriesCallCount).toBe(1);
     });
   });
 });

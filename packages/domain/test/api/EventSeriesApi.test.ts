@@ -33,6 +33,8 @@ const baseCreateSeriesPayload: Schema.Schema.Type<typeof EventSeriesApi.CreateEv
     description: Option.none(),
     frequency: 'weekly' as const,
     daysOfWeek: DAYS_OF_WEEK,
+    dayOfMonth: Option.none(),
+    weekOfMonth: Option.none(),
     startDate,
     endDate: Option.none(),
     startTime: '18:00',
@@ -256,5 +258,130 @@ describe('CreateEventSeriesRequest / UpdateEventSeriesRequest — timesAreTeamLo
     }).not.toThrow();
     expect(decoded?.timesAreTeamLocal).toBe(false);
     expect(decoded?.timesAreTeamLocal).not.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Monthly recurrence — CreateEventSeriesRequest decode
+// ---------------------------------------------------------------------------
+
+const createWire = (overrides: Record<string, unknown>) => ({
+  title: 'Training',
+  trainingTypeId: null,
+  description: null,
+  frequency: 'weekly',
+  daysOfWeek: [1],
+  startDate: '2099-12-31T00:00:00.000Z',
+  endDate: null,
+  startTime: '18:00',
+  endTime: null,
+  location: null,
+  ownerGroupId: null,
+  memberGroupId: null,
+  ...overrides,
+});
+
+describe('CreateEventSeriesRequest — monthly recurrence decode', () => {
+  const decode = Schema.decodeUnknownSync(EventSeriesApi.CreateEventSeriesRequest);
+
+  it('should decode an old-web weekly payload without dayOfMonth/weekOfMonth keys', () => {
+    const decoded = decode(createWire({}));
+    expect(decoded.frequency).toBe('weekly');
+    expect(decoded.daysOfWeek).toEqual([1]);
+    expect(Option.isNone(decoded.dayOfMonth)).toBe(true);
+    expect(Option.isNone(decoded.weekOfMonth)).toBe(true);
+  });
+
+  it('should reject a weekly payload with empty daysOfWeek', () => {
+    expect(() => decode(createWire({ daysOfWeek: [] }))).toThrow();
+  });
+
+  it('should decode a monthly_by_date payload with daysOfWeek [] and dayOfMonth 31', () => {
+    const decoded = decode(
+      createWire({ frequency: 'monthly_by_date', daysOfWeek: [], dayOfMonth: 31 }),
+    );
+    expect(decoded.frequency).toBe('monthly_by_date');
+    expect(decoded.daysOfWeek).toEqual([]);
+    expect(Option.getOrThrow(decoded.dayOfMonth)).toBe(31);
+  });
+
+  it('should reject a monthly_by_weekday payload with weekOfMonth 5', () => {
+    expect(() =>
+      decode(createWire({ frequency: 'monthly_by_weekday', daysOfWeek: [2], weekOfMonth: 5 })),
+    ).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Monthly recurrence — EventSeriesInfo wire compatibility
+// ---------------------------------------------------------------------------
+
+// Locally declared copy of the PRE-change EventSeriesInfo (before monthly recurrence): closed
+// weekly/biweekly frequency, min-1 daysOfWeek, no dayOfMonth/weekOfMonth. An old web holds this.
+const OldDayOfWeek = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 6 })));
+const OldEventSeriesInfo = Schema.Struct({
+  seriesId: Schema.String,
+  teamId: Schema.String,
+  title: Schema.String,
+  frequency: Schema.Literals(['weekly', 'biweekly']),
+  daysOfWeek: Schema.Array(OldDayOfWeek).pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(7)),
+  ),
+  startDate: Schema.String,
+  endDate: Schema.NullOr(Schema.String),
+  status: Schema.Literals(['active', 'cancelled']),
+  trainingTypeId: Schema.NullOr(Schema.String),
+  trainingTypeName: Schema.NullOr(Schema.String),
+  startTime: Schema.String,
+  endTime: Schema.NullOr(Schema.String),
+  location: Schema.NullOr(Schema.String),
+  locationUrl: Schema.NullOr(Schema.String),
+  ownerGroupId: Schema.NullOr(Schema.String),
+  ownerGroupName: Schema.NullOr(Schema.String),
+  memberGroupId: Schema.NullOr(Schema.String),
+  memberGroupName: Schema.NullOr(Schema.String),
+  timezone: Schema.optionalKey(Schema.String),
+});
+
+const oldServerInfoWire = {
+  seriesId: 'series-1',
+  teamId: 'team-1',
+  title: 'Weekly Training',
+  frequency: 'weekly',
+  daysOfWeek: [1, 3],
+  startDate: '2027-01-01T00:00:00.000Z',
+  endDate: null,
+  status: 'active',
+  trainingTypeId: null,
+  trainingTypeName: null,
+  startTime: '18:00',
+  endTime: null,
+  location: null,
+  locationUrl: null,
+  ownerGroupId: null,
+  ownerGroupName: null,
+  memberGroupId: null,
+  memberGroupName: null,
+};
+
+describe('EventSeriesInfo — monthly recurrence wire compatibility', () => {
+  it('should let the pre-change schema decode a weekly Info encoded by the new schema', () => {
+    const info = Schema.decodeUnknownSync(EventSeriesApi.EventSeriesInfo)(oldServerInfoWire);
+    const encoded = Schema.encodeSync(EventSeriesApi.EventSeriesInfo)(info);
+    expect('dayOfMonth' in encoded).toBe(false);
+    expect('weekOfMonth' in encoded).toBe(false);
+
+    const old = Schema.decodeUnknownSync(OldEventSeriesInfo)(encoded);
+    expect(old.frequency).toBe('weekly');
+    expect(old.daysOfWeek).toEqual([1, 3]);
+  });
+
+  it('should decode an old-server Info payload with no dayOfMonth/weekOfMonth keys', () => {
+    const decoded = Schema.decodeUnknownSync(EventSeriesApi.EventSeriesInfo)(oldServerInfoWire);
+    expect(decoded.frequency).toBe('weekly');
+    expect(decoded.daysOfWeek).toEqual([1, 3]);
+    expect(Option.isNone(decoded.dayOfMonth)).toBe(true);
+    expect(Option.isNone(decoded.weekOfMonth)).toBe(true);
   });
 });
