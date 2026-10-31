@@ -2,7 +2,11 @@ import { Array, DateTime, Effect, Option, Schedule } from 'effect';
 import { withCronMetrics } from '~/metrics.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
-import { computeHorizonEnd, generateOccurrenceDates } from '~/services/RecurrenceService.js';
+import {
+  computeHorizonEnd,
+  generateOccurrenceDates,
+  seriesRecurrence,
+} from '~/services/RecurrenceService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
 import { resolveSeriesOccurrenceInstant } from '~/utils/seriesTimeDialect.js';
 
@@ -14,7 +18,18 @@ export const eventHorizonCronEffect = Effect.Do.pipe(
   Effect.tap(({ allSeries, seriesRepo, eventsRepo }) =>
     Effect.all(
       Array.map(allSeries, (s) => {
+        const recurrence = seriesRecurrence(s);
+        // Never die here: one bad row must not abort the fleet-wide generation run.
+        if (Option.isNone(recurrence)) {
+          return Effect.logWarning(
+            `EventHorizonCron: series ${s.id} has an invalid recurrence shape, skipping`,
+          );
+        }
+
+        // may extend past horizonDays for monthly — see computeHorizonEnd
         const effectiveEnd = computeHorizonEnd({
+          recurrence: recurrence.value,
+          seriesStartDate: s.start_date,
           seriesEndDate: Option.getOrNull(s.end_date),
           horizonDays: s.event_horizon_days,
         });
@@ -27,8 +42,7 @@ export const eventHorizonCronEffect = Effect.Do.pipe(
         if (DateTime.isGreaterThan(startFrom, effectiveEnd)) return Effect.void;
 
         const dates = generateOccurrenceDates({
-          frequency: s.frequency,
-          daysOfWeek: s.days_of_week,
+          ...recurrence.value,
           startDate: startFrom,
           endDate: effectiveEnd,
         });
