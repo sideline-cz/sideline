@@ -112,10 +112,15 @@ describe('event_series chk_event_series_recurrence', () => {
         const seeded = yield* seed;
         const error = yield* Effect.flip(insertSeries(seeded, shape));
         // Rejected by THIS constraint — not by a missing column or the old frequency CHECK.
-        const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
-        expect(`${error.message} ${cause?.message ?? ''} ${cause?.constraint ?? ''}`).toContain(
-          'chk_event_series_recurrence',
-        );
+        // The pg error naming the constraint sits under the SqlError's own wrapper cause.
+        const chain: string[] = [];
+        let current: unknown = error;
+        while (current !== undefined && current !== null) {
+          const e = current as { message?: string; constraint?: string; cause?: unknown };
+          chain.push(e.message ?? '', e.constraint ?? '');
+          current = e.cause;
+        }
+        expect(chain.join(' ')).toContain('chk_event_series_recurrence');
       }).pipe(Effect.provide(TestLayer)),
     );
   }
