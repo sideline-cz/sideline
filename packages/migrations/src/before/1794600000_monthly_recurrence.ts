@@ -10,6 +10,9 @@ import { SqlClient } from 'effect/unstable/sql';
 // to NULL: without it, e.g. monthly_by_weekday with days_of_week = '{NULL}' would be accepted.
 export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
   Effect.Do.pipe(
+    // Fail fast instead of blocking boot behind the previous container's event_series queries
+    // during the blue-green window (packages/migrations/AGENTS.md, rule 1).
+    Effect.tap(() => sql`SET LOCAL lock_timeout = '5s'`),
     Effect.tap(() => sql`ALTER TABLE event_series ADD COLUMN IF NOT EXISTS day_of_month SMALLINT`),
     Effect.tap(() => sql`ALTER TABLE event_series ADD COLUMN IF NOT EXISTS week_of_month SMALLINT`),
     Effect.tap(
