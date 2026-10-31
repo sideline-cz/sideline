@@ -1,6 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { EventApi, EventTypeApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
-import { Event, EventSeries, EventType, GroupModel, Team, TrainingType } from '@sideline/domain';
+import { Event, EventType, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import { CalendarDays, List, Loader2, ShieldCheck } from 'lucide-react';
@@ -8,6 +8,7 @@ import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { EventTypePicker } from '~/components/molecules/EventTypePicker';
+import { RecurrenceFormFields } from '~/components/molecules/RecurrenceFormFields';
 import { EventCalendarView } from '~/components/organisms/EventCalendarView';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -38,16 +39,16 @@ import {
   formatUtcDate,
   localToUtc,
 } from '~/lib/datetime.js';
-import {
-  DAY_ORDER,
-  dayFullLabels,
-  dayShortLabels,
-  eventStatusClasses,
-  eventStatusLabels,
-  eventTypeName,
-  sortDays,
-} from '~/lib/event-labels';
+import { eventStatusClasses, eventStatusLabels, eventTypeName } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
+import {
+  FREQUENCY_ORDER,
+  frequencyLabel,
+  recurrenceCheck,
+  recurrenceFields,
+  recurrenceFormDefaults,
+  recurrenceFormFields,
+} from '~/lib/recurrence';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
@@ -88,14 +89,11 @@ const CreateEventSchema = Schema.Struct({
 
 type CreateEventValues = Schema.Schema.Type<typeof CreateEventSchema>;
 
-const CreateSeriesSchema = Schema.Struct({
+const CreateSeriesFields = Schema.Struct({
   title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   trainingTypeId: Schema.String,
   description: Schema.String,
-  frequency: EventSeries.RecurrenceFrequency.annotate({
-    message: tr('validation_invalidOption'),
-  }),
-  daysOfWeek: EventSeries.DaysOfWeek,
+  ...recurrenceFormFields(),
   locationUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>
@@ -111,6 +109,9 @@ const CreateSeriesSchema = Schema.Struct({
   ownerGroupId: Schema.String,
   memberGroupId: Schema.String,
 });
+const CreateSeriesSchema = CreateSeriesFields.pipe(
+  Schema.check(recurrenceCheck<typeof CreateSeriesFields.Type>()),
+);
 
 type CreateSeriesValues = Schema.Schema.Type<typeof CreateSeriesSchema>;
 
@@ -198,8 +199,7 @@ export function EventsListPage({
       title: '',
       trainingTypeId: NONE_VALUE,
       description: '',
-      frequency: 'weekly' as EventSeries.RecurrenceFrequency,
-      daysOfWeek: [] as number[],
+      ...recurrenceFormDefaults,
       locationUrl: '',
       startDate: new Date().toISOString().slice(0, 10),
       endDate: '',
@@ -213,6 +213,7 @@ export function EventsListPage({
 
   const watchedLocation = form.watch('location');
   const watchedSeriesLocation = seriesForm.watch('location');
+  const seriesFrequency = seriesForm.watch('frequency');
 
   React.useEffect(() => {
     if (!isTrainingSelected) {
@@ -302,7 +303,7 @@ export function EventsListPage({
                 : Option.none(),
             description: values.description ? Option.some(values.description) : Option.none(),
             frequency: values.frequency,
-            daysOfWeek: values.daysOfWeek,
+            ...recurrenceFields(values),
             startDate: dateOnlyToUtcNoon(values.startDate),
             endDate: values.endDate
               ? Option.some(dateOnlyToUtcNoon(values.endDate))
@@ -734,12 +735,11 @@ export function EventsListPage({
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value='weekly'>
-                                    {tr('event_frequency_weekly')}
-                                  </SelectItem>
-                                  <SelectItem value='biweekly'>
-                                    {tr('event_frequency_biweekly')}
-                                  </SelectItem>
+                                  {FREQUENCY_ORDER.map((f) => (
+                                    <SelectItem key={f} value={f}>
+                                      {frequencyLabel(f)}
+                                    </SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
                               <FormMessage />
@@ -747,44 +747,7 @@ export function EventsListPage({
                           )}
                         />
                       </div>
-                      <FormField
-                        name='daysOfWeek'
-                        control={seriesForm.control}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_daysOfWeek')}</FormLabel>
-                            <div className='flex gap-1'>
-                              {DAY_ORDER.map((d) => {
-                                const selected = (field.value as number[]).includes(d);
-                                return (
-                                  <Button
-                                    key={d}
-                                    type='button'
-                                    size='sm'
-                                    variant={selected ? 'default' : 'outline'}
-                                    className='w-10'
-                                    aria-pressed={selected}
-                                    aria-label={dayFullLabels[d]()}
-                                    onClick={() => {
-                                      const current = field.value as number[];
-                                      field.onChange(
-                                        sortDays(
-                                          selected
-                                            ? current.filter((v) => v !== d)
-                                            : [...current, d],
-                                        ),
-                                      );
-                                    }}
-                                  >
-                                    {dayShortLabels[d]()}
-                                  </Button>
-                                );
-                              })}
-                            </div>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
+                      <RecurrenceFormFields frequency={seriesFrequency} />
                       <div className='flex flex-col gap-4 sm:flex-row'>
                         <FormField
                           {...seriesForm.register('startDate')}

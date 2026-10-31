@@ -7,6 +7,7 @@ import React from 'react';
 import { useForm } from 'react-hook-form';
 
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { RecurrenceFormFields } from '~/components/molecules/RecurrenceFormFields';
 import { Button } from '~/components/ui/button';
 import {
   Form,
@@ -27,18 +28,24 @@ import {
 import { Textarea } from '~/components/ui/textarea';
 import { dateOnlyToUtcNoon, formatLocalDate } from '~/lib/datetime';
 import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
-import { DAY_ORDER, dayFullLabels, dayShortLabels, sortDays } from '~/lib/event-labels';
+import { dayShortLabels } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
+import {
+  FREQUENCY_ORDER,
+  frequencyLabel,
+  recurrenceCheck,
+  recurrenceFields,
+  recurrenceFormDefaults,
+  recurrenceFormFields,
+  recurrenceLabel,
+} from '~/lib/recurrence';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
-const CreateScheduleSchema = Schema.Struct({
+const CreateScheduleFields = Schema.Struct({
   title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   description: Schema.String,
-  frequency: EventSeries.RecurrenceFrequency.annotate({
-    message: tr('validation_invalidOption'),
-  }),
-  daysOfWeek: EventSeries.DaysOfWeek,
+  ...recurrenceFormFields(),
   locationUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>
@@ -52,6 +59,9 @@ const CreateScheduleSchema = Schema.Struct({
   endTime: Schema.String,
   location: Schema.String,
 });
+const CreateScheduleSchema = CreateScheduleFields.pipe(
+  Schema.check(recurrenceCheck<typeof CreateScheduleFields.Type>()),
+);
 
 type CreateScheduleValues = Schema.Schema.Type<typeof CreateScheduleSchema>;
 
@@ -103,8 +113,7 @@ export function TrainingTypeDetailPage({
     defaultValues: {
       title: trainingTypeDetail.name,
       description: '',
-      frequency: 'weekly' as EventSeries.RecurrenceFrequency,
-      daysOfWeek: [] as number[],
+      ...recurrenceFormDefaults,
       locationUrl: '',
       startDate: new Date().toISOString().slice(0, 10),
       endDate: '',
@@ -115,6 +124,7 @@ export function TrainingTypeDetailPage({
   });
 
   const watchedScheduleLocation = scheduleForm.watch('location');
+  const scheduleFrequency = scheduleForm.watch('frequency');
 
   React.useEffect(() => {
     if (!watchedScheduleLocation) {
@@ -192,7 +202,7 @@ export function TrainingTypeDetailPage({
             trainingTypeId: Option.some(trainingTypeIdBranded),
             description: values.description ? Option.some(values.description) : Option.none(),
             frequency: values.frequency,
-            daysOfWeek: values.daysOfWeek,
+            ...recurrenceFields(values),
             startDate: dateOnlyToUtcNoon(values.startDate),
             endDate: values.endDate
               ? Option.some(dateOnlyToUtcNoon(values.endDate))
@@ -254,6 +264,9 @@ export function TrainingTypeDetailPage({
         description: '',
         frequency: s.frequency,
         daysOfWeek: Array.from(s.daysOfWeek),
+        dayOfMonth: Option.getOrElse(s.dayOfMonth, () => recurrenceFormDefaults.dayOfMonth),
+        weekOfMonth: Option.getOrElse(s.weekOfMonth, () => recurrenceFormDefaults.weekOfMonth),
+        dayOfWeek: s.daysOfWeek[0] ?? recurrenceFormDefaults.dayOfWeek,
         startDate: formatLocalDate(s.startDate),
         endDate: Option.match(s.endDate, {
           onNone: () => '',
@@ -285,7 +298,10 @@ export function TrainingTypeDetailPage({
             description: Option.some(
               values.description ? Option.some(values.description) : Option.none(),
             ),
-            daysOfWeek: Option.some(values.daysOfWeek),
+            // Monthly recurrence is not editable (the server 400s on `daysOfWeek`).
+            daysOfWeek: EventSeries.isMonthlyFrequency(values.frequency)
+              ? Option.none()
+              : Option.some(values.daysOfWeek),
             // Verbatim, same reasoning as the create path above — these are team-local
             // wall-clock strings, not UTC.
             startTime: Option.some(values.startTime),
@@ -312,8 +328,7 @@ export function TrainingTypeDetailPage({
       scheduleForm.reset({
         title: trainingTypeDetail.name,
         description: '',
-        frequency: 'weekly',
-        daysOfWeek: [],
+        ...recurrenceFormDefaults,
         locationUrl: '',
         startDate: new Date().toISOString().slice(0, 10),
         endDate: '',
@@ -474,12 +489,14 @@ export function TrainingTypeDetailPage({
                       <tr key={s.seriesId} className='border-b'>
                         <td className='py-2 px-4 font-medium'>{s.title}</td>
                         <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                          {s.frequency === 'weekly'
-                            ? tr('event_frequency_weekly')
-                            : tr('event_frequency_biweekly')}
+                          {recurrenceLabel(s)}
                         </td>
                         <td className='py-2 px-4 text-muted-foreground'>
-                          {s.daysOfWeek.map((d) => dayShortLabels[d]()).join(', ')}
+                          {EventSeries.isMonthlyFrequency(s.frequency) ? (
+                            <span className='sm:hidden'>{recurrenceLabel(s)}</span>
+                          ) : (
+                            s.daysOfWeek.map((d) => dayShortLabels[d]()).join(', ')
+                          )}
                         </td>
                         <td className='py-2 px-4 text-muted-foreground'>
                           {/* Verbatim team-local wall clock, trimming any PG TIME seconds. */}
@@ -556,55 +573,20 @@ export function TrainingTypeDetailPage({
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value='weekly'>
-                                    {tr('event_frequency_weekly')}
-                                  </SelectItem>
-                                  <SelectItem value='biweekly'>
-                                    {tr('event_frequency_biweekly')}
-                                  </SelectItem>
+                                  {FREQUENCY_ORDER.map((f) => (
+                                    <SelectItem key={f} value={f}>
+                                      {frequencyLabel(f)}
+                                    </SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
                               <FormMessage />
                             </FormItem>
                           )}
                         />
-                        <FormField
-                          name='daysOfWeek'
-                          control={scheduleForm.control}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_daysOfWeek')}</FormLabel>
-                              <div className='flex gap-1'>
-                                {DAY_ORDER.map((d) => {
-                                  const selected = (field.value as number[]).includes(d);
-                                  return (
-                                    <Button
-                                      key={d}
-                                      type='button'
-                                      size='sm'
-                                      variant={selected ? 'default' : 'outline'}
-                                      className='w-10'
-                                      aria-pressed={selected}
-                                      aria-label={dayFullLabels[d]()}
-                                      onClick={() => {
-                                        const current = field.value as number[];
-                                        field.onChange(
-                                          sortDays(
-                                            selected
-                                              ? current.filter((v) => v !== d)
-                                              : [...current, d],
-                                          ),
-                                        );
-                                      }}
-                                    >
-                                      {dayShortLabels[d]()}
-                                    </Button>
-                                  );
-                                })}
-                              </div>
-                              <FormMessage />
-                            </FormItem>
-                          )}
+                        <RecurrenceFormFields
+                          frequency={scheduleFrequency}
+                          itemClassName='flex-1'
                         />
                       </div>
                     )}
@@ -736,8 +718,7 @@ export function TrainingTypeDetailPage({
                           scheduleForm.reset({
                             title: trainingTypeDetail.name,
                             description: '',
-                            frequency: 'weekly',
-                            daysOfWeek: [],
+                            ...recurrenceFormDefaults,
                             locationUrl: '',
                             startDate: new Date().toISOString().slice(0, 10),
                             endDate: '',

@@ -2347,11 +2347,11 @@ Event series define recurrence rules. The `EventHorizonCron` runs daily and gene
 
 #### Enums
 
-**RecurrenceFrequency:** `"weekly"`, `"biweekly"`
+**RecurrenceFrequency:** `"weekly"`, `"biweekly"`, `"monthly_by_date"`, `"monthly_by_weekday"`
 
 **EventSeriesStatus:** `"active"`, `"cancelled"`
 
-**DaysOfWeek:** Array of integers 0–6 (0 = Sunday, 1 = Monday, ..., 6 = Saturday). Must contain at least 1 and at most 7 values.
+**DaysOfWeek:** Array of integers 0–6 (0 = Sunday, 1 = Monday, ..., 6 = Saturday). Weekly/biweekly: 1–7 values. `monthly_by_date`: empty. `monthly_by_weekday`: exactly 1. Invalid combinations are rejected on create. `dayOfMonth` (1–31; short months clamp to the last day) is required for `monthly_by_date`; `weekOfMonth` (`1`–`4` or `-1` for last) is required for `monthly_by_weekday`. A monthly series always generates at least its next occurrence, even beyond the event horizon.
 
 ---
 
@@ -2375,8 +2375,10 @@ Creates a new recurring event series.
 | `title` | `string` | Yes | Non-empty series title |
 | `trainingTypeId` | `TrainingTypeId \| null` | Yes | Training type (for training series) |
 | `description` | `string \| null` | Yes | Optional description |
-| `frequency` | `RecurrenceFrequency` | Yes | `"weekly"` or `"biweekly"` |
-| `daysOfWeek` | `integer[]` | Yes | Days to schedule (0=Sun, 1–6 for Mon–Sat) |
+| `frequency` | `RecurrenceFrequency` | Yes | `"weekly"`, `"biweekly"`, `"monthly_by_date"` or `"monthly_by_weekday"` |
+| `daysOfWeek` | `integer[]` | Yes | Days to schedule (0=Sun, 1–6 for Mon–Sat); `[]` for `monthly_by_date`, one value for `monthly_by_weekday` |
+| `dayOfMonth` | `integer` | No | 1–31; required for `monthly_by_date` |
+| `weekOfMonth` | `integer` | No | `1`–`4` or `-1` (last); required for `monthly_by_weekday` |
 | `startDate` | `string` (ISO 8601) | Yes | Series start date |
 | `endDate` | `string \| null` | Yes | Series end date (null for open-ended) |
 | `startTime` | `string` | Yes | Start time as `HH:MM`, dialect declared by `timesAreTeamLocal` below (e.g. `"14:30"`) |
@@ -2395,7 +2397,9 @@ Creates a new recurring event series.
 | `teamId` | `TeamId` | No | Team ID |
 | `title` | `string` | No | Series title |
 | `frequency` | `RecurrenceFrequency` | No | Recurrence frequency |
-| `daysOfWeek` | `integer[]` | No | Days of week |
+| `daysOfWeek` | `integer[]` | No | Days of week (empty for `monthly_by_date`) |
+| `dayOfMonth` | `integer` | Optional key | Monthly-by-date day |
+| `weekOfMonth` | `integer` | Optional key | Monthly-by-weekday occurrence (`-1` = last) |
 | `startDate` | `string` (ISO 8601) | No | Start date |
 | `endDate` | `string \| null` | Yes | End date |
 | `status` | `EventSeriesStatus` | No | `"active"` or `"cancelled"` |
@@ -2514,6 +2518,7 @@ Updates a series. Changes apply only to future generated events. All fields are 
 | `EventSeriesNotFound` | 404 | Series does not exist |
 | `EventSeriesCancelled` | 400 | Series is already cancelled |
 | `EventSeriesTimeDialectMismatch` | 400 | `startTime` and/or `endTime` are present and `timesAreTeamLocal` does not match the series' stored dialect; row is unchanged |
+| `EventSeriesRecurrenceNotEditable` | 400 | `daysOfWeek` supplied for a monthly series; monthly days are fixed after creation |
 
 ---
 

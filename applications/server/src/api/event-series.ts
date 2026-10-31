@@ -1,4 +1,4 @@
-import { Auth, EventApi, EventSeriesApi } from '@sideline/domain';
+import { Auth, EventApi, EventSeries, EventSeriesApi } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Array, DateTime, Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -11,7 +11,11 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
-import { computeHorizonEnd, generateOccurrenceDates } from '~/services/RecurrenceService.js';
+import {
+  computeHorizonEnd,
+  generateOccurrenceDates,
+  seriesRecurrence,
+} from '~/services/RecurrenceService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
 import {
   assertDialectMatches,
@@ -100,6 +104,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 description: payload.description,
                 frequency: payload.frequency,
                 daysOfWeek: payload.daysOfWeek,
+                dayOfMonth: payload.dayOfMonth,
+                weekOfMonth: payload.weekOfMonth,
                 startDate: payload.startDate,
                 endDate: payload.endDate,
                 startTime: payload.startTime,
@@ -118,17 +124,26 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 timesAreTeamLocal: payload.timesAreTeamLocal,
               }),
             ),
+            // The request filter already rejected invalid shapes, so None is a bug.
+            Effect.bind('recurrence', ({ inserted }) =>
+              Option.match(seriesRecurrence(inserted), {
+                onNone: () => LogicError.die('inserted series violates recurrence shape'),
+                onSome: Effect.succeed,
+              }),
+            ),
             Effect.bind('horizonDays', () => teamSettings.getHorizonDays(teamId)),
-            Effect.let('effectiveEnd', ({ inserted, horizonDays }) =>
+            // may extend past horizonDays for monthly — see computeHorizonEnd
+            Effect.let('effectiveEnd', ({ inserted, recurrence, horizonDays }) =>
               computeHorizonEnd({
+                recurrence,
+                seriesStartDate: inserted.start_date,
                 seriesEndDate: Option.getOrNull(inserted.end_date),
                 horizonDays,
               }),
             ),
-            Effect.let('dates', ({ inserted, effectiveEnd }) =>
+            Effect.let('dates', ({ inserted, recurrence, effectiveEnd }) =>
               generateOccurrenceDates({
-                frequency: inserted.frequency,
-                daysOfWeek: inserted.days_of_week,
+                ...recurrence,
                 startDate: inserted.start_date,
                 endDate: effectiveEnd,
               }),
@@ -207,6 +222,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   title: inserted.title,
                   frequency: inserted.frequency,
                   daysOfWeek: inserted.days_of_week,
+                  dayOfMonth: inserted.day_of_month,
+                  weekOfMonth: inserted.week_of_month,
                   startDate: inserted.start_date,
                   endDate: inserted.end_date,
                   status: inserted.status,
@@ -256,6 +273,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                     title: s.title,
                     frequency: s.frequency,
                     daysOfWeek: s.days_of_week,
+                    dayOfMonth: s.day_of_month,
+                    weekOfMonth: s.week_of_month,
                     startDate: s.start_date,
                     endDate: s.end_date,
                     status: s.status,
@@ -315,6 +334,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   description: found.description,
                   frequency: found.frequency,
                   daysOfWeek: found.days_of_week,
+                  dayOfMonth: found.day_of_month,
+                  weekOfMonth: found.week_of_month,
                   startDate: found.start_date,
                   endDate: found.end_date,
                   status: found.status,
@@ -424,18 +445,28 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 forbidden,
               ),
             ),
+            // Also runs the D6 check (monthly recurrence is not editable) AFTER the access checks,
+            // so an unauthorised caller still gets 403, not 400. Sequenced with `Effect.andThen`
+            // because this pipe has no free overload slot for a separate `Effect.tap`.
             Effect.tap(({ existing, isAdmin, membership }) =>
-              checkTrainingTypeOwnerGroup(
-                trainingTypes,
-                groups,
-                membership.id,
-                Option.match(payload.trainingTypeId, {
-                  onNone: () => existing.training_type_id,
-                  onSome: (v) => v,
-                }),
-                isAdmin,
-                forbidden,
-                teamId,
+              Effect.andThen(
+                checkTrainingTypeOwnerGroup(
+                  trainingTypes,
+                  groups,
+                  membership.id,
+                  Option.match(payload.trainingTypeId, {
+                    onNone: () => existing.training_type_id,
+                    onSome: (v) => v,
+                  }),
+                  isAdmin,
+                  forbidden,
+                  teamId,
+                ),
+                () =>
+                  EventSeries.isMonthlyFrequency(existing.frequency) &&
+                  Option.isSome(payload.daysOfWeek)
+                    ? Effect.fail(new EventSeriesApi.EventSeriesRecurrenceNotEditable())
+                    : Effect.void,
               ),
             ),
             Effect.let('resolved', ({ existing }) => ({
@@ -529,7 +560,17 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
             Effect.tap(({ existing, resolved, membership, teamZone }) =>
               teamSettings.getHorizonDays(teamId).pipe(
                 Effect.flatMap((horizonDays) => {
+                  const recurrence = seriesRecurrence(existing);
+                  // Never die: `series.updateEventSeries` above has already committed.
+                  if (Option.isNone(recurrence)) {
+                    return Effect.logWarning(
+                      `updateEventSeries: series ${existing.id} has an invalid recurrence shape, skipping generation`,
+                    );
+                  }
+                  // may extend past horizonDays for monthly — see computeHorizonEnd
                   const effectiveEnd = computeHorizonEnd({
+                    recurrence: recurrence.value,
+                    seriesStartDate: existing.start_date,
                     seriesEndDate: Option.getOrNull(resolved.endDate),
                     horizonDays,
                   });
@@ -539,8 +580,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                       if (!DateTime.isGreaterThan(effectiveEnd, lastGen)) return Effect.void;
                       const nextDay = DateTime.add(lastGen, { days: 1 });
                       const newDates = generateOccurrenceDates({
-                        frequency: existing.frequency,
-                        daysOfWeek: existing.days_of_week,
+                        ...recurrence.value,
                         startDate: nextDay,
                         endDate: effectiveEnd,
                       });
@@ -618,6 +658,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   description: detail.description,
                   frequency: detail.frequency,
                   daysOfWeek: detail.days_of_week,
+                  dayOfMonth: detail.day_of_month,
+                  weekOfMonth: detail.week_of_month,
                   startDate: detail.start_date,
                   endDate: detail.end_date,
                   status: detail.status,
