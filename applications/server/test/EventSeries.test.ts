@@ -2064,12 +2064,12 @@ describe('Event Series API', () => {
       });
     };
 
-    const patch = (seriesId: EventSeries.EventSeriesId, body: unknown) =>
+    const patch = (seriesId: EventSeries.EventSeriesId, body: unknown, token = 'admin-token') =>
       handler(
         new Request(`${BASE}/${seriesId}`, {
           method: 'PATCH',
           headers: {
-            Authorization: 'Bearer admin-token',
+            Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(body),
@@ -2122,6 +2122,13 @@ describe('Event Series API', () => {
       expect(body._tag).toBe('EventSeriesRecurrenceNotEditable');
       expect(updateEventSeriesCallCount).toBe(0);
       expect(seriesStore.get(MONTHLY_SERIES)?.days_of_week).toEqual([2]);
+    });
+
+    it('should return 403, not 400, when a player PATCHes daysOfWeek on a monthly series', async () => {
+      seedMonthlySeries();
+      const response = await patch(MONTHLY_SERIES, { daysOfWeek: [3] }, 'user-token');
+      expect(response.status).toBe(403);
+      expect(updateEventSeriesCallCount).toBe(0);
     });
 
     it('should still allow a title-only PATCH on a monthly series', async () => {
