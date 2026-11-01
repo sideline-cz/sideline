@@ -27,6 +27,8 @@ type InsertedEvent = {
   seriesId: Option.Option<string>;
   // `formatIsoDateUtc(startAt)` — the key `idx_events_series_date` is unique on
   date: string;
+  eventType: string;
+  eventTypeId: Option.Option<string>;
 };
 
 type UpdatedDate = {
@@ -78,6 +80,9 @@ const makeActiveSeries = (
     // `resolveOccurrenceInstant` unconditionally, i.e. always team-local) keeps its
     // original meaning unchanged. Only the new `false`-row case below overrides this.
     times_are_team_local: boolean;
+    // Series of any event type: defaults to a legacy training series.
+    event_type: Event.EventType;
+    event_type_id: Option.Option<string>;
   }> = {},
 ) => ({
   id: overrides.id ?? SERIES_ID,
@@ -102,6 +107,8 @@ const makeActiveSeries = (
   created_by: overrides.created_by ?? CREATED_BY,
   event_horizon_days: overrides.event_horizon_days ?? 30,
   team_timezone: overrides.team_timezone ?? 'Europe/Prague',
+  event_type: overrides.event_type ?? ('training' as Event.EventType),
+  event_type_id: overrides.event_type_id ?? Option.none<string>(),
 });
 
 // --- Mock layers ---
@@ -127,6 +134,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     title: string;
     startAt: DateTime.Utc;
     seriesId?: Option.Option<string>;
+    eventType: string;
+    eventTypeId?: Option.Option<string>;
   }) => {
     const seriesId = params.seriesId ?? Option.none<string>();
     const date = DateTime.formatIsoDateUtc(params.startAt);
@@ -153,13 +162,15 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       startAt: params.startAt,
       seriesId,
       date,
+      eventType: params.eventType,
+      eventTypeId: params.eventTypeId ?? Option.none(),
     });
     return Effect.succeed({
       id: eventId,
       team_id: params.teamId,
       title: params.title,
       training_type_id: Option.none(),
-      event_type: 'training',
+      event_type: params.eventType,
       description: Option.none(),
       start_at: params.startAt,
       end_at: Option.none(),
@@ -190,6 +201,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   markEventSeriesModified: () => Effect.die(new Error('Not implemented')),
   cancelFutureInSeries: () => Effect.die(new Error('Not implemented')),
   updateFutureUnmodifiedInSeries: () => Effect.die(new Error('Not implemented')),
+  retypeFollowingInSeries: () => Effect.die(new Error('Not implemented')),
   findUpcomingByGuildId: () => Effect.die(new Error('Not implemented')),
   countUpcomingByGuildId: () => Effect.die(new Error('Not implemented')),
   findEventsByUserId: () => Effect.die(new Error('Not implemented')),
@@ -485,6 +497,55 @@ describe('eventHorizonCronEffect', () => {
 // Monthly recurrence (`.dev-loop/plan.md` Task 4/5): the next occurrence is always
 // materialised, and re-runs never insert it twice.
 // ---------------------------------------------------------------------------
+
+describe('eventHorizonCronEffect — series event type', () => {
+  const recentStart = () => DateTime.subtract(DateTime.nowUnsafe(), { days: 1 });
+
+  it.effect(
+    'should insert meeting events with the series type id when the series is a meeting',
+    () =>
+      eventHorizonCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(insertedEvents.length).toBeGreaterThan(0);
+            for (const e of insertedEvents) {
+              expect(e.eventType).toBe('meeting');
+              expect(e.eventTypeId).toEqual(Option.some('et-meeting'));
+            }
+          }),
+        ),
+        Effect.provide(
+          makeTestLayer([
+            makeActiveSeries({
+              start_date: recentStart(),
+              days_of_week: [1, 2, 3, 4, 5],
+              event_type: 'meeting',
+              event_type_id: Option.some('et-meeting'),
+            }),
+          ]),
+        ),
+        Effect.asVoid,
+      ),
+  );
+
+  it.effect('should still insert training events for a legacy training series', () =>
+    eventHorizonCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(insertedEvents.length).toBeGreaterThan(0);
+          for (const e of insertedEvents) {
+            expect(e.eventType).toBe('training');
+            expect(e.eventTypeId).toEqual(Option.none());
+          }
+        }),
+      ),
+      Effect.provide(
+        makeTestLayer([makeActiveSeries({ start_date: recentStart(), days_of_week: [1, 2, 3] })]),
+      ),
+      Effect.asVoid,
+    ),
+  );
+});
 
 describe('eventHorizonCronEffect — monthly recurrence', () => {
   const day = (iso: string) => DateTime.makeUnsafe(`${iso}T00:00:00Z`);

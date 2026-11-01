@@ -4,6 +4,7 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/ht
 import { AuthMiddleware } from '~/api/Auth.js';
 import { EventLocationUrl, Forbidden } from '~/api/EventApi.js';
 import { fieldState } from '~/api/RequestFilters.js';
+import { EventType } from '~/models/Event.js';
 import {
   DayOfMonth,
   DayOfWeek,
@@ -14,6 +15,7 @@ import {
   toRecurrence,
   WeekOfMonth,
 } from '~/models/EventSeries.js';
+import { EventTypeId } from '~/models/EventType.js';
 import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
 import { TrainingTypeId } from '~/models/TrainingType.js';
@@ -32,6 +34,9 @@ export class EventSeriesInfo extends Schema.Class<EventSeriesInfo>('EventSeriesI
   startDate: Schemas.DateTimeFromIsoString,
   endDate: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   status: EventSeriesStatus,
+  // Optional key: an old server omits it, so None, read as training.
+  eventType: Schema.OptionFromOptionalKey(EventType),
+  eventTypeId: Schema.OptionFromOptionalKey(EventTypeId),
   trainingTypeId: Schema.OptionFromNullOr(TrainingTypeId),
   trainingTypeName: Schema.OptionFromNullOr(Schema.String),
   /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
@@ -73,6 +78,9 @@ export class EventSeriesDetail extends Schema.Class<EventSeriesDetail>('EventSer
   startDate: Schemas.DateTimeFromIsoString,
   endDate: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   status: EventSeriesStatus,
+  // Optional key: an old server omits it, so None, read as training.
+  eventType: Schema.OptionFromOptionalKey(EventType),
+  eventTypeId: Schema.OptionFromOptionalKey(EventTypeId),
   trainingTypeId: Schema.OptionFromNullOr(TrainingTypeId),
   trainingTypeName: Schema.OptionFromNullOr(Schema.String),
   /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
@@ -109,6 +117,10 @@ const asOption = (value: Option.Option<number> | number | undefined): Option.Opt
 const CreateEventSeriesRequestStruct = Schema.Struct({
   title: Schema.NonEmptyString,
   trainingTypeId: Schema.OptionFromNullOr(TrainingTypeId),
+  // Absent means training (every pre-type client). The id is authoritative: the DB trigger
+  // overwrites the kind from it.
+  eventType: Schema.OptionFromOptional(EventType),
+  eventTypeId: Schema.OptionFromOptional(EventTypeId),
   description: Schema.OptionFromNullOr(Schema.String),
   frequency: RecurrenceFrequency,
   // No min-1: `monthly_by_date` sends `[]`. The per-frequency shape is checked by
@@ -162,6 +174,10 @@ export type CreateEventSeriesRequest = Schema.Schema.Type<typeof CreateEventSeri
 const UpdateEventSeriesRequestStruct = Schema.Struct({
   title: Schema.OptionFromOptional(Schema.NonEmptyString),
   trainingTypeId: Schema.OptionFromOptional(Schema.OptionFromNullOr(TrainingTypeId)),
+  // Absent means keep the stored type. The id is authoritative: the DB trigger overwrites the
+  // kind from it.
+  eventType: Schema.OptionFromOptional(EventType),
+  eventTypeId: Schema.OptionFromOptional(EventTypeId),
   description: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   daysOfWeek: Schema.OptionFromOptional(DaysOfWeek),
   // `HH:MM` wall clock resolved to an instant per occurrence. Whether this is team-local

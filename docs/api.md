@@ -2374,6 +2374,8 @@ Creates a new recurring event series.
 |---|---|---|---|
 | `title` | `string` | Yes | Non-empty series title |
 | `trainingTypeId` | `TrainingTypeId \| null` | Yes | Training type (for training series) |
+| `eventType` | `EventType` | No | `"training"` (default), `"match"`, `"tournament"`, `"meeting"`, `"social"`, `"other"`. `trainingTypeId` is dropped for any non-training kind |
+| `eventTypeId` | `EventTypeId` | No | Team event type. Authoritative: the DB trigger sets the kind from it; a foreign id is ignored |
 | `description` | `string \| null` | Yes | Optional description |
 | `frequency` | `RecurrenceFrequency` | Yes | `"weekly"`, `"biweekly"`, `"monthly_by_date"` or `"monthly_by_weekday"` |
 | `daysOfWeek` | `integer[]` | Yes | Days to schedule (0=Sun, 1–6 for Mon–Sat); `[]` for `monthly_by_date`, one value for `monthly_by_weekday` |
@@ -2404,6 +2406,8 @@ Creates a new recurring event series.
 | `endDate` | `string \| null` | Yes | End date |
 | `status` | `EventSeriesStatus` | No | `"active"` or `"cancelled"` |
 | `trainingTypeId` | `TrainingTypeId \| null` | Yes | Training type ID |
+| `eventType` | `EventType` | No | Series kind. Absent only from an older server (read as training) |
+| `eventTypeId` | `EventTypeId` | No | Stored event type id |
 | `trainingTypeName` | `string \| null` | Yes | Training type name |
 | `startTime` | `string` | No | Start time, `HH:MM` — dialect matches the series' own stored dialect (see `timesAreTeamLocal` on the request above; not yet echoed back on this response as of this release) |
 | `endTime` | `string \| null` | Yes | End time string |
@@ -2497,6 +2501,8 @@ Updates a series. Changes apply only to future generated events. All fields are 
 |---|---|---|---|
 | `title` | `string` | No | Non-empty series title |
 | `trainingTypeId` | `TrainingTypeId \| null` | No | Training type ID |
+| `eventType` | `EventType` | No | Absent keeps the stored kind. When `eventType` or `eventTypeId` is sent (even unchanged), every following active occurrence is re-typed, individually edited ones included. `trainingTypeId` is cleared when the resulting kind is not training |
+| `eventTypeId` | `EventTypeId` | No | Absent keeps the stored id (a kind change then re-resolves it) |
 | `description` | `string \| null` | No | Description |
 | `daysOfWeek` | `integer[]` | No | Days of week |
 | `startTime` | `string` | No | Start time as `HH:MM`, dialect declared by `timesAreTeamLocal` below. Omitted entirely means "leave the stored value alone" — no dialect is asserted for a field not sent. |

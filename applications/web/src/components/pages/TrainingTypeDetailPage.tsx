@@ -199,6 +199,10 @@ export function TrainingTypeDetailPage({
           params: { teamId: teamIdBranded },
           payload: {
             title: values.title,
+            // A training type's schedule is always a training: Some('training') with no id lets
+            // the DB trigger resolve the team's training type.
+            eventType: Option.some('training'),
+            eventTypeId: Option.none(),
             trainingTypeId: Option.some(trainingTypeIdBranded),
             description: values.description ? Option.some(values.description) : Option.none(),
             frequency: values.frequency,
@@ -294,6 +298,9 @@ export function TrainingTypeDetailPage({
           params: { teamId: teamIdBranded, seriesId: seriesIdBranded },
           payload: {
             title: Option.some(values.title),
+            // This form never edits the type: None keeps the stored one.
+            eventType: Option.none(),
+            eventTypeId: Option.none(),
             trainingTypeId: Option.none(),
             description: Option.some(
               values.description ? Option.some(values.description) : Option.none(),

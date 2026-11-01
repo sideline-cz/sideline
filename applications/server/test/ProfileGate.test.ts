@@ -391,6 +391,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   cancelFutureInSeries: () => Effect.void,
   updateFutureUnmodified: () => Effect.void,
   updateFutureUnmodifiedInSeries: () => Effect.void,
+  retypeFollowingInSeries: () => Effect.void,
   markEventPersonalMessagesDirty: () => Effect.void,
 } as any);
 
@@ -1097,6 +1098,7 @@ const RpcMockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   cancelFutureInSeries: () => Effect.void,
   updateFutureUnmodified: () => Effect.void,
   updateFutureUnmodifiedInSeries: () => Effect.void,
+  retypeFollowingInSeries: () => Effect.void,
   findEventsByChannelId: () => Effect.succeed([]),
   findUpcomingByGuildId: () => Effect.succeed([]),
   countUpcomingByGuildId: () => Effect.succeed(0),

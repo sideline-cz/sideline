@@ -1,6 +1,6 @@
 ---
 title: Create recurring events
-description: Set up trainings that repeat weekly, every two weeks, or monthly without manually posting each one.
+description: Set up trainings, matches or meetings that repeat weekly, every two weeks, or monthly without manually posting each one.
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
@@ -9,7 +9,7 @@ Most amateur teams train on a fixed schedule. Create an **event series** once an
 
 ## Concepts
 
-An **event series** is a pattern: a day of the week, a time, a location, and a training type. From it, Sideline generates individual **events** a few weeks in advance. Editing the series changes future events; editing a single event changes only that occurrence.
+An **event series** is a pattern: a day of the week, a time, a location, and an event type (and, for trainings, a training type). From it, Sideline generates individual **events** a few weeks in advance. Editing the series changes future events; editing a single event changes only that occurrence.
 
 ## Creating a series
 
@@ -18,7 +18,7 @@ An **event series** is a pattern: a day of the week, a time, a location, and a t
 1. Open your team → **Events** → **New event** → **Recurring**.
 2. Pick how often it repeats (weekly, every two weeks, monthly by date, or monthly by weekday), the matching day(s), and the **time**.
 3. Set the **location**.
-4. Choose a **training type** (training, match, tournament, friendly, other).
+4. Choose the **event type** (Training, Match, Meeting, … or one your team created). For a training you can also pick a **training type**.
 5. Pick the **target group** — who should be invited to RSVP.
 6. Optionally set a **start date** and **end date** (for seasonal schedules).
 7. Save. Sideline schedules the next few occurrences and starts posting them in Discord.
@@ -39,6 +39,8 @@ Something changes for next week only — different location, earlier time, cance
 ## Permanent changes
 
 Moving your training time permanently? Edit the **series**. Future events inherit the change; past events are untouched.
+
+If you change the **event type** with **This and all future events**, every upcoming occurrence gets the new type, including ones you edited individually. Other changes skip occurrences you edited individually.
 
 ## Cancelling events
 

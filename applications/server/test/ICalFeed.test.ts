@@ -221,6 +221,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   markEventSeriesModified: () => Effect.void,
   cancelFutureInSeries: () => Effect.void,
   updateFutureUnmodifiedInSeries: () => Effect.void,
+  retypeFollowingInSeries: () => Effect.void,
   findUpcomingByGuildId: () => Effect.succeed([]),
   countUpcomingByGuildId: () => Effect.succeed(0),
   findEventsByUserId: () => Effect.succeed(testEvents),

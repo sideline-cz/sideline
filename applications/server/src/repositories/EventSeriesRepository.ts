@@ -1,4 +1,12 @@
-import { EventSeries, GroupModel, Team, TeamMember, TrainingType } from '@sideline/domain';
+import {
+  Event,
+  EventSeries,
+  EventType,
+  GroupModel,
+  Team,
+  TeamMember,
+  TrainingType,
+} from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
 import { type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -22,6 +30,10 @@ class EventSeriesRow extends Schema.Class<EventSeriesRow>('EventSeriesRow')({
   start_date: Schemas.DateTimeFromDate,
   end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   status: EventSeries.EventSeriesStatus,
+  event_type: Event.EventType,
+  // Materialization id: NULL when the stored type is archived, so the events trigger picks the
+  // oldest active type of the kind (finalizeSeries).
+  event_type_id: Schema.OptionFromNullOr(EventType.EventTypeId),
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   // (`.work-plans/series-time-conversion.md`): the row's storage dialect, read back from
@@ -50,6 +62,9 @@ class EventSeriesWithDetails extends Schema.Class<EventSeriesWithDetails>('Event
     start_date: Schemas.DateTimeFromDate,
     end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
     status: EventSeries.EventSeriesStatus,
+    event_type: Event.EventType,
+    // Raw stored id, archived or not (API responses and the update handler's `existing`).
+    event_type_id: Schema.OptionFromNullOr(EventType.EventTypeId),
     training_type_name: Schema.OptionFromNullOr(Schema.String),
     last_generated_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
     owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
@@ -82,6 +97,9 @@ class EventSeriesForGeneration extends Schema.Class<EventSeriesForGeneration>(
   start_date: Schemas.DateTimeFromDate,
   end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   last_generated_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+  event_type: Event.EventType,
+  // Materialization id: NULL when the stored type is archived (see findActiveForGeneration).
+  event_type_id: Schema.OptionFromNullOr(EventType.EventTypeId),
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   created_by: TeamMember.TeamMemberId,
@@ -100,6 +118,8 @@ class EventSeriesForGeneration extends Schema.Class<EventSeriesForGeneration>(
 const EventSeriesInsertInput = Schema.Struct({
   team_id: Schema.String,
   training_type_id: Schema.OptionFromNullOr(Schema.String),
+  event_type: Event.EventType,
+  event_type_id: Schema.OptionFromNullOr(Schema.String),
   title: Schema.String,
   description: Schema.OptionFromNullOr(Schema.String),
   start_time: Schema.String,
@@ -127,6 +147,8 @@ const EventSeriesUpdateInput = Schema.Struct({
   id: EventSeries.EventSeriesId,
   title: Schema.String,
   training_type_id: Schema.OptionFromNullOr(Schema.String),
+  event_type: Event.EventType,
+  event_type_id: Schema.OptionFromNullOr(Schema.String),
   description: Schema.OptionFromNullOr(Schema.String),
   days_of_week: Schema.Array(Schema.Number),
   start_time: Schema.String,
@@ -141,24 +163,23 @@ const EventSeriesUpdateInput = Schema.Struct({
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  const SeriesIdRow = Schema.Struct({ id: EventSeries.EventSeriesId });
+
   const insertSeries = SqlSchema.findOne({
     Request: EventSeriesInsertInput,
-    Result: EventSeriesRow,
+    Result: SeriesIdRow,
     execute: (input) => sql`
-            INSERT INTO event_series (team_id, training_type_id, title, description,
+            INSERT INTO event_series (team_id, training_type_id, event_type, event_type_id, title, description,
                                       start_time, end_time, location, location_url, frequency,
                                       days_of_week, day_of_month, week_of_month,
                                       start_date, end_date, created_by,
                                       owner_group_id, member_group_id, times_are_team_local)
-            VALUES (${input.team_id}, ${input.training_type_id}, ${input.title},
+            VALUES (${input.team_id}, ${input.training_type_id}, ${input.event_type}, ${input.event_type_id}, ${input.title},
                     ${input.description}, ${input.start_time}, ${input.end_time},
                     ${input.location}, ${input.location_url}, ${input.frequency}, ${input.days_of_week},
                     ${input.day_of_month}, ${input.week_of_month}, ${input.start_date}, ${input.end_date}, ${input.created_by},
                     ${input.owner_group_id}, ${input.member_group_id}, ${input.times_are_team_local})
-            RETURNING id, team_id, training_type_id, title, description,
-                      start_time, end_time, location, location_url, frequency,
-                      days_of_week, day_of_month, week_of_month, start_date, end_date, status,
-                      owner_group_id, member_group_id, times_are_team_local
+            RETURNING id
           `,
   });
 
@@ -169,6 +190,7 @@ const make = Effect.gen(function* () {
             SELECT es.id, es.team_id, es.training_type_id, es.title, es.description,
                    es.start_time, es.end_time, es.location, es.location_url, es.frequency,
                    es.days_of_week, es.day_of_month, es.week_of_month, es.start_date, es.end_date, es.status,
+                   es.event_type, es.event_type_id,
                    tt.name AS training_type_name, es.last_generated_date,
                    es.owner_group_id, og.name AS owner_group_name,
                    es.member_group_id, mg.name AS member_group_name,
@@ -189,6 +211,7 @@ const make = Effect.gen(function* () {
             SELECT es.id, es.team_id, es.training_type_id, es.title, es.description,
                    es.start_time, es.end_time, es.location, es.location_url, es.frequency,
                    es.days_of_week, es.day_of_month, es.week_of_month, es.start_date, es.end_date, es.status,
+                   es.event_type, es.event_type_id,
                    tt.name AS training_type_name, es.last_generated_date,
                    es.owner_group_id, og.name AS owner_group_name,
                    es.member_group_id, mg.name AS member_group_name,
@@ -209,6 +232,10 @@ const make = Effect.gen(function* () {
                    es.start_time, es.end_time, es.location, es.location_url, es.frequency,
                    es.days_of_week, es.day_of_month, es.week_of_month, es.start_date, es.end_date,
                    es.last_generated_date,
+                   es.event_type,
+                   -- Archived stored type: hand the materializer no id, so the events trigger
+                   -- picks the oldest active type of the kind (what every series did before).
+                   CASE WHEN et.archived_at IS NULL THEN es.event_type_id END AS event_type_id,
                    es.owner_group_id, es.member_group_id,
                    es.created_by,
                    COALESCE(ts.event_horizon_days, 30) AS event_horizon_days,
@@ -216,6 +243,7 @@ const make = Effect.gen(function* () {
                    es.times_are_team_local
             FROM event_series es
             LEFT JOIN team_settings ts ON ts.team_id = es.team_id
+            LEFT JOIN event_types et ON et.id = es.event_type_id
             WHERE es.status = 'active'
               AND (es.end_date IS NULL OR es.end_date > CURRENT_DATE)
           `,
@@ -232,11 +260,13 @@ const make = Effect.gen(function* () {
 
   const updateSeries = SqlSchema.findOne({
     Request: EventSeriesUpdateInput,
-    Result: EventSeriesRow,
+    Result: SeriesIdRow,
     execute: (input) => sql`
             UPDATE event_series SET
               title = ${input.title},
               training_type_id = ${input.training_type_id},
+              event_type = ${input.event_type},
+              event_type_id = COALESCE(${input.event_type_id}, event_type_id),
               description = ${input.description},
               days_of_week = ${input.days_of_week},
               start_time = ${input.start_time},
@@ -248,9 +278,27 @@ const make = Effect.gen(function* () {
               member_group_id = ${input.member_group_id},
               updated_at = now()
             WHERE id = ${input.id}
+            RETURNING id
+          `,
+  });
+
+  // Post-trigger clamp. INSERT/UPDATE values are evaluated before events_sync_event_type
+  // resolves the kind (an id can overwrite it), so only a second statement can drop a training
+  // type on the FINAL kind. training_type_id is outside the trigger's UPDATE OF list, so this
+  // does not re-fire it. The returned event_type_id is masked when archived (materialization id).
+  const finalizeSeries = SqlSchema.findOne({
+    Request: EventSeries.EventSeriesId,
+    Result: EventSeriesRow,
+    execute: (id) => sql`
+            UPDATE event_series
+            SET training_type_id = CASE WHEN event_type = 'training' THEN training_type_id END
+            WHERE id = ${id}
             RETURNING id, team_id, training_type_id, title, description,
                       start_time, end_time, location, location_url, frequency,
                       days_of_week, day_of_month, week_of_month, start_date, end_date, status,
+                      event_type,
+                      CASE WHEN (SELECT et.archived_at FROM event_types et WHERE et.id = event_series.event_type_id) IS NULL
+                        THEN event_type_id END AS event_type_id,
                       owner_group_id, member_group_id, times_are_team_local
           `,
   });
@@ -264,6 +312,8 @@ const make = Effect.gen(function* () {
   const insertEventSeries = ({
     teamId,
     trainingTypeId,
+    eventType = 'training',
+    eventTypeId = Option.none(),
     title,
     description,
     startTime,
@@ -283,6 +333,9 @@ const make = Effect.gen(function* () {
   }: {
     teamId: Team.TeamId;
     trainingTypeId: Option.Option<string>;
+    // Defaults keep every pre-type caller meaning "training".
+    eventType?: Event.EventType;
+    eventTypeId?: Option.Option<string>;
     title: string;
     description: Option.Option<string>;
     startTime: string;
@@ -305,6 +358,8 @@ const make = Effect.gen(function* () {
     insertSeries({
       team_id: teamId,
       training_type_id: trainingTypeId,
+      event_type: eventType,
+      event_type_id: eventTypeId,
       title,
       description,
       start_time: startTime,
@@ -321,7 +376,11 @@ const make = Effect.gen(function* () {
       owner_group_id: ownerGroupId,
       member_group_id: memberGroupId,
       times_are_team_local: timesAreTeamLocal,
-    }).pipe(catchSqlErrors);
+    }).pipe(
+      Effect.flatMap(({ id }) => finalizeSeries(id)),
+      sql.withTransaction,
+      catchSqlErrors,
+    );
 
   const findSeriesByTeamId = (teamId: Team.TeamId) => findByTeamId(teamId).pipe(catchSqlErrors);
 
@@ -332,6 +391,8 @@ const make = Effect.gen(function* () {
     id,
     title,
     trainingTypeId,
+    eventType,
+    eventTypeId,
     description,
     daysOfWeek,
     startTime,
@@ -345,6 +406,9 @@ const make = Effect.gen(function* () {
     id: EventSeries.EventSeriesId;
     title: string;
     trainingTypeId: Option.Option<string>;
+    eventType: Event.EventType;
+    // None keeps the stored id (COALESCE); a kind change then re-resolves it in the trigger.
+    eventTypeId: Option.Option<string>;
     description: Option.Option<string>;
     daysOfWeek: ReadonlyArray<number>;
     startTime: string;
@@ -359,6 +423,8 @@ const make = Effect.gen(function* () {
       id,
       title,
       training_type_id: trainingTypeId,
+      event_type: eventType,
+      event_type_id: eventTypeId,
       description,
       days_of_week: Array.from(daysOfWeek),
       start_time: startTime,
@@ -368,7 +434,11 @@ const make = Effect.gen(function* () {
       end_date: endDate,
       owner_group_id: ownerGroupId,
       member_group_id: memberGroupId,
-    }).pipe(catchSqlErrors);
+    }).pipe(
+      Effect.flatMap(({ id }) => finalizeSeries(id)),
+      sql.withTransaction,
+      catchSqlErrors,
+    );
 
   const cancelEventSeries = (seriesId: EventSeries.EventSeriesId) =>
     cancelSeries(seriesId).pipe(catchSqlErrors);

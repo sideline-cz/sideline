@@ -99,6 +99,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   cancelFutureInSeries: () => Effect.void,
   updateFutureUnmodified: () => Effect.void,
   updateFutureUnmodifiedInSeries: () => Effect.void,
+  retypeFollowingInSeries: () => Effect.void,
   findEventsByChannelId: () => Effect.succeed([]),
   saveDiscordMessageId: () => Effect.void,
   getDiscordMessageId: () => Effect.succeed(Option.none()),

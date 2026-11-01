@@ -105,6 +105,7 @@ const makeMockEventsRepo = () =>
     markEventSeriesModified: () => Effect.die(new Error('Not implemented')),
     cancelFutureInSeries: () => Effect.die(new Error('Not implemented')),
     updateFutureUnmodifiedInSeries: () => Effect.die(new Error('Not implemented')),
+    retypeFollowingInSeries: () => Effect.die(new Error('Not implemented')),
     findUpcomingByGuildId: () => Effect.die(new Error('Not implemented')),
     countUpcomingByGuildId: () => Effect.die(new Error('Not implemented')),
     findEventsByUserId: () => Effect.die(new Error('Not implemented')),

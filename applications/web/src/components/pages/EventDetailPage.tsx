@@ -326,12 +326,24 @@ export function EventDetailPage({
     const seriesIdBranded = Schema.decodeSync(EventSeries.EventSeriesId)(
       eventDetail.seriesId.value,
     );
+    // Send the type only when the user changed it here: an "all future" title edit started from
+    // an individually re-typed occurrence must not re-type the whole series. Compared against
+    // `formValues`, not `dirtyFields` (the picker sets values without `shouldDirty`). On an old
+    // server (no id) the picker's mount auto-select fills the id; that alone is not a change.
+    const typeTouched =
+      values.eventType !== formValues.eventType ||
+      (Option.isSome(eventDetail.eventTypeId) && values.eventTypeId !== formValues.eventTypeId);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.eventSeries.updateEventSeries({
           params: { teamId: teamIdBranded, seriesId: seriesIdBranded },
           payload: {
             title: Option.some(values.title),
+            eventType: typeTouched ? Option.some(values.eventType) : Option.none(),
+            eventTypeId:
+              typeTouched && values.eventTypeId
+                ? Option.some(Schema.decodeSync(EventType.EventTypeId)(values.eventTypeId))
+                : Option.none(),
             trainingTypeId: Option.some(trainingTypeIdOption),
             description: Option.some(
               values.description ? Option.some(values.description) : Option.none(),
@@ -384,7 +396,16 @@ export function EventDetailPage({
       setEditing(false);
       router.invalidate();
     }
-  }, [form, teamIdBranded, eventDetail.seriesId, run, router, teamTimezone]);
+  }, [
+    form,
+    formValues,
+    teamIdBranded,
+    eventDetail.seriesId,
+    eventDetail.eventTypeId,
+    run,
+    router,
+    teamTimezone,
+  ]);
 
   const handleSave = form.handleSubmit((values) => {
     if (!values.allDay && !values.startTime) {
