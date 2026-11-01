@@ -167,6 +167,7 @@ const MockRpcEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   cancelFutureInSeries: () => Effect.void,
   updateFutureUnmodified: () => Effect.void,
   updateFutureUnmodifiedInSeries: () => Effect.void,
+  retypeFollowingInSeries: () => Effect.void,
   findEventsByChannelId: () => Effect.succeed([]),
   findUpcomingByGuildId: () => Effect.succeed([]),
   countUpcomingByGuildId: () => Effect.succeed(0),

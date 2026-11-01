@@ -1,4 +1,4 @@
-import { Auth, EventApi, EventSeries, EventSeriesApi } from '@sideline/domain';
+import { Auth, type Event, EventApi, EventSeries, EventSeriesApi } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Array, DateTime, Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -37,8 +37,13 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
     Effect.bind('groups', () => GroupsRepository.asEffect()),
     Effect.map(({ members, events, series, teamSettings, trainingTypes, groups }) =>
       handlers
-        .handle('createEventSeries', ({ params: { teamId }, payload }) =>
-          Effect.Do.pipe(
+        .handle('createEventSeries', ({ params: { teamId }, payload }) => {
+          const eventType = Option.getOrElse(payload.eventType, (): Event.EventType => 'training');
+          // Group inheritance only: a training type means nothing on another kind. Scoping checks
+          // and the insert take the payload's id; finalizeSeries clamps on the post-trigger kind.
+          const inheritFromTrainingTypeId =
+            eventType === 'training' ? payload.trainingTypeId : Option.none();
+          return Effect.Do.pipe(
             Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
@@ -75,13 +80,13 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
             Effect.bind('resolvedGroups', () => {
               const hasOwner = Option.isSome(payload.ownerGroupId);
               const hasMember = Option.isSome(payload.memberGroupId);
-              if (hasOwner || hasMember || Option.isNone(payload.trainingTypeId)) {
+              if (hasOwner || hasMember || Option.isNone(inheritFromTrainingTypeId)) {
                 return Effect.succeed({
                   ownerGroupId: payload.ownerGroupId,
                   memberGroupId: payload.memberGroupId,
                 });
               }
-              return trainingTypes.findTrainingTypeById(payload.trainingTypeId.value).pipe(
+              return trainingTypes.findTrainingTypeById(inheritFromTrainingTypeId.value).pipe(
                 Effect.map(
                   Option.match({
                     onNone: () => ({
@@ -100,6 +105,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
               series.insertEventSeries({
                 teamId,
                 trainingTypeId: payload.trainingTypeId,
+                eventType,
+                eventTypeId: payload.eventTypeId,
                 title: payload.title,
                 description: payload.description,
                 frequency: payload.frequency,
@@ -174,7 +181,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                     .insertEvent({
                       teamId,
                       trainingTypeId: inserted.training_type_id,
-                      eventType: 'training',
+                      eventType: inserted.event_type,
+                      eventTypeId: inserted.event_type_id,
                       title: inserted.title,
                       description: inserted.description,
                       startAt,
@@ -227,6 +235,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   startDate: inserted.start_date,
                   endDate: inserted.end_date,
                   status: inserted.status,
+                  eventType: Option.some(inserted.event_type),
+                  eventTypeId: inserted.event_type_id,
                   trainingTypeId: inserted.training_type_id,
                   trainingTypeName: Option.none(),
                   startTime: inserted.start_time,
@@ -244,8 +254,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
               'NoSuchElementError',
               LogicError.withMessage(() => 'Failed creating event series — no row returned'),
             ),
-          ),
-        )
+          );
+        })
         .handle('listEventSeries', ({ params: { teamId } }) =>
           Effect.Do.pipe(
             Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
@@ -278,6 +288,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                     startDate: s.start_date,
                     endDate: s.end_date,
                     status: s.status,
+                    eventType: Option.some(s.event_type),
+                    eventTypeId: s.event_type_id,
                     trainingTypeId: s.training_type_id,
                     trainingTypeName: s.training_type_name,
                     startTime: s.start_time,
@@ -339,6 +351,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   startDate: found.start_date,
                   endDate: found.end_date,
                   status: found.status,
+                  eventType: Option.some(found.event_type),
+                  eventTypeId: found.event_type_id,
                   trainingTypeId: found.training_type_id,
                   trainingTypeName: found.training_type_name,
                   startTime: found.start_time,
@@ -471,6 +485,15 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
             ),
             Effect.let('resolved', ({ existing }) => ({
               title: Option.getOrElse(payload.title, () => existing.title),
+              eventType: Option.getOrElse(payload.eventType, () => existing.event_type),
+              // "All future" re-types events whenever the request CARRIES a type, not only when it
+              // differs from the series: a resend then heals occurrences a failed retype (or an old
+              // server) left behind, and re-picking the series type on an individually re-typed
+              // occurrence takes effect. Clients send type keys only when the user touched the
+              // picker, so a title-only edit never retypes.
+              typeRequested: Option.isSome(payload.eventType) || Option.isSome(payload.eventTypeId),
+              // Not clamped here: an id-only payload's kind is decided by the trigger, so
+              // finalizeSeries (post-trigger) is the only clamp.
               trainingTypeId: Option.match(payload.trainingTypeId, {
                 onNone: () => existing.training_type_id,
                 onSome: (v) => v,
@@ -511,53 +534,73 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 ? Effect.fail(forbidden)
                 : Effect.void,
             ),
-            Effect.tap(({ resolved }) =>
-              series.updateEventSeries({
-                id: seriesId,
-                title: resolved.title,
-                trainingTypeId: resolved.trainingTypeId,
-                description: resolved.description,
-                daysOfWeek: resolved.daysOfWeek,
-                startTime: resolved.startTime,
-                endTime: resolved.endTime,
-                location: resolved.location,
-                locationUrl: resolved.locationUrl,
-                endDate: resolved.endDate,
-                ownerGroupId: resolved.ownerGroupId,
-                memberGroupId: resolved.memberGroupId,
-              }),
-            ),
-            Effect.tap(({ existing, resolved, teamZone }) =>
-              events.updateFutureUnmodifiedInSeries(seriesId, new Date(), {
-                title: resolved.title,
-                trainingTypeId: resolved.trainingTypeId,
-                description: resolved.description,
-                startTime: resolved.startTime,
-                endTime: resolved.endTime,
-                location: resolved.location,
-                locationUrl: resolved.locationUrl,
-                // Release N (§N.2 item 4): a FALSE (UTC-dialect) series' materialized
-                // occurrences must be re-derived in UTC, not the team zone — `seriesSqlZone`
-                // yields `'UTC'` for that case, and the team's own zone for a TRUE one. With
-                // `tz = 'UTC'`, `EventsRepository.updateFutureUnmodified`'s
-                // `((start_at AT TIME ZONE ${tz})::date + ${time}::time) AT TIME ZONE ${tz}` is
-                // *semantically* (not character-) identical to the pre-#650 SQL.
-                //
-                // Note `EventsRepository.ts`'s corresponding `WHERE (start_at AT TIME ZONE
-                // 'UTC')::date >= …` predicate still hardcodes `'UTC'` — #650 converted the
-                // `SET` clause and not the predicate. The two agree whenever `tz` resolves to
-                // `'UTC'`, i.e. for every FALSE row; that pre-existing #650 mismatch only
-                // matters for a TRUE-dialect series, which this release can only produce via an
-                // explicit `timesAreTeamLocal: true` create. Out of scope here.
-                timezone: seriesSqlZone(teamZone, existing.times_are_team_local),
-              }),
+            // ONE step (the pipe is at its 20-slot ceiling): write the series, copy the unmodified
+            // fields to unmodified occurrences, then — only when the request carries a type — retype every
+            // following occurrence. Retype runs last so a switch to training leaves unmodified
+            // occurrences on the series' training type.
+            Effect.bind('updated', ({ existing, resolved, teamZone }) =>
+              series
+                .updateEventSeries({
+                  id: seriesId,
+                  title: resolved.title,
+                  trainingTypeId: resolved.trainingTypeId,
+                  eventType: resolved.eventType,
+                  eventTypeId: payload.eventTypeId,
+                  description: resolved.description,
+                  daysOfWeek: resolved.daysOfWeek,
+                  startTime: resolved.startTime,
+                  endTime: resolved.endTime,
+                  location: resolved.location,
+                  locationUrl: resolved.locationUrl,
+                  endDate: resolved.endDate,
+                  ownerGroupId: resolved.ownerGroupId,
+                  memberGroupId: resolved.memberGroupId,
+                })
+                .pipe(
+                  Effect.tap((updated) =>
+                    events
+                      .updateFutureUnmodifiedInSeries(seriesId, new Date(), {
+                        title: resolved.title,
+                        trainingTypeId: updated.training_type_id,
+                        description: resolved.description,
+                        startTime: resolved.startTime,
+                        endTime: resolved.endTime,
+                        location: resolved.location,
+                        locationUrl: resolved.locationUrl,
+                        // Release N (§N.2 item 4): a FALSE (UTC-dialect) series' materialized
+                        // occurrences must be re-derived in UTC, not the team zone — `seriesSqlZone`
+                        // yields `'UTC'` for that case, and the team's own zone for a TRUE one. With
+                        // `tz = 'UTC'`, `EventsRepository.updateFutureUnmodified`'s
+                        // `((start_at AT TIME ZONE ${tz})::date + ${time}::time) AT TIME ZONE ${tz}` is
+                        // *semantically* (not character-) identical to the pre-#650 SQL.
+                        //
+                        // Note `EventsRepository.ts`'s corresponding `WHERE (start_at AT TIME ZONE
+                        // 'UTC')::date >= …` predicate still hardcodes `'UTC'` — #650 converted the
+                        // `SET` clause and not the predicate. The two agree whenever `tz` resolves to
+                        // `'UTC'`, i.e. for every FALSE row; that pre-existing #650 mismatch only
+                        // matters for a TRUE-dialect series, which this release can only produce via an
+                        // explicit `timesAreTeamLocal: true` create. Out of scope here.
+                        timezone: seriesSqlZone(teamZone, existing.times_are_team_local),
+                      })
+                      .pipe(
+                        Effect.andThen(
+                          resolved.typeRequested
+                            ? events.retypeFollowingInSeries(seriesId, new Date(), {
+                                eventType: updated.event_type,
+                                eventTypeId: updated.event_type_id,
+                              })
+                            : Effect.void,
+                        ),
+                      ),
+                  ),
+                ),
             ),
             Effect.tap(() =>
               events
                 .markSeriesFuturePersonalMessagesDirty(seriesId, new Date())
                 .pipe(Effect.ignore),
             ),
-            Effect.tap(({ existing, resolved, membership, teamZone }) =>
+            Effect.tap(({ existing, resolved, updated, membership, teamZone }) =>
               teamSettings.getHorizonDays(teamId).pipe(
                 Effect.flatMap((horizonDays) => {
                   const recurrence = seriesRecurrence(existing);
@@ -611,8 +654,12 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                           return events
                             .insertEvent({
                               teamId,
-                              trainingTypeId: existing.training_type_id,
-                              eventType: 'training',
+                              // From updated, not existing: a type or training-type change in
+                              // this same PATCH must reach the new occurrences (deliberate change;
+                              // this used to read the stale existing.training_type_id).
+                              trainingTypeId: updated.training_type_id,
+                              eventType: updated.event_type,
+                              eventTypeId: updated.event_type_id,
                               title: existing.title,
                               description: existing.description,
                               startAt,
@@ -663,6 +710,8 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   startDate: detail.start_date,
                   endDate: detail.end_date,
                   status: detail.status,
+                  eventType: Option.some(detail.event_type),
+                  eventTypeId: detail.event_type_id,
                   trainingTypeId: detail.training_type_id,
                   trainingTypeName: detail.training_type_name,
                   startTime: detail.start_time,

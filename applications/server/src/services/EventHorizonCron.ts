@@ -65,7 +65,8 @@ export const eventHorizonCronEffect = Effect.Do.pipe(
               .insertEvent({
                 teamId: s.team_id,
                 trainingTypeId: s.training_type_id,
-                eventType: 'training',
+                eventType: s.event_type,
+                eventTypeId: s.event_type_id,
                 title: s.title,
                 description: s.description,
                 startAt,

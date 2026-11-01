@@ -30,6 +30,8 @@ const baseCreateSeriesPayload: Schema.Schema.Type<typeof EventSeriesApi.CreateEv
   {
     title: 'Weekly Training' as typeof Schema.NonEmptyString.Type,
     trainingTypeId: Option.none(),
+    eventType: Option.none(),
+    eventTypeId: Option.none(),
     description: Option.none(),
     frequency: 'weekly' as const,
     daysOfWeek: DAYS_OF_WEEK,
@@ -122,6 +124,8 @@ describe('CreateEventSeriesRequest — encoding direction (regression for runtim
 const emptySeriesPatch: Schema.Schema.Type<typeof EventSeriesApi.UpdateEventSeriesRequest> = {
   title: Option.none(),
   trainingTypeId: Option.none(),
+  eventType: Option.none(),
+  eventTypeId: Option.none(),
   description: Option.none(),
   daysOfWeek: Option.none(),
   startTime: Option.none(),
@@ -151,6 +155,8 @@ describe('UpdateEventSeriesRequest — encoding direction (regression for runtim
     const patch: Schema.Schema.Type<typeof EventSeriesApi.UpdateEventSeriesRequest> = {
       title: Option.none(), // NonEmptyString field — only outer Option
       trainingTypeId: Option.some(Option.none()),
+      eventType: Option.none(),
+      eventTypeId: Option.none(),
       description: Option.some(Option.none()),
       daysOfWeek: Option.none(), // DaysOfWeek is not nullable — skip
       startTime: Option.none(), // String field — only outer Option

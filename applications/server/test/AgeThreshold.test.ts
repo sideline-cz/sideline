@@ -551,6 +551,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   cancelFutureInSeries: () => Effect.void,
   updateFutureUnmodified: () => Effect.void,
   updateFutureUnmodifiedInSeries: () => Effect.void,
+  retypeFollowingInSeries: () => Effect.void,
 } as any);
 
 const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {

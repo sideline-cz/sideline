@@ -262,6 +262,9 @@ type SeriesRecord = {
   // Release N (`.work-plans/series-time-conversion.md` §N.2/§N.c):
   // `TRUE` = wall clock in the team's timezone; `FALSE` = UTC time-of-day.
   times_are_team_local: boolean;
+  // Series of any event type: the stored kind + id (the real trigger resolves them).
+  event_type: Event.EventType;
+  event_type_id: Option.Option<string>;
 };
 
 let seriesStore: Map<EventSeries.EventSeriesId, SeriesRecord>;
@@ -271,8 +274,37 @@ let seriesStore: Map<EventSeries.EventSeriesId, SeriesRecord>;
 let capturedInsertEventSeriesInputs: Array<{
   dayOfMonth?: Option.Option<number>;
   weekOfMonth?: Option.Option<number>;
+  eventType?: string;
+  eventTypeId?: Option.Option<string>;
+  trainingTypeId?: Option.Option<string>;
+  ownerGroupId?: Option.Option<string>;
+  memberGroupId?: Option.Option<string>;
 }>;
 let updateEventSeriesCallCount: number;
+
+// Series event type instrumentation. Read via these arrays, never a reassigned `let` capture.
+type CapturedInsertEvent = {
+  eventType: string;
+  eventTypeId?: Option.Option<string>;
+  trainingTypeId: Option.Option<string>;
+  seriesId?: Option.Option<string>;
+};
+let capturedInsertEventInputs: CapturedInsertEvent[];
+let capturedUpdateEventSeriesInputs: Array<{
+  eventType?: string;
+  eventTypeId?: Option.Option<string>;
+  trainingTypeId: Option.Option<string>;
+}>;
+type CapturedRetypeCall = {
+  seriesId: EventSeries.EventSeriesId;
+  fromDate: Date;
+  fields: { eventType: string; eventTypeId: Option.Option<string> };
+};
+let capturedRetypeCalls: CapturedRetypeCall[];
+// Shared call log: proves updateFutureUnmodifiedInSeries runs BEFORE retypeFollowingInSeries.
+let seriesWriteCallLog: string[];
+// findTrainingTypeById fixtures (training type id → row); empty = not found.
+let trainingTypeLookup: Map<string, unknown>;
 
 // --- In-memory events store ---
 type EventRecord = {
@@ -297,6 +329,7 @@ type EventRecord = {
   owner_group_name: Option.Option<string>;
   member_group_id: Option.Option<string>;
   member_group_name: Option.Option<string>;
+  event_type_id?: Option.Option<string>;
 };
 
 let eventsStore: Map<Event.EventId, EventRecord>;
@@ -369,6 +402,11 @@ const resetStores = () => {
   capturedUpdateFutureUnmodifiedCalls = [];
   capturedInsertEventSeriesInputs = [];
   updateEventSeriesCallCount = 0;
+  capturedInsertEventInputs = [];
+  capturedUpdateEventSeriesInputs = [];
+  capturedRetypeCalls = [];
+  seriesWriteCallLog = [];
+  trainingTypeLookup = new Map();
   seriesStore = new Map();
   seriesStore.set(TEST_SERIES_1, {
     id: TEST_SERIES_1,
@@ -399,6 +437,8 @@ const resetStores = () => {
     // `updateFutureUnmodifiedInSeries`) keeps its original meaning unchanged. The new
     // Release-N dialect tests below use their OWN series ids for the `false` case.
     times_are_team_local: true,
+    event_type: 'training',
+    event_type_id: Option.none(),
   });
 
   eventsStore = new Map();
@@ -612,6 +652,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     teamId: string;
     trainingTypeId: Option.Option<string>;
     eventType: string;
+    eventTypeId?: Option.Option<string>;
     title: string;
     description: Option.Option<string>;
     startAt: DateTime.Utc;
@@ -622,6 +663,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
   }) => {
+    capturedInsertEventInputs.push(input);
     const id = crypto.randomUUID() as Event.EventId;
     const record: EventRecord = {
       id,
@@ -645,6 +687,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       owner_group_name: Option.none(),
       member_group_id: input.memberGroupId ?? Option.none(),
       member_group_name: Option.none(),
+      event_type_id: input.eventTypeId ?? Option.none(),
     };
     eventsStore.set(id, record);
     return Effect.succeed({
@@ -694,6 +737,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     fields: CapturedUpdateFutureUnmodifiedCall['fields'],
   ) => {
     capturedUpdateFutureUnmodifiedCalls.push({ seriesId, fromDate, fields });
+    seriesWriteCallLog.push('updateFutureUnmodifiedInSeries');
     // Faithfully re-derive `start_at`/`end_at` the way the real SQL does
     // (see `recomputeStartAt` above), for every unmodified event in the
     // series — this is what lets a test assert on the resulting
@@ -716,6 +760,35 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
             onNone: () => Option.none<DateTime.Utc>(),
             onSome: (t) => Option.some(recomputeStartAt(event.start_at, t, fields.timezone)),
           }),
+        });
+      }
+    }
+    return Effect.void;
+  },
+  // Mirrors the real SQL: every active occurrence of the series dated >= fromDate (UTC
+  // date), individually edited (series_modified) ones INCLUDED. Only the type moves, plus the
+  // training-type clamp for a non-training kind.
+  retypeFollowingInSeries: (
+    seriesId: EventSeries.EventSeriesId,
+    fromDate: Date,
+    fields: CapturedRetypeCall['fields'],
+  ) => {
+    capturedRetypeCalls.push({ seriesId, fromDate, fields });
+    seriesWriteCallLog.push('retypeFollowingInSeries');
+    const fromDay = fromDate.toISOString().slice(0, 10);
+    for (const [id, event] of eventsStore) {
+      if (
+        Option.isSome(event.series_id) &&
+        event.series_id.value === seriesId &&
+        event.status === 'active' &&
+        DateTime.formatIsoDateUtc(event.start_at) >= fromDay
+      ) {
+        eventsStore.set(id, {
+          ...event,
+          event_type: fields.eventType as Event.EventType,
+          event_type_id: fields.eventTypeId,
+          training_type_id:
+            fields.eventType === 'training' ? event.training_type_id : Option.none(),
         });
       }
     }
@@ -771,6 +844,8 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       // Matches the real DB column default (`1791700000_add_series_times_team_local_flag.ts`,
       // Release N): nothing on this write path names the column, so it's always FALSE.
       times_are_team_local: false,
+      event_type: 'training',
+      event_type_id: Option.none(),
     };
     seriesStore.set(id, record);
     return Effect.succeed({
@@ -794,6 +869,8 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       owner_group_id: record.owner_group_id,
       member_group_id: record.member_group_id,
       times_are_team_local: record.times_are_team_local,
+      event_type: record.event_type,
+      event_type_id: record.event_type_id,
     });
   },
   insertEventSeries: (input: {
@@ -814,13 +891,17 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
     timesAreTeamLocal: boolean;
+    eventType?: string;
+    eventTypeId?: Option.Option<string>;
   }) => {
     capturedInsertEventSeriesInputs.push(input);
     const id = crypto.randomUUID() as EventSeries.EventSeriesId;
     const record: SeriesRecord = {
       id,
       team_id: input.teamId as Team.TeamId,
-      training_type_id: input.trainingTypeId,
+      // finalizeSeries' clamp, on the requested kind (the mock has no trigger to resolve an id).
+      training_type_id:
+        (input.eventType ?? 'training') === 'training' ? input.trainingTypeId : Option.none(),
       title: input.title,
       description: input.description,
       start_time: input.startTime,
@@ -849,6 +930,9 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       // is exercised exactly as it will be reading `inserted.times_are_team_local` back off a
       // real `RETURNING` clause (N.2, item 2) for BOTH values, not just the DB default.
       times_are_team_local: input.timesAreTeamLocal,
+      // The repo defaults an omitted type to training (every pre-type caller).
+      event_type: (input.eventType ?? 'training') as Event.EventType,
+      event_type_id: input.eventTypeId ?? Option.none(),
     };
     seriesStore.set(id, record);
     return Effect.succeed({
@@ -872,6 +956,8 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       owner_group_id: record.owner_group_id,
       member_group_id: record.member_group_id,
       times_are_team_local: record.times_are_team_local,
+      event_type: record.event_type,
+      event_type_id: record.event_type_id,
     });
   },
   findByTeamId: (teamId: string) => {
@@ -939,6 +1025,9 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       discord_target_channel_id: updated.discord_target_channel_id,
       owner_group_id: updated.owner_group_id,
       member_group_id: updated.member_group_id,
+      times_are_team_local: updated.times_are_team_local,
+      event_type: updated.event_type,
+      event_type_id: updated.event_type_id,
     });
   },
   updateEventSeries: (input: {
@@ -952,14 +1041,22 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
     endDate: Option.Option<DateTime.Utc>;
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
+    eventType?: string;
+    eventTypeId?: Option.Option<string>;
   }) => {
     updateEventSeriesCallCount += 1;
+    capturedUpdateEventSeriesInputs.push(input);
     const s = seriesStore.get(input.id);
     if (!s) return Effect.die(new Error('Not found'));
-    const updated = {
+    const updated: SeriesRecord = {
       ...s,
+      // Kind is always written; the id is COALESCEd against the stored one (real SQL).
+      event_type: (input.eventType ?? s.event_type) as Event.EventType,
+      event_type_id: Option.orElse(input.eventTypeId ?? Option.none(), () => s.event_type_id),
       title: input.title,
-      training_type_id: input.trainingTypeId,
+      // finalizeSeries' clamp, on the requested kind (the mock has no trigger to resolve an id).
+      training_type_id:
+        (input.eventType ?? s.event_type) === 'training' ? input.trainingTypeId : Option.none(),
       description: input.description,
       start_time: input.startTime,
       end_time: input.endTime,
@@ -989,6 +1086,9 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       discord_target_channel_id: updated.discord_target_channel_id,
       owner_group_id: updated.owner_group_id,
       member_group_id: updated.member_group_id,
+      times_are_team_local: updated.times_are_team_local,
+      event_type: updated.event_type,
+      event_type_id: updated.event_type_id,
     });
   },
   cancelSeries: (id: EventSeries.EventSeriesId) => {
@@ -1050,7 +1150,8 @@ const MockTrainingTypesRepositoryLayer = Layer.succeed(TrainingTypesRepository, 
   findByTeamId: () => Effect.succeed([]),
   findTrainingTypesByTeamId: () => Effect.succeed([]),
   findById: () => Effect.succeed(Option.none()),
-  findTrainingTypeById: () => Effect.succeed(Option.none()),
+  findTrainingTypeById: (id: string) =>
+    Effect.succeed(Option.fromNullishOr(trainingTypeLookup.get(id))),
   findByIdWithGroup: () => Effect.succeed(Option.none()),
   findTrainingTypeByIdWithGroup: () => Effect.succeed(Option.none()),
   insert: () => Effect.die(new Error('Not implemented')),
@@ -2145,6 +2246,314 @@ describe('Event Series API', () => {
       const response = await patch(TEST_SERIES_1, { daysOfWeek: [3] });
       expect(response.status).toBe(200);
       expect(updateEventSeriesCallCount).toBe(1);
+    });
+  });
+
+  // Series of any event type (plan Task 4). The mock repositories record what the handler hands
+  // them. They model finalizeSeries' training-type clamp on the REQUESTED kind, but not the DB
+  // trigger (id → kind); the id-driven cases are covered by the repository integration tests.
+  describe('event type', () => {
+    const ET_MATCH = 'et-match';
+    const TYPED_SERIES = '00000000-0000-0000-0000-000000000080' as EventSeries.EventSeriesId;
+    const TEST_TRAINING_TYPE_GROUPED =
+      '00000000-0000-0000-0000-000000000052' as TrainingType.TrainingTypeId;
+    const OWNER_GROUP = '00000000-0000-0000-0000-000000000090';
+    const MEMBER_GROUP = '00000000-0000-0000-0000-000000000091';
+
+    const post = (body: unknown, token = 'admin-token') =>
+      handler(
+        new Request(BASE, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const patch = (seriesId: EventSeries.EventSeriesId, body: unknown, token = 'admin-token') =>
+      handler(
+        new Request(`${BASE}/${seriesId}`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const seedSeries = (overrides: Partial<SeriesRecord>) => {
+      const base = seriesStore.get(TEST_SERIES_1);
+      if (!base) throw new Error('TEST_SERIES_1 not seeded');
+      seriesStore.set(TYPED_SERIES, { ...base, id: TYPED_SERIES, ...overrides });
+    };
+
+    // last_generated_date a week ago with no end_date: the PATCH's horizon extension inserts
+    // new occurrences from lastGen + 1 up to now + 30 days.
+    const extendableOverrides = (): Partial<SeriesRecord> => ({
+      end_date: Option.none(),
+      last_generated_date: Option.some(DateTime.subtract(DateTime.nowUnsafe(), { days: 7 })),
+    });
+
+    const seriesEvents = (seriesId: string) =>
+      Array.from(eventsStore.values()).filter(
+        (e) => Option.getOrUndefined(e.series_id) === seriesId,
+      );
+
+    it('should store a match series and materialize match events without a training type when POSTed with eventType match', async () => {
+      const response = await post({
+        ...createPayload,
+        eventType: 'match',
+        eventTypeId: ET_MATCH,
+        trainingTypeId: TEST_TRAINING_TYPE_A,
+      });
+      expect(response.status).toBe(201);
+
+      expect(capturedInsertEventSeriesInputs).toHaveLength(1);
+      expect(capturedInsertEventSeriesInputs[0]?.eventType).toBe('match');
+      expect(capturedInsertEventSeriesInputs[0]?.eventTypeId).toEqual(Option.some(ET_MATCH));
+      // Handed over unclamped: finalizeSeries clamps on the post-trigger kind.
+      expect(capturedInsertEventSeriesInputs[0]?.trainingTypeId).toEqual(
+        Option.some(TEST_TRAINING_TYPE_A),
+      );
+
+      expect(capturedInsertEventInputs.length).toBeGreaterThan(0);
+      for (const input of capturedInsertEventInputs) {
+        expect(input.eventType).toBe('match');
+        expect(input.eventTypeId).toEqual(Option.some(ET_MATCH));
+        expect(input.trainingTypeId).toEqual(Option.none());
+      }
+
+      const body = await response.json();
+      expect(body.eventType).toBe('match');
+      expect(body.eventTypeId).toBe(ET_MATCH);
+    });
+
+    it('should default to training when POSTed without type keys (legacy client)', async () => {
+      const response = await post(createPayload);
+      expect(response.status).toBe(201);
+
+      expect(capturedInsertEventSeriesInputs[0]?.eventType).toBe('training');
+      expect(capturedInsertEventSeriesInputs[0]?.eventTypeId).toEqual(Option.none());
+
+      const body = await response.json();
+      expect(body.eventType).toBe('training');
+      const materialised = seriesEvents(body.seriesId);
+      for (const e of materialised) expect(e.event_type).toBe('training');
+      // Same weekly Tuesday occurrences the series always produced for this payload.
+      expect(materialised.map((e) => DateTime.formatIsoDateUtc(e.start_at)).sort()).toEqual([
+        '2026-03-03',
+        '2026-03-10',
+        '2026-03-17',
+        '2026-03-24',
+        '2026-03-31',
+      ]);
+    });
+
+    it('should return 403 when a scoped captain POSTs a match series carrying a disallowed training type', async () => {
+      trainingTypeLookup.set(TEST_TRAINING_TYPE_GROUPED, {
+        id: TEST_TRAINING_TYPE_GROUPED,
+        team_id: TEST_TEAM_ID,
+        name: 'Grouped',
+        owner_group_id: Option.some(OWNER_GROUP),
+        member_group_id: Option.some(MEMBER_GROUP),
+      });
+      const response = await post(
+        {
+          ...createPayload,
+          eventType: 'match',
+          eventTypeId: ET_MATCH,
+          trainingTypeId: TEST_TRAINING_TYPE_GROUPED,
+        },
+        'captain-token',
+      );
+      // Scoping runs on the payload's training type, not the kind-clamped one (stricter).
+      expect(response.status).toBe(403);
+      expect(capturedInsertEventSeriesInputs).toHaveLength(0);
+    });
+
+    it('should not inherit groups from a training type when an admin POSTs a match series', async () => {
+      trainingTypeLookup.set(TEST_TRAINING_TYPE_GROUPED, {
+        id: TEST_TRAINING_TYPE_GROUPED,
+        team_id: TEST_TEAM_ID,
+        name: 'Grouped',
+        owner_group_id: Option.some(OWNER_GROUP),
+        member_group_id: Option.some(MEMBER_GROUP),
+      });
+      const response = await post({
+        ...createPayload,
+        eventType: 'match',
+        eventTypeId: ET_MATCH,
+        trainingTypeId: TEST_TRAINING_TYPE_GROUPED,
+      });
+      expect(response.status).toBe(201);
+      expect(capturedInsertEventSeriesInputs[0]?.ownerGroupId).toEqual(Option.none());
+      expect(capturedInsertEventSeriesInputs[0]?.memberGroupId).toEqual(Option.none());
+    });
+
+    it('should clear the training type and retype following occurrences after the unmodified update when PATCHed from training to match', async () => {
+      seedSeries({ training_type_id: Option.some(TEST_TRAINING_TYPE_A) });
+      const response = await patch(TYPED_SERIES, { eventType: 'match', eventTypeId: ET_MATCH });
+      expect(response.status).toBe(200);
+
+      expect(capturedUpdateEventSeriesInputs).toHaveLength(1);
+      expect(capturedUpdateEventSeriesInputs[0]?.eventType).toBe('match');
+      expect(capturedUpdateEventSeriesInputs[0]?.eventTypeId).toEqual(Option.some(ET_MATCH));
+      // Handed over unclamped; the occurrences get the post-clamp value from the returned row.
+      expect(capturedUpdateEventSeriesInputs[0]?.trainingTypeId).toEqual(
+        Option.some(TEST_TRAINING_TYPE_A),
+      );
+
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.trainingTypeId).toEqual(Option.none());
+
+      expect(capturedRetypeCalls).toHaveLength(1);
+      expect(capturedRetypeCalls[0]?.seriesId).toBe(TYPED_SERIES);
+      expect(capturedRetypeCalls[0]?.fields).toEqual({
+        eventType: 'match',
+        eventTypeId: Option.some(ET_MATCH),
+      });
+      expect(seriesWriteCallLog).toEqual([
+        'updateFutureUnmodifiedInSeries',
+        'retypeFollowingInSeries',
+      ]);
+    });
+
+    it('should keep the stored kind and not retype when an old web PATCHes a social series without type keys', async () => {
+      seedSeries({ event_type: 'social', event_type_id: Option.some('et-social') });
+      const response = await patch(TYPED_SERIES, { title: 'Renamed social' });
+      expect(response.status).toBe(200);
+
+      expect(capturedUpdateEventSeriesInputs[0]?.eventType).toBe('social');
+      expect(capturedUpdateEventSeriesInputs[0]?.eventTypeId).toEqual(Option.none());
+      expect(capturedRetypeCalls).toHaveLength(0);
+      expect(seriesStore.get(TYPED_SERIES)?.event_type).toBe('social');
+    });
+
+    it('should retype when the PATCH resends the unchanged stored type (a retry heals a failed retype)', async () => {
+      seedSeries({ event_type: 'social', event_type_id: Option.some('et-social') });
+      const response = await patch(TYPED_SERIES, {
+        title: 'Renamed',
+        eventType: 'social',
+        eventTypeId: 'et-social',
+      });
+      expect(response.status).toBe(200);
+      expect(capturedRetypeCalls).toHaveLength(1);
+      expect(capturedRetypeCalls[0]?.fields).toEqual({
+        eventType: 'social',
+        eventTypeId: Option.some('et-social'),
+      });
+    });
+
+    it('should retype when a match series is PATCHed with eventType match (revert of an edited occurrence)', async () => {
+      seedSeries({ event_type: 'match', event_type_id: Option.some(ET_MATCH) });
+      const response = await patch(TYPED_SERIES, { eventType: 'match' });
+      expect(response.status).toBe(200);
+      expect(capturedRetypeCalls).toHaveLength(1);
+      expect(capturedRetypeCalls[0]?.fields.eventType).toBe('match');
+    });
+
+    it('should hand the training type over unclamped on an id-only PATCH (the trigger decides the kind)', async () => {
+      seedSeries({ event_type: 'match', event_type_id: Option.some(ET_MATCH) });
+      const response = await patch(TYPED_SERIES, {
+        eventTypeId: 'et-training',
+        trainingTypeId: TEST_TRAINING_TYPE_A,
+      });
+      expect(response.status).toBe(200);
+      expect(capturedUpdateEventSeriesInputs[0]?.eventType).toBe('match');
+      expect(capturedUpdateEventSeriesInputs[0]?.eventTypeId).toEqual(Option.some('et-training'));
+      expect(capturedUpdateEventSeriesInputs[0]?.trainingTypeId).toEqual(
+        Option.some(TEST_TRAINING_TYPE_A),
+      );
+    });
+
+    it('should retype an individually edited future occurrence and leave its other fields alone when the type changes', async () => {
+      seedSeries({});
+      const editedId = crypto.randomUUID() as Event.EventId;
+      const editedStart = DateTime.makeUnsafe('2099-03-10T17:00:00Z');
+      eventsStore.set(editedId, {
+        id: editedId,
+        team_id: TEST_TEAM_ID,
+        training_type_id: Option.none(),
+        event_type: 'training',
+        title: 'Edited occurrence',
+        description: Option.some('Edited'),
+        start_at: editedStart,
+        end_at: Option.none(),
+        location: Option.some('Other Field'),
+        location_url: Option.none(),
+        status: 'active',
+        created_by: TEST_ADMIN_MEMBER_ID,
+        training_type_name: Option.none(),
+        created_by_name: Option.none(),
+        series_id: Option.some(TYPED_SERIES),
+        series_modified: true,
+        discord_target_channel_id: Option.none(),
+        owner_group_id: Option.none(),
+        owner_group_name: Option.none(),
+        member_group_id: Option.none(),
+        member_group_name: Option.none(),
+      });
+
+      const response = await patch(TYPED_SERIES, { eventType: 'match', eventTypeId: ET_MATCH });
+      expect(response.status).toBe(200);
+
+      const edited = eventsStore.get(editedId);
+      expect(edited?.event_type).toBe('match');
+      expect(edited?.event_type_id).toEqual(Option.some(ET_MATCH));
+      expect(edited?.title).toBe('Edited occurrence');
+      expect(edited?.location).toEqual(Option.some('Other Field'));
+      expect(edited?.series_modified).toBe(true);
+      expect(edited?.start_at.epochMilliseconds).toBe(editedStart.epochMilliseconds);
+    });
+
+    it('should materialize horizon-extension events with the new type when a PATCH changes the type', async () => {
+      seedSeries(extendableOverrides());
+      const response = await patch(TYPED_SERIES, { eventType: 'match', eventTypeId: ET_MATCH });
+      expect(response.status).toBe(200);
+
+      expect(capturedInsertEventInputs.length).toBeGreaterThan(0);
+      for (const input of capturedInsertEventInputs) {
+        expect(input.eventType).toBe('match');
+        expect(input.eventTypeId).toEqual(Option.some(ET_MATCH));
+        expect(input.trainingTypeId).toEqual(Option.none());
+      }
+    });
+
+    it('should return eventType and eventTypeId from the stored row on GET and list', async () => {
+      seedSeries({ event_type: 'meeting', event_type_id: Option.some('et-meeting') });
+
+      const getResponse = await handler(
+        new Request(`${BASE}/${TYPED_SERIES}`, {
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(getResponse.status).toBe(200);
+      const detail = await getResponse.json();
+      expect(detail.eventType).toBe('meeting');
+      expect(detail.eventTypeId).toBe('et-meeting');
+
+      const listResponse = await handler(
+        new Request(BASE, { headers: { Authorization: 'Bearer admin-token' } }),
+      );
+      expect(listResponse.status).toBe(200);
+      const list: Array<{ seriesId: string; eventType?: string; eventTypeId?: string }> =
+        await listResponse.json();
+      const typed = list.find((s) => s.seriesId === TYPED_SERIES);
+      expect(typed?.eventType).toBe('meeting');
+      expect(typed?.eventTypeId).toBe('et-meeting');
+      const legacy = list.find((s) => s.seriesId === TEST_SERIES_1);
+      expect(legacy?.eventType).toBe('training');
+    });
+
+    // Deliberate behaviour change: the horizon extension used to read the stale
+    // existing.training_type_id, so a PATCH that changed the training type extended the series
+    // with the OLD one. It now uses the post-update row's training type.
+    it('should materialize horizon-extension events with the new training type when a PATCH changes it', async () => {
+      seedSeries({ ...extendableOverrides(), training_type_id: Option.some(TEST_TRAINING_TYPE_A) });
+      const response = await patch(TYPED_SERIES, { trainingTypeId: TEST_TRAINING_TYPE_B });
+      expect(response.status).toBe(200);
+
+      expect(capturedInsertEventInputs.length).toBeGreaterThan(0);
+      for (const input of capturedInsertEventInputs) {
+        expect(input.eventType).toBe('training');
+        expect(input.trainingTypeId).toEqual(Option.some(TEST_TRAINING_TYPE_B));
+      }
     });
   });
 });

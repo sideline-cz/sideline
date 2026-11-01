@@ -13,9 +13,11 @@ import { DateTime, Option } from 'effect';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { cancelResult, navigate } = vi.hoisted(() => ({
+const { cancelResult, navigate, apiCall } = vi.hoisted(() => ({
   cancelResult: vi.fn(),
   navigate: vi.fn(),
+  // Every `api.<group>.<method>(args)` call the page makes: [group, method, args].
+  apiCall: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -67,11 +69,78 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => navigate,
 }));
 
-vi.mock('~/lib/runtime', () => ({
-  ApiClient: { asEffect: () => ({ pipe: () => cancelResult() }) },
-  ClientError: { make: (msg: string) => ({ _tag: 'ClientError', message: msg }) },
-  useRun: () => () => (effect: unknown) => Promise.resolve(effect),
-}));
+// The page's first pipe step (`Effect.flatMap((api) => api.x.y(args))`) runs against a fake api
+// that records the call, so tests can read the exact payload; the pipe's result is `cancelResult`.
+vi.mock('~/lib/runtime', async () => {
+  const { Effect } = await import('effect');
+  const api = new Proxy(
+    {},
+    {
+      get: (_target, group) =>
+        new Proxy(
+          {},
+          {
+            get: (_t, method) => (args: unknown) => {
+              apiCall(String(group), String(method), args);
+              return Effect.void;
+            },
+          },
+        ),
+    },
+  );
+  return {
+    ApiClient: {
+      asEffect: () => ({
+        pipe: (first: (self: unknown) => unknown) => {
+          Effect.runSync(first(Effect.succeed(api)) as Parameters<typeof Effect.runSync>[0]);
+          return cancelResult();
+        },
+      }),
+    },
+    ClientError: { make: (msg: string) => ({ _tag: 'ClientError', message: msg }) },
+    useRun: () => () => (effect: unknown) => Promise.resolve(effect),
+  };
+});
+
+// Stub of the real picker: one button per type, and the same mount-time auto-select (B4) — only
+// when neither the form value nor the event carries an id (old server).
+vi.mock('~/components/molecules/EventTypePicker', async () => {
+  const React = await import('react');
+  const { Option } = await import('effect');
+  type PickerType = { eventTypeId: string; kind: string };
+  return {
+    EventTypePicker: ({
+      eventTypes,
+      event,
+      value,
+      onChange,
+    }: {
+      eventTypes: ReadonlyArray<PickerType>;
+      event: { eventType: string; eventTypeId: Option.Option<string> };
+      value: Option.Option<string>;
+      onChange: (next: PickerType) => void;
+    }) => {
+      React.useEffect(() => {
+        if (Option.isSome(value) || Option.isSome(event.eventTypeId)) return;
+        const fallback = eventTypes.find((t) => t.kind === event.eventType) ?? eventTypes[0];
+        if (fallback) onChange({ eventTypeId: fallback.eventTypeId, kind: fallback.kind });
+      }, [value, event.eventTypeId, event.eventType, eventTypes, onChange]);
+      return (
+        <div data-testid='event-type-picker'>
+          {eventTypes.map((t) => (
+            <button
+              key={t.eventTypeId}
+              type='button'
+              onClick={() => onChange({ eventTypeId: t.eventTypeId, kind: t.kind })}
+            >
+              {`pick-${t.kind}`}
+            </button>
+          ))}
+        </div>
+      );
+    },
+  };
+});
 
 vi.mock('~/components/organisms/EventRsvpPanel.js', () => ({ EventRsvpPanel: () => null }));
 vi.mock('~/components/organisms/EventAttendanceRosterSection.js', () => ({
@@ -135,6 +204,7 @@ function makeEventDetail(overrides: Record<string, unknown> = {}) {
 function renderPage(
   eventDetailOverrides: Record<string, unknown> = {},
   attendanceOverrides: Record<string, unknown> = {},
+  eventTypes: ReadonlyArray<unknown> = [],
 ) {
   const eventDetail = makeEventDetail(eventDetailOverrides);
   const props = {
@@ -142,7 +212,7 @@ function renderPage(
     eventId: 'event-1',
     eventDetail,
     trainingTypes: [],
-    eventTypes: [],
+    eventTypes,
     rsvpDetail: {},
     attendance: {
       canConfirm: false,
@@ -175,6 +245,7 @@ function renderPage(
 describe('EventDetailPage', () => {
   beforeEach(() => {
     navigate.mockReset();
+    apiCall.mockReset();
     cancelResult.mockReset();
     cancelResult.mockImplementation(() => Promise.resolve(Option.some({})));
   });
@@ -421,5 +492,95 @@ describe('EventDetailPage', () => {
     );
 
     expect(screen.getByTestId('attendance-confirm-section')).not.toBeNull();
+  });
+});
+
+describe('EventDetailPage "all future" save — event type', () => {
+  const EVENT_TYPES = [
+    {
+      eventTypeId: 'et-training',
+      teamId: 'team-1',
+      name: Option.none<string>(),
+      kind: 'training',
+      color: 'blue',
+      position: 0,
+      usageCount: 0,
+    },
+    {
+      eventTypeId: 'et-match',
+      teamId: 'team-1',
+      name: Option.none<string>(),
+      kind: 'match',
+      color: 'red',
+      position: 1,
+      usageCount: 0,
+    },
+  ];
+
+  const seriesEvent = (overrides: Record<string, unknown> = {}) => ({
+    canEdit: true,
+    status: 'active',
+    eventType: 'training',
+    eventTypeId: Option.some('et-training'),
+    seriesId: Option.some('series-1'),
+    ...overrides,
+  });
+
+  type SeriesPatch = {
+    eventType: Option.Option<string>;
+    eventTypeId: Option.Option<string>;
+  };
+
+  const saveAllFuture = async (): Promise<SeriesPatch> => {
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => {
+      expect(screen.getByRole('alertdialog')).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'All future events in series' }));
+    await waitFor(() => {
+      expect(apiCall.mock.calls.some((c) => c[1] === 'updateEventSeries')).toBe(true);
+    });
+    const call = apiCall.mock.calls.find((c) => c[1] === 'updateEventSeries') ?? [];
+    return (call[2] as { payload: SeriesPatch }).payload;
+  };
+
+  beforeEach(() => {
+    navigate.mockReset();
+    apiCall.mockReset();
+    cancelResult.mockReset();
+    cancelResult.mockImplementation(() => Promise.resolve(Option.some({})));
+  });
+
+  it('should send the new type when the type was changed before an all-future save', async () => {
+    renderPage(seriesEvent(), {}, EVENT_TYPES);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'pick-match' }));
+
+    const payload = await saveAllFuture();
+    expect(payload.eventType).toEqual(Option.some('match'));
+    expect(payload.eventTypeId).toEqual(Option.some('et-match'));
+  });
+
+  it('should not send a type when only the title changed before an all-future save', async () => {
+    renderPage(seriesEvent(), {}, EVENT_TYPES);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Renamed' } });
+
+    const payload = await saveAllFuture();
+    expect(payload.eventType).toEqual(Option.none());
+    expect(payload.eventTypeId).toEqual(Option.none());
+  });
+
+  it('should not count the picker auto-select on an old-server event (no id) as a type change', async () => {
+    renderPage(seriesEvent({ eventTypeId: Option.none() }), {}, EVENT_TYPES);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Renamed' } });
+
+    const payload = await saveAllFuture();
+    expect(payload.eventType).toEqual(Option.none());
+    expect(payload.eventTypeId).toEqual(Option.none());
   });
 });

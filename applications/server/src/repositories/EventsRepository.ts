@@ -790,6 +790,29 @@ const make = Effect.gen(function* () {
                 AND status = 'active'`,
   });
 
+  const retypeFollowing = SqlSchema.void({
+    Request: Schema.Struct({
+      series_id: Schema.String,
+      from_date: Schema.Date,
+      event_type: Event.EventType,
+      event_type_id: Schema.OptionFromNullOr(Schema.String),
+    }),
+    // A type change reaches ALL following active occurrences, individually edited ones
+    // included (product decision). Only the type and the training-type clamp move, and
+    // series_modified is left as it is. A NULL id lets events_sync_event_type resolve by kind.
+    // status = 'active' also skips occurrences already started today: re-typing a confirmed
+    // training would refire events_training_recompute_trg for an event that already happened.
+    execute: (input) => sql`
+      UPDATE events SET
+        event_type = ${input.event_type},
+        event_type_id = ${input.event_type_id},
+        training_type_id = CASE WHEN ${input.event_type}::text = 'training' THEN training_type_id END,
+        updated_at = now()
+      WHERE series_id = ${input.series_id}
+        AND (start_at AT TIME ZONE 'UTC')::date >= ${input.from_date}::date
+        AND status = 'active'`,
+  });
+
   const findUpcomingByGuild = SqlSchema.findAll({
     Request: Schema.Struct({
       guild_id: Schema.String,
@@ -1246,6 +1269,18 @@ const make = Effect.gen(function* () {
       timezone: fields.timezone,
     }).pipe(catchSqlErrors);
 
+  const retypeFollowingInSeries = (
+    seriesId: EventSeries.EventSeriesId,
+    fromDate: Date,
+    fields: { eventType: Event.EventType; eventTypeId: Option.Option<string> },
+  ) =>
+    retypeFollowing({
+      series_id: seriesId,
+      from_date: fromDate,
+      event_type: fields.eventType,
+      event_type_id: fields.eventTypeId,
+    }).pipe(catchSqlErrors);
+
   const markEventPersonalMessagesDirty = (eventId: Event.EventId) =>
     markPersonalMessagesDirty(eventId).pipe(catchSqlErrors);
 
@@ -1409,6 +1444,7 @@ const make = Effect.gen(function* () {
     cancelFutureInSeries,
     findUpcomingWithRsvp,
     updateFutureUnmodifiedInSeries,
+    retypeFollowingInSeries,
     claimTraining,
     unclaimTraining,
     saveClaimDiscordMessage,

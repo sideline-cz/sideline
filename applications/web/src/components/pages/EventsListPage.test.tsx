@@ -2,14 +2,16 @@
 // Dialog opened by the "New event" header button (list and calendar view alike). Dismissing the
 // dialog keeps the draft; only a successful submit closes it.
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DateTime, Option } from 'effect';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { invalidate, submitResult } = vi.hoisted(() => ({
+const { invalidate, submitResult, apiCall } = vi.hoisted(() => ({
   invalidate: vi.fn(),
   submitResult: vi.fn(),
+  // Every `api.<group>.<method>(args)` call the page makes: [group, method, args].
+  apiCall: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -27,6 +29,8 @@ vi.mock('~/lib/translations.js', () => ({
       event_createEvent: 'Create Event',
       event_createSeries: 'Create Recurring Series',
       event_startTime: 'Start time',
+      event_eventType: 'Event type',
+      event_trainingType: 'Training type',
     };
     return map[key] ?? key;
   },
@@ -42,11 +46,78 @@ vi.mock('@tanstack/react-router', () => ({
     select({ status: 'idle' }),
 }));
 
-vi.mock('~/lib/runtime', () => ({
-  ApiClient: { asEffect: () => ({ pipe: () => submitResult() }) },
-  ClientError: { make: (msg: string) => ({ _tag: 'ClientError', message: msg }) },
-  useRun: () => () => () => undefined,
-}));
+// The page's first pipe step (`Effect.flatMap((api) => api.x.y(args))`) runs against a fake api
+// that records the call, so tests can read the exact payload; the pipe's result is `submitResult`.
+vi.mock('~/lib/runtime', async () => {
+  const { Effect } = await import('effect');
+  const api = new Proxy(
+    {},
+    {
+      get: (_target, group) =>
+        new Proxy(
+          {},
+          {
+            get: (_t, method) => (args: unknown) => {
+              apiCall(String(group), String(method), args);
+              return Effect.void;
+            },
+          },
+        ),
+    },
+  );
+  return {
+    ApiClient: {
+      asEffect: () => ({
+        pipe: (first: (self: unknown) => unknown) => {
+          Effect.runSync(first(Effect.succeed(api)) as Parameters<typeof Effect.runSync>[0]);
+          return submitResult();
+        },
+      }),
+    },
+    ClientError: { make: (msg: string) => ({ _tag: 'ClientError', message: msg }) },
+    useRun: () => () => () => undefined,
+  };
+});
+
+// Stub of the real picker: one button per type, and the same mount-time auto-select (B4) — the
+// first type of the event's own kind when nothing is selected yet.
+vi.mock('~/components/molecules/EventTypePicker', async () => {
+  const React = await import('react');
+  const { Option } = await import('effect');
+  type PickerType = { eventTypeId: string; kind: string };
+  return {
+    EventTypePicker: ({
+      eventTypes,
+      event,
+      value,
+      onChange,
+    }: {
+      eventTypes: ReadonlyArray<PickerType>;
+      event: { eventType: string; eventTypeId: Option.Option<string> };
+      value: Option.Option<string>;
+      onChange: (next: PickerType) => void;
+    }) => {
+      React.useEffect(() => {
+        if (Option.isSome(value) || Option.isSome(event.eventTypeId)) return;
+        const fallback = eventTypes.find((t) => t.kind === event.eventType) ?? eventTypes[0];
+        if (fallback) onChange({ eventTypeId: fallback.eventTypeId, kind: fallback.kind });
+      }, [value, event.eventTypeId, event.eventType, eventTypes, onChange]);
+      return (
+        <div data-testid='event-type-picker'>
+          {eventTypes.map((t) => (
+            <button
+              key={t.eventTypeId}
+              type='button'
+              onClick={() => onChange({ eventTypeId: t.eventTypeId, kind: t.kind })}
+            >
+              {`pick-${t.kind}`}
+            </button>
+          ))}
+        </div>
+      );
+    },
+  };
+});
 
 vi.mock('~/components/organisms/EventCalendarView', () => ({
   EventCalendarView: () => <div data-testid='calendar' />,
@@ -104,6 +175,15 @@ const EVENT_TYPES = [
     position: 0,
     usageCount: 0,
   },
+  {
+    eventTypeId: 'et-match',
+    teamId: 'team-1',
+    name: Option.none<string>(),
+    kind: 'match',
+    color: 'red',
+    position: 1,
+    usageCount: 0,
+  },
 ];
 
 function renderPage(overrides: Record<string, unknown> = {}) {
@@ -132,10 +212,18 @@ const openDialog = () => {
 
 const titleInput = () => screen.getByLabelText('Title') as HTMLInputElement;
 
-// Open the dialog and fill a valid recurring series (Title "Weekly", first weekday, 18:00).
-const fillRecurring = () => {
+const openRecurring = () => {
   openDialog();
   fireEvent.click(screen.getByRole('button', { name: 'Recurring' }));
+};
+
+// Open the dialog and fill a valid recurring series (Title "Weekly", first weekday, 18:00).
+const fillRecurring = () => {
+  openRecurring();
+  fillAndSubmitRecurring();
+};
+
+const fillAndSubmitRecurring = () => {
   fireEvent.change(titleInput(), { target: { value: 'Weekly' } });
   const dayToggle = document.querySelector<HTMLButtonElement>('button[aria-pressed="false"]');
   expect(dayToggle).not.toBeNull();
@@ -146,6 +234,20 @@ const fillRecurring = () => {
   fireEvent.click(screen.getByRole('button', { name: 'Create Recurring Series' }));
 };
 
+type SeriesPayload = {
+  eventType: Option.Option<string>;
+  eventTypeId: Option.Option<string>;
+  trainingTypeId: Option.Option<string>;
+};
+
+const createSeriesPayload = async (): Promise<SeriesPayload> => {
+  await waitFor(() => {
+    expect(apiCall.mock.calls.some((c) => c[1] === 'createEventSeries')).toBe(true);
+  });
+  const call = apiCall.mock.calls.find((c) => c[1] === 'createEventSeries') ?? [];
+  return (call[2] as { payload: SeriesPayload }).payload;
+};
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -153,6 +255,7 @@ const fillRecurring = () => {
 describe('EventsListPage create dialog', () => {
   beforeEach(() => {
     invalidate.mockReset();
+    apiCall.mockReset();
     submitResult.mockReset();
     submitResult.mockImplementation(() => Promise.resolve(Option.some({})));
   });
@@ -253,5 +356,69 @@ describe('EventsListPage create dialog', () => {
 
     openDialog();
     expect(screen.getByLabelText('Title')).not.toBeNull();
+  });
+});
+
+describe('EventsListPage recurring series event type', () => {
+  beforeEach(() => {
+    invalidate.mockReset();
+    apiCall.mockReset();
+    submitResult.mockReset();
+    submitResult.mockImplementation(() => Promise.resolve(Option.some({})));
+  });
+
+  it('should render the event type picker inside the recurring form', () => {
+    renderPage();
+
+    openRecurring();
+
+    const form = screen.getByRole('button', { name: 'Create Recurring Series' }).closest('form');
+    expect(form).not.toBeNull();
+    expect(within(form as HTMLElement).getByTestId('event-type-picker')).not.toBeNull();
+  });
+
+  it('should send the auto-selected training type when the recurring form is submitted untouched', async () => {
+    renderPage();
+
+    fillRecurring();
+
+    const payload = await createSeriesPayload();
+    expect(payload.eventType).toEqual(Option.some('training'));
+    expect(payload.eventTypeId).toEqual(Option.some('et-training'));
+  });
+
+  it('should send no eventTypeId when no type was ever selected (empty type list)', async () => {
+    renderPage({ eventTypes: [] });
+
+    fillRecurring();
+
+    const payload = await createSeriesPayload();
+    expect(payload.eventType).toEqual(Option.some('training'));
+    expect(payload.eventTypeId).toEqual(Option.none());
+  });
+
+  it('should hide and clear the training type when a non-training type is picked', async () => {
+    renderPage({ trainingTypes: [{ trainingTypeId: 'tt-1', name: 'Throwing' }] });
+
+    openRecurring();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Training type' }));
+    fireEvent.click(within(screen.getByRole('listbox')).getByText('Throwing'));
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Training type' }).textContent).toContain(
+        'Throwing',
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'pick-match' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('combobox', { name: 'Training type' })).toBeNull();
+    });
+
+    fillAndSubmitRecurring();
+
+    const payload = await createSeriesPayload();
+    expect(payload.eventType).toEqual(Option.some('match'));
+    expect(payload.eventTypeId).toEqual(Option.some('et-match'));
+    expect(payload.trainingTypeId).toEqual(Option.none());
   });
 });

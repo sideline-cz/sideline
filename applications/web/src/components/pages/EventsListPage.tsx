@@ -92,6 +92,10 @@ type CreateEventValues = Schema.Schema.Type<typeof CreateEventSchema>;
 
 const CreateSeriesFields = Schema.Struct({
   title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  // Kept in sync by `EventTypePicker`, like the one-time form. No `tr()` message: the picker only
+  // ever supplies a valid literal, and a new module-scope `tr()` breaks web tests on Node 25.
+  eventType: Event.EventType,
+  eventTypeId: Schema.String,
   trainingTypeId: Schema.String,
   description: Schema.String,
   ...recurrenceFormFields(),
@@ -201,6 +205,8 @@ export function EventsListPage({
     mode: 'onChange',
     defaultValues: {
       title: '',
+      eventType: 'training' as Event.EventType,
+      eventTypeId: '',
       trainingTypeId: NONE_VALUE,
       description: '',
       ...recurrenceFormDefaults,
@@ -218,12 +224,24 @@ export function EventsListPage({
   const watchedLocation = form.watch('location');
   const watchedSeriesLocation = seriesForm.watch('location');
   const seriesFrequency = seriesForm.watch('frequency');
+  const watchedSeriesEventTypeId = seriesForm.watch('eventTypeId');
+  const selectedSeriesEventType = eventTypes.find(
+    (t) => t.eventTypeId === watchedSeriesEventTypeId,
+  );
+  const isSeriesTrainingSelected =
+    (selectedSeriesEventType?.kind ?? seriesForm.watch('eventType')) === 'training';
 
   React.useEffect(() => {
     if (!isTrainingSelected) {
       form.setValue('trainingTypeId', NONE_VALUE);
     }
   }, [isTrainingSelected, form]);
+
+  React.useEffect(() => {
+    if (!isSeriesTrainingSelected) {
+      seriesForm.setValue('trainingTypeId', NONE_VALUE);
+    }
+  }, [isSeriesTrainingSelected, seriesForm]);
 
   React.useEffect(() => {
     if (!watchedLocation) {
@@ -302,6 +320,12 @@ export function EventsListPage({
           params: { teamId: teamIdBranded },
           payload: {
             title: values.title,
+            eventType: Option.some(values.eventType),
+            // Guard `''` (no type list, so nothing was ever picked): it would decode as a branded
+            // string and fail the server's uuid cast. None lets the server fall back to training.
+            eventTypeId: values.eventTypeId
+              ? Option.some(Schema.decodeSync(EventType.EventTypeId)(values.eventTypeId))
+              : Option.none(),
             trainingTypeId:
               values.trainingTypeId && values.trainingTypeId !== NONE_VALUE
                 ? Option.some(Schema.decodeSync(TrainingType.TrainingTypeId)(values.trainingTypeId))
@@ -851,30 +875,55 @@ export function EventsListPage({
                   )}
                 />
                 <div className='flex flex-col gap-4 sm:flex-row'>
-                  <FormField
-                    {...seriesForm.register('trainingTypeId')}
-                    render={({ field }) => (
-                      <FormItem className='flex-1'>
-                        <FormLabel>{tr('event_trainingType')}</FormLabel>
-                        <FormControl>
-                          <SearchableSelect
-                            value={field.value}
-                            onValueChange={field.onChange}
-                            placeholder={tr('event_noTrainingType')}
-                            options={[
-                              { value: NONE_VALUE, label: tr('event_noTrainingType') },
-                              ...trainingTypes.map((tt) => ({
-                                value: tt.trainingTypeId,
-                                label: tt.name,
-                              })),
-                            ]}
-                            pinnedValues={[NONE_VALUE]}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  <FormItem className='flex-1'>
+                    <FormLabel>{tr('event_eventType')}</FormLabel>
+                    <EventTypePicker
+                      eventTypes={eventTypes}
+                      event={{
+                        eventType: seriesForm.watch('eventType'),
+                        eventTypeId: Option.none(),
+                        eventTypeName: Option.none(),
+                        eventTypeColor: Option.none(),
+                      }}
+                      value={
+                        watchedSeriesEventTypeId
+                          ? Option.some(
+                              Schema.decodeSync(EventType.EventTypeId)(watchedSeriesEventTypeId),
+                            )
+                          : Option.none()
+                      }
+                      onChange={({ eventTypeId, kind }) => {
+                        seriesForm.setValue('eventTypeId', eventTypeId, { shouldValidate: true });
+                        seriesForm.setValue('eventType', kind, { shouldValidate: true });
+                      }}
+                    />
+                  </FormItem>
+                  {isSeriesTrainingSelected && (
+                    <FormField
+                      {...seriesForm.register('trainingTypeId')}
+                      render={({ field }) => (
+                        <FormItem className='flex-1'>
+                          <FormLabel>{tr('event_trainingType')}</FormLabel>
+                          <FormControl>
+                            <SearchableSelect
+                              value={field.value}
+                              onValueChange={field.onChange}
+                              placeholder={tr('event_noTrainingType')}
+                              options={[
+                                { value: NONE_VALUE, label: tr('event_noTrainingType') },
+                                ...trainingTypes.map((tt) => ({
+                                  value: tt.trainingTypeId,
+                                  label: tt.name,
+                                })),
+                              ]}
+                              pinnedValues={[NONE_VALUE]}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
                   <FormField
                     {...seriesForm.register('frequency')}
                     render={({ field }) => (
