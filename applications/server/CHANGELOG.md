@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.80.0
+
+### 🚀 Features
+- monthly recurring series (by day of month or nth weekday) (#795)
+
 ## 0.72.0
 
 ### 🚀 Features
