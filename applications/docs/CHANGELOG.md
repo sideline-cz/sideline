@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.20.0
+
+### 🚀 Features
+- create events in a dialog; event confirms over the content (#797)
+
 ## 0.19.0
 
 ### 🚀 Features
