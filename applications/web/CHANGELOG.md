@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.68.0
+
+### 🚀 Features
+- monthly recurring series (by day of month or nth weekday) (#795)
+
 ## 0.62.2
 
 ### 🐛 Fixes
