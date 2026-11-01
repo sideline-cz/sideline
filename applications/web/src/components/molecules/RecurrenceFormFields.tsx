@@ -123,7 +123,7 @@ export function RecurrenceFormFields({ frequency, itemClassName }: RecurrenceFor
           render={({ field }) => (
             <FormItem className={itemClassName}>
               <FormLabel>{tr('event_daysOfWeek')}</FormLabel>
-              <div className='flex gap-1'>
+              <div className='flex flex-wrap gap-1'>
                 {DAY_ORDER.map((d) => {
                   const selected = field.value.includes(d);
                   return (

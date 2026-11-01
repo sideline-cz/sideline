@@ -129,7 +129,7 @@ export function SearchableSelect({
   }, [highlightedIndex, open]);
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <Popover modal open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button
           ref={ref}
