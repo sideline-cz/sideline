@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.21.0
+
+### 🚀 Features
+- recurring series of any event type (#798)
+
 ## 0.20.0
 
 ### 🚀 Features
