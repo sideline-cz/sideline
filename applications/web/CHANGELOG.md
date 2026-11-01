@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.69.0
+
+### 🚀 Features
+- create events in a dialog; event confirms over the content (#797)
+
 ## 0.68.0
 
 ### 🚀 Features
