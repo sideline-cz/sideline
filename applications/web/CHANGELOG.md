@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.70.0
+
+### 🚀 Features
+- recurring series of any event type (#798)
+
 ## 0.69.0
 
 ### 🚀 Features
