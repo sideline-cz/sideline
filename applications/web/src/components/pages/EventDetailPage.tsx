@@ -25,6 +25,16 @@ import { EventAttendanceRosterSection } from '~/components/organisms/EventAttend
 import { EventRsvpPanel } from '~/components/organisms/EventRsvpPanel.js';
 import { TeamGeneratorSection } from '~/components/organisms/TeamGeneratorSection.js';
 import { TrainingResultSection } from '~/components/organisms/TrainingResultSection.js';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '~/components/ui/alert-dialog';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { DatePicker } from '~/components/ui/date-picker';
@@ -236,6 +246,10 @@ export function EventDetailPage({
   const [editing, setEditing] = React.useState(false);
   const [showEditScope, setShowEditScope] = React.useState(false);
   const [showCancelScope, setShowCancelScope] = React.useState(false);
+  const [cancelling, setCancelling] = React.useState(false);
+  // Neither AlertDialog has a Trigger, so Radix has nothing to return focus to on close.
+  const cancelButtonRef = React.useRef<HTMLButtonElement>(null);
+  const saveButtonRef = React.useRef<HTMLButtonElement>(null);
   const hasSeries = Option.isSome(eventDetail.seriesId);
   const status = eventDetail.status;
   const eventTypeColor = getEventColor(eventDetail.eventTypeColor, eventDetail.eventType);
@@ -385,6 +399,8 @@ export function EventDetailPage({
   });
 
   const doCancelThisOnly = React.useCallback(async () => {
+    if (cancelling) return;
+    setCancelling(true);
     setShowCancelScope(false);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
@@ -395,11 +411,14 @@ export function EventDetailPage({
     );
     if (Option.isSome(result)) {
       navigate({ to: '/teams/$teamId/events', params: { teamId } });
+    } else {
+      setCancelling(false);
     }
-  }, [teamId, teamIdBranded, eventIdBranded, run, navigate]);
+  }, [cancelling, teamId, teamIdBranded, eventIdBranded, run, navigate]);
 
   const doCancelAllFuture = React.useCallback(async () => {
-    if (Option.isNone(eventDetail.seriesId)) return;
+    if (cancelling || Option.isNone(eventDetail.seriesId)) return;
+    setCancelling(true);
     setShowCancelScope(false);
     const seriesIdBranded = Schema.decodeSync(EventSeries.EventSeriesId)(
       eventDetail.seriesId.value,
@@ -415,17 +434,10 @@ export function EventDetailPage({
     );
     if (Option.isSome(result)) {
       navigate({ to: '/teams/$teamId/events', params: { teamId } });
-    }
-  }, [teamId, teamIdBranded, eventDetail.seriesId, run, navigate]);
-
-  const handleCancel = React.useCallback(() => {
-    if (hasSeries) {
-      setShowCancelScope(true);
     } else {
-      if (!window.confirm(tr('event_cancelConfirm'))) return;
-      doCancelThisOnly();
+      setCancelling(false);
     }
-  }, [hasSeries, doCancelThisOnly]);
+  }, [cancelling, teamId, teamIdBranded, eventDetail.seriesId, run, navigate]);
 
   const handleRsvpSubmit = React.useCallback(
     (response: 'yes' | 'no' | 'maybe' | 'coming_later', message: string) =>
@@ -480,7 +492,13 @@ export function EventDetailPage({
             </Button>
           )}
           {eventDetail.canCancel && status === 'active' && (
-            <Button variant='destructive' size='sm' onClick={handleCancel}>
+            <Button
+              ref={cancelButtonRef}
+              variant='destructive'
+              size='sm'
+              onClick={() => setShowCancelScope(true)}
+              disabled={cancelling}
+            >
               {tr('event_cancelEvent')}
             </Button>
           )}
@@ -806,22 +824,8 @@ export function EventDetailPage({
                     />
                   </div>
 
-                  {showEditScope && (
-                    <div className='rounded-md border p-4 space-y-2'>
-                      <p className='font-medium'>{tr('event_editScopeTitle')}</p>
-                      <div className='flex gap-2'>
-                        <Button type='button' size='sm' variant='outline' onClick={doSaveThisOnly}>
-                          {tr('event_editThisOnly')}
-                        </Button>
-                        <Button type='button' size='sm' onClick={doSaveAllFuture}>
-                          {tr('event_editAllFuture')}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
                   <div className='flex gap-2'>
-                    <Button type='submit' disabled={saving}>
+                    <Button ref={saveButtonRef} type='submit' disabled={saving}>
                       {saving ? tr('event_saving') : tr('event_saveChanges')}
                     </Button>
                     <Button type='button' variant='outline' onClick={handleDiscard}>
@@ -861,24 +865,6 @@ export function EventDetailPage({
                     {tr('event_createdBy')}: {eventDetail.createdByName.value}
                   </p>
                 )}
-              </div>
-            )}
-
-            {/* Hoisted out of the form: the "Cancel Event" button lives in the header now and is
-                reachable whether or not the edit form is open, so this scope picker must be too —
-                otherwise cancelling a recurring event while not editing would set state nobody
-                renders. */}
-            {showCancelScope && (
-              <div className='rounded-md border border-destructive/30 p-4 space-y-2'>
-                <p className='font-medium'>{tr('event_cancelScopeTitle')}</p>
-                <div className='flex gap-2'>
-                  <Button type='button' size='sm' variant='outline' onClick={doCancelThisOnly}>
-                    {tr('event_cancelThisOnly')}
-                  </Button>
-                  <Button type='button' size='sm' variant='destructive' onClick={doCancelAllFuture}>
-                    {tr('event_cancelAllFuture')}
-                  </Button>
-                </div>
               </div>
             )}
           </div>
@@ -942,6 +928,72 @@ export function EventDetailPage({
           />
         </div>
       )}
+
+      <AlertDialog
+        open={showCancelScope}
+        onOpenChange={(o) => {
+          if (!o) setShowCancelScope(false);
+        }}
+      >
+        <AlertDialogContent
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            cancelButtonRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {hasSeries ? tr('event_cancelScopeTitle') : tr('event_cancelConfirm')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{eventDetail.title}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className='sm:flex-wrap'>
+            <AlertDialogCancel>{tr('event_cancelKeep')}</AlertDialogCancel>
+            {hasSeries ? (
+              <>
+                <AlertDialogAction variant='outline' onClick={doCancelThisOnly}>
+                  {tr('event_cancelThisOnly')}
+                </AlertDialogAction>
+                <AlertDialogAction variant='destructive' onClick={doCancelAllFuture}>
+                  {tr('event_cancelAllFuture')}
+                </AlertDialogAction>
+              </>
+            ) : (
+              <AlertDialogAction variant='destructive' onClick={doCancelThisOnly}>
+                {tr('event_cancelEvent')}
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={showEditScope}
+        onOpenChange={(o) => {
+          if (!o) setShowEditScope(false);
+        }}
+      >
+        <AlertDialogContent
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            saveButtonRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tr('event_editScopeTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{eventDetail.title}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className='sm:flex-wrap'>
+            <AlertDialogCancel>{tr('event_editScopeBack')}</AlertDialogCancel>
+            <AlertDialogAction variant='outline' onClick={doSaveThisOnly}>
+              {tr('event_editThisOnly')}
+            </AlertDialogAction>
+            <AlertDialogAction onClick={doSaveAllFuture}>
+              {tr('event_editAllFuture')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import type { EventApi, EventTypeApi, GroupApi, TrainingTypeApi } from '@sidelin
 import { Event, EventType, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
-import { CalendarDays, List, Loader2, ShieldCheck } from 'lucide-react';
+import { CalendarDays, List, Loader2, Plus, ShieldCheck } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
@@ -13,6 +13,7 @@ import { EventCalendarView } from '~/components/organisms/EventCalendarView';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { DatePicker } from '~/components/ui/date-picker';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import {
   Form,
   FormControl,
@@ -155,6 +156,9 @@ export function EventsListPage({
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
   const [viewMode, setViewMode] = React.useState<'list' | 'calendar'>('list');
   const [mode, setMode] = React.useState<'one-time' | 'recurring'>('one-time');
+  const [createOpen, setCreateOpen] = React.useState(false);
+  // The Dialog has no Trigger, so Radix has nothing to return focus to on close.
+  const newEventButtonRef = React.useRef<HTMLButtonElement>(null);
   // Started/cancelled events are hidden from the list by default; the calendar always shows all.
   const [showHidden, setShowHidden] = React.useState(false);
   const isPending = useRouterState({ select: (s) => s.status === 'pending' });
@@ -285,6 +289,7 @@ export function EventsListPage({
       run({ success: tr('event_eventCreated') }),
     );
     if (Option.isSome(result)) {
+      setCreateOpen(false);
       form.reset();
       router.invalidate();
     }
@@ -332,6 +337,7 @@ export function EventsListPage({
       run({ success: tr('event_seriesCreated') }),
     );
     if (Option.isSome(result)) {
+      setCreateOpen(false);
       seriesForm.reset();
       router.invalidate();
     }
@@ -345,7 +351,7 @@ export function EventsListPage({
             ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <div className='flex items-center gap-3'>
+        <div className='flex flex-wrap items-center gap-3'>
           <h1 className='text-2xl font-bold'>{tr('event_events')}</h1>
           <div className='flex rounded-md border'>
             <Button
@@ -367,6 +373,17 @@ export function EventsListPage({
               <CalendarDays className='h-4 w-4' />
             </Button>
           </div>
+          {canCreate && (
+            <Button
+              ref={newEventButtonRef}
+              size='sm'
+              className='ml-auto'
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus className='size-4' aria-hidden='true' />
+              {tr('event_newEvent')}
+            </Button>
+          )}
         </div>
       </header>
 
@@ -378,694 +395,688 @@ export function EventsListPage({
           <EventCalendarView teamId={teamId} events={events} trainingTypes={trainingTypes} />
         </div>
       ) : (
-        <div className='flex flex-col gap-6 lg:grid lg:grid-cols-[1fr_420px]'>
-          <div className='order-2 lg:order-2 lg:sticky lg:top-20 lg:self-start'>
-            {canCreate && (
-              <div className='mb-8'>
-                <div className='flex gap-2 mb-4'>
-                  <Button
-                    variant={mode === 'one-time' ? 'default' : 'outline'}
-                    size='sm'
-                    onClick={() => setMode('one-time')}
-                  >
-                    {tr('event_oneTime')}
-                  </Button>
-                  <Button
-                    variant={mode === 'recurring' ? 'default' : 'outline'}
-                    size='sm'
-                    onClick={() => setMode('recurring')}
-                  >
-                    {tr('event_recurring')}
-                  </Button>
-                </div>
-
-                {mode === 'one-time' ? (
-                  <Form key='one-time' {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className='flex flex-col gap-4'>
-                      <FormField
-                        {...form.register('title')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_title')}</FormLabel>
-                            <FormControl>
-                              <Input {...field} placeholder={tr('event_titlePlaceholder')} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <div className='flex flex-col gap-4 sm:flex-row'>
-                        <FormItem className='flex-1'>
-                          <FormLabel>{tr('event_eventType')}</FormLabel>
-                          <EventTypePicker
-                            eventTypes={eventTypes}
-                            event={{
-                              eventType: form.watch('eventType'),
-                              eventTypeId: Option.none(),
-                              eventTypeName: Option.none(),
-                              eventTypeColor: Option.none(),
-                            }}
-                            value={
-                              watchedEventTypeId
-                                ? Option.some(
-                                    Schema.decodeSync(EventType.EventTypeId)(watchedEventTypeId),
-                                  )
-                                : Option.none()
-                            }
-                            onChange={({ eventTypeId, kind }) => {
-                              form.setValue('eventTypeId', eventTypeId, { shouldValidate: true });
-                              form.setValue('eventType', kind, { shouldValidate: true });
-                            }}
-                          />
-                        </FormItem>
-                        {isTrainingSelected && (
-                          <FormField
-                            {...form.register('trainingTypeId')}
-                            render={({ field }) => (
-                              <FormItem className='flex-1'>
-                                <FormLabel>{tr('event_trainingType')}</FormLabel>
-                                <FormControl>
-                                  <SearchableSelect
-                                    value={field.value}
-                                    onValueChange={field.onChange}
-                                    placeholder={tr('event_noTrainingType')}
-                                    options={[
-                                      { value: NONE_VALUE, label: tr('event_noTrainingType') },
-                                      ...trainingTypes.map((tt) => ({
-                                        value: tt.trainingTypeId,
-                                        label: tt.name,
-                                      })),
-                                    ]}
-                                    pinnedValues={[NONE_VALUE]}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        )}
-                      </div>
-                      <div className='flex items-center gap-2'>
-                        <Switch
-                          id='create-all-day'
-                          checked={watchedAllDay}
-                          onCheckedChange={(checked) => form.setValue('allDay', checked)}
-                        />
-                        <Label htmlFor='create-all-day'>{tr('event_allDay')}</Label>
-                      </div>
-                      <div className='flex flex-col gap-4 sm:flex-row'>
-                        <FormField
-                          {...form.register('startDate')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_startDate')}</FormLabel>
-                              <FormControl>
-                                <DatePicker
-                                  value={field.value}
-                                  onChange={field.onChange}
-                                  placeholder={tr('event_startDate')}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        {!watchedAllDay && (
-                          <FormField
-                            {...form.register('startTime')}
-                            render={({ field }) => (
-                              <FormItem className='flex-1'>
-                                <FormLabel>{tr('event_startTime')}</FormLabel>
-                                <FormControl>
-                                  <Input {...field} type='time' />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        )}
-                      </div>
-                      <div className='flex flex-col gap-4 sm:flex-row'>
-                        <FormField
-                          {...form.register('endDate')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_endDate')}</FormLabel>
-                              <FormControl>
-                                <DatePicker
-                                  value={field.value}
-                                  onChange={field.onChange}
-                                  placeholder={tr('event_endDate')}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        {!watchedAllDay && (
-                          <FormField
-                            {...form.register('endTime')}
-                            render={({ field }) => (
-                              <FormItem className='flex-1'>
-                                <FormLabel>{tr('event_endTime')}</FormLabel>
-                                <FormControl>
-                                  <Input {...field} type='time' />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        )}
-                      </div>
-                      <FormField
-                        {...form.register('location')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_location')}</FormLabel>
-                            <FormControl>
-                              <Input {...field} placeholder={tr('event_locationPlaceholder')} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        {...form.register('locationUrl')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_locationUrl')}</FormLabel>
-                            <FormControl>
-                              <Input
-                                {...field}
-                                type='url'
-                                inputMode='url'
-                                autoComplete='url'
-                                placeholder={tr('event_locationUrlPlaceholder')}
-                                disabled={!form.watch('location')}
-                              />
-                            </FormControl>
-                            <p className='text-xs text-muted-foreground'>
-                              {tr('event_locationUrlHelp')}
-                            </p>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        {...form.register('description')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_description')}</FormLabel>
-                            <FormControl>
-                              <Textarea
-                                {...field}
-                                placeholder={tr('event_descriptionPlaceholder')}
-                                rows={3}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        {...form.register('imageUrl')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_imageUrl')}</FormLabel>
-                            <FormControl>
-                              <Input
-                                {...field}
-                                type='url'
-                                placeholder={tr('event_imageUrlPlaceholder')}
-                              />
-                            </FormControl>
-                            {field.value &&
-                              URL.canParse(field.value) &&
-                              field.value.startsWith('https://') && (
-                                <img
-                                  src={field.value}
-                                  alt=''
-                                  loading='lazy'
-                                  decoding='async'
-                                  referrerPolicy='no-referrer'
-                                  className='mt-2 aspect-video max-h-32 rounded-md border object-cover'
-                                  onError={(e) => {
-                                    e.currentTarget.style.display = 'none';
-                                  }}
-                                />
-                              )}
-                            <p className='text-xs text-muted-foreground'>
-                              {tr('event_imageUrlHelp')}
-                            </p>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <div className='flex flex-col gap-4 sm:flex-row'>
-                        <FormField
-                          {...form.register('ownerGroupId')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_ownerGroup')}</FormLabel>
-                              <FormControl>
-                                <SearchableSelect
-                                  value={field.value}
-                                  onValueChange={field.onChange}
-                                  placeholder={tr('event_useDefault')}
-                                  options={[
-                                    { value: NONE_VALUE, label: tr('event_useDefault') },
-                                    ...toGroupOptions(groups),
-                                  ]}
-                                  pinnedValues={[NONE_VALUE]}
-                                />
-                              </FormControl>
-                              <p className='text-xs text-muted-foreground'>
-                                {tr('event_ownerGroupHelp')}
-                              </p>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          {...form.register('memberGroupId')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_memberGroup')}</FormLabel>
-                              <FormControl>
-                                <SearchableSelect
-                                  value={field.value}
-                                  onValueChange={field.onChange}
-                                  placeholder={tr('event_useDefault')}
-                                  options={[
-                                    { value: NONE_VALUE, label: tr('event_useDefault') },
-                                    ...toGroupOptions(groups),
-                                  ]}
-                                  pinnedValues={[NONE_VALUE]}
-                                />
-                              </FormControl>
-                              <p className='text-xs text-muted-foreground'>
-                                {tr('event_memberGroupHelp')}
-                              </p>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      <Button
-                        type='submit'
-                        disabled={form.formState.isSubmitting}
-                        className='self-start'
+        <div>
+          <div className='flex flex-wrap items-center gap-3 mb-2'>
+            {hiddenCount > 0 && (
+              <Button
+                variant='ghost'
+                size='sm'
+                className='text-muted-foreground'
+                onClick={() => setShowHidden((v) => !v)}
+              >
+                {showHidden ? tr('event_hidePastCancelled') : tr('event_showPastCancelled')}
+              </Button>
+            )}
+            {canViewAll && (
+              <div className='flex items-center gap-2'>
+                <Switch
+                  id='events-all-groups'
+                  checked={showAllGroups}
+                  onCheckedChange={onShowAllGroupsChange}
+                  aria-describedby='events-all-groups-help'
+                />
+                <Label htmlFor='events-all-groups' className='flex items-center gap-1.5'>
+                  {tr('event_allGroups')}
+                  <Badge variant='secondary'>{tr('event_adminViewBadge')}</Badge>
+                </Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type='button'
+                        className='text-muted-foreground'
+                        aria-label={tr('event_allGroupsHelp')}
                       >
-                        {tr('event_createEvent')}
-                      </Button>
-                    </form>
-                  </Form>
-                ) : (
-                  <Form key='recurring' {...seriesForm}>
-                    <form
-                      onSubmit={seriesForm.handleSubmit(onSubmitSeries)}
-                      className='flex flex-col gap-4'
-                    >
-                      <FormField
-                        {...seriesForm.register('title')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_title')}</FormLabel>
-                            <FormControl>
-                              <Input {...field} placeholder={tr('event_titlePlaceholder')} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <div className='flex flex-col gap-4 sm:flex-row'>
-                        <FormField
-                          {...seriesForm.register('trainingTypeId')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_trainingType')}</FormLabel>
-                              <FormControl>
-                                <SearchableSelect
-                                  value={field.value}
-                                  onValueChange={field.onChange}
-                                  placeholder={tr('event_noTrainingType')}
-                                  options={[
-                                    { value: NONE_VALUE, label: tr('event_noTrainingType') },
-                                    ...trainingTypes.map((tt) => ({
-                                      value: tt.trainingTypeId,
-                                      label: tt.name,
-                                    })),
-                                  ]}
-                                  pinnedValues={[NONE_VALUE]}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          {...seriesForm.register('frequency')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_frequency')}</FormLabel>
-                              <Select onValueChange={field.onChange} value={field.value}>
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {FREQUENCY_ORDER.map((f) => (
-                                    <SelectItem key={f} value={f}>
-                                      {frequencyLabel(f)}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      <RecurrenceFormFields frequency={seriesFrequency} />
-                      <div className='flex flex-col gap-4 sm:flex-row'>
-                        <FormField
-                          {...seriesForm.register('startDate')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_startDate')}</FormLabel>
-                              <FormControl>
-                                <DatePicker
-                                  value={field.value}
-                                  onChange={field.onChange}
-                                  placeholder={tr('event_startDate')}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          {...seriesForm.register('endDate')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_endDate')}</FormLabel>
-                              <FormControl>
-                                <DatePicker
-                                  value={field.value}
-                                  onChange={field.onChange}
-                                  placeholder={tr('event_endDate')}
-                                />
-                              </FormControl>
-                              <p className='text-xs text-muted-foreground'>
-                                {tr('event_endDateHelp')}
-                              </p>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      <div className='flex flex-col gap-4 sm:flex-row'>
-                        <FormField
-                          {...seriesForm.register('startTime')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>
-                                {tr('event_startTime')}
-                                {tzSuffix}
-                              </FormLabel>
-                              <FormControl>
-                                <Input {...field} type='time' />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          {...seriesForm.register('endTime')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>
-                                {tr('event_endTime')}
-                                {tzSuffix}
-                              </FormLabel>
-                              <FormControl>
-                                <Input {...field} type='time' />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      <FormField
-                        {...seriesForm.register('location')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_location')}</FormLabel>
-                            <FormControl>
-                              <Input {...field} placeholder={tr('event_locationPlaceholder')} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        {...seriesForm.register('locationUrl')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_locationUrl')}</FormLabel>
-                            <FormControl>
-                              <Input
-                                {...field}
-                                type='url'
-                                inputMode='url'
-                                autoComplete='url'
-                                placeholder={tr('event_locationUrlPlaceholder')}
-                                disabled={!seriesForm.watch('location')}
-                              />
-                            </FormControl>
-                            <p className='text-xs text-muted-foreground'>
-                              {tr('event_locationUrlHelp')}
-                            </p>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        {...seriesForm.register('description')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_description')}</FormLabel>
-                            <FormControl>
-                              <Textarea
-                                {...field}
-                                placeholder={tr('event_descriptionPlaceholder')}
-                                rows={3}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <div className='flex flex-col gap-4 sm:flex-row'>
-                        <FormField
-                          {...seriesForm.register('ownerGroupId')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_ownerGroup')}</FormLabel>
-                              <FormControl>
-                                <SearchableSelect
-                                  value={field.value}
-                                  onValueChange={field.onChange}
-                                  placeholder={tr('event_useDefault')}
-                                  options={[
-                                    { value: NONE_VALUE, label: tr('event_useDefault') },
-                                    ...toGroupOptions(groups),
-                                  ]}
-                                  pinnedValues={[NONE_VALUE]}
-                                />
-                              </FormControl>
-                              <p className='text-xs text-muted-foreground'>
-                                {tr('event_ownerGroupHelp')}
-                              </p>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          {...seriesForm.register('memberGroupId')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_memberGroup')}</FormLabel>
-                              <FormControl>
-                                <SearchableSelect
-                                  value={field.value}
-                                  onValueChange={field.onChange}
-                                  placeholder={tr('event_useDefault')}
-                                  options={[
-                                    { value: NONE_VALUE, label: tr('event_useDefault') },
-                                    ...toGroupOptions(groups),
-                                  ]}
-                                  pinnedValues={[NONE_VALUE]}
-                                />
-                              </FormControl>
-                              <p className='text-xs text-muted-foreground'>
-                                {tr('event_memberGroupHelp')}
-                              </p>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      <Button
-                        type='submit'
-                        disabled={seriesForm.formState.isSubmitting}
-                        className='self-start'
-                      >
-                        {tr('event_createSeries')}
-                      </Button>
-                    </form>
-                  </Form>
+                        <ShieldCheck className='size-4' />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent id='events-all-groups-help'>
+                      {tr('event_allGroupsHelp')}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                {isPending && (
+                  <Loader2
+                    className='size-4 animate-spin text-muted-foreground'
+                    aria-hidden='true'
+                  />
                 )}
               </div>
             )}
           </div>
-          <div className='order-1 lg:order-1'>
-            <div className='flex flex-wrap items-center gap-3 mb-2'>
-              {hiddenCount > 0 && (
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  className='text-muted-foreground'
-                  onClick={() => setShowHidden((v) => !v)}
-                >
-                  {showHidden ? tr('event_hidePastCancelled') : tr('event_showPastCancelled')}
-                </Button>
-              )}
-              {canViewAll && (
-                <div className='flex items-center gap-2'>
-                  <Switch
-                    id='events-all-groups'
-                    checked={showAllGroups}
-                    onCheckedChange={onShowAllGroupsChange}
-                    aria-describedby='events-all-groups-help'
-                  />
-                  <Label htmlFor='events-all-groups' className='flex items-center gap-1.5'>
-                    {tr('event_allGroups')}
-                    <Badge variant='secondary'>{tr('event_adminViewBadge')}</Badge>
-                  </Label>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type='button'
-                          className='text-muted-foreground'
-                          aria-label={tr('event_allGroupsHelp')}
-                        >
-                          <ShieldCheck className='size-4' />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent id='events-all-groups-help'>
-                        {tr('event_allGroupsHelp')}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                  {isPending && (
-                    <Loader2
-                      className='size-4 animate-spin text-muted-foreground'
-                      aria-hidden='true'
+          {visibleEvents.length === 0 ? (
+            <p className='text-muted-foreground'>{tr('event_noEvents')}</p>
+          ) : (
+            <div
+              className={`flex flex-col gap-2${isPending ? ' opacity-60 pointer-events-none transition-opacity' : ''}`}
+              aria-busy={isPending}
+            >
+              {visibleEvents.map((event) => {
+                const { startDate, startTime, end } = formatEventDateRange(
+                  event.startAt,
+                  event.endAt,
+                  event.allDay,
+                  event.startDate,
+                  event.endDate,
+                );
+                // All-day badge reads the server-derived team-local date
+                // (falling back to `formatUtcDate` on the noon-UTC instant
+                // for an older server, plan §17) rather than the instant
+                // itself, so the badge never regresses to a UTC-shifted day.
+                const badgeAt = event.allDay
+                  ? dateOnlyToUtcNoon(
+                      Option.getOrElse(event.startDate, () => formatUtcDate(event.startAt)),
+                    )
+                  : event.startAt;
+                return (
+                  <Link
+                    key={event.eventId}
+                    to='/teams/$teamId/events/$eventId'
+                    params={{ teamId, eventId: event.eventId }}
+                    className='flex items-start gap-3 rounded-lg border p-3 hover:bg-accent transition-colors'
+                  >
+                    <div className='flex size-10 shrink-0 flex-col items-center justify-center rounded-md bg-muted text-xs'>
+                      <span className='font-semibold leading-none'>
+                        {event.allDay
+                          ? new Date(Number(DateTime.toEpochMillis(badgeAt))).getUTCDate()
+                          : new Date(Number(DateTime.toEpochMillis(badgeAt))).getDate()}
+                      </span>
+                      <span className='text-muted-foreground leading-none mt-0.5'>
+                        {new Date(Number(DateTime.toEpochMillis(badgeAt))).toLocaleDateString(
+                          undefined,
+                          {
+                            month: 'short',
+                            ...(event.allDay ? { timeZone: 'UTC' } : {}),
+                          },
+                        )}
+                      </span>
+                    </div>
+                    <div className='min-w-0 flex-1'>
+                      <div className='flex items-center gap-1.5 mb-0.5'>
+                        <p className='font-medium truncate text-sm'>{event.title}</p>
+                        {Option.isSome(event.seriesId) && (
+                          <span className='text-[10px] text-muted-foreground'>
+                            {tr('event_recurring')}
+                          </span>
+                        )}
+                      </div>
+                      <div className='flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground'>
+                        <span>{eventTypeName(event.eventTypeName, event.eventType)}</span>
+                        <span>·</span>
+                        <span>
+                          {startDate}
+                          {event.allDay &&
+                            Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
+                        </span>
+                        {event.allDay ? (
+                          <span className='rounded bg-muted px-1 py-0.5 text-[10px]'>
+                            {tr('event_allDayLabel')}
+                          </span>
+                        ) : (
+                          <span className='hidden sm:inline'>
+                            {startTime}
+                            {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`text-xs shrink-0 ${eventStatusClasses[event.status]}`}>
+                      {eventStatusLabels[event.status]()}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent
+          aria-describedby={undefined}
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            newEventButtonRef.current?.focus();
+          }}
+          className='max-h-[90dvh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl'
+        >
+          <DialogHeader>
+            <DialogTitle>{tr('event_newEvent')}</DialogTitle>
+          </DialogHeader>
+          <div className='flex gap-2 mb-4'>
+            <Button
+              variant={mode === 'one-time' ? 'default' : 'outline'}
+              size='sm'
+              onClick={() => setMode('one-time')}
+            >
+              {tr('event_oneTime')}
+            </Button>
+            <Button
+              variant={mode === 'recurring' ? 'default' : 'outline'}
+              size='sm'
+              onClick={() => setMode('recurring')}
+            >
+              {tr('event_recurring')}
+            </Button>
+          </div>
+
+          {mode === 'one-time' ? (
+            <Form key='one-time' {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className='flex flex-col gap-4'>
+                <FormField
+                  {...form.register('title')}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{tr('event_title')}</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder={tr('event_titlePlaceholder')} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className='flex flex-col gap-4 sm:flex-row'>
+                  <FormItem className='flex-1'>
+                    <FormLabel>{tr('event_eventType')}</FormLabel>
+                    <EventTypePicker
+                      eventTypes={eventTypes}
+                      event={{
+                        eventType: form.watch('eventType'),
+                        eventTypeId: Option.none(),
+                        eventTypeName: Option.none(),
+                        eventTypeColor: Option.none(),
+                      }}
+                      value={
+                        watchedEventTypeId
+                          ? Option.some(
+                              Schema.decodeSync(EventType.EventTypeId)(watchedEventTypeId),
+                            )
+                          : Option.none()
+                      }
+                      onChange={({ eventTypeId, kind }) => {
+                        form.setValue('eventTypeId', eventTypeId, { shouldValidate: true });
+                        form.setValue('eventType', kind, { shouldValidate: true });
+                      }}
+                    />
+                  </FormItem>
+                  {isTrainingSelected && (
+                    <FormField
+                      {...form.register('trainingTypeId')}
+                      render={({ field }) => (
+                        <FormItem className='flex-1'>
+                          <FormLabel>{tr('event_trainingType')}</FormLabel>
+                          <FormControl>
+                            <SearchableSelect
+                              value={field.value}
+                              onValueChange={field.onChange}
+                              placeholder={tr('event_noTrainingType')}
+                              options={[
+                                { value: NONE_VALUE, label: tr('event_noTrainingType') },
+                                ...trainingTypes.map((tt) => ({
+                                  value: tt.trainingTypeId,
+                                  label: tt.name,
+                                })),
+                              ]}
+                              pinnedValues={[NONE_VALUE]}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
                   )}
                 </div>
-              )}
-            </div>
-            {visibleEvents.length === 0 ? (
-              <p className='text-muted-foreground'>{tr('event_noEvents')}</p>
-            ) : (
-              <div
-                className={`flex flex-col gap-2${isPending ? ' opacity-60 pointer-events-none transition-opacity' : ''}`}
-                aria-busy={isPending}
+                <div className='flex items-center gap-2'>
+                  <Switch
+                    id='create-all-day'
+                    checked={watchedAllDay}
+                    onCheckedChange={(checked) => form.setValue('allDay', checked)}
+                  />
+                  <Label htmlFor='create-all-day'>{tr('event_allDay')}</Label>
+                </div>
+                <div className='flex flex-col gap-4 sm:flex-row'>
+                  <FormField
+                    {...form.register('startDate')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_startDate')}</FormLabel>
+                        <FormControl>
+                          <DatePicker
+                            value={field.value}
+                            onChange={field.onChange}
+                            placeholder={tr('event_startDate')}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  {!watchedAllDay && (
+                    <FormField
+                      {...form.register('startTime')}
+                      render={({ field }) => (
+                        <FormItem className='flex-1'>
+                          <FormLabel>{tr('event_startTime')}</FormLabel>
+                          <FormControl>
+                            <Input {...field} type='time' />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </div>
+                <div className='flex flex-col gap-4 sm:flex-row'>
+                  <FormField
+                    {...form.register('endDate')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_endDate')}</FormLabel>
+                        <FormControl>
+                          <DatePicker
+                            value={field.value}
+                            onChange={field.onChange}
+                            placeholder={tr('event_endDate')}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  {!watchedAllDay && (
+                    <FormField
+                      {...form.register('endTime')}
+                      render={({ field }) => (
+                        <FormItem className='flex-1'>
+                          <FormLabel>{tr('event_endTime')}</FormLabel>
+                          <FormControl>
+                            <Input {...field} type='time' />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </div>
+                <FormField
+                  {...form.register('location')}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{tr('event_location')}</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder={tr('event_locationPlaceholder')} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  {...form.register('locationUrl')}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{tr('event_locationUrl')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='url'
+                          inputMode='url'
+                          autoComplete='url'
+                          placeholder={tr('event_locationUrlPlaceholder')}
+                          disabled={!form.watch('location')}
+                        />
+                      </FormControl>
+                      <p className='text-xs text-muted-foreground'>{tr('event_locationUrlHelp')}</p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  {...form.register('description')}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{tr('event_description')}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          {...field}
+                          placeholder={tr('event_descriptionPlaceholder')}
+                          rows={3}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  {...form.register('imageUrl')}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{tr('event_imageUrl')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='url'
+                          placeholder={tr('event_imageUrlPlaceholder')}
+                        />
+                      </FormControl>
+                      {field.value &&
+                        URL.canParse(field.value) &&
+                        field.value.startsWith('https://') && (
+                          <img
+                            src={field.value}
+                            alt=''
+                            loading='lazy'
+                            decoding='async'
+                            referrerPolicy='no-referrer'
+                            className='mt-2 aspect-video max-h-32 rounded-md border object-cover'
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        )}
+                      <p className='text-xs text-muted-foreground'>{tr('event_imageUrlHelp')}</p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className='flex flex-col gap-4 sm:flex-row'>
+                  <FormField
+                    {...form.register('ownerGroupId')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_ownerGroup')}</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder={tr('event_useDefault')}
+                            options={[
+                              { value: NONE_VALUE, label: tr('event_useDefault') },
+                              ...toGroupOptions(groups),
+                            ]}
+                            pinnedValues={[NONE_VALUE]}
+                          />
+                        </FormControl>
+                        <p className='text-xs text-muted-foreground'>
+                          {tr('event_ownerGroupHelp')}
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    {...form.register('memberGroupId')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_memberGroup')}</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder={tr('event_useDefault')}
+                            options={[
+                              { value: NONE_VALUE, label: tr('event_useDefault') },
+                              ...toGroupOptions(groups),
+                            ]}
+                            pinnedValues={[NONE_VALUE]}
+                          />
+                        </FormControl>
+                        <p className='text-xs text-muted-foreground'>
+                          {tr('event_memberGroupHelp')}
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <Button type='submit' disabled={form.formState.isSubmitting} className='self-start'>
+                  {tr('event_createEvent')}
+                </Button>
+              </form>
+            </Form>
+          ) : (
+            <Form key='recurring' {...seriesForm}>
+              <form
+                onSubmit={seriesForm.handleSubmit(onSubmitSeries)}
+                className='flex flex-col gap-4'
               >
-                {visibleEvents.map((event) => {
-                  const { startDate, startTime, end } = formatEventDateRange(
-                    event.startAt,
-                    event.endAt,
-                    event.allDay,
-                    event.startDate,
-                    event.endDate,
-                  );
-                  // All-day badge reads the server-derived team-local date
-                  // (falling back to `formatUtcDate` on the noon-UTC instant
-                  // for an older server, plan §17) rather than the instant
-                  // itself, so the badge never regresses to a UTC-shifted day.
-                  const badgeAt = event.allDay
-                    ? dateOnlyToUtcNoon(
-                        Option.getOrElse(event.startDate, () => formatUtcDate(event.startAt)),
-                      )
-                    : event.startAt;
-                  return (
-                    <Link
-                      key={event.eventId}
-                      to='/teams/$teamId/events/$eventId'
-                      params={{ teamId, eventId: event.eventId }}
-                      className='flex items-start gap-3 rounded-lg border p-3 hover:bg-accent transition-colors'
-                    >
-                      <div className='flex size-10 shrink-0 flex-col items-center justify-center rounded-md bg-muted text-xs'>
-                        <span className='font-semibold leading-none'>
-                          {event.allDay
-                            ? new Date(Number(DateTime.toEpochMillis(badgeAt))).getUTCDate()
-                            : new Date(Number(DateTime.toEpochMillis(badgeAt))).getDate()}
-                        </span>
-                        <span className='text-muted-foreground leading-none mt-0.5'>
-                          {new Date(Number(DateTime.toEpochMillis(badgeAt))).toLocaleDateString(
-                            undefined,
-                            {
-                              month: 'short',
-                              ...(event.allDay ? { timeZone: 'UTC' } : {}),
-                            },
-                          )}
-                        </span>
-                      </div>
-                      <div className='min-w-0 flex-1'>
-                        <div className='flex items-center gap-1.5 mb-0.5'>
-                          <p className='font-medium truncate text-sm'>{event.title}</p>
-                          {Option.isSome(event.seriesId) && (
-                            <span className='text-[10px] text-muted-foreground'>
-                              {tr('event_recurring')}
-                            </span>
-                          )}
-                        </div>
-                        <div className='flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground'>
-                          <span>{eventTypeName(event.eventTypeName, event.eventType)}</span>
-                          <span>·</span>
-                          <span>
-                            {startDate}
-                            {event.allDay &&
-                              Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
-                          </span>
-                          {event.allDay ? (
-                            <span className='rounded bg-muted px-1 py-0.5 text-[10px]'>
-                              {tr('event_allDayLabel')}
-                            </span>
-                          ) : (
-                            <span className='hidden sm:inline'>
-                              {startTime}
-                              {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <span className={`text-xs shrink-0 ${eventStatusClasses[event.status]}`}>
-                        {eventStatusLabels[event.status]()}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+                <FormField
+                  {...seriesForm.register('title')}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{tr('event_title')}</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder={tr('event_titlePlaceholder')} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className='flex flex-col gap-4 sm:flex-row'>
+                  <FormField
+                    {...seriesForm.register('trainingTypeId')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_trainingType')}</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder={tr('event_noTrainingType')}
+                            options={[
+                              { value: NONE_VALUE, label: tr('event_noTrainingType') },
+                              ...trainingTypes.map((tt) => ({
+                                value: tt.trainingTypeId,
+                                label: tt.name,
+                              })),
+                            ]}
+                            pinnedValues={[NONE_VALUE]}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    {...seriesForm.register('frequency')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_frequency')}</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {FREQUENCY_ORDER.map((f) => (
+                              <SelectItem key={f} value={f}>
+                                {frequencyLabel(f)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <RecurrenceFormFields frequency={seriesFrequency} />
+                <div className='flex flex-col gap-4 sm:flex-row'>
+                  <FormField
+                    {...seriesForm.register('startDate')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_startDate')}</FormLabel>
+                        <FormControl>
+                          <DatePicker
+                            value={field.value}
+                            onChange={field.onChange}
+                            placeholder={tr('event_startDate')}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    {...seriesForm.register('endDate')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_endDate')}</FormLabel>
+                        <FormControl>
+                          <DatePicker
+                            value={field.value}
+                            onChange={field.onChange}
+                            placeholder={tr('event_endDate')}
+                          />
+                        </FormControl>
+                        <p className='text-xs text-muted-foreground'>{tr('event_endDateHelp')}</p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <div className='flex flex-col gap-4 sm:flex-row'>
+                  <FormField
+                    {...seriesForm.register('startTime')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>
+                          {tr('event_startTime')}
+                          {tzSuffix}
+                        </FormLabel>
+                        <FormControl>
+                          <Input {...field} type='time' />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    {...seriesForm.register('endTime')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>
+                          {tr('event_endTime')}
+                          {tzSuffix}
+                        </FormLabel>
+                        <FormControl>
+                          <Input {...field} type='time' />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  {...seriesForm.register('location')}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{tr('event_location')}</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder={tr('event_locationPlaceholder')} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  {...seriesForm.register('locationUrl')}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{tr('event_locationUrl')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='url'
+                          inputMode='url'
+                          autoComplete='url'
+                          placeholder={tr('event_locationUrlPlaceholder')}
+                          disabled={!seriesForm.watch('location')}
+                        />
+                      </FormControl>
+                      <p className='text-xs text-muted-foreground'>{tr('event_locationUrlHelp')}</p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  {...seriesForm.register('description')}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{tr('event_description')}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          {...field}
+                          placeholder={tr('event_descriptionPlaceholder')}
+                          rows={3}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className='flex flex-col gap-4 sm:flex-row'>
+                  <FormField
+                    {...seriesForm.register('ownerGroupId')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_ownerGroup')}</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder={tr('event_useDefault')}
+                            options={[
+                              { value: NONE_VALUE, label: tr('event_useDefault') },
+                              ...toGroupOptions(groups),
+                            ]}
+                            pinnedValues={[NONE_VALUE]}
+                          />
+                        </FormControl>
+                        <p className='text-xs text-muted-foreground'>
+                          {tr('event_ownerGroupHelp')}
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    {...seriesForm.register('memberGroupId')}
+                    render={({ field }) => (
+                      <FormItem className='flex-1'>
+                        <FormLabel>{tr('event_memberGroup')}</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder={tr('event_useDefault')}
+                            options={[
+                              { value: NONE_VALUE, label: tr('event_useDefault') },
+                              ...toGroupOptions(groups),
+                            ]}
+                            pinnedValues={[NONE_VALUE]}
+                          />
+                        </FormControl>
+                        <p className='text-xs text-muted-foreground'>
+                          {tr('event_memberGroupHelp')}
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <Button
+                  type='submit'
+                  disabled={seriesForm.formState.isSubmitting}
+                  className='self-start'
+                >
+                  {tr('event_createSeries')}
+                </Button>
+              </form>
+            </Form>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

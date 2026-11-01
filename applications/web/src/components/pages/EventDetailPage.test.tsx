@@ -11,7 +11,12 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DateTime, Option } from 'effect';
 import type React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { cancelResult, navigate } = vi.hoisted(() => ({
+  cancelResult: vi.fn(),
+  navigate: vi.fn(),
+}));
 
 // ---------------------------------------------------------------------------
 // Module mocks — before any imports using them
@@ -23,6 +28,9 @@ vi.mock('~/lib/translations.js', () => ({
       event_backToEvents: 'Back to Events',
       event_edit: 'Edit',
       event_cancelEvent: 'Cancel Event',
+      event_cancelConfirm: 'Are you sure you want to cancel this event?',
+      event_cancelKeep: 'Keep event',
+      event_editScopeBack: 'Back to editing',
       event_editCancel: 'Discard changes',
       event_saveChanges: 'Save Changes',
       event_saving: 'Saving...',
@@ -56,11 +64,11 @@ vi.mock('@tanstack/react-router', () => ({
     <a {...props}>{children}</a>
   ),
   useRouter: () => ({ invalidate: vi.fn() }),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigate,
 }));
 
 vi.mock('~/lib/runtime', () => ({
-  ApiClient: { asEffect: () => ({}) },
+  ApiClient: { asEffect: () => ({ pipe: () => cancelResult() }) },
   ClientError: { make: (msg: string) => ({ _tag: 'ClientError', message: msg }) },
   useRun: () => () => (effect: unknown) => Promise.resolve(effect),
 }));
@@ -165,6 +173,12 @@ function renderPage(
 // ---------------------------------------------------------------------------
 
 describe('EventDetailPage', () => {
+  beforeEach(() => {
+    navigate.mockReset();
+    cancelResult.mockReset();
+    cancelResult.mockImplementation(() => Promise.resolve(Option.some({})));
+  });
+
   it('a coach sees facts as text, not a form, on first render (canEdit:true, status:active) — the regression this redesign fixes', () => {
     renderPage({ canEdit: true, status: 'active' });
 
@@ -269,6 +283,7 @@ describe('EventDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Event' }));
 
+    expect(screen.getByRole('alertdialog')).not.toBeNull();
     expect(screen.getByText('What would you like to cancel?')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'This event only' })).not.toBeNull();
     expect(screen.getByRole('button', { name: 'All future events in series' })).not.toBeNull();
@@ -286,8 +301,108 @@ describe('EventDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByText('How would you like to edit?')).not.toBeNull();
     });
+    expect(screen.getByRole('alertdialog')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'This event only' })).not.toBeNull();
     expect(screen.getByRole('button', { name: 'All future events in series' })).not.toBeNull();
+  });
+
+  it('a non-series cancel asks in an AlertDialog, not window.confirm', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderPage({ canCancel: true, status: 'active', title: 'Tuesday Training' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Event' }));
+
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByText('Are you sure you want to cancel this event?')).not.toBeNull();
+    expect(within(dialog).getByText('Tuesday Training')).not.toBeNull();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it('"Keep event" closes the non-series cancel dialog without cancelling and refocuses Cancel Event', async () => {
+    renderPage({ canCancel: true, status: 'active' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Event' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep event' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel Event' }));
+    expect(cancelResult).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('confirming the non-series cancel dialog cancels the event and navigates to the list', async () => {
+    renderPage({ canCancel: true, status: 'active' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Event' }));
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel Event' }));
+
+    await waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith(
+        expect.objectContaining({ to: '/teams/$teamId/events' }),
+      );
+    });
+    expect(cancelResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismissing the series edit-scope dialog keeps the edit form and its values and refocuses Save Changes', async () => {
+    renderPage({ canEdit: true, status: 'active', seriesId: Option.some('series-1') });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Changed Title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alertdialog')).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to editing' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Changed Title');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(cancelResult).not.toHaveBeenCalled();
+  });
+
+  it('the header Cancel Event button is disabled while a cancel is in flight (double-cancel guard)', async () => {
+    cancelResult.mockImplementation(() => new Promise(() => {}));
+    renderPage({ canCancel: true, status: 'active' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Event' }));
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel Event' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    const headerButton = screen.getByRole('button', { name: 'Cancel Event' }) as HTMLButtonElement;
+    expect(headerButton.disabled).toBe(true);
+    expect(cancelResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed cancel re-enables the header Cancel Event button and does not navigate', async () => {
+    cancelResult.mockImplementation(() => Promise.resolve(Option.none()));
+    renderPage({ canCancel: true, status: 'active' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Event' }));
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel Event' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    await waitFor(() => {
+      const headerButton = screen.getByRole('button', {
+        name: 'Cancel Event',
+      }) as HTMLButtonElement;
+      expect(headerButton.disabled).toBe(false);
+    });
+    expect(cancelResult).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it('the attendance confirm section is NOT rendered when canConfirm is false', () => {
