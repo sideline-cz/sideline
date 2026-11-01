@@ -1,22 +1,85 @@
-import { DateTime } from 'effect';
+import { EventSeries } from '@sideline/domain';
+import { DateTime, type Option } from 'effect';
 
+// Deliberately NOT "everything in the window": a monthly series always materialises its next
+// occurrence, even past `horizonDays` (also for a future `start_date`). Anchored on
+// `seriesStartDate`, NOT on the caller's `startFrom` (`last_generated_date + 1`), or every run
+// would chase one occurrence further ahead. Do not "fix" this into a pure window.
 export const computeHorizonEnd = (params: {
+  recurrence: EventSeries.Recurrence;
+  seriesStartDate: DateTime.Utc;
   seriesEndDate: DateTime.Utc | null;
   horizonDays: number;
 }): DateTime.Utc => {
-  const horizonEnd = DateTime.add(DateTime.nowUnsafe(), { days: params.horizonDays });
+  const now = DateTime.nowUnsafe();
+  let horizonEnd = DateTime.add(now, { days: params.horizonDays });
+  if (EventSeries.isMonthlyRecurrence(params.recurrence)) {
+    const today = DateTime.startOf(now, 'day');
+    const anchor = DateTime.max(today, params.seriesStartDate);
+    // Monthly gaps are at most 35 days, so a 62-day scan always finds the next occurrence.
+    const [next] = generateOccurrenceDates({
+      ...params.recurrence,
+      startDate: anchor,
+      endDate: DateTime.add(anchor, { days: 62 }),
+    });
+    if (next !== undefined && DateTime.isGreaterThan(next, horizonEnd)) horizonEnd = next;
+  }
   if (params.seriesEndDate === null) return horizonEnd;
   return DateTime.isLessThanOrEqualTo(params.seriesEndDate, horizonEnd)
     ? params.seriesEndDate
     : horizonEnd;
 };
 
-export const generateOccurrenceDates = (params: {
-  frequency: 'weekly' | 'biweekly';
-  daysOfWeek: ReadonlyArray<number>;
-  startDate: DateTime.Utc;
-  endDate: DateTime.Utc;
-}): ReadonlyArray<DateTime.Utc> => {
+// The only way server callers turn a series row into a `Recurrence`.
+export const seriesRecurrence = (row: {
+  readonly frequency: string;
+  readonly days_of_week: ReadonlyArray<number>;
+  readonly day_of_month: Option.Option<number>;
+  readonly week_of_month: Option.Option<number>;
+}): Option.Option<EventSeries.Recurrence> =>
+  EventSeries.toRecurrence({
+    frequency: row.frequency,
+    daysOfWeek: row.days_of_week,
+    dayOfMonth: row.day_of_month,
+    weekOfMonth: row.week_of_month,
+  });
+
+// Same UTC-midnight walk and boundary semantics as the weekly loop, but anchor-free: the output
+// depends only on the calendar. Short months clamp to their last day (one occurrence per month).
+const monthlyDates = (
+  params: EventSeries.MonthlyRecurrence & {
+    startDate: DateTime.Utc;
+    endDate: DateTime.Utc;
+  },
+): ReadonlyArray<DateTime.Utc> => {
+  const { startDate, endDate } = params;
+  if (DateTime.isGreaterThan(startDate, endDate)) return [];
+
+  const dates: DateTime.Utc[] = [];
+  let current = startDate;
+  while (DateTime.isLessThanOrEqualTo(current, endDate)) {
+    const d = DateTime.getPartUtc(current, 'day');
+    const last = new Date(
+      Date.UTC(DateTime.getPartUtc(current, 'year'), DateTime.getPartUtc(current, 'month'), 0),
+    ).getUTCDate();
+    const match =
+      params.frequency === 'monthly_by_date'
+        ? d === params.dayOfMonth || (d === last && params.dayOfMonth > last)
+        : DateTime.getPartUtc(current, 'weekDay') === params.dayOfWeek &&
+          (params.weekOfMonth === -1 ? d + 7 > last : Math.ceil(d / 7) === params.weekOfMonth);
+    if (match) dates.push(current);
+    current = DateTime.add(current, { days: 1 });
+  }
+  return dates;
+};
+
+export const generateOccurrenceDates = (
+  params: EventSeries.Recurrence & {
+    startDate: DateTime.Utc;
+    endDate: DateTime.Utc;
+  },
+): ReadonlyArray<DateTime.Utc> => {
+  if (EventSeries.isMonthlyRecurrence(params)) return monthlyDates(params);
   const { frequency, daysOfWeek, startDate, endDate } = params;
 
   if (DateTime.isGreaterThan(startDate, endDate)) return [];

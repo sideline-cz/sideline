@@ -1,14 +1,18 @@
 import * as Schemas from '@sideline/effect-lib/Schemas';
-import { Schema } from 'effect';
+import { Option, Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import { EventLocationUrl, Forbidden } from '~/api/EventApi.js';
 import { fieldState } from '~/api/RequestFilters.js';
 import {
+  DayOfMonth,
+  DayOfWeek,
   DaysOfWeek,
   EventSeriesId,
   EventSeriesStatus,
   RecurrenceFrequency,
+  toRecurrence,
+  WeekOfMonth,
 } from '~/models/EventSeries.js';
 import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
@@ -19,7 +23,12 @@ export class EventSeriesInfo extends Schema.Class<EventSeriesInfo>('EventSeriesI
   teamId: TeamId,
   title: Schema.String,
   frequency: RecurrenceFrequency,
-  daysOfWeek: DaysOfWeek,
+  // No min-1: `monthly_by_date` sends `[]`. The per-frequency shape is checked by
+  // `toRecurrence` (create filter, server reads) and the DB CHECK.
+  daysOfWeek: Schema.Array(DayOfWeek).pipe(Schema.check(Schema.isMaxLength(7))),
+  // Monthly-only. `OptionFromOptionalKey` so old peers that omit the keys still decode.
+  dayOfMonth: Schema.OptionFromOptionalKey(DayOfMonth),
+  weekOfMonth: Schema.OptionFromOptionalKey(WeekOfMonth),
   startDate: Schemas.DateTimeFromIsoString,
   endDate: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   status: EventSeriesStatus,
@@ -55,7 +64,12 @@ export class EventSeriesDetail extends Schema.Class<EventSeriesDetail>('EventSer
   title: Schema.String,
   description: Schema.OptionFromNullOr(Schema.String),
   frequency: RecurrenceFrequency,
-  daysOfWeek: DaysOfWeek,
+  // No min-1: `monthly_by_date` sends `[]`. The per-frequency shape is checked by
+  // `toRecurrence` (create filter, server reads) and the DB CHECK.
+  daysOfWeek: Schema.Array(DayOfWeek).pipe(Schema.check(Schema.isMaxLength(7))),
+  // Monthly-only. `OptionFromOptionalKey` so old peers that omit the keys still decode.
+  dayOfMonth: Schema.OptionFromOptionalKey(DayOfMonth),
+  weekOfMonth: Schema.OptionFromOptionalKey(WeekOfMonth),
   startDate: Schemas.DateTimeFromIsoString,
   endDate: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   status: EventSeriesStatus,
@@ -87,12 +101,22 @@ export class EventSeriesDetail extends Schema.Class<EventSeriesDetail>('EventSer
   timezone: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
+// The struct-level check runs in both directions (see `fieldState`): on encode an optional key
+// is the raw `number | undefined`, not an Option, so normalise before `toRecurrence`.
+const asOption = (value: Option.Option<number> | number | undefined): Option.Option<number> =>
+  Option.isOption(value) ? value : Option.fromNullishOr(value);
+
 const CreateEventSeriesRequestStruct = Schema.Struct({
   title: Schema.NonEmptyString,
   trainingTypeId: Schema.OptionFromNullOr(TrainingTypeId),
   description: Schema.OptionFromNullOr(Schema.String),
   frequency: RecurrenceFrequency,
-  daysOfWeek: DaysOfWeek,
+  // No min-1: `monthly_by_date` sends `[]`. The per-frequency shape is checked by
+  // `toRecurrence` (create filter, server reads) and the DB CHECK.
+  daysOfWeek: Schema.Array(DayOfWeek).pipe(Schema.check(Schema.isMaxLength(7))),
+  // Monthly-only. `OptionFromOptionalKey` so old peers that omit the keys still decode.
+  dayOfMonth: Schema.OptionFromOptionalKey(DayOfMonth),
+  weekOfMonth: Schema.OptionFromOptionalKey(WeekOfMonth),
   startDate: Schemas.DateTimeFromIsoString,
   endDate: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   // `HH:MM` wall clock resolved to an instant per occurrence. Whether this is team-local
@@ -122,6 +146,13 @@ export const CreateEventSeriesRequest = CreateEventSeriesRequestStruct.pipe(
     Schema.makeFilter<Schema.Schema.Type<typeof CreateEventSeriesRequestStruct>>((req) => {
       if (fieldState(req.locationUrl) === 'setting' && fieldState(req.location) !== 'setting')
         return 'Location URL requires location text';
+      const recurrence = toRecurrence({
+        frequency: req.frequency,
+        daysOfWeek: req.daysOfWeek,
+        dayOfMonth: asOption(req.dayOfMonth),
+        weekOfMonth: asOption(req.weekOfMonth),
+      });
+      if (Option.isNone(recurrence)) return 'Invalid recurrence for frequency';
       return true;
     }),
   ),
@@ -197,6 +228,13 @@ export class EventSeriesTimeDialectMismatch extends Schema.TaggedErrorClass<Even
   {},
 ) {}
 
+// Raised when an UPDATE payload supplies `daysOfWeek` for a monthly series: monthly
+// recurrence is not editable (`frequency` never is).
+export class EventSeriesRecurrenceNotEditable extends Schema.TaggedErrorClass<EventSeriesRecurrenceNotEditable>()(
+  'EventSeriesRecurrenceNotEditable',
+  {},
+) {}
+
 export class EventSeriesApiGroup extends HttpApiGroup.make('eventSeries')
   .add(
     HttpApiEndpoint.post('createEventSeries', '/teams/:teamId/event-series', {
@@ -234,6 +272,7 @@ export class EventSeriesApiGroup extends HttpApiGroup.make('eventSeries')
         EventSeriesNotFound.pipe(HttpApiSchema.status(404)),
         EventSeriesNotActive.pipe(HttpApiSchema.status(400)),
         EventSeriesTimeDialectMismatch.pipe(HttpApiSchema.status(400)),
+        EventSeriesRecurrenceNotEditable.pipe(HttpApiSchema.status(400)),
       ],
       payload: UpdateEventSeriesRequest,
       params: { teamId: TeamId, seriesId: EventSeriesId },

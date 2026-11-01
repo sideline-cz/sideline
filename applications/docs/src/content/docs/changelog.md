@@ -5,6 +5,12 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-10-31 — New: recurring events can repeat monthly
+
+Event series can now repeat **monthly by date** (one day of the month; 29, 30 and 31 fall on the last day of shorter months) or **monthly by weekday** (1st to 4th, or last, weekday of the month). A monthly series always creates at least its next occurrence, even beyond the event generation horizon. A monthly series' day can't be edited after creation.
+
+- API integrators: `frequency` gains `monthly_by_date` and `monthly_by_weekday`; event series payloads gain optional `dayOfMonth` and `weekOfMonth`, and `daysOfWeek` may be empty for `monthly_by_date`. Updating `daysOfWeek` on a monthly series returns `400 EventSeriesRecurrenceNotEditable`. See the [Create recurring events guide](/guides/create-recurring-events/#monthly-series).
+
 ## 2026-10-08 — New: membership plans can be billed automatically each season
 
 Treasurers and Admins can now turn on **Bill membership plans each season** in **Team → Settings → Finance → Automation**, so a plan's price is actually charged instead of just displayed. Off by default — nothing changes for a club that doesn't touch it.

@@ -1,6 +1,6 @@
 ---
 title: Create recurring events
-description: Set up trainings that repeat weekly without manually posting each one.
+description: Set up trainings that repeat weekly, every two weeks, or monthly without manually posting each one.
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
@@ -16,7 +16,7 @@ An **event series** is a pattern: a day of the week, a time, a location, and a t
 <Steps>
 
 1. Open your team → **Events** → **New event series**.
-2. Pick the **day(s) of the week** and **time**.
+2. Pick how often it repeats (weekly, every two weeks, monthly by date, or monthly by weekday), the matching day(s), and the **time**.
 3. Set the **location**.
 4. Choose a **training type** (training, match, tournament, friendly, other).
 5. Pick the **target group** — who should be invited to RSVP.
@@ -24,6 +24,13 @@ An **event series** is a pattern: a day of the week, a time, a location, and a t
 7. Save. Sideline schedules the next few occurrences and starts posting them in Discord.
 
 </Steps>
+
+## Monthly series
+
+- **Monthly (by date)** repeats on one day of the month. If a month is shorter, the event lands on its last day, so day 31 becomes 30 April and day 29, 30 or 31 becomes 28 (or 29) February.
+- **Monthly (by weekday)** repeats on the 1st, 2nd, 3rd, 4th or last chosen weekday of the month. **Last** differs from **4th** in months with five of that weekday.
+
+A monthly series always creates at least its next occurrence, even when it falls beyond your event generation horizon (also when the start date is in the future). You can't change a monthly series' day after you create it. To move it, create a new series.
 
 ## One-off changes
 

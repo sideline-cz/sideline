@@ -15,7 +15,10 @@ class EventSeriesRow extends Schema.Class<EventSeriesRow>('EventSeriesRow')({
   location: Schema.OptionFromNullOr(Schema.String),
   location_url: Schema.OptionFromNullOr(Schema.String),
   frequency: EventSeries.RecurrenceFrequency,
-  days_of_week: EventSeries.DaysOfWeek,
+  // weekly min-1 rule: DB chk_event_series_recurrence + toRecurrence
+  days_of_week: Schema.Array(EventSeries.DayOfWeek),
+  day_of_month: Schema.OptionFromNullOr(EventSeries.DayOfMonth),
+  week_of_month: Schema.OptionFromNullOr(EventSeries.WeekOfMonth),
   start_date: Schemas.DateTimeFromDate,
   end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   status: EventSeries.EventSeriesStatus,
@@ -40,7 +43,10 @@ class EventSeriesWithDetails extends Schema.Class<EventSeriesWithDetails>('Event
     location: Schema.OptionFromNullOr(Schema.String),
     location_url: Schema.OptionFromNullOr(Schema.String),
     frequency: EventSeries.RecurrenceFrequency,
-    days_of_week: EventSeries.DaysOfWeek,
+    // weekly min-1 rule: DB chk_event_series_recurrence + toRecurrence
+    days_of_week: Schema.Array(EventSeries.DayOfWeek),
+    day_of_month: Schema.OptionFromNullOr(EventSeries.DayOfMonth),
+    week_of_month: Schema.OptionFromNullOr(EventSeries.WeekOfMonth),
     start_date: Schemas.DateTimeFromDate,
     end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
     status: EventSeries.EventSeriesStatus,
@@ -69,7 +75,10 @@ class EventSeriesForGeneration extends Schema.Class<EventSeriesForGeneration>(
   location: Schema.OptionFromNullOr(Schema.String),
   location_url: Schema.OptionFromNullOr(Schema.String),
   frequency: EventSeries.RecurrenceFrequency,
-  days_of_week: EventSeries.DaysOfWeek,
+  // weekly min-1 rule: DB chk_event_series_recurrence + toRecurrence
+  days_of_week: Schema.Array(EventSeries.DayOfWeek),
+  day_of_month: Schema.OptionFromNullOr(EventSeries.DayOfMonth),
+  week_of_month: Schema.OptionFromNullOr(EventSeries.WeekOfMonth),
   start_date: Schemas.DateTimeFromDate,
   end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   last_generated_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
@@ -99,6 +108,8 @@ const EventSeriesInsertInput = Schema.Struct({
   location_url: Schema.OptionFromNullOr(Schema.String),
   frequency: Schema.String,
   days_of_week: Schema.Array(Schema.Number),
+  day_of_month: Schema.OptionFromNullOr(Schema.Number),
+  week_of_month: Schema.OptionFromNullOr(Schema.Number),
   start_date: Schemas.DateTimeFromDate,
   end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   created_by: Schema.String,
@@ -136,16 +147,17 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
             INSERT INTO event_series (team_id, training_type_id, title, description,
                                       start_time, end_time, location, location_url, frequency,
-                                      days_of_week, start_date, end_date, created_by,
+                                      days_of_week, day_of_month, week_of_month,
+                                      start_date, end_date, created_by,
                                       owner_group_id, member_group_id, times_are_team_local)
             VALUES (${input.team_id}, ${input.training_type_id}, ${input.title},
                     ${input.description}, ${input.start_time}, ${input.end_time},
                     ${input.location}, ${input.location_url}, ${input.frequency}, ${input.days_of_week},
-                    ${input.start_date}, ${input.end_date}, ${input.created_by},
+                    ${input.day_of_month}, ${input.week_of_month}, ${input.start_date}, ${input.end_date}, ${input.created_by},
                     ${input.owner_group_id}, ${input.member_group_id}, ${input.times_are_team_local})
             RETURNING id, team_id, training_type_id, title, description,
                       start_time, end_time, location, location_url, frequency,
-                      days_of_week, start_date, end_date, status,
+                      days_of_week, day_of_month, week_of_month, start_date, end_date, status,
                       owner_group_id, member_group_id, times_are_team_local
           `,
   });
@@ -156,7 +168,7 @@ const make = Effect.gen(function* () {
     execute: (teamId) => sql`
             SELECT es.id, es.team_id, es.training_type_id, es.title, es.description,
                    es.start_time, es.end_time, es.location, es.location_url, es.frequency,
-                   es.days_of_week, es.start_date, es.end_date, es.status,
+                   es.days_of_week, es.day_of_month, es.week_of_month, es.start_date, es.end_date, es.status,
                    tt.name AS training_type_name, es.last_generated_date,
                    es.owner_group_id, og.name AS owner_group_name,
                    es.member_group_id, mg.name AS member_group_name,
@@ -176,7 +188,7 @@ const make = Effect.gen(function* () {
     execute: (id) => sql`
             SELECT es.id, es.team_id, es.training_type_id, es.title, es.description,
                    es.start_time, es.end_time, es.location, es.location_url, es.frequency,
-                   es.days_of_week, es.start_date, es.end_date, es.status,
+                   es.days_of_week, es.day_of_month, es.week_of_month, es.start_date, es.end_date, es.status,
                    tt.name AS training_type_name, es.last_generated_date,
                    es.owner_group_id, og.name AS owner_group_name,
                    es.member_group_id, mg.name AS member_group_name,
@@ -195,7 +207,7 @@ const make = Effect.gen(function* () {
     execute: () => sql`
             SELECT es.id, es.team_id, es.training_type_id, es.title, es.description,
                    es.start_time, es.end_time, es.location, es.location_url, es.frequency,
-                   es.days_of_week, es.start_date, es.end_date,
+                   es.days_of_week, es.day_of_month, es.week_of_month, es.start_date, es.end_date,
                    es.last_generated_date,
                    es.owner_group_id, es.member_group_id,
                    es.created_by,
@@ -215,7 +227,7 @@ const make = Effect.gen(function* () {
       last_generated_date: Schemas.DateTimeFromDate,
     }),
     execute: (input) =>
-      sql`UPDATE event_series SET last_generated_date = ${input.last_generated_date}::date, updated_at = now() WHERE id = ${input.id}`,
+      sql`UPDATE event_series SET last_generated_date = (${input.last_generated_date}::timestamptz AT TIME ZONE 'UTC')::date, updated_at = now() WHERE id = ${input.id}`,
   });
 
   const updateSeries = SqlSchema.findOne({
@@ -238,7 +250,7 @@ const make = Effect.gen(function* () {
             WHERE id = ${input.id}
             RETURNING id, team_id, training_type_id, title, description,
                       start_time, end_time, location, location_url, frequency,
-                      days_of_week, start_date, end_date, status,
+                      days_of_week, day_of_month, week_of_month, start_date, end_date, status,
                       owner_group_id, member_group_id, times_are_team_local
           `,
   });
@@ -260,6 +272,8 @@ const make = Effect.gen(function* () {
     locationUrl = Option.none(),
     frequency,
     daysOfWeek,
+    dayOfMonth = Option.none(),
+    weekOfMonth = Option.none(),
     startDate,
     endDate,
     createdBy,
@@ -277,6 +291,8 @@ const make = Effect.gen(function* () {
     locationUrl?: Option.Option<string>;
     frequency: string;
     daysOfWeek: ReadonlyArray<number>;
+    dayOfMonth?: Option.Option<number>;
+    weekOfMonth?: Option.Option<number>;
     startDate: DateTime.Utc;
     endDate: Option.Option<DateTime.Utc>;
     createdBy: string;
@@ -297,6 +313,8 @@ const make = Effect.gen(function* () {
       location_url: locationUrl,
       frequency,
       days_of_week: Array.from(daysOfWeek),
+      day_of_month: dayOfMonth,
+      week_of_month: weekOfMonth,
       start_date: startDate,
       end_date: endDate,
       created_by: createdBy,

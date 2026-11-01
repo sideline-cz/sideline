@@ -116,7 +116,7 @@ No. RSVPs are always the player's own action — we don't want captains to fake 
 
 ### How far in advance are recurring events posted?
 
-By default, the next 4 weeks. Change it from **Team settings → General → Event generation horizon**.
+By default, the next 4 weeks. Change it from **Team settings → General → Event generation horizon**. Monthly series are the exception: they always create at least their next occurrence, even beyond the horizon.
 
 ### Can I move an event to a different time without editing the whole series?
 

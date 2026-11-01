@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from '@effect/vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from '@effect/vitest';
 import type { Event, EventSeries, Team, TeamMember, TrainingType } from '@sideline/domain';
-import { DateTime, Effect, Layer, Option } from 'effect';
+import { DateTime, Effect, Layer, Logger, Option } from 'effect';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -24,10 +24,16 @@ type InsertedEvent = {
   teamId: Team.TeamId;
   title: string;
   startAt: DateTime.Utc;
+  seriesId: Option.Option<string>;
+  // `formatIsoDateUtc(startAt)` — the key `idx_events_series_date` is unique on
+  date: string;
 };
 
 type UpdatedDate = {
   seriesId: EventSeries.EventSeriesId;
+  // `DateTime.startOf(date, 'day')`: mirrors the real `::date` write, so the value fed back as
+  // `last_generated_date` on the next run is what production would read back.
+  date: DateTime.Utc;
 };
 
 // --- In-memory stores ---
@@ -56,7 +62,9 @@ const makeActiveSeries = (
     member_group_id: Option.Option<unknown>;
     event_horizon_days: number;
     days_of_week: ReadonlyArray<number>;
-    frequency: 'weekly' | 'biweekly';
+    day_of_month: Option.Option<number>;
+    week_of_month: Option.Option<number>;
+    frequency: EventSeries.RecurrenceFrequency;
     start_time: string;
     end_time: Option.Option<string>;
     training_type_id: Option.Option<TrainingType.TrainingTypeId>;
@@ -82,6 +90,8 @@ const makeActiveSeries = (
   location_url: overrides.location_url ?? Option.none<string>(),
   frequency: overrides.frequency ?? ('weekly' as const),
   days_of_week: overrides.days_of_week ?? [1], // Monday
+  day_of_month: overrides.day_of_month ?? Option.none<number>(),
+  week_of_month: overrides.week_of_month ?? Option.none<number>(),
   start_date: overrides.start_date ?? START_DATE,
   end_date: overrides.end_date ?? Option.none<DateTime.Utc>(),
   last_generated_date: overrides.last_generated_date ?? Option.none<DateTime.Utc>(),
@@ -99,8 +109,8 @@ const makeActiveSeries = (
 const makeMockEventSeriesRepository = (activeSeries: ReturnType<typeof makeActiveSeries>[]) =>
   Layer.succeed(EventSeriesRepository, {
     getActiveForGeneration: () => Effect.succeed(activeSeries),
-    updateLastGeneratedDate: (seriesId: EventSeries.EventSeriesId) => {
-      updatedDates.push({ seriesId });
+    updateLastGeneratedDate: (seriesId: EventSeries.EventSeriesId, date: DateTime.Utc) => {
+      updatedDates.push({ seriesId, date: DateTime.startOf(date, 'day') });
       return Effect.void;
     },
     // Stubs for unused methods
@@ -112,7 +122,23 @@ const makeMockEventSeriesRepository = (activeSeries: ReturnType<typeof makeActiv
   } as any);
 
 const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
-  insertEvent: (params: { teamId: Team.TeamId; title: string; startAt: DateTime.Utc }) => {
+  insertEvent: (params: {
+    teamId: Team.TeamId;
+    title: string;
+    startAt: DateTime.Utc;
+    seriesId?: Option.Option<string>;
+  }) => {
+    const seriesId = params.seriesId ?? Option.none<string>();
+    const date = DateTime.formatIsoDateUtc(params.startAt);
+    // Simulates `idx_events_series_date`: a second insert for the same (series, date) raises.
+    if (
+      Option.isSome(seriesId) &&
+      insertedEvents.some(
+        (e) => Option.getOrUndefined(e.seriesId) === seriesId.value && e.date === date,
+      )
+    ) {
+      throw new Error(`duplicate key value violates idx_events_series_date: ${date}`);
+    }
     insertCounter += 1;
     const eventId =
       `00000000-0000-0000-0000-0000000001${String(insertCounter).padStart(2, '0')}` as Event.EventId;
@@ -125,6 +151,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       teamId: params.teamId,
       title: params.title,
       startAt: params.startAt,
+      seriesId,
+      date,
     });
     return Effect.succeed({
       id: eventId,
@@ -450,5 +478,154 @@ describe('eventHorizonCronEffect', () => {
         Effect.asVoid,
       );
     },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Monthly recurrence (`.dev-loop/plan.md` Task 4/5): the next occurrence is always
+// materialised, and re-runs never insert it twice.
+// ---------------------------------------------------------------------------
+
+describe('eventHorizonCronEffect — monthly recurrence', () => {
+  const day = (iso: string) => DateTime.makeUnsafe(`${iso}T00:00:00Z`);
+
+  const lastTuesday = {
+    frequency: 'monthly_by_weekday' as const,
+    days_of_week: [2],
+    week_of_month: Option.some(-1),
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Runs the cron once at `now` and returns the dates inserted by THIS run. The insert
+  // store is NOT reset between runs, so the mock's duplicate guard spans the whole test.
+  const runAt = (now: string, series: ReturnType<typeof makeActiveSeries>[]) =>
+    Effect.gen(function* () {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(now));
+      const before = insertedEvents.length;
+      yield* eventHorizonCronEffect.pipe(Effect.provide(makeTestLayer(series)));
+      return insertedEvents.slice(before).map((e) => e.date);
+    });
+
+  const lastGenFor = (seriesId: EventSeries.EventSeriesId) =>
+    Option.fromNullishOr(updatedDates.filter((u) => u.seriesId === seriesId).at(-1)?.date);
+
+  it.effect(
+    'should insert exactly the next last Tuesday with horizon 1, then nothing the next day, then the five-Tuesday March occurrence',
+    () =>
+      Effect.gen(function* () {
+        const base = { ...lastTuesday, event_horizon_days: 1, start_date: day('2027-01-27') };
+
+        // Case 1
+        const first = yield* runAt('2027-01-27T10:00:00Z', [makeActiveSeries(base)]);
+        expect(first).toEqual(['2027-02-23']);
+        expect(updatedDates).toHaveLength(1);
+        expect(DateTime.formatIso(updatedDates[0].date)).toBe('2027-02-23T00:00:00.000Z');
+
+        // Case 2: next day, fed the captured last_generated_date
+        const second = yield* runAt('2027-01-28T03:00:00Z', [
+          makeActiveSeries({ ...base, last_generated_date: lastGenFor(SERIES_ID) }),
+        ]);
+        expect(second).toEqual([]);
+        expect(updatedDates).toHaveLength(1);
+
+        // Case 3: day after the occurrence
+        const third = yield* runAt('2027-02-24T03:00:00Z', [
+          makeActiveSeries({ ...base, last_generated_date: lastGenFor(SERIES_ID) }),
+        ]);
+        expect(third).toEqual(['2027-03-30']);
+        expect(DateTime.formatIso(updatedDates.at(-1)?.date ?? day('1970-01-01'))).toBe(
+          '2027-03-30T00:00:00.000Z',
+        );
+      }),
+  );
+
+  it.effect(
+    'should insert exactly the next last Tuesday with horizon 30 and nothing on the next day',
+    () =>
+      Effect.gen(function* () {
+        const base = { ...lastTuesday, event_horizon_days: 30, start_date: day('2027-01-27') };
+
+        const first = yield* runAt('2027-01-27T10:00:00Z', [makeActiveSeries(base)]);
+        expect(first).toEqual(['2027-02-23']);
+        expect(DateTime.formatIso(updatedDates[0].date)).toBe('2027-02-26T00:00:00.000Z');
+
+        const second = yield* runAt('2027-01-28T03:00:00Z', [
+          makeActiveSeries({ ...base, last_generated_date: lastGenFor(SERIES_ID) }),
+        ]);
+        expect(second).toEqual([]);
+      }),
+  );
+
+  it.effect('should insert exactly the clamped 28 Feb for day 31 with horizon 1', () =>
+    Effect.gen(function* () {
+      const inserted = yield* runAt('2027-02-01T10:00:00Z', [
+        makeActiveSeries({
+          frequency: 'monthly_by_date',
+          days_of_week: [],
+          day_of_month: Option.some(31),
+          event_horizon_days: 1,
+          start_date: day('2027-02-01'),
+        }),
+      ]);
+      expect(inserted).toEqual(['2027-02-28']);
+    }),
+  );
+
+  // On purpose: with no last_generated_date the cron back-fills from start_date, exactly as
+  // weekly does. Pinned so nobody "fixes" the computeHorizonEnd anchor to make the case above
+  // pass with an older start_date.
+  it.effect('should back-fill from start_date when last_generated_date is None', () =>
+    Effect.gen(function* () {
+      const inserted = yield* runAt('2027-01-27T10:00:00Z', [
+        makeActiveSeries({ ...lastTuesday, event_horizon_days: 1, start_date: day('2027-01-01') }),
+      ]);
+      expect(inserted).toEqual(['2027-01-26', '2027-02-23']);
+    }),
+  );
+
+  it.effect(
+    'should warn and skip a series whose recurrence shape is invalid, still generating the others',
+    () =>
+      Effect.gen(function* () {
+        const messages: string[] = [];
+        const levels: string[] = [];
+        const logCapture = Logger.layer([
+          Logger.make((options) => {
+            messages.push(String(options.message));
+            levels.push(String(options.logLevel));
+          }),
+        ]);
+        const BROKEN_ID = '10000000-0000-0000-0000-0000000000bb' as EventSeries.EventSeriesId;
+        const broken = makeActiveSeries({
+          id: BROKEN_ID,
+          frequency: 'monthly_by_date',
+          days_of_week: [],
+          day_of_month: Option.none(), // monthly_by_date without a day: toRecurrence is None
+          event_horizon_days: 1,
+          start_date: day('2027-01-27'),
+        });
+        const healthy = makeActiveSeries({
+          ...lastTuesday,
+          event_horizon_days: 1,
+          start_date: day('2027-01-27'),
+        });
+
+        const inserted = yield* runAt('2027-01-27T10:00:00Z', [broken, healthy]).pipe(
+          Effect.provide(logCapture),
+        );
+
+        expect(inserted).toEqual(['2027-02-23']);
+        expect(insertedEvents.every((e) => Option.getOrUndefined(e.seriesId) === SERIES_ID)).toBe(
+          true,
+        );
+        expect(updatedDates.map((u) => u.seriesId)).toEqual([SERIES_ID]);
+        const warning = messages.findIndex((m) => m.includes(BROKEN_ID));
+        expect(warning).toBeGreaterThanOrEqual(0);
+        expect(levels[warning]).toBe('Warn');
+      }),
   );
 });
