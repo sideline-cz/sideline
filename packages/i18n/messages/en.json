@@ -86,6 +86,7 @@
   "activityLog_empty_cta": "Log your first activity",
   "activityLog_empty_title": "No activity logged yet",
   "activityLog_invalidDate": "Invalid date.",
+  "activityLog_loadError": "Could not load activity logs.",
   "activityLog_logActivity": "Log Activity",
   "activityLog_logFailed": "Failed to log activity.",
   "activityLog_logged": "Activity logged",

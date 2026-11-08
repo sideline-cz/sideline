@@ -3,6 +3,7 @@ import { ActivityLogDate } from '@sideline/domain';
 import { Option } from 'effect';
 import { ClipboardList } from 'lucide-react';
 import React from 'react';
+import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { DatePicker } from '~/components/ui/date-picker';
 import { Input } from '~/components/ui/input';
@@ -38,6 +39,9 @@ interface ActivityLogListProps {
   isOwnProfile: boolean;
   // A past season or Earlier is selected: empty copy points to other seasons, no "log first" CTA
   isPastPeriod?: boolean;
+  // listLogs failed: show an error with Retry, never the empty state or the log form
+  loadError?: boolean;
+  onRetry?: () => void;
   activityTypes: ReadonlyArray<ActivityTypeOption>;
   onCreateLog: (input: {
     activityTypeId: ActivityType.ActivityTypeId;
@@ -61,6 +65,8 @@ export function ActivityLogList({
   logs,
   isOwnProfile,
   isPastPeriod = false,
+  loadError = false,
+  onRetry,
   activityTypes,
   onCreateLog,
   onUpdateLog,
@@ -183,9 +189,12 @@ export function ActivityLogList({
     return groups;
   }, [logs]);
 
+  // A new log lands in the current season, so a past-scope list would never show it
+  const canLog = isOwnProfile && !isPastPeriod && !loadError;
+
   return (
     <div>
-      {isOwnProfile && (
+      {canLog && (
         <div ref={logActivityRef} className='mb-6 p-4 border rounded-lg'>
           <p className='text-sm font-medium mb-2'>{tr('activityLog_logActivity')}</p>
           <div className='flex gap-2 mb-3 flex-wrap'>
@@ -258,10 +267,21 @@ export function ActivityLogList({
         </div>
       )}
 
-      {logs.length === 0 ? (
+      {loadError ? (
+        <Alert variant='destructive'>
+          <AlertDescription className='flex flex-wrap items-center gap-3'>
+            {tr('activityLog_loadError')}
+            {onRetry ? (
+              <Button size='sm' onClick={onRetry}>
+                {tr('common_retry')}
+              </Button>
+            ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : logs.length === 0 ? (
         <div className='flex flex-col items-center justify-center gap-2 py-10 text-center'>
           <ClipboardList className='size-8 text-muted-foreground' aria-hidden='true' />
-          {isOwnProfile && !isPastPeriod ? (
+          {canLog ? (
             <>
               <p className='font-medium'>{tr('activityLog_empty_title')}</p>
               <p className='text-sm text-muted-foreground'>{tr('activityLog_empty_body')}</p>
@@ -272,7 +292,7 @@ export function ActivityLogList({
               <p className='text-sm text-muted-foreground'>{tr('activityLog_emptyPeriod_body')}</p>
             </>
           )}
-          {isOwnProfile && !isPastPeriod ? (
+          {canLog ? (
             <Button type='button' size='sm' className='mt-2' onClick={handleFocusLogActivity}>
               {tr('activityLog_empty_cta')}
             </Button>

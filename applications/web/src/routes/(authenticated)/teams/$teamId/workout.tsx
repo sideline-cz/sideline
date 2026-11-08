@@ -37,6 +37,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
               activityStats: ActivityStatsApi.ActivityStatsResponse | null;
               activityLogs: ReadonlyArray<ActivityLogApi.ActivityLogEntry>;
               seasons: ReadonlyArray<ActivityLogApi.ActivitySeason>;
+              activityLogsError: boolean;
               memberId: TeamMember.TeamMemberId | null;
               canViewTeamActivity: boolean;
             };
@@ -48,6 +49,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
                 activityStats: null,
                 activityLogs: [],
                 seasons: [],
+                activityLogsError: false,
                 memberId: null,
                 canViewTeamActivity,
               });
@@ -58,14 +60,18 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
                 params: { teamId, memberId },
                 query: { season },
               }),
+              // Own logs: any failure is real, so the card shows an error, not "log your first"
               list: api.activityLog
                 .listLogs({ params: { teamId, memberId }, query: { season } })
                 .pipe(
+                  Effect.map((r) => ({ logs: r.logs, seasons: r.seasons, failed: false })),
                   Effect.tapError((e) => Effect.logWarning('Failed to load activity logs', e)),
                   Effect.catch(() =>
-                    Effect.succeed<
-                      Pick<ActivityLogApi.ActivityLogListResponse, 'logs' | 'seasons'>
-                    >({ logs: [], seasons: [] }),
+                    Effect.succeed({
+                      logs: [] as ActivityLogApi.ActivityLogEntry[],
+                      seasons: [] as ActivityLogApi.ActivitySeason[],
+                      failed: true,
+                    }),
                   ),
                 ),
             }).pipe(
@@ -76,6 +82,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
                   activityStats,
                   activityLogs: list.logs,
                   seasons: list.seasons,
+                  activityLogsError: list.failed,
                   memberId,
                   canViewTeamActivity,
                 }),
@@ -237,6 +244,10 @@ function MakanickoRoute() {
       activityStats={data?.activityStats ?? defaultStats}
       activityLogs={data?.activityLogs ?? []}
       seasons={data?.seasons ?? []}
+      activityLogsError={data?.activityLogsError ?? false}
+      onRetry={() => {
+        router.invalidate();
+      }}
       season={season}
       onSeasonChange={handleSeasonChange}
       canViewTeamActivity={data?.canViewTeamActivity ?? false}

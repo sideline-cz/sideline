@@ -34,4 +34,41 @@ describe('ActivityLogList', () => {
     expect(screen.getByText('Gym')).not.toBeNull();
     expect(screen.queryByText('private-note')).toBeNull();
   });
+
+  // A new log goes to the current season, so a past-scope list would hide it and invite a re-log.
+  it('hides the log form for a past season but keeps edit on own rows', () => {
+    render(
+      <ActivityLogList
+        logs={[log]}
+        isOwnProfile
+        isPastPeriod
+        activityTypes={[]}
+        onCreateLog={async () => {}}
+        onUpdateLog={async () => {}}
+        onDeleteLog={async () => {}}
+      />,
+    );
+    expect(screen.queryByText('activityLog_logActivity')).toBeNull();
+    expect(screen.getByText('activityLog_edit')).not.toBeNull();
+  });
+
+  // A failed load must not read as "no activity" with a "log your first" prompt over real logs.
+  it('shows the load error instead of the empty state and the form', () => {
+    render(
+      <ActivityLogList
+        logs={[]}
+        isOwnProfile
+        loadError
+        onRetry={() => {}}
+        activityTypes={[]}
+        onCreateLog={async () => {}}
+        onUpdateLog={async () => {}}
+        onDeleteLog={async () => {}}
+      />,
+    );
+    expect(screen.getByText('activityLog_loadError')).not.toBeNull();
+    expect(screen.getByText('common_retry')).not.toBeNull();
+    expect(screen.queryByText('activityLog_empty_cta')).toBeNull();
+    expect(screen.queryByText('activityLog_logActivity')).toBeNull();
+  });
 });

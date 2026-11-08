@@ -86,6 +86,7 @@
   "activityLog_empty_cta": "Zaznamenat první aktivitu",
   "activityLog_empty_title": "Zatím žádná zaznamenaná aktivita",
   "activityLog_invalidDate": "Neplatné datum.",
+  "activityLog_loadError": "Záznamy aktivit se nepodařilo načíst.",
   "activityLog_logActivity": "Zaznamenat aktivitu",
   "activityLog_logFailed": "Nepodařilo se zaznamenat aktivitu.",
   "activityLog_logged": "Aktivita zaznamenána",

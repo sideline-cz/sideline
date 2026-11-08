@@ -26,6 +26,9 @@ interface MakanickoPageProps {
   activityStats: ActivityStatsApi.ActivityStatsResponse;
   activityLogs: ReadonlyArray<ActivityLogApi.ActivityLogEntry>;
   seasons: ReadonlyArray<ActivityLogApi.ActivitySeason>;
+  // listLogs failed: the log card shows an error with Retry
+  activityLogsError?: boolean;
+  onRetry?: () => void;
   // `undefined` = default view (current season, or "No active season")
   season: string | undefined;
   onSeasonChange: (season: string | undefined) => void;
@@ -61,6 +64,8 @@ export function MakanickoPage({
   activityStats,
   activityLogs,
   seasons,
+  activityLogsError = false,
+  onRetry,
   season,
   onSeasonChange,
   canViewTeamActivity,
@@ -115,6 +120,8 @@ export function MakanickoPage({
               logs={activityLogs}
               isOwnProfile={true}
               isPastPeriod={isPastPeriod}
+              loadError={activityLogsError}
+              onRetry={onRetry}
               activityTypes={activityTypes}
               onCreateLog={onCreateLog}
               onUpdateLog={onUpdateLog}

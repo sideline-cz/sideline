@@ -20,6 +20,8 @@ import type { Client } from '~/lib/runtime';
 import { ApiClient, ClientError, SilentClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
+const emptyLogs = new ActivityLogApi.ActivityLogListResponse({ logs: [], seasons: [] });
+
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$memberId')({
   ssr: false,
   validateSearch: validateSeasonSearch,
@@ -49,12 +51,15 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
               activityLogs: api.activityLog
                 .listLogs({ params: { teamId, memberId }, query: { season } })
                 .pipe(
+                  Effect.map((list) => ({ list, failed: false })),
                   Effect.tapError((e) => Effect.logWarning('Failed to load activity logs', e)),
-                  Effect.catch(() =>
-                    Effect.succeed(
-                      new ActivityLogApi.ActivityLogListResponse({ logs: [], seasons: [] }),
-                    ),
-                  ),
+                  // No access to this member's logs is not a failure: keep the empty card
+                  Effect.catchTags({
+                    ActivityLogForbidden: () => Effect.succeed({ list: emptyLogs, failed: false }),
+                    ActivityLogMemberNotFound: () =>
+                      Effect.succeed({ list: emptyLogs, failed: false }),
+                  }),
+                  Effect.catch(() => Effect.succeed({ list: emptyLogs, failed: true })),
                 ),
               activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),
               rating: canEdit
@@ -75,6 +80,8 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
               // listLogs succeeds for every member:view holder, so it cannot tell "own profile"
               Effect.map((data) => ({
                 ...data,
+                activityLogs: data.activityLogs.list,
+                activityLogsError: data.activityLogs.failed,
                 isOwnProfile: data.player.userId === context.user.id,
               })),
             );
@@ -99,6 +106,7 @@ function MemberDetailRoute() {
     roles: roleListResponse,
     activityStats,
     activityLogs,
+    activityLogsError,
     activityTypes: fetchedActivityTypes,
     rating,
     rosterList,
@@ -462,6 +470,7 @@ function MemberDetailRoute() {
       achievements={activityStats.achievements}
       isOwnProfile={isOwnProfile}
       activityLogs={activityLogs}
+      activityLogsError={activityLogsError}
       season={season}
       onSeasonChange={handleSeasonChange}
       isActivityPending={isPending}

@@ -128,6 +128,8 @@ interface PlayerDetailPageProps {
   achievements: ReadonlyArray<{ slug: Achievement.AchievementSlug; earned_at: string }>;
   isOwnProfile: boolean;
   activityLogs: ActivityLogApi.ActivityLogListResponse;
+  // listLogs failed for a real reason (not 403/404): the log card shows an error with Retry
+  activityLogsError?: boolean;
   // `undefined` = default view (current season, or "No active season")
   season: string | undefined;
   onSeasonChange: (season: string | undefined) => void;
@@ -191,6 +193,7 @@ export function PlayerDetailPage({
   achievements,
   isOwnProfile,
   activityLogs,
+  activityLogsError = false,
   season,
   onSeasonChange,
   isActivityPending = false,
@@ -599,7 +602,7 @@ export function PlayerDetailPage({
             <SeasonInfoLine seasons={seasons} value={season} />
             <ActivityStatsCard
               stats={activityStats}
-              isOwnProfile={isOwnProfile && !isPastPeriod}
+              isOwnProfile={isOwnProfile && !isPastPeriod && !activityLogsError}
               onLogActivity={handleFocusActivityLog}
               hideCurrentStreak={isPastPeriod}
             />
@@ -638,6 +641,8 @@ export function PlayerDetailPage({
             logs={activityLogs.logs}
             isOwnProfile={isOwnProfile}
             isPastPeriod={isPastPeriod}
+            loadError={activityLogsError}
+            onRetry={onRefresh}
             activityTypes={activityTypes}
             onCreateLog={onCreateLog}
             onUpdateLog={onUpdateLog}
