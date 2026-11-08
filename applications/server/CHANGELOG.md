@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.82.0
+
+### 🚀 Features
+- season-scoped workout tracking, shared member logs, team activity matrix (#801)
+
 ## 0.81.0
 
 ### 🚀 Features
