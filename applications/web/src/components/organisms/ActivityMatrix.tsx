@@ -46,6 +46,9 @@ export function ActivityMatrix({ teamId, days, rows, busy = false }: ActivityMat
   const cellRefs = React.useRef(new Map<string, HTMLElement>());
   // Roving tabindex: the whole day area is one tab stop (initially today in row 1)
   const [active, setActive] = React.useState({ r: 0, c: todayIndex });
+  // Clamp at render: `rows` change per group filter and must never leave the grid without a tab stop
+  const activeR = Math.max(0, Math.min(active.r, rows.length - 1));
+  const activeC = Math.max(0, Math.min(active.c, todayIndex));
 
   // Today is the rightmost column: show it on a phone without a swipe
   React.useEffect(() => {
@@ -89,7 +92,7 @@ export function ActivityMatrix({ teamId, days, rows, busy = false }: ActivityMat
   const cellProps = (r: number, c: number) => ({
     'data-r': r,
     'data-c': c,
-    tabIndex: active.r === r && active.c === c ? 0 : -1,
+    tabIndex: activeR === r && activeC === c ? 0 : -1,
     ref: (el: HTMLElement | null) => {
       if (el) cellRefs.current.set(`${r}:${c}`, el);
       else cellRefs.current.delete(`${r}:${c}`);

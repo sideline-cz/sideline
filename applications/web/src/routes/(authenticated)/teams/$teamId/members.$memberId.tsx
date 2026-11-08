@@ -1,6 +1,6 @@
 import type { Auth, GroupApi } from '@sideline/domain';
 import {
-  ActivityLog,
+  type ActivityLog,
   ActivityLogApi,
   type ActivityType,
   GroupModel,
@@ -15,24 +15,20 @@ import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import type { PlayerEditValues } from '~/components/pages/PlayerDetailPage';
 import { PlayerDetailPage } from '~/components/pages/PlayerDetailPage';
+import { isUnknownSeason, toSeasonSearch, validateSeasonSearch } from '~/lib/activitySeason.js';
 import type { Client } from '~/lib/runtime';
 import { ApiClient, ClientError, SilentClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
-const MemberSearchSchema = Schema.Struct({
-  season: Schema.optional(Schema.String),
-});
-
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$memberId')({
   ssr: false,
-  validateSearch: Schema.toStandardSchemaV1(MemberSearchSchema),
+  validateSearch: validateSeasonSearch,
   component: MemberDetailRoute,
   loaderDeps: ({ search }) => ({ season: search.season }),
   loader: async ({ params, context, deps }) => {
     const teamId = Schema.decodeSync(Team.TeamId)(params.teamId);
     const memberId = Schema.decodeSync(TeamMember.TeamMemberId)(params.memberId);
-    // Invalid value = None = default view, never an error page
-    const season = Schema.decodeUnknownOption(ActivityLog.ActivitySeasonFilter)(deps.season);
+    const season = Option.fromUndefinedOr(deps.season);
     return ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.auth.myTeams().pipe(
@@ -116,10 +112,17 @@ function MemberDetailRoute() {
   const isPending = useRouterState({ select: (s) => s.status === 'pending' });
   const handleSeasonChange = React.useCallback(
     (v: string | undefined) => {
-      navigate({ search: (prev) => ({ ...prev, season: v }) });
+      navigate({ search: (prev) => ({ ...prev, season: toSeasonSearch(v) }) });
     },
     [navigate],
   );
+  // A well-formed id outside the loaded seasons has no picker option; fall back to the default.
+  const loadedSeasons = activityLogs.seasons;
+  React.useEffect(() => {
+    if (isUnknownSeason(loadedSeasons, season)) {
+      navigate({ search: (prev) => ({ ...prev, season: undefined }), replace: true });
+    }
+  }, [loadedSeasons, season, navigate]);
   const roles = roleListResponse.roles;
 
   const memberRosterIds = new Set(memberRosters.map((r: Roster.RosterInfo) => r.rosterId));

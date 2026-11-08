@@ -2,7 +2,7 @@
 // ActivityMatrixResponse fields the page passes down).
 
 import { ActivityLogApi, type Team, type TeamMember } from '@sideline/domain';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { Option } from 'effect';
 import type React from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -84,5 +84,28 @@ describe('ActivityMatrix', () => {
   it('empty day has no button', () => {
     renderMatrix();
     expect(within(rowOf(/Eva Svobodová/)).queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('keeps one tab stop when the rows shrink under the focused row', () => {
+    const teamId = '00000000-0000-0000-0000-0000000000aa' as Team.TeamId;
+    const many = Array.from(
+      { length: 5 },
+      (_, i) =>
+        new ActivityLogApi.ActivityMatrixRow({
+          memberId: `00000000-0000-0000-0000-00000000001${i}` as TeamMember.TeamMemberId,
+          displayName: `Member ${i}`,
+          cells: [],
+        }),
+    );
+    const { container, rerender } = render(
+      <ActivityMatrix teamId={teamId} days={days} rows={many} />,
+    );
+    const cell = container.querySelector<HTMLElement>('[data-r="4"][data-c="2"]');
+    if (!cell) throw new Error('no cell in row 4');
+    act(() => cell.focus());
+    expect(cell.getAttribute('tabindex')).toBe('0');
+
+    rerender(<ActivityMatrix teamId={teamId} days={days} rows={many.slice(0, 2)} />);
+    expect(container.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
   });
 });

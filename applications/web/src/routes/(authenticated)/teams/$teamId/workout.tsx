@@ -1,26 +1,22 @@
 import type { ActivityLogApi, ActivityStatsApi, ActivityType } from '@sideline/domain';
-import { ActivityLog, Team, TeamMember } from '@sideline/domain';
+import { type ActivityLog, Team, TeamMember } from '@sideline/domain';
 import { createFileRoute, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { MakanickoPage } from '~/components/pages/MakanickoPage.js';
+import { isUnknownSeason, toSeasonSearch, validateSeasonSearch } from '~/lib/activitySeason.js';
 import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
-const WorkoutSearchSchema = Schema.Struct({
-  season: Schema.optional(Schema.String),
-});
-
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
   ssr: false,
-  validateSearch: Schema.toStandardSchemaV1(WorkoutSearchSchema),
+  validateSearch: validateSeasonSearch,
   component: MakanickoRoute,
   loaderDeps: ({ search }) => ({ season: search.season }),
   loader: async ({ params, context, deps }) => {
     const teamId = Schema.decodeSync(Team.TeamId)(params.teamId);
     const userId = context.user?.id;
-    // Invalid value = None = default view, never an error page
-    const season = Schema.decodeUnknownOption(ActivityLog.ActivitySeasonFilter)(deps.season);
+    const season = Option.fromUndefinedOr(deps.season);
     const canViewTeamActivity =
       context.teams.find((t) => t.teamId === params.teamId)?.permissions.includes('member:view') ??
       false;
@@ -106,10 +102,17 @@ function MakanickoRoute() {
   const isPending = useRouterState({ select: (s) => s.status === 'pending' });
   const handleSeasonChange = React.useCallback(
     (v: string | undefined) => {
-      navigate({ search: (prev) => ({ ...prev, season: v }) });
+      navigate({ search: (prev) => ({ ...prev, season: toSeasonSearch(v) }) });
     },
     [navigate],
   );
+  // A well-formed id outside the loaded seasons has no picker option; fall back to the default.
+  const loadedSeasons = data?.seasons;
+  React.useEffect(() => {
+    if (loadedSeasons && isUnknownSeason(loadedSeasons, season)) {
+      navigate({ search: (prev) => ({ ...prev, season: undefined }), replace: true });
+    }
+  }, [loadedSeasons, season, navigate]);
 
   const memberId = React.useMemo(
     () => (data?.memberId ? Schema.decodeSync(TeamMember.TeamMemberId)(data.memberId) : null),
