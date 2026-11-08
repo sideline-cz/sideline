@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.73.0
+
+### 🚀 Features
+- workout page for one member (#805)
+
 ## 0.72.0
 
 ### 🚀 Features
