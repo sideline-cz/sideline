@@ -287,9 +287,8 @@ describe('activity visibility and seasons', () => {
     expect(othersLogs.status).toBe(403);
     expect(othersLogs.body._tag).toBe('ActivityLogForbidden');
 
-    // ActivityStatsApi errors carry no HttpApiSchema.status, so the wire status is not 403; the
-    // tag is the contract here.
     const othersStats = await get('c', statsPath(f, f.members.b));
+    expect(othersStats.status).toBe(403);
     expect(othersStats.body._tag).toBe('ActivityStatsForbidden');
 
     expect((await get('c', matrixPath(f))).status).toBe(403);

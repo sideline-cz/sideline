@@ -28,7 +28,8 @@ const formatDateInTimeZone = (date: Date, timeZone: string): string => {
 };
 
 const forbidden = new DashboardApi.Forbidden();
-const allTimeframe: Leaderboard.LeaderboardTimeframe = 'all';
+// The dashboard widget shows the current season, same numbers as the workout page.
+const currentSeasonScope = 'current';
 
 export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers) =>
   Effect.Do.pipe(
@@ -72,8 +73,12 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
           // Fetch leaderboard data and activity stats in parallel
           Effect.bind('leaderboardAndStats', ({ membership }) =>
             Effect.all({
-              leaderboardRows: leaderboardRepo.getLeaderboard(teamId, Option.none(), allTimeframe),
-              activityRows: activityLogs.findByTeamMember(membership.id),
+              leaderboardRows: leaderboardRepo.getLeaderboard(
+                teamId,
+                Option.none(),
+                currentSeasonScope,
+              ),
+              activityRows: activityLogs.findByTeamMember(membership.id, currentSeasonScope),
             }),
           ),
           // Build the response

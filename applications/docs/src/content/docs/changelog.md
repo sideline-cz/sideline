@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-11-08 — New: activity stats follow seasons, and teammates can see activity
+
+Your activity stats, streaks and the leaderboard now count the **current season**. Use the season picker on the **Activity** tab to look at a past season, or at **Earlier** for anything outside a season. Because seasons only started in October 2026, most of your history shows up under **Earlier** at first. The `/makanicko stats` and `/makanicko leaderboard` commands and the dashboard numbers follow the current season too.
+
+- Teammates with the member-view permission can now see your log entries (type, date, duration) and a new **Team activity** matrix of the last 30 days. They never see your notes; only you do.
+- Your own logs and stats need no special permission.
+- API integrators: `season` query param (`earlier` or a season id) on activity logs, stats and leaderboard; the log list gains `seasons`; new `GET /teams/:teamId/activity-matrix`; activity stats errors are now `403` (`ActivityStatsForbidden`) and `404` (`ActivityStatsMemberNotFound`).
+
 ## 2026-10-31 — New: recurring events can repeat monthly
 
 Event series can now repeat **monthly by date** (one day of the month; 29, 30 and 31 fall on the last day of shorter months) or **monthly by weekday** (1st to 4th, or last, weekday of the month). A monthly series always creates at least its next occurrence, even beyond the event generation horizon. A monthly series' day can't be edited after creation.

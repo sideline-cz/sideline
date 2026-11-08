@@ -186,7 +186,7 @@ export const ActivityRpcLive = Effect.Do.pipe(
               ? Effect.void
               : Effect.fail(new ActivityRpcModels.ActivityMemberNotFound()),
           ),
-          Effect.bind('rows', ({ member }) => activityLogs.findByTeamMember(member.id)),
+          Effect.bind('rows', ({ member }) => activityLogs.findByTeamMember(member.id, 'current')),
           Effect.map(({ rows }) => {
             const stats = ActivityStats.calculateStats(rows, ActivityStats.todayInPrague());
             return new ActivityRpcModels.GetStatsResult({
@@ -249,7 +249,7 @@ export const ActivityRpcLive = Effect.Do.pipe(
               : Effect.fail(new ActivityRpcModels.ActivityMemberNotFound()),
           ),
           Effect.bind('rows', ({ team }) =>
-            leaderboardRepo.getLeaderboard(team.id, Option.none(), 'all'),
+            leaderboardRepo.getLeaderboard(team.id, Option.none(), 'current'),
           ),
           Effect.map(({ member, rows }) => {
             const today = ActivityStats.todayInPrague();

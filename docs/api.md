@@ -647,7 +647,7 @@ Returns a summary view for the authenticated user within a team: upcoming events
 |---|---|---|
 | `currentStreak` | `integer` | Current consecutive-day activity streak |
 | `longestStreak` | `integer` | Longest streak ever achieved |
-| `totalActivities` | `integer` | Total number of activity log entries |
+| `totalActivities` | `integer` | Number of activity log entries in the current season |
 | `totalDurationMinutes` | `integer` | Total time logged across all activities |
 | `leaderboardRank` | `integer \| null` | Current rank on the team leaderboard |
 | `leaderboardTotal` | `integer` | Total number of members on the leaderboard |
@@ -2925,9 +2925,11 @@ Activity logs track physical activities for individual members. Entries can be c
 
 #### `GET /teams/:teamId/members/:memberId/activity-logs`
 
-Lists all activity log entries for a member.
+Lists activity log entries for a member, scoped to one season.
 
 **Auth:** Bearer token (AuthMiddleware)
+
+**Required Permission:** none for your own logs; `member:view` to read another member's logs (otherwise `ActivityLogForbidden`). Entries of other members are returned with `note` always `null` — notes never leave the server for anyone but the author.
 
 **Path Parameters:**
 
@@ -2936,11 +2938,20 @@ Lists all activity log entries for a member.
 | `teamId` | `TeamId` (string) | Team ID |
 | `memberId` | `TeamMemberId` (string) | Member ID |
 
+**Query Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `season` | `"earlier" \| uuid` | No | Season to list (default: the current season). `earlier` = logs outside any season (before the first season or in a gap). A non-UUID value returns 400. |
+
 **Response:** `200 OK` — `ActivityLogListResponse`
 
 | Field | Type | Description |
 |---|---|---|
-| `logs` | `ActivityLogEntry[]` | Log entries |
+| `logs` | `ActivityLogEntry[]` | Log entries in the selected season |
+| `seasons` | `ActivitySeason[]` | Seasons that have started, newest first (future seasons excluded) |
+
+`ActivitySeason`: `id` (uuid), `startsAt` (ISO 8601), `endsAt` (string or null: `expires_at`, else the next season's `starts_at`, else null when open), `isCurrent` (boolean).
 
 `ActivityLogEntry`:
 
@@ -2960,7 +2971,31 @@ Lists all activity log entries for a member.
 | Tag | Status | When |
 |---|---|---|
 | `ActivityLogMemberNotFound` | 404 | Member does not exist |
-| `ActivityLogForbidden` | 403 | Not authorized to view this member's logs |
+| `ActivityLogForbidden` | 403 | Viewing another member's logs without `member:view` |
+
+---
+
+#### `GET /teams/:teamId/activity-matrix`
+
+Team activity matrix: who logged what on each of the last 30 days. Never includes notes.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Required Permission:** `member:view` (otherwise `ActivityLogForbidden`, 403)
+
+**Query Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `group` | `GroupId` (UUID) | No | Only members of this group. A group from another team yields `rows: []`; a non-UUID returns 400. |
+
+**Response:** `200 OK` — `ActivityMatrixResponse`
+
+| Field | Type | Description |
+|---|---|---|
+| `days` | `string[]` | 30 `YYYY-MM-DD` Europe/Prague days, oldest first, today last (fixed window) |
+| `rows` | `ActivityMatrixRow[]` | One per active member: `memberId`, `displayName`, `cells[]` (only days with a log: `date`, `entries[]` of `activityTypeName`, `activityTypeEmoji`, `totalMinutes`) |
+| `groups` | `ActivityMatrixGroup[]` | Groups usable as filter: `groupId`, `name`, `emoji` |
 
 ---
 
@@ -3241,9 +3276,11 @@ Deletes a team-specific activity type. Built-in types and types with existing lo
 
 #### `GET /teams/:teamId/members/:memberId/activity-stats`
 
-Returns aggregated activity statistics for a specific member.
+Returns aggregated activity statistics for a specific member, scoped to one season.
 
 **Auth:** Bearer token (AuthMiddleware)
+
+**Required Permission:** none for your own stats; `member:view` for another member's.
 
 **Path Parameters:**
 
@@ -3251,6 +3288,12 @@ Returns aggregated activity statistics for a specific member.
 |---|---|---|
 | `teamId` | `TeamId` (string) | Team ID |
 | `memberId` | `TeamMemberId` (string) | Member ID |
+
+**Query Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `season` | `"earlier" \| uuid` | No | Season to aggregate (default: the current season). Totals and streaks are computed inside it. |
 
 **Response:** `200 OK` — `ActivityStatsResponse`
 
@@ -3268,7 +3311,7 @@ Returns aggregated activity statistics for a specific member.
 | Tag | Status | When |
 |---|---|---|
 | `ActivityStatsMemberNotFound` | 404 | Member does not exist |
-| `ActivityStatsForbidden` | 403 | Not authorized to view this member's stats |
+| `ActivityStatsForbidden` | 403 | Viewing another member's stats without `member:view` |
 
 ---
 
@@ -3298,7 +3341,8 @@ Returns the activity leaderboard for a team. Members are ranked by total activit
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `timeframe` | `"all" \| "week"` | No | Filter by time window (default: `"all"`) |
+| `timeframe` | `"all" \| "week"` | No | Filter by time window. When absent, `season` applies. |
+| `season` | `"earlier" \| uuid` | No | Season to rank; used only when `timeframe` is absent. Absent too = the current season. `timeframe=all` is lifetime. |
 | `activityTypeId` | `ActivityTypeId` (string) | No | Filter by a specific activity type |
 
 **Response:** `200 OK` — `LeaderboardResponse`

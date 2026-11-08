@@ -2680,3 +2680,14 @@ Rules:
 1. **`PROFILE_GATE_ENABLED` defaults ON, deliberately.** It is a global incident lever to kill the profile gate for every team at once; no team is affected until its captain flips the per-team column. Do not "align" it with the two flags above.
 2. **`PROFILE_GATE_FALSY` must never contain `''`.** `parseDiscordJoinEnforcementEnabled` puts `''` in its falsy set because its safe direction is disabled. `parseProfileGateEnabled`'s safe direction is enabled, so `''` must fall through to the unrecognised-value branch (which warns and returns `true`). Adding `''` to the falsy set makes an unset variable read as `false` and silently inverts the default with no test failure anywhere except `test/env.profileGate.test.ts`.
 3. **A new boolean flag states its safe direction first, then builds the truthy/falsy sets to match** — and gets a `test/env.<flag>.test.ts` asserting the unset, empty-string, and unrecognised-value cases explicitly. `test/env.profileGate.test.ts` is the reference.
+
+## Activity Log Seasons Are Trigger-Owned
+
+`activity_logs.season_id` is derived by the database; never set it from application code.
+
+1. **Only `activity_logs_set_season_trg` writes `season_id`** (BEFORE INSERT / UPDATE OF `logged_at`). A supplied value is overwritten. It is stable at write: an UPDATE that keeps `logged_at` (a note-only edit) does not re-derive it, and season date edits never rewrite existing logs.
+2. **Season membership compares Prague dates** via `season_at(team_id, ts)`, not instants. Do not reimplement it in TypeScript or SQL.
+3. **"Current" means `current_season_id(team_id)`, never `governing_season_id`** (which may return a future season for plan selection).
+4. **Scope reads with `seasonScopeFilter` + `resolveScope`.** Normalize the current season's id to the default so `?season=<current id>` equals no param. NULL season = "earlier".
+5. **The streak subquery alias is `al2`.** Binding the `activity_dates` subquery to the outer `al` (or leaving it unscoped) leaks lifetime dates into per-season streaks.
+6. **Other members' notes never leave the server.** Strip `note` in the handler for any log whose owner is not the caller; the matrix never selects it.
