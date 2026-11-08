@@ -226,7 +226,8 @@ const MockInactiveMemberProvideLayer = Layer.mergeAll(
   MockActivityLogsRepositoryLayer,
 );
 
-// --- Handler logic (mirrors actual API handler) ---
+// --- Handler logic (own-profile path only; the cross-member read rule is tested in
+// integration/api/activityVisibility.test.ts) ---
 
 const listLogs = (payload: {
   teamId: Team.TeamId;
@@ -272,6 +273,7 @@ const listLogs = (payload: {
                 source: l.source,
               }),
           ),
+          seasons: [],
         }),
     ),
   );
@@ -482,26 +484,6 @@ describe('listLogs handler', () => {
           expect(result.logs[1].activityTypeId).toBe(RUNNING_TYPE_ID);
           expect(Option.isNone(result.logs[1].durationMinutes)).toBe(true);
           expect(Option.isNone(result.logs[1].note)).toBe(true);
-        }),
-      ),
-      Effect.provide(MockProvideLayer),
-      Effect.asVoid,
-    ),
-  );
-
-  it.effect('returns 403 when memberId is not current user', () =>
-    listLogs({
-      teamId: TEST_TEAM_ID,
-      memberId: TEST_OTHER_MEMBER_ID,
-      currentUserId: TEST_USER_ID,
-    }).pipe(
-      Effect.result,
-      Effect.tap((result) =>
-        Effect.sync(() => {
-          expect(Result.isFailure(result)).toBe(true);
-          if (Result.isFailure(result)) {
-            expect(result.failure._tag).toBe('ActivityLogForbidden');
-          }
         }),
       ),
       Effect.provide(MockProvideLayer),

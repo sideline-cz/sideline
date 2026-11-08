@@ -1,7 +1,8 @@
 import { Schema } from 'effect';
-import { HttpApiEndpoint, HttpApiGroup } from 'effect/unstable/httpapi';
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import * as Achievement from '~/models/Achievement.js';
+import { ActivitySeasonFilter } from '~/models/ActivityLog.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
@@ -37,7 +38,11 @@ export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()('ActivitySta
 export class ActivityStatsApiGroup extends HttpApiGroup.make('activityStats').add(
   HttpApiEndpoint.get('getMemberStats', '/teams/:teamId/members/:memberId/activity-stats', {
     success: ActivityStatsResponse,
-    error: [MemberNotFound, Forbidden],
+    error: [
+      MemberNotFound.pipe(HttpApiSchema.status(404)),
+      Forbidden.pipe(HttpApiSchema.status(403)),
+    ],
     params: { teamId: TeamId, memberId: TeamMemberId },
+    query: { season: Schema.OptionFromOptional(ActivitySeasonFilter) },
   }).middleware(AuthMiddleware),
 ) {}

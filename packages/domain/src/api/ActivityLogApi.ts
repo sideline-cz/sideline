@@ -1,9 +1,15 @@
 import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
-import { ActivityLogId, ActivitySource } from '~/models/ActivityLog.js';
+import {
+  ActivityLogId,
+  ActivitySeasonFilter,
+  ActivitySeasonId,
+  ActivitySource,
+} from '~/models/ActivityLog.js';
 import * as ActivityType from '~/models/ActivityType.js';
 import { ActivityTypeId } from '~/models/ActivityType.js';
+import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
@@ -18,10 +24,54 @@ export class ActivityLogEntry extends Schema.Class<ActivityLogEntry>('ActivityLo
   source: ActivitySource,
 }) {}
 
+export class ActivitySeason extends Schema.Class<ActivitySeason>('ActivitySeason')({
+  id: ActivitySeasonId,
+  startsAt: Schema.String,
+  // expires_at, else the next season's starts_at, else None (open)
+  endsAt: Schema.OptionFromNullOr(Schema.String),
+  isCurrent: Schema.Boolean,
+}) {}
+
 export class ActivityLogListResponse extends Schema.Class<ActivityLogListResponse>(
   'ActivityLogListResponse',
 )({
   logs: Schema.Array(ActivityLogEntry),
+  // Seasons that started, newest first
+  seasons: Schema.Array(ActivitySeason),
+}) {}
+
+export class ActivityMatrixEntry extends Schema.Class<ActivityMatrixEntry>('ActivityMatrixEntry')({
+  activityTypeName: Schema.String,
+  activityTypeEmoji: Schema.OptionFromNullOr(ActivityType.ActivityTypeEmoji),
+  totalMinutes: Schema.OptionFromNullOr(Schema.Int),
+}) {}
+
+export class ActivityMatrixCell extends Schema.Class<ActivityMatrixCell>('ActivityMatrixCell')({
+  // YYYY-MM-DD, Europe/Prague
+  date: Schema.String,
+  entries: Schema.Array(ActivityMatrixEntry),
+}) {}
+
+export class ActivityMatrixRow extends Schema.Class<ActivityMatrixRow>('ActivityMatrixRow')({
+  memberId: TeamMemberId,
+  displayName: Schema.String,
+  // Only days with at least one log
+  cells: Schema.Array(ActivityMatrixCell),
+}) {}
+
+export class ActivityMatrixGroup extends Schema.Class<ActivityMatrixGroup>('ActivityMatrixGroup')({
+  groupId: GroupId,
+  name: Schema.String,
+  emoji: Schema.OptionFromNullOr(Schema.String),
+}) {}
+
+export class ActivityMatrixResponse extends Schema.Class<ActivityMatrixResponse>(
+  'ActivityMatrixResponse',
+)({
+  // 30 Prague days, oldest first, today last
+  days: Schema.Array(Schema.String),
+  rows: Schema.Array(ActivityMatrixRow),
+  groups: Schema.Array(ActivityMatrixGroup),
 }) {}
 
 export const LoggedAtDate = Schema.String.pipe(
@@ -86,6 +136,18 @@ export class ActivityLogApiGroup extends HttpApiGroup.make('activityLog')
         Forbidden.pipe(HttpApiSchema.status(403)),
       ],
       params: { teamId: TeamId, memberId: TeamMemberId },
+      query: { season: Schema.OptionFromOptional(ActivitySeasonFilter) },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get('getActivityMatrix', '/teams/:teamId/activity-matrix', {
+      success: ActivityMatrixResponse,
+      error: Forbidden.pipe(HttpApiSchema.status(403)),
+      params: { teamId: TeamId },
+      query: {
+        // UUID check: a bad id is a 400, not a 22P02 -> 500
+        group: Schema.OptionFromOptional(GroupId.pipe(Schema.check(Schema.isUUID()))),
+      },
     }).middleware(AuthMiddleware),
   )
   .add(
