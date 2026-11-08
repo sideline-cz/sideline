@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.71.0
+
+### 🚀 Features
+- season-scoped workout tracking, shared member logs, team activity matrix (#801)
+
 ## 0.70.0
 
 ### 🚀 Features
