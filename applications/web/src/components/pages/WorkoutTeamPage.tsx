@@ -31,7 +31,8 @@ export function WorkoutTeamPage({
   isPending = false,
 }: WorkoutTeamPageProps) {
   const rows = matrix?.rows ?? [];
-  const hasActivity = rows.some((r) => r.cells.length > 0);
+  // Only members who logged something in the window get a row
+  const activeRows = rows.filter((r) => r.cells.length > 0);
   // Server days are Prague dates, today last: never the browser clock
   const lastDay = matrix?.days.at(-1);
   const todayDay = lastDay === undefined ? '' : Number(lastDay.slice(8, 10));
@@ -102,7 +103,7 @@ export function WorkoutTeamPage({
             </Button>
           ) : null}
         </div>
-      ) : !hasActivity ? (
+      ) : activeRows.length === 0 ? (
         <div className='flex flex-col items-center justify-center gap-2 py-10 text-center'>
           <Activity className='size-8 text-muted-foreground' aria-hidden='true' />
           <p className='font-medium'>{tr('makanicko_matrix_empty_title')}</p>
@@ -112,7 +113,7 @@ export function WorkoutTeamPage({
         <Card
           className={`min-w-0 overflow-hidden p-0${isPending ? ' opacity-60 transition-opacity' : ''}`}
         >
-          <ActivityMatrix teamId={teamId} days={matrix.days} rows={rows} busy={isPending} />
+          <ActivityMatrix teamId={teamId} days={matrix.days} rows={activeRows} busy={isPending} />
         </Card>
       )}
     </div>

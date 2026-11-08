@@ -134,7 +134,12 @@ export function MakanickoPage({
         <div className='lg:sticky lg:top-20 lg:self-start'>
           <Card className={busy} aria-busy={isPending}>
             <CardContent className='pt-6'>
-              <LeaderboardPage entries={leaderboardEntries} currentUserId={currentUserId} />
+              <LeaderboardPage
+                teamId={teamId}
+                entries={leaderboardEntries}
+                currentUserId={currentUserId}
+                canViewMembers={canViewTeamActivity}
+              />
             </CardContent>
           </Card>
         </div>

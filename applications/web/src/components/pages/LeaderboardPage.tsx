@@ -1,9 +1,13 @@
 import type { LeaderboardApi } from '@sideline/domain';
+import { Link } from '@tanstack/react-router';
 import { tr } from '~/lib/translations.js';
 
 interface LeaderboardPageProps {
+  teamId: string;
   entries: ReadonlyArray<LeaderboardApi.LeaderboardEntry>;
   currentUserId: string;
+  // The member page needs member:view; without it rows stay plain
+  canViewMembers: boolean;
 }
 
 const formatDuration = (minutes: number): string => {
@@ -48,7 +52,12 @@ function RankBadge({ rank }: RankBadgeProps) {
   );
 }
 
-export function LeaderboardPage({ entries, currentUserId }: LeaderboardPageProps) {
+export function LeaderboardPage({
+  teamId,
+  entries,
+  currentUserId,
+  canViewMembers,
+}: LeaderboardPageProps) {
   if (entries.length === 0) {
     return (
       <div>
@@ -65,15 +74,13 @@ export function LeaderboardPage({ entries, currentUserId }: LeaderboardPageProps
       <div className='flex flex-col gap-2'>
         {entries.map((entry) => {
           const isCurrentUser = entry.userId === currentUserId;
-          return (
-            <div
-              key={entry.teamMemberId}
-              className={`flex items-center gap-3 rounded-lg border p-3 ${
-                isCurrentUser
-                  ? 'border-primary/40 bg-primary/5 dark:border-primary/30 dark:bg-primary/10'
-                  : 'border-border bg-card'
-              }`}
-            >
+          const rowClass = `flex items-center gap-3 rounded-lg border p-3 ${
+            isCurrentUser
+              ? 'border-primary/40 bg-primary/5 dark:border-primary/30 dark:bg-primary/10'
+              : 'border-border bg-card'
+          }`;
+          const content = (
+            <>
               <RankBadge rank={entry.rank} />
               <div className='flex-1 min-w-0'>
                 <p
@@ -90,6 +97,20 @@ export function LeaderboardPage({ entries, currentUserId }: LeaderboardPageProps
                 <p className='text-sm font-medium'>{entry.currentStreak}d</p>
                 <p className='text-xs text-muted-foreground'>{tr('leaderboard_currentStreak')}</p>
               </div>
+            </>
+          );
+          return canViewMembers ? (
+            <Link
+              key={entry.teamMemberId}
+              to='/teams/$teamId/members/$memberId'
+              params={{ teamId, memberId: entry.teamMemberId }}
+              className={`${rowClass} transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+            >
+              {content}
+            </Link>
+          ) : (
+            <div key={entry.teamMemberId} className={rowClass}>
+              {content}
             </div>
           );
         })}
