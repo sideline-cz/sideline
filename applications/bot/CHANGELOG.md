@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.56.0
+
+_No notable changes._
+
 ## 0.38.2
 
 ### 🐛 Fixes
