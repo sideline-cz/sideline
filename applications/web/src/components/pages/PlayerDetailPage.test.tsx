@@ -201,8 +201,8 @@ function makeActivityStats(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeActivityLogs(): { logs: ReadonlyArray<unknown> } {
-  return { logs: [] };
+function makeActivityLogs(): { logs: ReadonlyArray<unknown>; seasons: ReadonlyArray<unknown> } {
+  return { logs: [], seasons: [] };
 }
 
 function makeRoles(): ReadonlyArray<{
@@ -258,6 +258,8 @@ const baseProps = {
   canRemoveMember: false,
   achievements: [] as ReadonlyArray<{ slug: string; earned_at: string }>,
   activityLogs: makeActivityLogs(),
+  season: undefined,
+  onSeasonChange: vi.fn(),
   activityTypes: [],
   onSave: vi.fn().mockResolvedValue(undefined),
   onAssignRole: vi.fn().mockResolvedValue(undefined),

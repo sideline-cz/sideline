@@ -1,24 +1,35 @@
-import type { ActivityLog, ActivityLogApi, ActivityStatsApi, ActivityType } from '@sideline/domain';
-import { Team, TeamMember } from '@sideline/domain';
-import { createFileRoute, useRouter } from '@tanstack/react-router';
+import type { ActivityLogApi, ActivityStatsApi, ActivityType } from '@sideline/domain';
+import { ActivityLog, Team, TeamMember } from '@sideline/domain';
+import { createFileRoute, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { MakanickoPage } from '~/components/pages/MakanickoPage.js';
 import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
+const WorkoutSearchSchema = Schema.Struct({
+  season: Schema.optional(Schema.String),
+});
+
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
   ssr: false,
+  validateSearch: Schema.toStandardSchemaV1(WorkoutSearchSchema),
   component: MakanickoRoute,
-  loader: async ({ params, context }) => {
+  loaderDeps: ({ search }) => ({ season: search.season }),
+  loader: async ({ params, context, deps }) => {
     const teamId = Schema.decodeSync(Team.TeamId)(params.teamId);
     const userId = context.user?.id;
+    // Invalid value = None = default view, never an error page
+    const season = Schema.decodeUnknownOption(ActivityLog.ActivitySeasonFilter)(deps.season);
+    const canViewTeamActivity =
+      context.teams.find((t) => t.teamId === params.teamId)?.permissions.includes('member:view') ??
+      false;
     return ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         Effect.all({
           leaderboard: api.leaderboard.getLeaderboard({
             params: { teamId },
-            query: { timeframe: Option.none(), activityTypeId: Option.none() },
+            query: { timeframe: Option.none(), season, activityTypeId: Option.none() },
           }),
           members: api.roster.listMembers({ params: { teamId } }),
           activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),
@@ -29,7 +40,9 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
               activityTypes: typeof activityTypes;
               activityStats: ActivityStatsApi.ActivityStatsResponse | null;
               activityLogs: ReadonlyArray<ActivityLogApi.ActivityLogEntry>;
+              seasons: ReadonlyArray<ActivityLogApi.ActivitySeason>;
               memberId: TeamMember.TeamMemberId | null;
+              canViewTeamActivity: boolean;
             };
             const currentMember = members.find((member) => member.userId === userId);
             if (!currentMember) {
@@ -38,26 +51,37 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
                 activityTypes,
                 activityStats: null,
                 activityLogs: [],
+                seasons: [],
                 memberId: null,
+                canViewTeamActivity,
               });
             }
             const memberId = currentMember.memberId;
             return Effect.all({
-              activityStats: api.activityStats.getMemberStats({ params: { teamId, memberId } }),
-              activityLogs: api.activityLog.listLogs({ params: { teamId, memberId } }).pipe(
-                Effect.map((r) => r.logs),
-                Effect.catch(() =>
-                  Effect.succeed<ReadonlyArray<ActivityLogApi.ActivityLogEntry>>([]),
+              activityStats: api.activityStats.getMemberStats({
+                params: { teamId, memberId },
+                query: { season },
+              }),
+              list: api.activityLog
+                .listLogs({ params: { teamId, memberId }, query: { season } })
+                .pipe(
+                  Effect.tapError((e) => Effect.logWarning('Failed to load activity logs', e)),
+                  Effect.catch(() =>
+                    Effect.succeed<
+                      Pick<ActivityLogApi.ActivityLogListResponse, 'logs' | 'seasons'>
+                    >({ logs: [], seasons: [] }),
+                  ),
                 ),
-              ),
             }).pipe(
               Effect.map(
-                ({ activityStats, activityLogs }): WorkoutData => ({
+                ({ activityStats, list }): WorkoutData => ({
                   leaderboard,
                   activityTypes,
                   activityStats,
-                  activityLogs,
+                  activityLogs: list.logs,
+                  seasons: list.seasons,
                   memberId,
+                  canViewTeamActivity,
                 }),
               ),
             );
@@ -77,6 +101,15 @@ function MakanickoRoute() {
   const router = useRouter();
   const run = useRun();
   const data = Route.useLoaderData();
+  const { season } = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const isPending = useRouterState({ select: (s) => s.status === 'pending' });
+  const handleSeasonChange = React.useCallback(
+    (v: string | undefined) => {
+      navigate({ search: (prev) => ({ ...prev, season: v }) });
+    },
+    [navigate],
+  );
 
   const memberId = React.useMemo(
     () => (data?.memberId ? Schema.decodeSync(TeamMember.TeamMemberId)(data.memberId) : null),
@@ -200,6 +233,11 @@ function MakanickoRoute() {
       currentUserId={user.id}
       activityStats={data?.activityStats ?? defaultStats}
       activityLogs={data?.activityLogs ?? []}
+      seasons={data?.seasons ?? []}
+      season={season}
+      onSeasonChange={handleSeasonChange}
+      canViewTeamActivity={data?.canViewTeamActivity ?? false}
+      isPending={isPending}
       activityTypes={activityTypes}
       onCreateLog={handleCreateLog}
       onUpdateLog={handleUpdateLog}

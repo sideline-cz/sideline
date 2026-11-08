@@ -151,20 +151,23 @@ code {
 
 @media (pointer: coarse) {
   /* Ensure minimum 44x44px touch targets on touch devices */
-  button:not([role="switch"], [role="checkbox"]),
+  button:not([role="switch"], [role="checkbox"], [data-matrix-dot]),
   a[role="button"],
   [role="radio"] {
     min-height: 44px;
     min-width: 44px;
   }
   /* Switches and checkboxes are deliberately small: inflating the
-   * box turns a switch into a circle. Grow the tap target instead. */
+   * box turns a switch into a circle. Grow the tap target instead.
+   * Activity-matrix dots fill a fixed 2rem table column. */
   [role="switch"],
-  [role="checkbox"] {
+  [role="checkbox"],
+  [data-matrix-dot] {
     position: relative;
   }
   [role="switch"]::after,
-  [role="checkbox"]::after {
+  [role="checkbox"]::after,
+  [data-matrix-dot]::after {
     content: "";
     position: absolute;
     top: 50%;

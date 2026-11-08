@@ -36,6 +36,8 @@ const formatDate = (isoString: string): string => {
 interface ActivityLogListProps {
   logs: ReadonlyArray<ActivityLogApi.ActivityLogEntry>;
   isOwnProfile: boolean;
+  // A past season or Earlier is selected: empty copy points to other seasons, no "log first" CTA
+  isPastPeriod?: boolean;
   activityTypes: ReadonlyArray<ActivityTypeOption>;
   onCreateLog: (input: {
     activityTypeId: ActivityType.ActivityTypeId;
@@ -58,6 +60,7 @@ interface ActivityLogListProps {
 export function ActivityLogList({
   logs,
   isOwnProfile,
+  isPastPeriod = false,
   activityTypes,
   onCreateLog,
   onUpdateLog,
@@ -258,9 +261,18 @@ export function ActivityLogList({
       {logs.length === 0 ? (
         <div className='flex flex-col items-center justify-center gap-2 py-10 text-center'>
           <ClipboardList className='size-8 text-muted-foreground' aria-hidden='true' />
-          <p className='font-medium'>{tr('activityLog_empty_title')}</p>
-          <p className='text-sm text-muted-foreground'>{tr('activityLog_empty_body')}</p>
-          {isOwnProfile ? (
+          {isOwnProfile && !isPastPeriod ? (
+            <>
+              <p className='font-medium'>{tr('activityLog_empty_title')}</p>
+              <p className='text-sm text-muted-foreground'>{tr('activityLog_empty_body')}</p>
+            </>
+          ) : (
+            <>
+              <p className='font-medium'>{tr('activityLog_emptyPeriod_title')}</p>
+              <p className='text-sm text-muted-foreground'>{tr('activityLog_emptyPeriod_body')}</p>
+            </>
+          )}
+          {isOwnProfile && !isPastPeriod ? (
             <Button type='button' size='sm' className='mt-2' onClick={handleFocusLogActivity}>
               {tr('activityLog_empty_cta')}
             </Button>
@@ -292,15 +304,22 @@ export function ActivityLogList({
                       {log.source === 'auto' && (
                         <span className='text-xs text-muted-foreground italic'>(auto)</span>
                       )}
-                      {Option.isSome(log.durationMinutes) && (
+                      {Option.isSome(log.durationMinutes) && isOwnProfile && (
                         <span className='text-xs text-muted-foreground'>
                           {formatDuration(log.durationMinutes.value)}
                         </span>
                       )}
-                      {Option.isSome(log.note) && (
+                      {/* Second wall: the server strips other members' notes already */}
+                      {isOwnProfile && Option.isSome(log.note) && (
                         <span className='text-xs text-muted-foreground'>{log.note.value}</span>
                       )}
                     </div>
+                    {/* Read-only rows have no actions: durations line up on the right */}
+                    {!isOwnProfile && Option.isSome(log.durationMinutes) && (
+                      <span className='ml-auto text-xs text-muted-foreground tabular-nums'>
+                        {formatDuration(log.durationMinutes.value)}
+                      </span>
+                    )}
                     {isOwnProfile && log.source !== 'auto' && (
                       <div className='flex gap-1'>
                         <Button
