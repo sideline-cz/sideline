@@ -1,6 +1,7 @@
 import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
+import { ActivitySeasonFilter } from '~/models/ActivityLog.js';
 import { ActivityTypeId } from '~/models/ActivityType.js';
 import { LeaderboardTimeframe } from '~/models/Leaderboard.js';
 import { TeamId } from '~/models/Team.js';
@@ -35,6 +36,8 @@ export class LeaderboardApiGroup extends HttpApiGroup.make('leaderboard').add(
     params: { teamId: TeamId },
     query: {
       timeframe: Schema.OptionFromOptional(LeaderboardTimeframe),
+      // Used only when timeframe is absent; absent too = current season
+      season: Schema.OptionFromOptional(ActivitySeasonFilter),
       activityTypeId: Schema.OptionFromOptional(ActivityTypeId),
     },
   }).middleware(AuthMiddleware),

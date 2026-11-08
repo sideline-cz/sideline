@@ -269,7 +269,18 @@ async function setupApiMocks(page: Page) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ logs: [] }),
+        body: JSON.stringify({ logs: [], seasons: [] }),
+      });
+    }),
+  );
+
+  await page.route(
+    '**/teams/*/activity-matrix*',
+    apiOnly(async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mock.mockActivityMatrix),
       });
     }),
   );

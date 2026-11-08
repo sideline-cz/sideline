@@ -1,9 +1,11 @@
 import { type Achievement, ActivityStats, ActivityStatsApi } from '@sideline/domain';
+import { Options } from '@sideline/effect-lib';
 import { Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requirePermission, requireReadAccess } from '~/api/permissions.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
+import { resolveScope } from '~/repositories/activitySeasonScope.js';
 import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 
@@ -13,25 +15,22 @@ export const ActivityStatsApiLive = HttpApiBuilder.group(Api, 'activityStats', (
     Effect.bind('activityLogs', () => ActivityLogsRepository.asEffect()),
     Effect.bind('earnedAchievementsOpt', () => Effect.serviceOption(EarnedAchievementsRepository)),
     Effect.map(({ members, activityLogs, earnedAchievementsOpt }) =>
-      handlers.handle('getMemberStats', ({ params: { teamId, memberId } }) =>
+      handlers.handle('getMemberStats', ({ params: { teamId, memberId }, query }) =>
         Effect.Do.pipe(
           Effect.bind('membership', () =>
             requireReadAccess(members, teamId, new ActivityStatsApi.Forbidden()),
           ),
+          // Own stats need no member:view (same rule as listLogs). Others: permission, then 404.
           Effect.tap(({ membership }) =>
-            requirePermission(membership, 'member:view', new ActivityStatsApi.Forbidden()),
+            membership.id === memberId
+              ? Effect.void
+              : requirePermission(membership, 'member:view', new ActivityStatsApi.Forbidden()).pipe(
+                  Effect.andThen(members.findRosterMemberByIds(teamId, memberId)),
+                  Effect.flatMap(Options.toEffect(() => new ActivityStatsApi.MemberNotFound())),
+                ),
           ),
-          Effect.tap(() =>
-            members.findRosterMemberByIds(teamId, memberId).pipe(
-              Effect.flatMap(
-                Option.match({
-                  onNone: () => Effect.fail(new ActivityStatsApi.MemberNotFound()),
-                  onSome: Effect.succeed,
-                }),
-              ),
-            ),
-          ),
-          Effect.bind('rows', () => activityLogs.findByTeamMember(memberId)),
+          Effect.bind('scope', () => resolveScope(activityLogs, teamId, query.season)),
+          Effect.bind('rows', ({ scope }) => activityLogs.findByTeamMember(memberId, scope)),
           Effect.bind('achievementRows', () =>
             Option.match(earnedAchievementsOpt, {
               onNone: (): Effect.Effect<
@@ -43,10 +42,12 @@ export const ActivityStatsApiLive = HttpApiBuilder.group(Api, 'activityStats', (
               onSome: (repo) => repo.findByMember(memberId),
             }),
           ),
-          Effect.map(({ rows, achievementRows }) => {
+          // Achievements stay lifetime: they are earned once, not per season.
+          Effect.map(({ scope, rows, achievementRows }) => {
             const stats = ActivityStats.calculateStats(rows, ActivityStats.todayInPrague());
             return new ActivityStatsApi.ActivityStatsResponse({
-              currentStreak: stats.currentStreak,
+              // A past season or Earlier has no running streak.
+              currentStreak: scope === 'current' ? stats.currentStreak : 0,
               longestStreak: stats.longestStreak,
               totalActivities: stats.totalActivities,
               totalDurationMinutes: stats.totalDurationMinutes,

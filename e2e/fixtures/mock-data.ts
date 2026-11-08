@@ -516,3 +516,31 @@ export const mockLeaderboard = {
     },
   ],
 };
+
+// 30 Prague days, oldest first. Fixed dates: the mock only needs a full-width matrix.
+const MATRIX_DAYS = Array.from({ length: 30 }, (_, i) =>
+  new Date(Date.UTC(2026, 9, 10 + i)).toISOString().slice(0, 10),
+);
+
+const matrixEntry = (activityTypeName: string, totalMinutes: number | null) => ({
+  activityTypeName,
+  activityTypeEmoji: null,
+  totalMinutes,
+});
+
+export const mockActivityMatrix = {
+  days: MATRIX_DAYS,
+  rows: [
+    {
+      memberId: MEMBER_ID,
+      displayName: 'Jan Novák',
+      cells: [
+        { date: MATRIX_DAYS[3], entries: [matrixEntry('Gym', 60)] },
+        { date: MATRIX_DAYS[17], entries: [matrixEntry('Gym', 30), matrixEntry('Running', 15)] },
+        { date: MATRIX_DAYS[29], entries: [matrixEntry('Training', null)] },
+      ],
+    },
+    { memberId: 'test-member-00000002', displayName: 'Eva Svobodová', cells: [] },
+  ],
+  groups: [],
+};

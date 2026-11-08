@@ -18,6 +18,12 @@ import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { DirtyFieldLabel } from '~/components/molecules/DirtyFieldLabel.js';
 import { RoleBadge } from '~/components/molecules/RoleBadge.js';
+import {
+  isNonCurrentSelection,
+  SeasonInfoLine,
+  SeasonPicker,
+  seasonRangeLabel,
+} from '~/components/molecules/SeasonPicker.js';
 import { AchievementsGridI18n } from '~/components/organisms/AchievementsGrid.js';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList';
 import { ActivityStatsCard } from '~/components/organisms/ActivityStatsCard';
@@ -37,7 +43,15 @@ import {
 } from '~/components/ui/alert-dialog';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '~/components/ui/card';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '~/components/ui/card';
 import { DatePicker } from '~/components/ui/date-picker';
 import { Form, FormControl, FormField, FormItem, FormMessage } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
@@ -114,6 +128,12 @@ interface PlayerDetailPageProps {
   achievements: ReadonlyArray<{ slug: Achievement.AchievementSlug; earned_at: string }>;
   isOwnProfile: boolean;
   activityLogs: ActivityLogApi.ActivityLogListResponse;
+  // listLogs failed for a real reason (not 403/404): the log card shows an error with Retry
+  activityLogsError?: boolean;
+  // `undefined` = default view (current season, or "No active season")
+  season: string | undefined;
+  onSeasonChange: (season: string | undefined) => void;
+  isActivityPending?: boolean;
   activityTypes: ReadonlyArray<ActivityTypeOption>;
   rating?: PlayerRatingApi.MemberRatingResponse;
   teamMemberId?: string;
@@ -173,6 +193,10 @@ export function PlayerDetailPage({
   achievements,
   isOwnProfile,
   activityLogs,
+  activityLogsError = false,
+  season,
+  onSeasonChange,
+  isActivityPending = false,
   activityTypes,
   rating,
   teamMemberId,
@@ -267,6 +291,12 @@ export function PlayerDetailPage({
   );
 
   const activityLogCardRef = React.useRef<HTMLDivElement>(null);
+  const seasons = activityLogs.seasons;
+  const isPastPeriod = isNonCurrentSelection(seasons, season);
+  const rangeLabel = seasonRangeLabel(seasons, season);
+  const activityBusy = isActivityPending
+    ? 'opacity-60 pointer-events-none transition-opacity'
+    : undefined;
   const handleFocusActivityLog = React.useCallback(() => {
     activityLogCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
@@ -559,15 +589,22 @@ export function PlayerDetailPage({
           </Card>
         ) : null}
 
-        <Card>
+        <Card className={activityBusy} aria-busy={isActivityPending}>
           <CardHeader>
             <CardTitle>{tr('stats_title')}</CardTitle>
+            {seasons.length > 0 ? (
+              <CardAction>
+                <SeasonPicker seasons={seasons} value={season} onChange={onSeasonChange} />
+              </CardAction>
+            ) : null}
           </CardHeader>
-          <CardContent>
+          <CardContent className='flex flex-col gap-4'>
+            <SeasonInfoLine seasons={seasons} value={season} />
             <ActivityStatsCard
               stats={activityStats}
-              isOwnProfile={isOwnProfile}
+              isOwnProfile={isOwnProfile && !isPastPeriod && !activityLogsError}
               onLogActivity={handleFocusActivityLog}
+              hideCurrentStreak={isPastPeriod}
             />
           </CardContent>
         </Card>
@@ -586,14 +623,26 @@ export function PlayerDetailPage({
         </CardContent>
       </Card>
 
-      <Card ref={activityLogCardRef}>
+      <Card ref={activityLogCardRef} className={activityBusy} aria-busy={isActivityPending}>
         <CardHeader>
           <CardTitle>{tr('activityLog_title')}</CardTitle>
+          {rangeLabel !== undefined || !isOwnProfile ? (
+            <CardDescription>
+              {rangeLabel !== undefined
+                ? tr('activitySeason_showing', { range: rangeLabel })
+                : null}
+              {rangeLabel !== undefined && !isOwnProfile ? ' ' : null}
+              {isOwnProfile ? null : tr('activityLog_notesPrivate', { name: player.displayName })}
+            </CardDescription>
+          ) : null}
         </CardHeader>
         <CardContent>
           <ActivityLogList
             logs={activityLogs.logs}
             isOwnProfile={isOwnProfile}
+            isPastPeriod={isPastPeriod}
+            loadError={activityLogsError}
+            onRetry={onRefresh}
             activityTypes={activityTypes}
             onCreateLog={onCreateLog}
             onUpdateLog={onUpdateLog}

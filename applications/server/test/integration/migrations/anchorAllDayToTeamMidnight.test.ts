@@ -564,15 +564,15 @@ describe('migration 1791400000 — anchor existing all-day events to team-local 
   );
 
   it.effect(
-    "10. AMBIGUOUS local midnight (America/Havana) — assert the DIVERGENCE between engines, not equality (§11.5(d)). Postgres AT TIME ZONE picks the SECOND instant (−05); Effect setParts (write path, §7.10) picks the FIRST (−04). They are exactly one hour apart, and §13.5's not_local_midnight filter is blind to BOTH.",
+    "10. AMBIGUOUS local midnight (Atlantic/Azores) — assert the DIVERGENCE between engines, not equality (§11.5(d)). Postgres AT TIME ZONE picks the SECOND instant (−01); Effect setParts (write path, §7.10) picks the FIRST (+00). They are exactly one hour apart, and §13.5's not_local_midnight filter is blind to BOTH.",
     () =>
       Effect.Do.pipe(
-        Effect.bind('setup', () => setupTeam('950100000000000010', 'America/Havana')),
+        Effect.bind('setup', () => setupTeam('950100000000000010', 'Atlantic/Azores')),
         Effect.bind('migratedId', ({ setup }) =>
           insertRawEvent({
             teamId: setup.teamId,
             createdBy: setup.memberId,
-            startAtIso: '2026-11-01T12:00:00Z',
+            startAtIso: '2026-10-25T12:00:00Z',
             allDay: true,
             allDayAnchored: false,
           }),
@@ -583,7 +583,9 @@ describe('migration 1791400000 — anchor existing all-day events to team-local 
           Effect.sync(() => {
             // Postgres's actual answer for this migration — verified against
             // a real Postgres 17 instance, NOT hand-computed.
-            expect(migratedRow.startAtIso).toBe('2026-11-01T05:00:00.000Z');
+            // Not America/Havana: tzdata 2026f keeps Cuba on summer time, so its
+            // November midnight is no longer ambiguous. Azores falls back 01:00 → 00:00.
+            expect(migratedRow.startAtIso).toBe('2026-10-25T01:00:00.000Z');
           }),
         ),
         // Do NOT assert this equals the migrated value — see the box above.
@@ -593,7 +595,7 @@ describe('migration 1791400000 — anchor existing all-day events to team-local 
         // this residual accepts, rather than an unexplained magic number.
         Effect.bind('effectWritePathLiteral', ({ migratedRow }) =>
           Effect.sync(() => {
-            const effectLiteral = '2026-11-01T04:00:00.000Z';
+            const effectLiteral = '2026-10-25T00:00:00.000Z';
             const diffMs =
               new Date(migratedRow.startAtIso).getTime() - new Date(effectLiteral).getTime();
             expect(diffMs).toBe(60 * 60 * 1000);

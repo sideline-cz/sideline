@@ -1171,11 +1171,14 @@ Individual physical activity session records belonging to a team member.
 | `logged_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `duration_minutes` | INTEGER | CHECK (`duration_minutes > 0 AND duration_minutes <= 1440`) | — |
 | `note` | TEXT | — | — |
+| `season_id` | UUID | FK → `seasons(id)` ON DELETE SET NULL | — (set by trigger) |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
-**Indexes**: `idx_activity_logs_team_member_id` on `(team_member_id)`, `idx_activity_logs_logged_at` on `(logged_at)`
+**Indexes**: `idx_activity_logs_member_season` on `(team_member_id, season_id, logged_at DESC)`, `idx_activity_logs_team_member_id` on `(team_member_id)`, `idx_activity_logs_logged_at` on `(logged_at)`
 
 **Unique**: `idx_activity_logs_auto_training_dedup` — partial unique index on `(team_member_id, activity_type_id, (logged_at AT TIME ZONE 'UTC')::date) WHERE source = 'auto'`, preventing duplicate auto-logged entries for the same day
+
+**Season ownership**: `season_id` is set only by the `activity_logs_set_season_trg` trigger (`BEFORE INSERT OR UPDATE OF logged_at`, function `set_activity_log_season()`); a supplied value is overwritten. An UPDATE that leaves `logged_at` unchanged keeps the season, so a log's season is stable once written. `NULL` means "Earlier" (before the first season or in a gap). Deleting a season sets its logs to `NULL`; no rows are lost. Helper functions: `season_at(team_id, timestamptz)` picks the season by comparing Europe/Prague calendar dates (a season covers its start day in full; its expiry day belongs to the next period); `current_season_id(team_id)` = `season_at(team_id, now())` (unlike `governing_season_id`, never a future season); `season_for_activity_log(team_member_id, logged_at)` resolves the team and calls `season_at`.
 
 **Notes**: `source` and `activity_type_id` added in migration `1742900000`. Auto-logged entries (created by `TrainingAutoLogCron`) cannot be edited or deleted via the API.
 
@@ -2394,6 +2397,7 @@ All 110 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1794500000 | `drop_rsvp_reminder_dms` | Drops `team_members.rsvp_reminder_dms` (`IF EXISTS`). Server v0.78.0 already stopped reading and writing it; the three `rsvp_dms_*` bucket columns from `1794400000` are the only reminder-DM opt-out. |
 | 1794600000 | `monthly_recurrence` | Adds nullable `day_of_month SMALLINT` and `week_of_month SMALLINT` (`IF NOT EXISTS`) to `event_series`. Drops `event_series_frequency_check` and `chk_days_of_week` and adds `chk_event_series_recurrence`, one per-frequency rule: weekly/biweekly keep the old `days_of_week` rule verbatim with both new columns NULL, so existing rows and an old server's INSERT still pass; `monthly_by_date` needs `days_of_week = '{}'` and a day 1–31; `monthly_by_weekday` needs exactly one weekday and `week_of_month` in (1, 2, 3, 4, -1). Wrapped in `COALESCE(..., false)` so a NULL result rejects the row. |
 | 1794700000 | `event_series_event_type` | Adds `event_type TEXT NOT NULL DEFAULT 'training'` (with the same kind CHECK as `events`) and `event_type_id UUID` (FK → `event_types(id)` ON DELETE SET NULL) to `event_series`. Creates `event_series_sync_event_type_trg`, reusing `events_sync_event_type()`, BEFORE the backfill, then backfills `event_type_id` through the trigger (`SET event_type = event_type WHERE event_type_id IS NULL`), so existing series resolve exactly as a one-time training event would. An old server's INSERT that omits both columns lands as `'training'` with the id resolved by the trigger. |
+| 1794800000 | `activity_log_seasons` | Adds `activity_logs.season_id` (FK → `seasons` ON DELETE SET NULL), functions `season_at`, `current_season_id`, `season_for_activity_log`, `set_activity_log_season`, trigger `activity_logs_set_season_trg`, backfills `season_id` (UPDATE of NULL rows only; idempotent) and creates `idx_activity_logs_member_season`. `idx_activity_logs_team_member_id` is now a prefix duplicate, to be dropped later. |
 
 ### After Migrations (seed data)
 

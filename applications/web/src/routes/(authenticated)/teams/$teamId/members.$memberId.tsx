@@ -1,5 +1,6 @@
-import type { ActivityLog, Auth, GroupApi } from '@sideline/domain';
+import type { Auth, GroupApi } from '@sideline/domain';
 import {
+  type ActivityLog,
   ActivityLogApi,
   type ActivityType,
   GroupModel,
@@ -9,21 +10,27 @@ import {
   Team,
   TeamMember,
 } from '@sideline/domain';
-import { createFileRoute, useRouter } from '@tanstack/react-router';
+import { createFileRoute, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import type { PlayerEditValues } from '~/components/pages/PlayerDetailPage';
 import { PlayerDetailPage } from '~/components/pages/PlayerDetailPage';
+import { isUnknownSeason, toSeasonSearch, validateSeasonSearch } from '~/lib/activitySeason.js';
 import type { Client } from '~/lib/runtime';
 import { ApiClient, ClientError, SilentClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
+const emptyLogs = new ActivityLogApi.ActivityLogListResponse({ logs: [], seasons: [] });
+
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$memberId')({
   ssr: false,
+  validateSearch: validateSeasonSearch,
   component: MemberDetailRoute,
-  loader: async ({ params, context }) => {
+  loaderDeps: ({ search }) => ({ season: search.season }),
+  loader: async ({ params, context, deps }) => {
     const teamId = Schema.decodeSync(Team.TeamId)(params.teamId);
     const memberId = Schema.decodeSync(TeamMember.TeamMemberId)(params.memberId);
+    const season = Option.fromUndefinedOr(deps.season);
     return ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.auth.myTeams().pipe(
@@ -37,19 +44,23 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
               player: api.roster.getMember({ params: { teamId, memberId } }),
               myTeams: Effect.succeed(myTeams),
               roles: api.role.listRoles({ params: { teamId } }),
-              activityStats: api.activityStats.getMemberStats({ params: { teamId, memberId } }),
-              activityLogs: api.activityLog.listLogs({ params: { teamId, memberId } }).pipe(
-                Effect.map((r): { isOwnProfile: boolean; logs: typeof r.logs } => ({
-                  isOwnProfile: true,
-                  logs: r.logs,
-                })),
-                Effect.catch(() =>
-                  Effect.succeed<{ isOwnProfile: boolean; logs: readonly [] }>({
-                    isOwnProfile: false,
-                    logs: [],
+              activityStats: api.activityStats.getMemberStats({
+                params: { teamId, memberId },
+                query: { season },
+              }),
+              activityLogs: api.activityLog
+                .listLogs({ params: { teamId, memberId }, query: { season } })
+                .pipe(
+                  Effect.map((list) => ({ list, failed: false })),
+                  Effect.tapError((e) => Effect.logWarning('Failed to load activity logs', e)),
+                  // No access to this member's logs is not a failure: keep the empty card
+                  Effect.catchTags({
+                    ActivityLogForbidden: () => Effect.succeed({ list: emptyLogs, failed: false }),
+                    ActivityLogMemberNotFound: () =>
+                      Effect.succeed({ list: emptyLogs, failed: false }),
                   }),
+                  Effect.catch(() => Effect.succeed({ list: emptyLogs, failed: true })),
                 ),
-              ),
               activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),
               rating: canEdit
                 ? api.playerRating.getMemberRating({ params: { teamId, memberId } }).pipe(
@@ -65,7 +76,15 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
                 ? api.group.listGroups({ params: { teamId } })
                 : Effect.succeed([]),
               memberGroups: api.group.listMemberGroups({ params: { teamId, memberId } }),
-            });
+            }).pipe(
+              // listLogs succeeds for every member:view holder, so it cannot tell "own profile"
+              Effect.map((data) => ({
+                ...data,
+                activityLogs: data.activityLogs.list,
+                activityLogsError: data.activityLogs.failed,
+                isOwnProfile: data.player.userId === context.user.id,
+              })),
+            );
           }),
         ),
       ),
@@ -87,13 +106,31 @@ function MemberDetailRoute() {
     roles: roleListResponse,
     activityStats,
     activityLogs,
+    activityLogsError,
     activityTypes: fetchedActivityTypes,
     rating,
     rosterList,
     memberRosters,
     groups,
     memberGroups,
+    isOwnProfile,
   } = Route.useLoaderData();
+  const { season } = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const isPending = useRouterState({ select: (s) => s.status === 'pending' });
+  const handleSeasonChange = React.useCallback(
+    (v: string | undefined) => {
+      navigate({ search: (prev) => ({ ...prev, season: toSeasonSearch(v) }) });
+    },
+    [navigate],
+  );
+  // A well-formed id outside the loaded seasons has no picker option; fall back to the default.
+  const loadedSeasons = activityLogs.seasons;
+  React.useEffect(() => {
+    if (isUnknownSeason(loadedSeasons, season)) {
+      navigate({ search: (prev) => ({ ...prev, season: undefined }), replace: true });
+    }
+  }, [loadedSeasons, season, navigate]);
   const roles = roleListResponse.roles;
 
   const memberRosterIds = new Set(memberRosters.map((r: Roster.RosterInfo) => r.rosterId));
@@ -431,8 +468,12 @@ function MemberDetailRoute() {
       canRemoveMember={canRemoveMember}
       activityStats={activityStats}
       achievements={activityStats.achievements}
-      isOwnProfile={activityLogs.isOwnProfile}
-      activityLogs={new ActivityLogApi.ActivityLogListResponse({ logs: activityLogs.logs })}
+      isOwnProfile={isOwnProfile}
+      activityLogs={activityLogs}
+      activityLogsError={activityLogsError}
+      season={season}
+      onSeasonChange={handleSeasonChange}
+      isActivityPending={isPending}
       activityTypes={activityTypes}
       rating={rating}
       teamMemberId={memberIdRaw}

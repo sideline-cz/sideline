@@ -7,6 +7,8 @@ interface ActivityStatsCardProps {
   stats: ActivityStatsApi.ActivityStatsResponse;
   isOwnProfile?: boolean;
   onLogActivity?: () => void;
+  // Past season or Earlier: a streak that ended is not "current"
+  hideCurrentStreak?: boolean;
 }
 
 const formatDuration = (minutes: number): string => {
@@ -18,7 +20,12 @@ const formatDuration = (minutes: number): string => {
   return `${hours}h ${mins}m`;
 };
 
-export function ActivityStatsCard({ stats, isOwnProfile, onLogActivity }: ActivityStatsCardProps) {
+export function ActivityStatsCard({
+  stats,
+  isOwnProfile,
+  onLogActivity,
+  hideCurrentStreak = false,
+}: ActivityStatsCardProps) {
   const isEmpty = stats.totalActivities === 0;
 
   if (isEmpty) {
@@ -40,7 +47,7 @@ export function ActivityStatsCard({ stats, isOwnProfile, onLogActivity }: Activi
     <div>
       <div className='grid grid-cols-2 gap-4 mb-6'>
         <div>
-          <p className='text-3xl font-bold'>🔥 {stats.currentStreak}</p>
+          <p className='text-3xl font-bold'>🔥 {hideCurrentStreak ? '—' : stats.currentStreak}</p>
           <p className='text-sm text-muted-foreground'>{tr('stats_currentStreak')}</p>
         </div>
         <div>

@@ -142,4 +142,32 @@ authedTest.describe('No horizontal overflow on mobile', () => {
       ).toBeLessThanOrEqual(clientWidth + 1);
     });
   }
+
+  authedTest('team activity matrix scrolls inside its frame at 360px', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.goto(`/teams/${TEAM_ID}/workout/team`);
+
+    // A real matrix first: the crash screen has no overflow, so every check below would pass on it.
+    const janHeader = page.getByRole('rowheader', { name: /Jan Novák/ });
+    await expect(janHeader).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('h1').first()).not.toHaveText(/Something went wrong/i);
+    const janRow = page.getByRole('row').filter({ has: janHeader });
+    expect(await janRow.getByRole('button').count()).toBeGreaterThanOrEqual(1);
+    expect(await janRow.locator('td').count()).toBeGreaterThanOrEqual(30);
+
+    const doc = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(
+      doc.scrollWidth,
+      `page overflows by ${doc.scrollWidth - doc.clientWidth}px`,
+    ).toBeLessThanOrEqual(doc.clientWidth + 1);
+
+    // The overflow must go to the frame, not disappear: 30 day columns cannot fit 360px.
+    const frame = await page
+      .getByTestId('activity-matrix-frame')
+      .evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+    expect(frame.scrollWidth).toBeGreaterThan(frame.clientWidth);
+  });
 });

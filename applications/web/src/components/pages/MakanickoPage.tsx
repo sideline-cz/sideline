@@ -7,6 +7,11 @@ import type {
 } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import type { Option } from 'effect';
+import {
+  isNonCurrentSelection,
+  SeasonInfoLine,
+  SeasonPicker,
+} from '~/components/molecules/SeasonPicker.js';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList.js';
 import { ActivityStatsCard } from '~/components/organisms/ActivityStatsCard.js';
 import { LeaderboardPage } from '~/components/pages/LeaderboardPage.js';
@@ -20,6 +25,15 @@ interface MakanickoPageProps {
   currentUserId: string;
   activityStats: ActivityStatsApi.ActivityStatsResponse;
   activityLogs: ReadonlyArray<ActivityLogApi.ActivityLogEntry>;
+  seasons: ReadonlyArray<ActivityLogApi.ActivitySeason>;
+  // listLogs failed: the log card shows an error with Retry
+  activityLogsError?: boolean;
+  onRetry?: () => void;
+  // `undefined` = default view (current season, or "No active season")
+  season: string | undefined;
+  onSeasonChange: (season: string | undefined) => void;
+  canViewTeamActivity: boolean;
+  isPending?: boolean;
   activityTypes: ReadonlyArray<{
     id: ActivityType.ActivityTypeId;
     name: string;
@@ -49,11 +63,20 @@ export function MakanickoPage({
   currentUserId,
   activityStats,
   activityLogs,
+  seasons,
+  activityLogsError = false,
+  onRetry,
+  season,
+  onSeasonChange,
+  canViewTeamActivity,
+  isPending = false,
   activityTypes,
   onCreateLog,
   onUpdateLog,
   onDeleteLog,
 }: MakanickoPageProps) {
+  const isPastPeriod = isNonCurrentSelection(seasons, season);
+  const busy = isPending ? 'opacity-60 pointer-events-none transition-opacity' : undefined;
   return (
     <div className='flex flex-col gap-6'>
       <header>
@@ -62,27 +85,43 @@ export function MakanickoPage({
             ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <div className='flex items-center justify-between gap-4'>
-          <h1 className='text-2xl font-bold'>{tr('makanicko_title')}</h1>
+        <div className='flex flex-wrap items-center gap-3'>
+          <h1 className='text-2xl font-bold mr-auto'>{tr('makanicko_title')}</h1>
+          {seasons.length > 0 ? (
+            <SeasonPicker seasons={seasons} value={season} onChange={onSeasonChange} />
+          ) : null}
           <Button asChild variant='outline' size='sm'>
             <Link to='/teams/$teamId/workout/weekly' params={{ teamId }}>
-              View weekly summary →
+              {tr('makanicko_weeklyLink')}
             </Link>
           </Button>
+          {canViewTeamActivity ? (
+            <Button asChild variant='outline' size='sm'>
+              <Link to='/teams/$teamId/workout/team' params={{ teamId }}>
+                {tr('makanicko_matrix_link')}
+              </Link>
+            </Button>
+          ) : null}
+        </div>
+        <div className='mt-2'>
+          <SeasonInfoLine seasons={seasons} value={season} />
         </div>
       </header>
 
       <div className='flex flex-col gap-6 lg:grid lg:grid-cols-[1fr_400px]'>
         {/* Left: Activity card */}
-        <Card>
+        <Card className={busy} aria-busy={isPending}>
           <CardHeader>
             <CardTitle>{tr('makanicko_yourActivity')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityStatsCard stats={activityStats} />
+            <ActivityStatsCard stats={activityStats} hideCurrentStreak={isPastPeriod} />
             <ActivityLogList
               logs={activityLogs}
               isOwnProfile={true}
+              isPastPeriod={isPastPeriod}
+              loadError={activityLogsError}
+              onRetry={onRetry}
               activityTypes={activityTypes}
               onCreateLog={onCreateLog}
               onUpdateLog={onUpdateLog}
@@ -93,7 +132,7 @@ export function MakanickoPage({
 
         {/* Right: Leaderboard sticky panel */}
         <div className='lg:sticky lg:top-20 lg:self-start'>
-          <Card>
+          <Card className={busy} aria-busy={isPending}>
             <CardContent className='pt-6'>
               <LeaderboardPage entries={leaderboardEntries} currentUserId={currentUserId} />
             </CardContent>

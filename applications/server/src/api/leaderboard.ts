@@ -3,6 +3,9 @@ import { Array, Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requireMembership } from '~/api/permissions.js';
+import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
+import type { LogScope } from '~/repositories/activitySeasonScope.js';
+import { resolveScope } from '~/repositories/activitySeasonScope.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 
@@ -10,24 +13,32 @@ export const LeaderboardApiLive = HttpApiBuilder.group(Api, 'leaderboard', (hand
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('leaderboard', () => LeaderboardRepository.asEffect()),
-    Effect.map(({ members, leaderboard }) =>
+    Effect.bind('activityLogs', () => ActivityLogsRepository.asEffect()),
+    Effect.map(({ members, leaderboard, activityLogs }) =>
       handlers.handle(
         'getLeaderboard',
-        ({ params: { teamId }, query: { timeframe, activityTypeId } }) =>
+        ({ params: { teamId }, query: { timeframe, season, activityTypeId } }) =>
           Effect.Do.pipe(
             Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
             Effect.tap(({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, new LeaderboardApi.Forbidden()),
             ),
-            Effect.bind('rows', () =>
-              leaderboard.getLeaderboard(
-                teamId,
-                activityTypeId,
-                Option.getOrElse(timeframe, () => 'all' as const),
-              ),
+            // timeframe present -> old behaviour; absent -> season scope (default current).
+            Effect.bind(
+              'scope',
+              (): Effect.Effect<Leaderboard.LeaderboardTimeframe | Exclude<LogScope, 'lifetime'>> =>
+                Option.match(timeframe, {
+                  onSome: Effect.succeed,
+                  onNone: () => resolveScope(activityLogs, teamId, season),
+                }),
             ),
-            Effect.map(({ rows }) => {
+            Effect.bind('rows', ({ scope }) =>
+              leaderboard.getLeaderboard(teamId, activityTypeId, scope),
+            ),
+            Effect.map(({ scope, rows }) => {
               const today = ActivityStats.todayInPrague();
+              // A past season or Earlier has no running streak.
+              const hasCurrentStreak = scope === 'current' || scope === 'all' || scope === 'week';
 
               const memberData = rows.map((row) => {
                 const streaks = ActivityStats.calculateStreaks(row.activity_dates, today);
@@ -37,7 +48,7 @@ export const LeaderboardApiLive = HttpApiBuilder.group(Api, 'leaderboard', (hand
                   username: row.username,
                   totalActivities: row.total_activities,
                   totalDurationMinutes: row.total_duration_minutes,
-                  currentStreak: streaks.currentStreak,
+                  currentStreak: hasCurrentStreak ? streaks.currentStreak : 0,
                   longestStreak: streaks.longestStreak,
                 };
               });

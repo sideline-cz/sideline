@@ -660,13 +660,12 @@ export const listEventAttendance = (
   );
 
 // ---------------------------------------------------------------------------
-// list_activity_logs — SELF-ONLY (api/activity-logs.ts:37-41).
+// list_activity_logs — SELF-ONLY.
 //
-// The endpoint's real gate is `membership.id === memberId`, four lines BELOW the
-// `requireMembership` bind an earlier version of this comment cited. There is no admin branch:
-// nobody can read another member's training log over HTTP, so this tool must not offer one
-// either. A training note is free text a person wrote about their own body ("knee rehab, still
-// painful") — same-team is nowhere near enough.
+// The tool stays SELF-ONLY. Other members' logs ARE readable over HTTP (api/activity-logs.ts
+// listLogs) with member:view, but the server strips the note there. This tool returns note,
+// and a training note is free text a person wrote about their own body ("knee rehab, still
+// painful"). Do not "align" this tool with HTTP: offering another member's logs here leaks notes.
 //
 // `memberId` is therefore not a parameter at all. The caller's own membership is the only
 // subject, which also removes the id the model had no way to obtain (see `registry.ts`).

@@ -528,7 +528,7 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 
 ### /makanicko stats
 
-**Description:** View personal activity stats and streaks.
+**Description:** View personal activity stats and streaks for the team's current season (the RPC uses the current season; there is no season option).
 
 **Czech sub-command name:** `statistiky`
 
@@ -558,7 +558,7 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 
 ### /makanicko leaderboard
 
-**Description:** View the team activity leaderboard.
+**Description:** View the team activity leaderboard for the current season (the RPC uses the current season; lifetime ranking is only available via the HTTP `timeframe=all`).
 
 **Czech sub-command name:** `zebricek`
 

@@ -2,6 +2,7 @@ import type { ActivityType, Leaderboard, Team } from '@sideline/domain';
 import { TeamMember, User } from '@sideline/domain';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
+import { type LogScope, seasonScopeFilter } from '~/repositories/activitySeasonScope.js';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 
 class LeaderboardRow extends Schema.Class<LeaderboardRow>('LeaderboardRow')({
@@ -25,7 +26,7 @@ const make = Effect.gen(function* () {
   const getLeaderboard = (
     teamId: Team.TeamId,
     activityTypeId: Option.Option<ActivityType.ActivityTypeId>,
-    timeframe: Leaderboard.LeaderboardTimeframe,
+    scope: Leaderboard.LeaderboardTimeframe | Exclude<LogScope, 'lifetime'>,
   ) => {
     const activityTypeFilter = Option.match(activityTypeId, {
       onNone: () => sql``,
@@ -37,8 +38,19 @@ const make = Effect.gen(function* () {
       onSome: (id) => sql`AND al2.activity_type_id = ${id}`,
     });
 
+    const isTimeframe = scope === 'all' || scope === 'week';
     const timeframeFilter =
-      timeframe === 'week' ? sql`AND al.logged_at >= NOW() - INTERVAL '7 days'` : sql``;
+      scope === 'week'
+        ? sql`AND al.logged_at >= NOW() - INTERVAL '7 days'`
+        : isTimeframe
+          ? sql``
+          : seasonScopeFilter(sql, 'al', scope, sql`${teamId}`);
+
+    // al2, not al: al is the outer LEFT JOIN row; binding to it makes the streak dates unscoped.
+    // 'all' / 'week' keep the streak dates unfiltered (unchanged behaviour).
+    const seasonDatesFilter = isTimeframe
+      ? sql``
+      : seasonScopeFilter(sql, 'al2', scope, sql`${teamId}`);
 
     const query = sql`
       SELECT
@@ -56,6 +68,7 @@ const make = Effect.gen(function* () {
           FROM activity_logs al2
           WHERE al2.team_member_id = tm.id
             ${activityTypeDatesFilter}
+            ${seasonDatesFilter}
           ORDER BY 1
         ) AS activity_dates
       FROM team_members tm
