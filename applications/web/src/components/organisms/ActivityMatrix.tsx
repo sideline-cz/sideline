@@ -175,7 +175,7 @@ export function ActivityMatrix({ teamId, days, rows, busy = false }: ActivityMat
                   className='sticky left-0 z-10 w-(--name-w) bg-card px-3 py-1 text-left font-normal shadow-[1px_0_0_var(--border)]'
                 >
                   <Link
-                    to='/teams/$teamId/members/$memberId'
+                    to='/teams/$teamId/workout/members/$memberId'
                     params={{ teamId, memberId: row.memberId }}
                     title={row.displayName}
                     className='block truncate rounded-sm font-medium outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50'

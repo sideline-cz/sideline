@@ -102,7 +102,7 @@ export function LeaderboardPage({
           return canViewMembers ? (
             <Link
               key={entry.teamMemberId}
-              to='/teams/$teamId/members/$memberId'
+              to='/teams/$teamId/workout/members/$memberId'
               params={{ teamId, memberId: entry.teamMemberId }}
               className={`${rowClass} transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
             >
