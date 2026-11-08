@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.72.0
+
+### 🚀 Features
+- leaderboard rows open the member page; matrix hides inactive members (#804)
+
 ## 0.71.0
 
 ### 🚀 Features
