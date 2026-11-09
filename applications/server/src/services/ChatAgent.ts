@@ -21,6 +21,7 @@
 import type { AiActionProposal, AiChatApi } from '@sideline/domain';
 import { Array as Arr, Cause, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { hasPermission } from '~/api/permissions.js';
+import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
@@ -208,6 +209,7 @@ interface AgentDeps {
     readonly channels: ServiceMap.Service.Shape<typeof DiscordChannelsRepository>;
     readonly roles: ServiceMap.Service.Shape<typeof DiscordRolesRepository>;
     readonly mappings: ServiceMap.Service.Shape<typeof DiscordChannelMappingRepository>;
+    readonly achievementRoles: ServiceMap.Service.Shape<typeof AchievementRoleMappingsRepository>;
   };
 }
 
@@ -429,6 +431,7 @@ const executeTool = (
           Effect.provideService(BotGuildsRepository, deps.discord.botGuilds),
           Effect.provideService(DiscordRolesRepository, deps.discord.roles),
           Effect.provideService(DiscordChannelMappingRepository, deps.discord.mappings),
+          Effect.provideService(AchievementRoleMappingsRepository, deps.discord.achievementRoles),
         ),
       );
     case 'search_docs':
@@ -916,6 +919,7 @@ const make: Effect.Effect<
   | DiscordChannelsRepository
   | DiscordRolesRepository
   | DiscordChannelMappingRepository
+  | AchievementRoleMappingsRepository
 > = Effect.Do.pipe(
   Effect.bind('llm', () => LlmClient.asEffect()),
   Effect.bind('events', () => EventsRepository.asEffect()),
@@ -938,6 +942,7 @@ const make: Effect.Effect<
       channels: DiscordChannelsRepository.asEffect(),
       roles: DiscordRolesRepository.asEffect(),
       mappings: DiscordChannelMappingRepository.asEffect(),
+      achievementRoles: AchievementRoleMappingsRepository.asEffect(),
     }),
   ),
   Effect.map(

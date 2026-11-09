@@ -6,7 +6,7 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
     Effect.tap(
       () => sql`
       INSERT INTO role_permissions (role_id, permission)
-      SELECT id, 'ai:discord_manage' FROM roles WHERE is_built_in = true AND name IN ('Admin', 'Captain')
+      SELECT id, 'ai:manage_discord' FROM roles WHERE is_built_in = true AND name IN ('Admin', 'Captain')
       ON CONFLICT DO NOTHING
     `,
     ),

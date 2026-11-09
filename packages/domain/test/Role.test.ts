@@ -32,10 +32,10 @@ describe('Role', () => {
     );
   });
 
-  it('ai:discord_manage is granted to Admin and Captain only', () => {
-    expect(defaultPermissions.Captain).toContain('ai:discord_manage');
-    expect(defaultPermissions.Player).not.toContain('ai:discord_manage');
-    expect(defaultPermissions.Treasurer).not.toContain('ai:discord_manage');
+  it('ai:manage_discord is granted to Admin and Captain only', () => {
+    expect(defaultPermissions.Captain).toContain('ai:manage_discord');
+    expect(defaultPermissions.Player).not.toContain('ai:manage_discord');
+    expect(defaultPermissions.Treasurer).not.toContain('ai:manage_discord');
   });
 
   it('defaultPermissions.Player equals exactly [roster:view, member:view]', () => {

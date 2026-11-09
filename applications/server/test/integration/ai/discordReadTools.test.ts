@@ -1,6 +1,6 @@
 // `list_discord_channels` / `list_discord_roles` on real Postgres. The unit tests in
 // `test/services/aiTools.test.ts` use mock repositories; this file proves the two parts mocks
-// cannot: the `ai:discord_manage` gate reads `membership.permissions` that real SQL builds from
+// cannot: the `ai:manage_discord` gate reads `membership.permissions` that real SQL builds from
 // the seeded built-in roles, and every row is scoped to the caller's team (team B is seeded the
 // same way and must never show).
 //
@@ -11,6 +11,7 @@ import type { Discord, Team, TeamMember, User } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
+import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
@@ -34,6 +35,7 @@ const TestLayer = Layer.mergeAll(
   DiscordRolesRepository.Default,
   DiscordChannelMappingRepository.Default,
   GroupsRepository.Default,
+  AchievementRoleMappingsRepository.Default,
 ).pipe(Layer.provideMerge(TestPgClient));
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
@@ -98,7 +100,8 @@ const membershipOf = (teamId: Team.TeamId, userId: User.UserId) =>
 /**
  * One team with its Discord guild synced: category `<label>-cat`, text channels
  * `<label>-general` (in the category, mapped to a group + role) and `<label>-old` (an archived
- * Sideline channel), roles `<label>-U20` (linked to the group) and `<label>-Mod`.
+ * Sideline channel), roles `<label>-U20` (linked to the group), `<label>-Mod` and
+ * `<label>-Champ` (an achievement role).
  * `digit` keeps the Discord ids of the two teams apart (`teams.guild_id` is UNIQUE).
  */
 const seedDiscordTeam = (digit: string, label: string) =>
@@ -139,6 +142,7 @@ const seedDiscordTeam = (digit: string, label: string) =>
         repo.syncForGuild(guildId, [
           { role_id: id('0200'), name: `${label}-U20`, color: 0, position: 2, managed: false },
           { role_id: id('0201'), name: `${label}-Mod`, color: 0, position: 1, managed: false },
+          { role_id: id('0202'), name: `${label}-Champ`, color: 0, position: 0, managed: false },
         ]),
       ),
     );
@@ -149,6 +153,9 @@ const seedDiscordTeam = (digit: string, label: string) =>
     );
     yield* DiscordChannelMappingRepository.asEffect().pipe(
       Effect.andThen((repo) => repo.insert(team.id, group.id, id('0101'), id('0200'))),
+    );
+    yield* AchievementRoleMappingsRepository.asEffect().pipe(
+      Effect.andThen((repo) => repo.upsert(team.id, 'first_activity', id('0202'))),
     );
 
     return { team, guildId, id };
@@ -192,7 +199,7 @@ describe('Discord read tools on real Postgres', () => {
       const a = yield* seedDiscordTeam('1', 'A');
       const ctx = yield* memberWithBuiltInRole(a.team.id, a.id('0900'), 'Player');
 
-      const forbidden = { error: 'forbidden', permission: 'ai:discord_manage' };
+      const forbidden = { error: 'forbidden', permission: 'ai:manage_discord' };
       expect((yield* listDiscordChannels({}, ctx)).result).toEqual(forbidden);
       expect((yield* listDiscordRoles({}, ctx)).result).toEqual(forbidden);
     }).pipe(Effect.provide(TestLayer)),
@@ -213,6 +220,7 @@ describe('Discord read tools on real Postgres', () => {
       const roleItems = itemsOf(roles.result);
       expect(roleItems.find((i) => i.name === 'A-U20')?.linkedTo).toBe('group');
       expect(roleItems.find((i) => i.name === 'A-Mod')?.linkedTo).toBeNull();
+      expect(roleItems.find((i) => i.name === 'A-Champ')?.linkedTo).toBe('achievement');
       expect(JSON.stringify(roles.result)).not.toContain('B-');
     }).pipe(Effect.provide(TestLayer)),
   );

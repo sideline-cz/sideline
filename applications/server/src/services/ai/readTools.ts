@@ -31,6 +31,7 @@ import { hasPermission } from '~/api/permissions.js';
 import { toRoleInfo } from '~/api/role.js';
 import { toEffectiveRoles, toRosterInfo } from '~/api/roster.js';
 import { toTrainingTypeInfo } from '~/api/training-type.js';
+import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
@@ -866,7 +867,7 @@ export const listExpenses = (
     : Effect.succeed(forbiddenResult('finance:view'));
 
 // ===========================================================================
-// list_discord_channels / list_discord_roles — `ai:discord_manage`.
+// list_discord_channels / list_discord_roles — `ai:manage_discord`.
 //
 // The data is the server's stored copy of the bot's last sync (`bot_guilds`, `discord_channels`,
 // `discord_guild_roles`, `discord_channel_mappings`), not a live Discord call. No RPC on
@@ -901,13 +902,14 @@ const connectedGuildId = (teamId: Team.TeamId) =>
     ),
   );
 
-const DISCORD_CHANNEL_TYPES: Record<number, string> = {
+const DISCORD_CHANNEL_TYPES: Partial<Record<number, string>> = {
   0: 'text',
   2: 'voice',
   4: 'category',
   5: 'announcement',
   13: 'stage',
   15: 'forum',
+  16: 'media',
 };
 
 export const listDiscordChannels = (
@@ -918,7 +920,7 @@ export const listDiscordChannels = (
   never,
   TeamsRepository | BotGuildsRepository | DiscordChannelsRepository
 > =>
-  hasPermission(ctx.membership, 'ai:discord_manage')
+  hasPermission(ctx.membership, 'ai:manage_discord')
     ? connectedGuildId(ctx.teamId).pipe(
         Effect.flatMap(
           Option.match({
@@ -933,22 +935,26 @@ export const listDiscordChannels = (
                   const named = rows.map((row) => ({
                     row,
                     name: Option.getOrElse(row.team_channel_name, () => row.name),
+                    category: Option.getOrNull(
+                      Option.flatMap(row.parent_id, (pid) =>
+                        Option.fromNullishOr(categoryNames.get(pid)),
+                      ),
+                    ),
                   }));
                   return itemsResult(
                     applyLimit(
-                      applyQueryFilter(named, args.query, (entry) => entry.name),
+                      // Sideline name, Discord name and category: a user may ask by any of them.
+                      applyQueryFilter(named, args.query, (entry) =>
+                        [entry.name, entry.row.name, entry.category ?? ''].join(' '),
+                      ),
                       args.limit,
-                    ).map(({ row, name }) => ({
+                    ).map(({ row, name, category }) => ({
                       name,
                       type: DISCORD_CHANNEL_TYPES[row.type] ?? 'other',
-                      category: Option.getOrNull(
-                        Option.flatMap(row.parent_id, (pid) =>
-                          Option.fromNullishOr(categoryNames.get(pid)),
-                        ),
-                      ),
+                      category,
                       managedBySideline: Option.isSome(row.team_channel_id),
                       archived: Option.getOrElse(row.team_channel_archived, () => false),
-                      accessGroupCount: Number(row.access_count),
+                      accessGroupCount: row.access_count,
                     })),
                   );
                 }),
@@ -956,7 +962,7 @@ export const listDiscordChannels = (
           }),
         ),
       )
-    : Effect.succeed(forbiddenResult('ai:discord_manage'));
+    : Effect.succeed(forbiddenResult('ai:manage_discord'));
 
 export const listDiscordRoles = (
   args: ListDiscordArgs,
@@ -964,9 +970,13 @@ export const listDiscordRoles = (
 ): Effect.Effect<
   ToolExecutionResult,
   never,
-  TeamsRepository | BotGuildsRepository | DiscordRolesRepository | DiscordChannelMappingRepository
+  | TeamsRepository
+  | BotGuildsRepository
+  | DiscordRolesRepository
+  | DiscordChannelMappingRepository
+  | AchievementRoleMappingsRepository
 > =>
-  hasPermission(ctx.membership, 'ai:discord_manage')
+  hasPermission(ctx.membership, 'ai:manage_discord')
     ? connectedGuildId(ctx.teamId).pipe(
         Effect.flatMap(
           Option.match({
@@ -977,7 +987,13 @@ export const listDiscordRoles = (
                 Effect.bind('mappings', () => DiscordChannelMappingRepository.asEffect()),
                 Effect.bind('roleRows', ({ roles }) => roles.listByGuild(guildId)),
                 Effect.bind('mappingRows', ({ mappings }) => mappings.findAllByTeam(ctx.teamId)),
-                Effect.map(({ roleRows, mappingRows }) =>
+                Effect.bind('achievementRoleIds', () =>
+                  AchievementRoleMappingsRepository.asEffect().pipe(
+                    Effect.flatMap((achievements) => achievements.findAllByTeam(ctx.teamId)),
+                    Effect.map((rows) => new Set(rows.map((r) => r.discord_role_id))),
+                  ),
+                ),
+                Effect.map(({ roleRows, mappingRows, achievementRoleIds }) =>
                   itemsResult(
                     applyLimit(
                       applyQueryFilter(roleRows, args.query, (row) => row.name),
@@ -988,7 +1004,7 @@ export const listDiscordRoles = (
                       managedByDiscord: row.managed,
                       linkedTo:
                         mappingRows.find((m) => Option.contains(m.discord_role_id, row.id))
-                          ?.entity_type ?? null,
+                          ?.entity_type ?? (achievementRoleIds.has(row.id) ? 'achievement' : null),
                     })),
                   ),
                 ),
@@ -996,4 +1012,4 @@ export const listDiscordRoles = (
           }),
         ),
       )
-    : Effect.succeed(forbiddenResult('ai:discord_manage'));
+    : Effect.succeed(forbiddenResult('ai:manage_discord'));

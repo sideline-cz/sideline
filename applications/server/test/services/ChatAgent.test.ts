@@ -99,6 +99,7 @@ import type { Event, GroupModel, Role, Team, TeamMember, TrainingType } from '@s
 import { AiChatApi } from '@sideline/domain';
 import { Cause, DateTime, Effect, Exit, Fiber, Layer, Option } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
+import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
@@ -309,6 +310,10 @@ const unusedRepoLayers = Layer.mergeAll(
   Layer.succeed(DiscordChannelMappingRepository, {
     findAllByTeam: () =>
       Effect.die(new Error('ChatAgent.test: DiscordChannelMappingRepository not stubbed')),
+  } as never),
+  Layer.succeed(AchievementRoleMappingsRepository, {
+    findAllByTeam: () =>
+      Effect.die(new Error('ChatAgent.test: AchievementRoleMappingsRepository not stubbed')),
   } as never),
 );
 
@@ -826,7 +831,7 @@ describe('ChatAgent.respond — dispatch never fails, loop continues', () => {
   // A missing switch case answers `unknown_tool`, so this runs once per Discord tool name. The
   // die-stubs in `unusedRepoLayers` prove the gate runs before any repository.
   for (const name of ['list_discord_channels', 'list_discord_roles']) {
-    it.effect(`${name}: a caller without ai:discord_manage gets forbidden from the executor`, () =>
+    it.effect(`${name}: a caller without ai:manage_discord gets forbidden from the executor`, () =>
       Effect.gen(function* () {
         const call: LlmToolCall = { id: 'd1', name, argumentsJson: '{}' };
         const scripted = makeScriptedLlm([
@@ -843,7 +848,7 @@ describe('ChatAgent.respond — dispatch never fails, loop continues', () => {
         if (toolMsg) {
           expect(JSON.parse(toolMsg.content)).toEqual({
             error: 'forbidden',
-            permission: 'ai:discord_manage',
+            permission: 'ai:manage_discord',
           });
         }
       }),

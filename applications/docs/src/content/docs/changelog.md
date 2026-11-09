@@ -9,7 +9,7 @@ This page lists user-visible changes to Sideline. For developer-level release no
 
 Ask the AI assistant which channels and roles your Discord server has, or which Discord role belongs to a group. The answer shows what Sideline last saw from the bot, so a change made in Discord a moment ago may not show yet.
 
-- Only people with the new **AI Assistant: View Discord Setup** permission get these answers. Admin and Captain have it by default; you can give it to other roles in **Team → Roles**.
+- Only people with the new **AI Assistant: Manage Discord Setup** permission get these answers. Admin and Captain have it by default; you can give it to other roles in **Team → Roles**.
 
 ## 2026-11-08 — New: activity stats follow seasons, and teammates can see activity
 
