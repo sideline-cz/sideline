@@ -109,7 +109,7 @@ describe('FeeImportDialog', () => {
     expect(screen.getByText('Nothing was imported.').closest('[aria-live]')).not.toBeNull();
   });
 
-  it('disables Cancel and Import while onSubmit is pending', async () => {
+  it('disables Cancel, Import and the file input while onSubmit is pending', async () => {
     let resolve: (v: never[]) => void = () => {};
     const onSubmit = vi.fn(
       () =>
@@ -126,6 +126,7 @@ describe('FeeImportDialog', () => {
     const pending = await screen.findByRole('button', { name: 'Importing…' });
     expect(pending).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', true);
+    expect(screen.getByLabelText('CSV file')).toHaveProperty('disabled', true);
 
     await act(async () => resolve([]));
     expect(importButton()).toHaveProperty('disabled', false);

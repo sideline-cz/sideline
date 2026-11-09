@@ -1,5 +1,6 @@
 import type { FinanceApi } from '@sideline/domain';
 import React from 'react';
+import { flushSync } from 'react-dom';
 import { Button } from '~/components/ui/button';
 import {
   Dialog,
@@ -70,6 +71,9 @@ export function FeeImportDialog({ open, onSubmit, onCancel }: FeeImportDialogPro
     if (!file) return;
     const version = ++fileVersion.current;
     setFileName(file.name);
+    // Drop the previous file's rows now, so Import cannot send them while this file decodes.
+    setRows([]);
+    setErrors([]);
     let text: string;
     try {
       text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
@@ -87,15 +91,17 @@ export function FeeImportDialog({ open, onSubmit, onCancel }: FeeImportDialogPro
 
   const handleSubmit = async () => {
     setSubmitting(true);
+    let serverErrors: ReadonlyArray<FinanceApi.FeeImportRowError> = [];
     try {
-      const serverErrors = await onSubmit(rows);
-      if (serverErrors.length > 0) {
-        setRows([]);
-        setErrors(serverErrors);
-        inputRef.current?.focus();
-      }
+      serverErrors = await onSubmit(rows);
     } finally {
-      setSubmitting(false);
+      // Flush so the file input is enabled again before it takes focus below.
+      flushSync(() => setSubmitting(false));
+    }
+    if (serverErrors.length > 0) {
+      setRows([]);
+      setErrors(serverErrors);
+      inputRef.current?.focus();
     }
   };
 
@@ -127,6 +133,7 @@ export function FeeImportDialog({ open, onSubmit, onCancel }: FeeImportDialogPro
             type='file'
             accept='.csv,text/csv'
             aria-describedby='fee-import-description'
+            disabled={submitting}
             onChange={handleFile}
           />
           {fileName !== null && (
