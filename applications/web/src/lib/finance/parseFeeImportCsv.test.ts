@@ -82,6 +82,9 @@ describe('parseFeeImportCsv', () => {
       'alice;Fee;500;CZ;', // 5
       'alice;Fee;500;CZK;31.2.2026', // 6
       'alice;Fee;500;CZK;2026-09-30', // 7
+      `${'a'.repeat(101)};Fee;500;CZK;`, // 8 — member over 100 chars
+      `${'a'.repeat(100)};Fee;500;CZK;`, // 9 — member at the cap
+      'alice;Fee;99999999999999999999;CZK;', // 10 — not a safe integer
     ].join('\n');
 
     const { rows, errors } = parseFeeImportCsv(text);
@@ -92,7 +95,9 @@ describe('parseFeeImportCsv', () => {
       { line: 4, code: 'invalid_amount' },
       { line: 5, code: 'invalid_currency' },
       { line: 6, code: 'invalid_due_at' },
+      { line: 8, code: 'malformed_row' },
+      { line: 10, code: 'invalid_amount' },
     ]);
-    expect(rows.map((r) => r.line)).toEqual([7]);
+    expect(rows.map((r) => r.line)).toEqual([7, 9]);
   });
 });

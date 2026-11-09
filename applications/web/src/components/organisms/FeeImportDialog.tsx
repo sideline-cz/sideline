@@ -1,6 +1,5 @@
 import type { FinanceApi } from '@sideline/domain';
 import React from 'react';
-import { Alert, AlertTitle } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import {
   Dialog,
@@ -50,9 +49,12 @@ export function FeeImportDialog({ open, onSubmit, onCancel }: FeeImportDialogPro
   const [rows, setRows] = React.useState<ParsedFeeImportRow[]>([]);
   const [errors, setErrors] = React.useState<ReadonlyArray<ImportError>>([]);
   const [submitting, setSubmitting] = React.useState(false);
+  // Bumped per file pick and on close; a decode that finishes after a newer bump is dropped.
+  const fileVersion = React.useRef(0);
 
   React.useEffect(() => {
     if (!open) {
+      fileVersion.current++;
       setFileName(null);
       setRows([]);
       setErrors([]);
@@ -66,15 +68,18 @@ export function FeeImportDialog({ open, onSubmit, onCancel }: FeeImportDialogPro
     // Clear now: Chromium fires no `change` when the same file is picked again after a fix.
     e.target.value = '';
     if (!file) return;
+    const version = ++fileVersion.current;
     setFileName(file.name);
     let text: string;
     try {
       text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
     } catch {
+      if (version !== fileVersion.current) return;
       setRows([]);
       setErrors([{ line: 1, code: 'invalid_encoding' }]);
       return;
     }
+    if (version !== fileVersion.current) return;
     const result = parseFeeImportCsv(text);
     setRows(result.rows);
     setErrors(result.errors);
@@ -128,22 +133,23 @@ export function FeeImportDialog({ open, onSubmit, onCancel }: FeeImportDialogPro
             <p className='text-sm text-muted-foreground break-all'>{fileName}</p>
           )}
 
+          {/* Only the title or the summary is announced; the list (up to 1000 rows) is not. */}
           <div aria-live='polite' aria-atomic='true'>
             {errors.length > 0 ? (
-              <Alert variant='destructive' role='presentation'>
-                <AlertTitle className='line-clamp-none'>{tr('fee_import_errorsTitle')}</AlertTitle>
-                <ol className='col-start-2 mt-1 max-h-60 overflow-y-auto text-sm'>
-                  {errors.map(({ line, code }) => (
-                    <li key={`${line}-${code}`}>
-                      {tr('fee_import_errorLine', { line, reason: errorLabels[code]() })}
-                    </li>
-                  ))}
-                </ol>
-              </Alert>
+              <p className='text-sm font-medium text-destructive'>{tr('fee_import_errorsTitle')}</p>
             ) : rows.length > 0 ? (
               <p className='text-sm'>{tr('fee_import_summary', { rows: rows.length, fees })}</p>
             ) : null}
           </div>
+          {errors.length > 0 && (
+            <ol className='max-h-60 overflow-y-auto text-sm text-destructive'>
+              {errors.map(({ line, code }) => (
+                <li key={`${line}-${code}`}>
+                  {tr('fee_import_errorLine', { line, reason: errorLabels[code]() })}
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
 
         <DialogFooter>

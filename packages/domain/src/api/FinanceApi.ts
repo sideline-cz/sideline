@@ -205,12 +205,15 @@ export const VoidCreditDepositRequest = Schema.Struct({
 export type VoidCreditDepositRequest = Schema.Schema.Type<typeof VoidCreditDepositRequest>;
 
 export const FEE_IMPORT_MAX_ROWS = 1000;
+export const FEE_IMPORT_MAX_MEMBER_LENGTH = 100;
 
 export const FeeImportRow = Schema.Struct({
   // 1-based CSV line; header is line 1, so data starts at 2
   line: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(2))),
   // Discord username; the server resolves it
-  member: Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(100))),
+  member: Schema.NonEmptyString.pipe(
+    Schema.check(Schema.isMaxLength(FEE_IMPORT_MAX_MEMBER_LENGTH)),
+  ),
   feeName: Schema.NonEmptyString,
   amountMinor: AmountMinor,
   currency: CurrencyCode,

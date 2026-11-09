@@ -313,6 +313,21 @@ describe('POST /teams/:teamId/fees/import', () => {
     expect(await counts(f.team.id)).toEqual({ fees: 0, assignments: 0 });
   });
 
+  it('a database error on a later fee rolls back the earlier fees', async () => {
+    const f = await seedFixture();
+    sessionsStore.set('treasurer-token', f.treasurerUserId);
+
+    // 1e19 passes AmountMinor (it is an integer) but overflows Postgres bigint,
+    // so "Fee A" is inserted before the "Fee B" insert fails.
+    const response = await postImport(f.team.id, 'treasurer-token', [
+      importRow(2, 'alice', 'Fee A', 500),
+      importRow(3, 'bob', 'Fee B', 10_000_000_000_000_000_000),
+    ]);
+
+    expect(response.status).toBe(500);
+    expect(await counts(f.team.id)).toEqual({ fees: 0, assignments: 0 });
+  });
+
   it('a re-upload is blocked by fee_exists until the fees are archived', async () => {
     const f = await seedFixture();
     sessionsStore.set('treasurer-token', f.treasurerUserId);

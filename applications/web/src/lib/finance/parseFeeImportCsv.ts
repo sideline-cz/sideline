@@ -54,7 +54,12 @@ export function parseFeeImportCsv(text: string): {
   const errors: FeeImportError[] = [];
   for (const { line, fields } of data) {
     const [member = '', feeName = '', amount = '', rawCurrency = '', rawDueAt = ''] = fields;
-    if (fields.length !== COLUMNS || member === '' || feeName === '') {
+    if (
+      fields.length !== COLUMNS ||
+      member === '' ||
+      member.length > FinanceApi.FEE_IMPORT_MAX_MEMBER_LENGTH ||
+      feeName === ''
+    ) {
       errors.push({ line, code: 'malformed_row' });
       continue;
     }
@@ -133,7 +138,8 @@ function toAmountMinor(raw: string, currency: string): number | null {
   const value = raw.replace(/[\s ]/g, '').replace(',', '.');
   if (!/^\d+(\.\d{1,2})?$/.test(value)) return null;
   try {
-    return parseAmount(value, currency);
+    const result = parseAmount(value, currency);
+    return Number.isSafeInteger(result) ? result : null;
   } catch {
     return null; // 0
   }
