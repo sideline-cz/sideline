@@ -29,6 +29,7 @@ interface FeeManagementPageProps {
   fees: ReadonlyArray<FeeView>;
   canManageFees: boolean;
   onCreateFee?: () => void;
+  onImportFees?: () => void;
   onEditFee?: (fee: FeeView) => void;
   onArchiveFee?: (feeId: string) => void;
   onAssignMembers?: (fee: FeeView) => void;
@@ -42,6 +43,7 @@ export function FeeManagementPage({
   fees,
   canManageFees,
   onCreateFee,
+  onImportFees,
   onEditFee,
   onArchiveFee,
   onAssignMembers,
@@ -55,9 +57,14 @@ export function FeeManagementPage({
         <h1 className='text-2xl font-bold'>{tr('fee_management_title')}</h1>
         <p className='text-muted-foreground'>{tr('fee_management_empty')}</p>
         {canManageFees && (
-          <Button type='button' onClick={onCreateFee}>
-            {tr('fee_management_createFee')}
-          </Button>
+          <div className='flex gap-2'>
+            <Button type='button' variant='outline' onClick={onImportFees}>
+              {tr('fee_import_button')}
+            </Button>
+            <Button type='button' onClick={onCreateFee}>
+              {tr('fee_management_createFee')}
+            </Button>
+          </div>
         )}
       </div>
     );
@@ -65,12 +72,17 @@ export function FeeManagementPage({
 
   return (
     <div>
-      <div className='mb-4 flex items-center justify-between'>
+      <div className='mb-4 flex flex-wrap items-center justify-between gap-2'>
         <h1 className='text-2xl font-bold'>{tr('fee_management_title')}</h1>
         {canManageFees && (
-          <Button type='button' onClick={onCreateFee}>
-            {tr('fee_management_createFee')}
-          </Button>
+          <div className='flex gap-2'>
+            <Button type='button' variant='outline' onClick={onImportFees}>
+              {tr('fee_import_button')}
+            </Button>
+            <Button type='button' onClick={onCreateFee}>
+              {tr('fee_management_createFee')}
+            </Button>
+          </div>
         )}
       </div>
 

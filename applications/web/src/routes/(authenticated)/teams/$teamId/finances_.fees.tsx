@@ -2,8 +2,10 @@ import { Fee, type FinanceApi, Team } from '@sideline/domain';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { Array, Effect, Option, Schema } from 'effect';
 import React from 'react';
+import { toast } from 'sonner';
 import { AssignFeeDialog } from '~/components/organisms/AssignFeeDialog.js';
 import { FeeFormDialog } from '~/components/organisms/FeeFormDialog.js';
+import { FeeImportDialog } from '~/components/organisms/FeeImportDialog.js';
 import type { FeeView } from '~/components/pages/FeeManagementPage.js';
 import { FeeManagementPage } from '~/components/pages/FeeManagementPage.js';
 import { Button } from '~/components/ui/button';
@@ -15,8 +17,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from '~/components/ui/dialog';
+import { dateOnlyToUtcNoon } from '~/lib/datetime.js';
+import type { ParsedFeeImportRow } from '~/lib/finance/parseFeeImportCsv.js';
 import { ApiClient, ClientError, NotFound, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
+
+const toPayloadRow = (row: ParsedFeeImportRow): FinanceApi.FeeImportRow => ({
+  line: row.line,
+  member: row.member,
+  feeName: row.feeName,
+  amountMinor: Schema.decodeSync(Fee.AmountMinor)(row.amountMinor),
+  currency: Schema.decodeSync(Fee.CurrencyCode)(row.currency),
+  dueAt: row.dueDate === null ? Option.none() : Option.some(dateOnlyToUtcNoon(row.dueDate)),
+});
 
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances_/fees')({
   ssr: false,
@@ -63,6 +76,7 @@ function FeesRoute() {
   const [editFee, setEditFee] = React.useState<FeeView | null>(null);
   const [archiveFeeId, setArchiveFeeId] = React.useState<string | null>(null);
   const [assignFee, setAssignFee] = React.useState<FeeView | null>(null);
+  const [importOpen, setImportOpen] = React.useState(false);
 
   const handleCreateSubmit = async (
     req: FinanceApi.CreateFeeRequest | FinanceApi.UpdateFeeRequest,
@@ -150,12 +164,44 @@ function FeesRoute() {
     }
   };
 
+  const handleImportSubmit = async (
+    rows: ParsedFeeImportRow[],
+  ): Promise<ReadonlyArray<FinanceApi.FeeImportRowError>> => {
+    const noErrors: ReadonlyArray<FinanceApi.FeeImportRowError> = [];
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.finance.importFees({ params: { teamId }, payload: { rows: rows.map(toPayloadRow) } }),
+      ),
+      Effect.map((ok) => ({ ok: Option.some(ok), errors: noErrors })),
+      Effect.catchTag('FeeImportInvalid', (e) =>
+        Effect.succeed({ ok: Option.none<FinanceApi.FeeImportResult>(), errors: e.errors }),
+      ),
+      Effect.mapError(() => ClientError.make(tr('fee_import_failed'))),
+      // No `run({ success })`: it would also toast on the FeeImportInvalid branch.
+      run(),
+    );
+    if (Option.isNone(result)) return [];
+    const { ok, errors } = result.value;
+    if (Option.isSome(ok)) {
+      toast.success(
+        tr('fee_import_success', {
+          feeCount: ok.value.feeCount,
+          assignmentCount: ok.value.assignmentCount,
+        }),
+      );
+      setImportOpen(false);
+      router.invalidate();
+    }
+    return errors;
+  };
+
   return (
     <>
       <FeeManagementPage
         fees={fees}
         canManageFees={canManageFees}
         onCreateFee={() => setCreateOpen(true)}
+        onImportFees={() => setImportOpen(true)}
         onEditFee={(fee) => setEditFee(fee)}
         onArchiveFee={(feeIdStr) => setArchiveFeeId(feeIdStr)}
         onAssignMembers={(fee) => setAssignFee(fee)}
@@ -166,6 +212,11 @@ function FeesRoute() {
         teamId={teamId}
         onSubmit={handleCreateSubmit}
         onCancel={() => setCreateOpen(false)}
+      />
+      <FeeImportDialog
+        open={importOpen}
+        onSubmit={handleImportSubmit}
+        onCancel={() => setImportOpen(false)}
       />
       {editFee !== null && (
         <FeeFormDialog

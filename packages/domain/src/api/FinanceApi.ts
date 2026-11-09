@@ -204,6 +204,45 @@ export const VoidCreditDepositRequest = Schema.Struct({
 });
 export type VoidCreditDepositRequest = Schema.Schema.Type<typeof VoidCreditDepositRequest>;
 
+export const FEE_IMPORT_MAX_ROWS = 1000;
+
+export const FeeImportRow = Schema.Struct({
+  // 1-based CSV line; header is line 1, so data starts at 2
+  line: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(2))),
+  // Discord username; the server resolves it
+  member: Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(100))),
+  feeName: Schema.NonEmptyString,
+  amountMinor: AmountMinor,
+  currency: CurrencyCode,
+  dueAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
+});
+export type FeeImportRow = Schema.Schema.Type<typeof FeeImportRow>;
+
+export const ImportFeesRequest = Schema.Struct({
+  rows: Schema.Array(FeeImportRow).pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(FEE_IMPORT_MAX_ROWS)),
+  ),
+});
+export type ImportFeesRequest = Schema.Schema.Type<typeof ImportFeesRequest>;
+
+export const FeeImportRowErrorCode = Schema.Literals([
+  'invalid_amount',
+  'member_not_found',
+  'member_ambiguous',
+  'duplicate_member',
+  'fee_exists',
+]);
+export type FeeImportRowErrorCode = typeof FeeImportRowErrorCode.Type;
+
+export const FeeImportRowError = Schema.Struct({ line: Schema.Int, code: FeeImportRowErrorCode });
+export type FeeImportRowError = Schema.Schema.Type<typeof FeeImportRowError>;
+
+export class FeeImportResult extends Schema.Class<FeeImportResult>('FeeImportResult')({
+  feeCount: Schema.Number,
+  assignmentCount: Schema.Number,
+}) {}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -277,6 +316,11 @@ export class CreditDepositSpent extends Schema.TaggedErrorClass<CreditDepositSpe
   {},
 ) {}
 
+export class FeeImportInvalid extends Schema.TaggedErrorClass<FeeImportInvalid>()(
+  'FeeImportInvalid',
+  { errors: Schema.Array(FeeImportRowError) },
+) {}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -308,6 +352,17 @@ export class FinanceApiGroup extends HttpApiGroup.make('finance')
         InvalidAmount.pipe(HttpApiSchema.status(400)),
       ],
       payload: CreateFeeRequest,
+      params: { teamId: TeamId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('importFees', '/teams/:teamId/fees/import', {
+      success: FeeImportResult.pipe(HttpApiSchema.status(201)),
+      error: [
+        FinanceForbidden.pipe(HttpApiSchema.status(403)),
+        FeeImportInvalid.pipe(HttpApiSchema.status(400)),
+      ],
+      payload: ImportFeesRequest,
       params: { teamId: TeamId },
     }).middleware(AuthMiddleware),
   )
