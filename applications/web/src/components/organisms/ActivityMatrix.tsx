@@ -5,6 +5,7 @@ import { Option } from 'effect';
 import React from 'react';
 import { Button } from '~/components/ui/button';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '~/components/ui/popover';
+import { FALLBACK_COLOR } from '~/lib/activityColors.js';
 import { tr } from '~/lib/translations.js';
 import { cn } from '~/lib/utils';
 
@@ -13,6 +14,8 @@ interface ActivityMatrixProps {
   // YYYY-MM-DD Prague days, oldest first, today last
   days: ReadonlyArray<string>;
   rows: ReadonlyArray<ActivityLogApi.ActivityMatrixRow>;
+  // Activity type name -> dot colour class
+  colors?: ReadonlyMap<string, string>;
   busy?: boolean;
 }
 
@@ -25,7 +28,13 @@ const sumMinutes = (entries: ReadonlyArray<ActivityLogApi.ActivityMatrixEntry>) 
     null,
   );
 
-export function ActivityMatrix({ teamId, days, rows, busy = false }: ActivityMatrixProps) {
+export function ActivityMatrix({
+  teamId,
+  days,
+  rows,
+  colors = new Map(),
+  busy = false,
+}: ActivityMatrixProps) {
   const locale = getLocale();
   const fmt = React.useMemo(
     () => ({
@@ -241,7 +250,20 @@ export function ActivityMatrix({ teamId, days, rows, busy = false }: ActivityMat
                             className='h-full w-full min-h-0 min-w-0 rounded-none p-0'
                             {...cellProps(r, c)}
                           >
-                            <span aria-hidden='true' className='size-2.5 rounded-full bg-primary' />
+                            <span aria-hidden='true' className='flex items-center gap-0.5'>
+                              {[...new Set(entries.map((e) => e.activityTypeName))]
+                                .slice(0, 3)
+                                .map((name, _i, shown) => (
+                                  <span
+                                    key={name}
+                                    className={cn(
+                                      'rounded-full',
+                                      shown.length === 1 ? 'size-2.5' : 'size-1.5',
+                                      colors.get(name) ?? FALLBACK_COLOR,
+                                    )}
+                                  />
+                                ))}
+                            </span>
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className='w-56'>
@@ -251,7 +273,14 @@ export function ActivityMatrix({ teamId, days, rows, busy = false }: ActivityMat
                           <ul className='flex flex-col gap-1 text-sm'>
                             {entries.map((e, i) => (
                               // biome-ignore lint/suspicious/noArrayIndexKey: entries have no id; order is stable
-                              <li key={i}>
+                              <li key={i} className='flex items-center gap-1.5'>
+                                <span
+                                  aria-hidden='true'
+                                  className={cn(
+                                    'size-2 shrink-0 rounded-full',
+                                    colors.get(e.activityTypeName) ?? FALLBACK_COLOR,
+                                  )}
+                                />
                                 {Option.match(e.activityTypeEmoji, {
                                   onNone: () => null,
                                   onSome: (emoji) => (

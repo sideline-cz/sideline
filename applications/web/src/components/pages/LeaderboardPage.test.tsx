@@ -142,3 +142,56 @@ describe('WorkoutMemberPage', () => {
     expect(screen.getByRole('link', { name: /makanicko_matrix_back/ })).toBeTruthy();
   });
 });
+
+describe('WorkoutTeamPage colours', () => {
+  it('gives each activity type its own dot colour, stable by the team type list', () => {
+    const cellEntry = (name: string) =>
+      new ActivityLogApi.ActivityMatrixEntry({
+        activityTypeName: name,
+        activityTypeEmoji: Option.none(),
+        totalMinutes: Option.some(30),
+      });
+    const matrix = new ActivityLogApi.ActivityMatrixResponse({
+      days: ['2026-11-07', '2026-11-08'],
+      groups: [],
+      rows: [
+        new ActivityLogApi.ActivityMatrixRow({
+          memberId: JAN,
+          displayName: 'Jan Novák',
+          cells: [
+            new ActivityLogApi.ActivityMatrixCell({
+              date: '2026-11-07',
+              entries: [cellEntry('Gym')],
+            }),
+            new ActivityLogApi.ActivityMatrixCell({
+              date: '2026-11-08',
+              entries: [cellEntry('Running')],
+            }),
+          ],
+        }),
+      ],
+    });
+    const { container } = render(
+      <WorkoutTeamPage
+        teamId={'t' as never}
+        matrix={matrix}
+        groupId={undefined}
+        onGroupChange={() => {}}
+        onRetry={() => {}}
+        activityTypes={[
+          { name: 'Gym', emoji: Option.none() },
+          { name: 'Running', emoji: Option.none() },
+        ]}
+      />,
+    );
+    const dots = [...container.querySelectorAll('[data-matrix-dot] span span')].map(
+      (el) => el.className,
+    );
+    expect(dots).toHaveLength(2);
+    expect(dots[0]).toContain('bg-emerald-500');
+    expect(dots[1]).toContain('bg-sky-500');
+    // Legend names each type
+    expect(screen.getByText('Gym')).toBeTruthy();
+    expect(screen.getByText('Running')).toBeTruthy();
+  });
+});
