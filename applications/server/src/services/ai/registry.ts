@@ -136,6 +136,12 @@ export const SearchDocsSchema = Schema.Struct({
   limit: Schema.optionalKey(LimitParam),
 });
 
+/** Shared by `list_discord_channels` and `list_discord_roles` — same filter, same cap. */
+export const ListDiscordSchema = Schema.Struct({
+  query: Schema.optionalKey(QueryParam),
+  limit: Schema.optionalKey(LimitParam),
+});
+
 // ---------------------------------------------------------------------------
 // Catalogue
 // ---------------------------------------------------------------------------
@@ -261,6 +267,26 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       "questions about the app itself. Do NOT use it for questions about the team's own data — " +
       'events, members, fees and everything else live in the other tools.',
     SearchDocsSchema,
+  ),
+  define(
+    'list_discord_channels',
+    "Lists the channels and categories in the team's Discord server as Sideline last saw them " +
+      '(name, type, category, whether Sideline manages the channel, whether Sideline archived it, ' +
+      'how many groups have access). Filter with a free-text `query` matched against the channel ' +
+      'name, and/or cap the rows with `limit` (1-50). If it returns `discord_not_connected`, tell ' +
+      "the user the Sideline bot is not in the team's Discord server.",
+    ListDiscordSchema,
+    Option.some('ai:discord_manage'),
+  ),
+  define(
+    'list_discord_roles',
+    "Lists the roles in the team's Discord server, highest first (name, position, whether " +
+      'Discord or an integration manages it, and whether Sideline links it to a group or a ' +
+      'roster). Filter with a free-text `query` matched against the role name, and/or cap the ' +
+      'rows with `limit` (1-50). If it returns `discord_not_connected`, tell the user the ' +
+      "Sideline bot is not in the team's Discord server.",
+    ListDiscordSchema,
+    Option.some('ai:discord_manage'),
   ),
   // Built FROM the action registry (`services/ai/actions.ts`) so a `propose_<action>` tool
   // cannot drift from its entry — adding an action there is enough to offer it here too.

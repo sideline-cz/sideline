@@ -32,6 +32,10 @@ import { toRoleInfo } from '~/api/role.js';
 import { toEffectiveRoles, toRosterInfo } from '~/api/roster.js';
 import { toTrainingTypeInfo } from '~/api/training-type.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
+import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, type EventWithDetails } from '~/repositories/EventsRepository.js';
@@ -43,6 +47,7 @@ import { MembershipPlansRepository } from '~/repositories/MembershipPlansReposit
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { type RosterEntry, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { computeCurrentDatetime } from '~/services/ai/currentDatetime.js';
 import {
@@ -859,3 +864,136 @@ export const listExpenses = (
         ),
       )
     : Effect.succeed(forbiddenResult('finance:view'));
+
+// ===========================================================================
+// list_discord_channels / list_discord_roles — `ai:discord_manage`.
+//
+// The data is the server's stored copy of the bot's last sync (`bot_guilds`, `discord_channels`,
+// `discord_guild_roles`, `discord_channel_mappings`), not a live Discord call. No RPC on
+// purpose: the repositories already hold what the web "Channels" page shows (api/channel.ts).
+// ===========================================================================
+
+export interface ListDiscordArgs {
+  readonly query?: string;
+  readonly limit?: number;
+}
+
+const discordNotConnected: ToolExecutionResult = {
+  result: { error: 'discord_not_connected' },
+  hits: [],
+};
+
+/** The team's guild id when the bot is in it — `teams.guild_id` is NOT NULL, so "no guild"
+ *  means "no `bot_guilds` row" (same check as `listChannels`, api/channel.ts:133). */
+const connectedGuildId = (teamId: Team.TeamId) =>
+  Effect.Do.pipe(
+    Effect.bind('teams', () => TeamsRepository.asEffect()),
+    Effect.bind('botGuilds', () => BotGuildsRepository.asEffect()),
+    Effect.bind('team', ({ teams }) => teams.findById(teamId)),
+    Effect.flatMap(({ botGuilds, team }) =>
+      Option.match(team, {
+        onNone: () => Effect.succeed(Option.none<Discord.Snowflake>()),
+        onSome: (t) =>
+          botGuilds
+            .exists(t.guild_id)
+            .pipe(Effect.map((linked) => (linked ? Option.some(t.guild_id) : Option.none()))),
+      }),
+    ),
+  );
+
+const DISCORD_CHANNEL_TYPES: Record<number, string> = {
+  0: 'text',
+  2: 'voice',
+  4: 'category',
+  5: 'announcement',
+  13: 'stage',
+  15: 'forum',
+};
+
+export const listDiscordChannels = (
+  args: ListDiscordArgs,
+  ctx: EntityReadContext,
+): Effect.Effect<
+  ToolExecutionResult,
+  never,
+  TeamsRepository | BotGuildsRepository | DiscordChannelsRepository
+> =>
+  hasPermission(ctx.membership, 'ai:discord_manage')
+    ? connectedGuildId(ctx.teamId).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.succeed(discordNotConnected),
+            onSome: () =>
+              DiscordChannelsRepository.asEffect().pipe(
+                Effect.flatMap((channels) => channels.findManagedListByTeam(ctx.teamId)),
+                Effect.map((rows) => {
+                  const categoryNames = new Map(
+                    rows.filter((row) => row.type === 4).map((row) => [row.channel_id, row.name]),
+                  );
+                  const named = rows.map((row) => ({
+                    row,
+                    name: Option.getOrElse(row.team_channel_name, () => row.name),
+                  }));
+                  return itemsResult(
+                    applyLimit(
+                      applyQueryFilter(named, args.query, (entry) => entry.name),
+                      args.limit,
+                    ).map(({ row, name }) => ({
+                      name,
+                      type: DISCORD_CHANNEL_TYPES[row.type] ?? 'other',
+                      category: Option.getOrNull(
+                        Option.flatMap(row.parent_id, (pid) =>
+                          Option.fromNullishOr(categoryNames.get(pid)),
+                        ),
+                      ),
+                      managedBySideline: Option.isSome(row.team_channel_id),
+                      archived: Option.getOrElse(row.team_channel_archived, () => false),
+                      accessGroupCount: Number(row.access_count),
+                    })),
+                  );
+                }),
+              ),
+          }),
+        ),
+      )
+    : Effect.succeed(forbiddenResult('ai:discord_manage'));
+
+export const listDiscordRoles = (
+  args: ListDiscordArgs,
+  ctx: EntityReadContext,
+): Effect.Effect<
+  ToolExecutionResult,
+  never,
+  TeamsRepository | BotGuildsRepository | DiscordRolesRepository | DiscordChannelMappingRepository
+> =>
+  hasPermission(ctx.membership, 'ai:discord_manage')
+    ? connectedGuildId(ctx.teamId).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.succeed(discordNotConnected),
+            onSome: (guildId) =>
+              Effect.Do.pipe(
+                Effect.bind('roles', () => DiscordRolesRepository.asEffect()),
+                Effect.bind('mappings', () => DiscordChannelMappingRepository.asEffect()),
+                Effect.bind('roleRows', ({ roles }) => roles.listByGuild(guildId)),
+                Effect.bind('mappingRows', ({ mappings }) => mappings.findAllByTeam(ctx.teamId)),
+                Effect.map(({ roleRows, mappingRows }) =>
+                  itemsResult(
+                    applyLimit(
+                      applyQueryFilter(roleRows, args.query, (row) => row.name),
+                      args.limit,
+                    ).map((row) => ({
+                      name: row.name,
+                      position: row.position,
+                      managedByDiscord: row.managed,
+                      linkedTo:
+                        mappingRows.find((m) => Option.contains(m.discord_role_id, row.id))
+                          ?.entity_type ?? null,
+                    })),
+                  ),
+                ),
+              ),
+          }),
+        ),
+      )
+    : Effect.succeed(forbiddenResult('ai:discord_manage'));

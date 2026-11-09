@@ -75,18 +75,22 @@ import type {
   Fee,
   GroupModel,
   MembershipPlan,
-  Role,
   RosterModel,
   Team,
   TeamMember,
   TrainingType,
   User,
 } from '@sideline/domain';
+import { Role } from '@sideline/domain';
 import { DateTime, Effect, Exit, Layer, Option, Schema, type ServiceMap } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
 import { toEventInfo } from '~/api/event.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
+import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, EventWithDetails } from '~/repositories/EventsRepository.js';
@@ -100,6 +104,7 @@ import {
   RosterEntry,
   TeamMembersRepository,
 } from '~/repositories/TeamMembersRepository.js';
+import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { ProposeCreateEventArgs } from '~/services/ai/actions.js';
 import { toToolParameters } from '~/services/ai/jsonSchema.js';
@@ -107,6 +112,8 @@ import {
   currentDatetime,
   getFinanceOverview,
   listActivityLogs,
+  listDiscordChannels,
+  listDiscordRoles,
   listEventAttendance,
   listEventRsvps,
   listEvents,
@@ -665,6 +672,129 @@ const makeMembershipPlansLayer = (rows: ReadonlyArray<MembershipPlanRowLike>) =>
     },
   } as never);
   return { layer, calls, assignmentCalls };
+};
+
+// ---------------------------------------------------------------------------
+// Discord read tools (`list_discord_channels`, `list_discord_roles`) — gated on
+// `ai:discord_manage`. They read the server's stored copy of the bot's last sync. `calls` pins
+// "never asked" for the forbidden and not-connected paths.
+// ---------------------------------------------------------------------------
+
+const GUILD_A = '100000000000000001' as Discord.Snowflake;
+
+interface DiscordChannelRowLike {
+  readonly channel_id: Discord.Snowflake;
+  readonly name: string;
+  readonly type: number;
+  readonly parent_id: Option.Option<Discord.Snowflake>;
+  readonly team_channel_id: Option.Option<string>;
+  readonly team_channel_archived: Option.Option<boolean>;
+  readonly team_channel_name: Option.Option<string>;
+  readonly team_channel_emoji: Option.Option<string>;
+  readonly access_count: number;
+}
+
+const buildDiscordChannelRow = (
+  overrides: Partial<Omit<DiscordChannelRowLike, 'channel_id'>> & {
+    channel_id: string;
+    name: string;
+  },
+): DiscordChannelRowLike => ({
+  type: 0,
+  parent_id: Option.none(),
+  team_channel_id: Option.none(),
+  team_channel_archived: Option.none(),
+  team_channel_name: Option.none(),
+  team_channel_emoji: Option.none(),
+  access_count: 0,
+  ...overrides,
+  channel_id: overrides.channel_id as Discord.Snowflake,
+});
+
+interface DiscordRoleRowLike {
+  readonly id: Discord.Snowflake;
+  readonly name: string;
+  readonly color: number;
+  readonly position: number;
+  readonly managed: boolean;
+}
+
+interface DiscordMappingRowLike {
+  readonly entity_type: 'group' | 'roster';
+  readonly discord_role_id: Option.Option<Discord.Snowflake>;
+}
+
+const makeDiscordLayers = (fixtures: {
+  readonly guildLinked: boolean;
+  readonly channels?: ReadonlyArray<DiscordChannelRowLike>;
+  readonly roles?: ReadonlyArray<DiscordRoleRowLike>;
+  readonly mappings?: ReadonlyArray<DiscordMappingRowLike>;
+}) => {
+  const calls = {
+    channels: [] as Array<Team.TeamId>,
+    roles: [] as Array<Discord.Snowflake>,
+    mappings: [] as Array<Team.TeamId>,
+  };
+  const layer = Layer.mergeAll(
+    Layer.succeed(TeamsRepository, {
+      findById: () => Effect.succeed(Option.some({ guild_id: GUILD_A })),
+    } as never),
+    Layer.succeed(BotGuildsRepository, {
+      exists: () => Effect.succeed(fixtures.guildLinked),
+    } as never),
+    Layer.succeed(DiscordChannelsRepository, {
+      findManagedListByTeam: (teamId: Team.TeamId) => {
+        calls.channels.push(teamId);
+        return Effect.succeed(fixtures.channels ?? []);
+      },
+    } as never),
+    Layer.succeed(DiscordRolesRepository, {
+      listByGuild: (guildId: Discord.Snowflake) => {
+        calls.roles.push(guildId);
+        return Effect.succeed(fixtures.roles ?? []);
+      },
+    } as never),
+    Layer.succeed(DiscordChannelMappingRepository, {
+      findAllByTeam: (teamId: Team.TeamId) => {
+        calls.mappings.push(teamId);
+        return Effect.succeed(fixtures.mappings ?? []);
+      },
+    } as never),
+  );
+  return { layer, calls };
+};
+
+const discordCtx = (permissions: ReadonlyArray<Role.Permission>) =>
+  buildCtx({ membership: buildMembership({ permissions }) });
+
+const DISCORD_CHANNEL_ROWS = [
+  buildDiscordChannelRow({ channel_id: '200000000000000001', name: 'General', type: 4 }),
+  buildDiscordChannelRow({
+    channel_id: '200000000000000002',
+    name: 'juniors-raw',
+    parent_id: Option.some('200000000000000001' as Discord.Snowflake),
+    team_channel_id: Option.some('tc-1'),
+    team_channel_archived: Option.some(false),
+    team_channel_name: Option.some('Juniors'),
+    access_count: 2,
+  }),
+  buildDiscordChannelRow({
+    channel_id: '200000000000000003',
+    name: 'old-seniors',
+    team_channel_id: Option.some('tc-2'),
+    team_channel_archived: Option.some(true),
+    team_channel_name: Option.some('Old seniors'),
+    access_count: 1,
+  }),
+  buildDiscordChannelRow({ channel_id: '200000000000000004', name: 'Lounge', type: 2 }),
+];
+
+const expectNoIdKeys = (items: ReadonlyArray<Record<string, unknown>>): void => {
+  for (const item of items) {
+    for (const key of Object.keys(item)) {
+      expect(key).not.toMatch(/(id|Id)$/);
+    }
+  }
 };
 
 /** The keys no model-facing row from ANY tool may carry (plan "Invariants" §5). */
@@ -1765,6 +1895,137 @@ describe('list_event_attendance', () => {
 });
 
 // ---------------------------------------------------------------------------
+// list_discord_channels / list_discord_roles — ai:discord_manage
+// ---------------------------------------------------------------------------
+
+describe('list_discord_channels', () => {
+  it.effect('EXECUTOR refuses a caller without ai:discord_manage — no repository call', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({ guildLinked: true, channels: DISCORD_CHANNEL_ROWS });
+      const outcome = yield* listDiscordChannels(
+        {},
+        discordCtx(['team:manage', 'group:manage']),
+      ).pipe(Effect.provide(discord.layer));
+
+      expect(outcome.result).toEqual({ error: 'forbidden', permission: 'ai:discord_manage' });
+      expect(outcome.hits).toEqual([]);
+      expect(discord.calls.channels).toEqual([]);
+    }),
+  );
+
+  it.effect('bot not in the guild → discord_not_connected, channels never queried', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({ guildLinked: false, channels: DISCORD_CHANNEL_ROWS });
+      const outcome = yield* listDiscordChannels({}, discordCtx(['ai:discord_manage'])).pipe(
+        Effect.provide(discord.layer),
+      );
+
+      expect(outcome.result).toEqual({ error: 'discord_not_connected' });
+      expect(discord.calls.channels).toEqual([]);
+    }),
+  );
+
+  it.effect('returns the team channels with category, managed and archived flags, no ids', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({ guildLinked: true, channels: DISCORD_CHANNEL_ROWS });
+      const outcome = yield* listDiscordChannels({}, discordCtx(['ai:discord_manage'])).pipe(
+        Effect.provide(discord.layer),
+      );
+
+      expect(discord.calls.channels).toEqual([TEAM_A]);
+      expect(outcome.hits).toEqual([]);
+      const items = itemsOf(outcome.result);
+      expect(items).toContainEqual({
+        name: 'Juniors',
+        type: 'text',
+        category: 'General',
+        managedBySideline: true,
+        archived: false,
+        accessGroupCount: 2,
+      });
+      expect(items.find((i) => i.name === 'Old seniors')?.archived).toBe(true);
+      const lounge = items.find((i) => i.name === 'Lounge');
+      expect(lounge?.archived).toBe(false);
+      expect(lounge?.managedBySideline).toBe(false);
+      expect(lounge?.type).toBe('voice');
+      expectNoIdKeys(items);
+    }),
+  );
+
+  it.effect('query filters by display name and limit caps the rows', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({ guildLinked: true, channels: DISCORD_CHANNEL_ROWS });
+      const ctx = discordCtx(['ai:discord_manage']);
+
+      const filtered = yield* listDiscordChannels({ query: 'jun' }, ctx).pipe(
+        Effect.provide(discord.layer),
+      );
+      expect(itemsOf(filtered.result).map((i) => i.name)).toEqual(['Juniors']);
+
+      const capped = yield* listDiscordChannels({ limit: 1 }, ctx).pipe(
+        Effect.provide(discord.layer),
+      );
+      expect(itemsOf(capped.result)).toHaveLength(1);
+    }),
+  );
+});
+
+describe('list_discord_roles', () => {
+  const ROLE_U20 = '300000000000000001' as Discord.Snowflake;
+  const ROLE_MOD = '300000000000000002' as Discord.Snowflake;
+  const roles: ReadonlyArray<DiscordRoleRowLike> = [
+    { id: ROLE_U20, name: 'U20', color: 0, position: 5, managed: false },
+    { id: ROLE_MOD, name: 'Moderator', color: 0, position: 3, managed: false },
+  ];
+  const mappings: ReadonlyArray<DiscordMappingRowLike> = [
+    { entity_type: 'group', discord_role_id: Option.some(ROLE_U20) },
+  ];
+
+  it.effect('EXECUTOR refuses a caller without ai:discord_manage — no repository call', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({ guildLinked: true, roles, mappings });
+      const outcome = yield* listDiscordRoles({}, discordCtx(['team:manage'])).pipe(
+        Effect.provide(discord.layer),
+      );
+
+      expect(outcome.result).toEqual({ error: 'forbidden', permission: 'ai:discord_manage' });
+      expect(outcome.hits).toEqual([]);
+      expect(discord.calls.roles).toEqual([]);
+      expect(discord.calls.mappings).toEqual([]);
+    }),
+  );
+
+  it.effect('bot not in the guild → discord_not_connected', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({ guildLinked: false, roles, mappings });
+      const outcome = yield* listDiscordRoles({}, discordCtx(['ai:discord_manage'])).pipe(
+        Effect.provide(discord.layer),
+      );
+
+      expect(outcome.result).toEqual({ error: 'discord_not_connected' });
+      expect(discord.calls.roles).toEqual([]);
+    }),
+  );
+
+  it.effect('returns the guild roles in repository order with the Sideline link', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({ guildLinked: true, roles, mappings });
+      const outcome = yield* listDiscordRoles({}, discordCtx(['ai:discord_manage'])).pipe(
+        Effect.provide(discord.layer),
+      );
+
+      expect(discord.calls.roles).toEqual([GUILD_A]);
+      expect(outcome.hits).toEqual([]);
+      const items = itemsOf(outcome.result);
+      expect(items.map((i) => i.name)).toEqual(['U20', 'Moderator']);
+      expect(items[0]).toMatchObject({ name: 'U20', linkedTo: 'group' });
+      expect(items[1]).toMatchObject({ name: 'Moderator', linkedTo: null });
+      expectNoIdKeys(items);
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // visibleTools + registry parity + current_datetime wiring
 // ---------------------------------------------------------------------------
 
@@ -1842,6 +2103,20 @@ describe('visibleTools', () => {
     }),
   );
 
+  it.effect('offers the Discord tools only to a caller holding ai:discord_manage', () =>
+    Effect.sync(() => {
+      const holder = visibleTools(discordCtx(['ai:discord_manage'])).map((t) => t.name);
+      expect(holder).toContain('list_discord_channels');
+      expect(holder).toContain('list_discord_roles');
+
+      const everythingElse = visibleTools(
+        discordCtx(Role.allPermissions.filter((p) => p !== 'ai:discord_manage')),
+      ).map((t) => t.name);
+      expect(everythingElse).not.toContain('list_discord_channels');
+      expect(everythingElse).not.toContain('list_discord_roles');
+    }),
+  );
+
   it.effect('search_docs is UNGATED — offered to a caller holding zero permissions', () =>
     Effect.sync(() => {
       const player = buildCtx({ membership: buildMembership({ permissions: [] }) });
@@ -1856,11 +2131,11 @@ describe('visibleTools', () => {
 describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3/10)', () => {
   it.effect('every tool has a well-formed, unique, flat, additionalProperties:false schema', () =>
     Effect.sync(() => {
-      // 13 read tools (the original 6, plus `search_docs` and the six database read tools of
-      // `.dev-loop/plan.md`) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (currently just
+      // 15 read tools (the original 6, plus `search_docs`, the six database read tools and the
+      // two Discord read tools) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (currently just
       // `propose_create_event`) — built FROM the registry (`registry.ts`), so this count moves
       // in lockstep with `AiActionName.literals`.
-      expect(ALL_TOOLS.length).toBe(14);
+      expect(ALL_TOOLS.length).toBe(16);
       expect(ALL_TOOLS.map((t) => t.name)).toContain('propose_create_event');
       for (const added of [
         'search_docs',
@@ -1870,6 +2145,8 @@ describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3
         'list_event_attendance',
         'list_activity_logs',
         'list_membership_plans',
+        'list_discord_channels',
+        'list_discord_roles',
       ]) {
         expect(ALL_TOOLS.map((t) => t.name)).toContain(added);
       }

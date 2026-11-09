@@ -35,6 +35,7 @@ const permissionLabels: Record<Role.Permission, () => string> = {
   'challenge:manage': () => tr('role_perm_challengeManage'),
   'carpool:manage': () => tr('role_perm_carpoolManage'),
   'poll:manage': () => tr('role_perm_pollManage'),
+  'ai:discord_manage': () => tr('role_perm_aiDiscordManage'),
 };
 
 interface RoleDetailPageProps {

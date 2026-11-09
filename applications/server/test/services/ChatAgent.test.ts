@@ -101,6 +101,10 @@ import { Cause, DateTime, Effect, Exit, Fiber, Layer, Option } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
+import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, EventWithDetails } from '~/repositories/EventsRepository.js';
@@ -291,6 +295,20 @@ const unusedRepoLayers = Layer.mergeAll(
       Effect.die(new Error('ChatAgent.test: MembershipPlansRepository not stubbed')),
     findSeasons: () =>
       Effect.die(new Error('ChatAgent.test: MembershipPlansRepository not stubbed')),
+  } as never),
+  Layer.succeed(BotGuildsRepository, {
+    exists: () => Effect.die(new Error('ChatAgent.test: BotGuildsRepository not stubbed')),
+  } as never),
+  Layer.succeed(DiscordChannelsRepository, {
+    findManagedListByTeam: () =>
+      Effect.die(new Error('ChatAgent.test: DiscordChannelsRepository not stubbed')),
+  } as never),
+  Layer.succeed(DiscordRolesRepository, {
+    listByGuild: () => Effect.die(new Error('ChatAgent.test: DiscordRolesRepository not stubbed')),
+  } as never),
+  Layer.succeed(DiscordChannelMappingRepository, {
+    findAllByTeam: () =>
+      Effect.die(new Error('ChatAgent.test: DiscordChannelMappingRepository not stubbed')),
   } as never),
 );
 
@@ -804,6 +822,33 @@ describe('ChatAgent.respond — dispatch never fails, loop continues', () => {
       if (toolMsg) expect(JSON.parse(toolMsg.content)).toEqual({ error: 'unknown_tool' });
     }),
   );
+
+  // A missing switch case answers `unknown_tool`, so this runs once per Discord tool name. The
+  // die-stubs in `unusedRepoLayers` prove the gate runs before any repository.
+  for (const name of ['list_discord_channels', 'list_discord_roles']) {
+    it.effect(`${name}: a caller without ai:discord_manage gets forbidden from the executor`, () =>
+      Effect.gen(function* () {
+        const call: LlmToolCall = { id: 'd1', name, argumentsJson: '{}' };
+        const scripted = makeScriptedLlm([
+          toolCallResult(Option.none(), [call]),
+          textResult('OK.'),
+        ]);
+        const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
+
+        const outcome = yield* runRespond(ctx, [userMsg('show discord')], scripted.layer);
+
+        expect(outcome._tag).toBe('Success');
+        const toolMsg = toolMessages(scripted.calls[1]?.messages ?? [])[0];
+        expect(toolMsg).toBeDefined();
+        if (toolMsg) {
+          expect(JSON.parse(toolMsg.content)).toEqual({
+            error: 'forbidden',
+            permission: 'ai:discord_manage',
+          });
+        }
+      }),
+    );
+  }
 
   it.effect('unparseable arguments JSON → {"error":"invalid_arguments"} (no detail key)', () =>
     Effect.gen(function* () {

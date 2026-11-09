@@ -332,11 +332,11 @@ Individual permission strings granted to a role.
 
 **Primary Key**: `(role_id, permission)`
 
-**Built-in permission values**: `team:manage`, `team:invite`, `roster:view`, `roster:manage`, `member:view`, `member:edit`, `member:remove`, `role:view`, `role:manage`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `training-type:delete`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `finance:manage_fees`, `finance:record_payments`, `challenge:manage`, `carpool:manage`, `poll:manage`
+**Built-in permission values**: `team:manage`, `team:invite`, `roster:view`, `roster:manage`, `member:view`, `member:edit`, `member:remove`, `role:view`, `role:manage`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `training-type:delete`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `finance:manage_fees`, `finance:record_payments`, `challenge:manage`, `carpool:manage`, `poll:manage`, `ai:discord_manage`
 
 **Built-in role defaults**:
 - **Admin**: all permissions (see `defaultPermissions.Admin` in `packages/domain/src/models/Role.ts`)
-- **Captain**: `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `carpool:manage`, `poll:manage`
+- **Captain**: `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `carpool:manage`, `poll:manage`, `ai:discord_manage`
 - **Player**: `roster:view`, `member:view`
 - **Treasurer**: `finance:view`, `finance:manage_fees`, `finance:record_payments`
 
@@ -2398,6 +2398,7 @@ All 110 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1794600000 | `monthly_recurrence` | Adds nullable `day_of_month SMALLINT` and `week_of_month SMALLINT` (`IF NOT EXISTS`) to `event_series`. Drops `event_series_frequency_check` and `chk_days_of_week` and adds `chk_event_series_recurrence`, one per-frequency rule: weekly/biweekly keep the old `days_of_week` rule verbatim with both new columns NULL, so existing rows and an old server's INSERT still pass; `monthly_by_date` needs `days_of_week = '{}'` and a day 1–31; `monthly_by_weekday` needs exactly one weekday and `week_of_month` in (1, 2, 3, 4, -1). Wrapped in `COALESCE(..., false)` so a NULL result rejects the row. |
 | 1794700000 | `event_series_event_type` | Adds `event_type TEXT NOT NULL DEFAULT 'training'` (with the same kind CHECK as `events`) and `event_type_id UUID` (FK → `event_types(id)` ON DELETE SET NULL) to `event_series`. Creates `event_series_sync_event_type_trg`, reusing `events_sync_event_type()`, BEFORE the backfill, then backfills `event_type_id` through the trigger (`SET event_type = event_type WHERE event_type_id IS NULL`), so existing series resolve exactly as a one-time training event would. An old server's INSERT that omits both columns lands as `'training'` with the id resolved by the trigger. |
 | 1794800000 | `activity_log_seasons` | Adds `activity_logs.season_id` (FK → `seasons` ON DELETE SET NULL), functions `season_at`, `current_season_id`, `season_for_activity_log`, `set_activity_log_season`, trigger `activity_logs_set_season_trg`, backfills `season_id` (UPDATE of NULL rows only; idempotent) and creates `idx_activity_logs_member_season`. `idx_activity_logs_team_member_id` is now a prefix duplicate, to be dropped later. |
+| 1794900000 | `grant_ai_discord_manage_permission` | Backfills `ai:discord_manage` into `role_permissions` for every existing built-in Admin and Captain role; `ON CONFLICT DO NOTHING`. |
 
 ### After Migrations (seed data)
 

@@ -5,6 +5,12 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-11-09 — New: the AI assistant can tell you about your Discord server
+
+Ask the AI assistant which channels and roles your Discord server has, or which Discord role belongs to a group. The answer shows what Sideline last saw from the bot, so a change made in Discord a moment ago may not show yet.
+
+- Only people with the new **AI Assistant: View Discord Setup** permission get these answers. Admin and Captain have it by default; you can give it to other roles in **Team → Roles**.
+
 ## 2026-11-08 — New: activity stats follow seasons, and teammates can see activity
 
 Your activity stats, streaks and the leaderboard now count the **current season**. Use the season picker on the **Activity** tab to look at a past season, or at **Earlier** for anything outside a season. Because seasons only started in October 2026, most of your history shows up under **Earlier** at first. The `/makanicko stats` and `/makanicko leaderboard` commands and the dashboard numbers follow the current season too.
