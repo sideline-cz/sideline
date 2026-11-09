@@ -1,12 +1,15 @@
 import type { ActivityLogApi, Team } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
+import { Option } from 'effect';
 import { Activity, Users } from 'lucide-react';
+import React from 'react';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { ActivityMatrix } from '~/components/organisms/ActivityMatrix.js';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Card } from '~/components/ui/card';
 import { Label } from '~/components/ui/label';
+import { activityTypeColors, FALLBACK_COLOR } from '~/lib/activityColors.js';
 import { toGroupOptions } from '~/lib/group-options.js';
 import { tr } from '~/lib/translations.js';
 
@@ -19,6 +22,8 @@ interface WorkoutTeamPageProps {
   groupId: string | undefined;
   onGroupChange: (groupId: string | undefined) => void;
   onRetry: () => void;
+  // The team's full type list keeps each type's colour stable across group filters
+  activityTypes?: ReadonlyArray<{ name: string; emoji: Option.Option<string> }>;
   isPending?: boolean;
 }
 
@@ -28,11 +33,30 @@ export function WorkoutTeamPage({
   groupId,
   onGroupChange,
   onRetry,
+  activityTypes = [],
   isPending = false,
 }: WorkoutTeamPageProps) {
   const rows = matrix?.rows ?? [];
   // Only members who logged something in the window get a row
   const activeRows = rows.filter((r) => r.cells.length > 0);
+  const colors = React.useMemo(
+    () => activityTypeColors(activityTypes.map((t) => t.name)),
+    [activityTypes],
+  );
+  // Legend: only the types that appear in the grid
+  const shownTypes = React.useMemo(() => {
+    const seen = new Set(
+      activeRows.flatMap((r) => r.cells.flatMap((c) => c.entries.map((e) => e.activityTypeName))),
+    );
+    const known = activityTypes.filter((t) => seen.has(t.name));
+    const knownNames = new Set(known.map((t) => t.name));
+    return [
+      ...known,
+      ...[...seen]
+        .filter((n) => !knownNames.has(n))
+        .map((name) => ({ name, emoji: Option.none<string>() })),
+    ];
+  }, [activeRows, activityTypes]);
   // Server days are Prague dates, today last: never the browser clock
   const lastDay = matrix?.days.at(-1);
   const todayDay = lastDay === undefined ? '' : Number(lastDay.slice(8, 10));
@@ -64,10 +88,19 @@ export function WorkoutTeamPage({
           />
         </div>
         <ul className='flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground'>
-          <li className='flex items-center gap-1.5'>
-            <span aria-hidden='true' className='size-2.5 rounded-full bg-primary' />
-            {tr('makanicko_matrix_legendDot')}
-          </li>
+          {shownTypes.map((t) => (
+            <li key={t.name} className='flex items-center gap-1.5'>
+              <span
+                aria-hidden='true'
+                className={`size-2.5 rounded-full ${colors.get(t.name) ?? FALLBACK_COLOR}`}
+              />
+              {Option.match(t.emoji, {
+                onNone: () => null,
+                onSome: (e) => <span aria-hidden='true'>{e}</span>,
+              })}
+              {t.name}
+            </li>
+          ))}
           <li className='flex items-center gap-1.5'>
             <span
               aria-hidden='true'
@@ -113,7 +146,13 @@ export function WorkoutTeamPage({
         <Card
           className={`min-w-0 overflow-hidden p-0${isPending ? ' opacity-60 transition-opacity' : ''}`}
         >
-          <ActivityMatrix teamId={teamId} days={matrix.days} rows={activeRows} busy={isPending} />
+          <ActivityMatrix
+            teamId={teamId}
+            days={matrix.days}
+            rows={activeRows}
+            colors={colors}
+            busy={isPending}
+          />
         </Card>
       )}
     </div>

@@ -23,13 +23,19 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout_/te
     const group = Schema.decodeUnknownOption(GroupFilter)(deps.group);
     return ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
-        api.activityLog.getActivityMatrix({ params: { teamId }, query: { group } }).pipe(
-          // The page shows its own error state with a retry button
-          Effect.tapError((e) => Effect.logWarning('Failed to load activity matrix', e)),
-          Effect.catch(() => Effect.succeed(null)),
-        ),
+        Effect.all({
+          matrix: api.activityLog.getActivityMatrix({ params: { teamId }, query: { group } }).pipe(
+            // The page shows its own error state with a retry button
+            Effect.tapError((e) => Effect.logWarning('Failed to load activity matrix', e)),
+            Effect.catch(() => Effect.succeed(null)),
+          ),
+          // Only colours depend on it: without it the dots fall back to one colour
+          activityTypes: api.activityType.listActivityTypes({ params: { teamId } }).pipe(
+            Effect.map((r) => r.activityTypes),
+            Effect.catch(() => Effect.succeed([])),
+          ),
+        }),
       ),
-      Effect.map((matrix) => ({ matrix })),
       warnAndCatchAll,
       context.run,
     );
@@ -39,7 +45,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout_/te
 function WorkoutTeamRoute() {
   const { teamId: teamIdRaw } = Route.useParams();
   const teamId = Schema.decodeSync(Team.TeamId)(teamIdRaw);
-  const { matrix } = Route.useLoaderData();
+  const { matrix, activityTypes } = Route.useLoaderData();
   const { group } = Route.useSearch();
   const router = useRouter();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -58,6 +64,7 @@ function WorkoutTeamRoute() {
       matrix={matrix}
       groupId={group}
       onGroupChange={handleGroupChange}
+      activityTypes={activityTypes}
       onRetry={() => {
         router.invalidate();
       }}

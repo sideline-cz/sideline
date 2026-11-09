@@ -25,13 +25,22 @@ const formatDuration = (minutes: number): string => {
   return `${hours}h ${mins}m`;
 };
 
-const formatDate = (isoString: string): string => {
-  const date = new Date(isoString);
-  return date.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
+const dayKey = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const formatDayLabel = (date: Date, now: Date): string => {
+  const today = dayKey(now);
+  const yesterday = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  const key = dayKey(date);
+  const long = date.toLocaleDateString(undefined, {
+    weekday: 'short',
     day: 'numeric',
+    month: 'short',
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
   });
+  if (key === today) return `${tr('activityLog_today')} · ${long}`;
+  if (key === yesterday) return `${tr('activityLog_yesterday')} · ${long}`;
+  return long;
 };
 
 interface ActivityLogListProps {
@@ -180,13 +189,20 @@ export function ActivityLogList({
   );
 
   const groupedByDate = React.useMemo(() => {
-    const groups = new Map<string, ActivityLogApi.ActivityLogEntry[]>();
+    const now = new Date();
+    const groups = new Map<
+      string,
+      { label: string; minutes: number; logs: ActivityLogApi.ActivityLogEntry[] }
+    >();
     for (const log of logs) {
-      const date = formatDate(log.loggedAt);
-      if (!groups.has(date)) groups.set(date, []);
-      groups.get(date)?.push(log);
+      const date = new Date(log.loggedAt);
+      const key = dayKey(date);
+      const group = groups.get(key) ?? { label: formatDayLabel(date, now), minutes: 0, logs: [] };
+      group.logs.push(log);
+      group.minutes += Option.getOrElse(log.durationMinutes, () => 0);
+      groups.set(key, group);
     }
-    return groups;
+    return Array.from(groups, ([key, group]) => ({ key, ...group }));
   }, [logs]);
 
   // A new log lands in the current season, so a past-scope list would never show it
@@ -299,49 +315,51 @@ export function ActivityLogList({
           ) : null}
         </div>
       ) : (
-        <div className='flex flex-col gap-4'>
-          {Array.from(groupedByDate.entries()).map(([date, dateLogs]) => (
-            <div key={date}>
-              <p className='text-xs font-semibold text-muted-foreground uppercase mb-1'>{date}</p>
-              <div className='flex flex-col gap-1'>
-                {dateLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className='flex items-center justify-between p-2 rounded border'
-                  >
-                    <div className='flex items-center gap-2'>
-                      <span className='font-medium text-sm'>
-                        {Option.match(log.activityTypeEmoji, {
-                          onNone: () => null,
-                          onSome: (e) => (
-                            <span aria-hidden='true' className='mr-1'>
-                              {e}
-                            </span>
-                          ),
-                        })}
-                        {log.activityTypeName}
-                      </span>
-                      {log.source === 'auto' && (
-                        <span className='text-xs text-muted-foreground italic'>(auto)</span>
+        <ol className='flex flex-col gap-5'>
+          {groupedByDate.map((group) => (
+            <li key={group.key}>
+              <div className='mb-2 flex items-baseline justify-between gap-3'>
+                <h3 className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                  {group.label}
+                </h3>
+                {group.minutes > 0 ? (
+                  <span className='text-xs font-medium tabular-nums text-muted-foreground'>
+                    {formatDuration(group.minutes)}
+                  </span>
+                ) : null}
+              </div>
+              <ul className='divide-y rounded-lg border bg-card'>
+                {group.logs.map((log) => (
+                  <li key={log.id} className='flex items-center gap-3 px-3 py-2.5'>
+                    <span
+                      aria-hidden='true'
+                      className='flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-lg'
+                    >
+                      {Option.getOrElse(log.activityTypeEmoji, () =>
+                        log.activityTypeName.slice(0, 1).toUpperCase(),
                       )}
-                      {Option.isSome(log.durationMinutes) && isOwnProfile && (
-                        <span className='text-xs text-muted-foreground'>
-                          {formatDuration(log.durationMinutes.value)}
-                        </span>
-                      )}
+                    </span>
+                    <div className='min-w-0 flex-1'>
+                      <div className='flex flex-wrap items-center gap-x-2 gap-y-0.5'>
+                        <span className='truncate text-sm font-medium'>{log.activityTypeName}</span>
+                        {log.source === 'auto' && (
+                          <span className='rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary'>
+                            {tr('activityLog_autoBadge')}
+                          </span>
+                        )}
+                      </div>
                       {/* Second wall: the server strips other members' notes already */}
                       {isOwnProfile && Option.isSome(log.note) && (
-                        <span className='text-xs text-muted-foreground'>{log.note.value}</span>
+                        <p className='truncate text-xs text-muted-foreground'>{log.note.value}</p>
                       )}
                     </div>
-                    {/* Read-only rows have no actions: durations line up on the right */}
-                    {!isOwnProfile && Option.isSome(log.durationMinutes) && (
-                      <span className='ml-auto text-xs text-muted-foreground tabular-nums'>
+                    {Option.isSome(log.durationMinutes) && (
+                      <span className='shrink-0 text-sm font-medium tabular-nums'>
                         {formatDuration(log.durationMinutes.value)}
                       </span>
                     )}
                     {isOwnProfile && log.source !== 'auto' && (
-                      <div className='flex gap-1'>
+                      <div className='flex shrink-0 gap-1'>
                         <Button
                           type='button'
                           variant='ghost'
@@ -365,12 +383,12 @@ export function ActivityLogList({
                         </Button>
                       </div>
                     )}
-                  </div>
+                  </li>
                 ))}
-              </div>
-            </div>
+              </ul>
+            </li>
           ))}
-        </div>
+        </ol>
       )}
 
       <Sheet
