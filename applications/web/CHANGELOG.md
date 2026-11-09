@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.74.0
+
+### 🚀 Features
+- clearer activity log, colour per activity type in the matrix (#806)
+
 ## 0.73.0
 
 ### 🚀 Features
