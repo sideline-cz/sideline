@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.76.0
+
+### 🚀 Features
+- Discord write actions in the AI assistant (#809)
+
 ## 0.75.0
 
 ### 🚀 Features
