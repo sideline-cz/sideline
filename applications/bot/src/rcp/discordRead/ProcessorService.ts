@@ -44,7 +44,16 @@ export const resolveMentions = (
     .replace(
       /https:\/\/(?:\w+\.)?discord(?:app)?\.com\/channels\/\d+\/\d+(?:\/\d+)?/g,
       '[Discord link]',
-    );
+    )
+    // Catch-all: any id the rules above miss (CDN, `@me` and `http://` links, slash commands
+    // with non-ASCII names). Discord snowflakes are 17-20 digits.
+    .replace(/(?<!\d)\d{17,20}(?!\d)/g, '[id]');
+
+// Postgres `jsonb` rejects `\u0000` and a lone UTF-16 surrogate, and `SubmitResult` then dies on
+// every retry. Remove both before the content goes anywhere.
+const LONE_SURROGATE_OR_NUL =
+  /\0|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+const toJsonbSafe = (text: string): string => text.replace(LONE_SURROGATE_OR_NUL, '');
 
 const size = (messages: ReadonlyArray<Message>) => JSON.stringify(messages).length;
 
@@ -69,16 +78,17 @@ export const fitToBudget = (
   const newest = messages.at(-1);
   if (newest === undefined) return { messages: [], dropped: false };
   const withContent = (content: string) => [{ ...newest, content: `${content}…` }];
-  let content = newest.content;
-  while (content.length > 0 && size(withContent(content)) > budget) {
-    content = content.slice(0, -Math.max(1, size(withContent(content)) - budget));
+  // Cut on code points, never inside a surrogate pair (see `toJsonbSafe`).
+  let chars = [...newest.content];
+  while (chars.length > 0 && size(withContent(chars.join(''))) > budget) {
+    chars = chars.slice(0, -Math.max(1, size(withContent(chars.join(''))) - budget));
   }
-  return { messages: withContent(content), dropped: true };
+  return { messages: withContent(chars.join('')), dropped: true };
 };
 
 const toMessage = (m: MessageResponse): Message => ({
-  author: m.author.global_name ?? m.author.username,
-  content: resolveMentions(m.content, m.mentions),
+  author: toJsonbSafe(m.author.global_name ?? m.author.username),
+  content: toJsonbSafe(resolveMentions(m.content, m.mentions)),
   timestamp: m.timestamp,
 });
 
@@ -116,15 +126,28 @@ const read = (
     ),
   );
 
+const summarize = (error: unknown): string => {
+  if (typeof error !== 'object' || error === null) return typeof error;
+  const tag = '_tag' in error && typeof error._tag === 'string' ? error._tag : 'UnknownError';
+  const message = 'message' in error && typeof error.message === 'string' ? error.message : '';
+  return `${tag}: ${message}`;
+};
+
+const logSubmitFailure = (request: DiscordReadRpcGroup.PendingDiscordRead, error: unknown) =>
+  Effect.logError(
+    `DiscordRead SubmitResult failed for request ${request.id} (channel ${request.channel_id}): ${summarize(error)}`,
+  );
+
 const makeProcessRequest =
   (rpc: SyncRpcClient, discord: ServiceMap.Service.Shape<typeof DiscordREST>) =>
   (request: DiscordReadRpcGroup.PendingDiscordRead): Effect.Effect<void> =>
     read(discord, request).pipe(
       Effect.flatMap((result) => rpc['DiscordRead/SubmitResult']({ id: request.id, result })),
-      // The row stays unprocessed: the next tick reads Discord again and submits again.
-      Effect.catchTag('RpcClientError', (e) =>
-        Effect.logError(`DiscordRead SubmitResult failed for request ${request.id}`, e),
-      ),
+      // The row stays unprocessed: the next tick reads Discord again and submits again. A server
+      // defect arrives as a die, so catch both, or one bad row stops the batch for every team.
+      // Log only the tag and message: the RPC error cause holds the request body (member content).
+      Effect.catch((e) => logSubmitFailure(request, e)),
+      Effect.catchDefect((defect) => logSubmitFailure(request, defect)),
       Effect.withSpan('sync/discord_read', {
         attributes: { 'request.id': request.id, 'channel.id': request.channel_id },
       }),

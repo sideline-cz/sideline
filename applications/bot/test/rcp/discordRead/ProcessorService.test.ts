@@ -5,7 +5,7 @@
 
 import { DiscordReadRequest } from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
-import { DateTime, Effect, Layer, Option, type ServiceMap } from 'effect';
+import { DateTime, Effect, Layer, Logger, Option, type ServiceMap } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { ProcessorService } from '~/rcp/discordRead/ProcessorService.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
@@ -56,6 +56,7 @@ const run = (opts: {
   readonly requests: ReadonlyArray<Request>;
   readonly rpc?: Record<string, Fn>;
   readonly rest?: Record<string, Fn>;
+  readonly logger?: Logger.Logger<unknown, void>;
 }) => {
   const calls: Record<string, unknown[][]> = {};
   const rpc = makeProxy(
@@ -77,6 +78,7 @@ const run = (opts: {
     ProcessorService.pipe(
       Effect.flatMap((svc: any): Effect.Effect<void> => svc.processTick),
       Effect.provide(Layer.merge(rpc, rest)),
+      Effect.provide(opts.logger === undefined ? Layer.empty : Logger.layer([opts.logger])),
     ),
   ).then(() => ({
     calls,
@@ -258,5 +260,65 @@ describe('discordRead ProcessorService — processTick', () => {
     );
     const text = JSON.stringify(messages.map(({ author, content }) => ({ author, content })));
     expect(text).not.toMatch(/\d{3,}/);
+  });
+
+  it('size cap: the cut never splits a surrogate pair, and lone surrogates and NUL are removed', async () => {
+    const { submitted } = await run({
+      requests: [request()],
+      rest: {
+        listMessages: () =>
+          Effect.succeed([msg({ content: `a\u0000b\ud83d c\ude00${'\n😀'.repeat(1300)}` })]),
+      },
+    });
+
+    const content = submitted[0]?.result.messages[0]?.content ?? '';
+    expect(content.startsWith('ab c')).toBe(true);
+    expect(content.endsWith('😀…')).toBe(true);
+    expect(content).not.toMatch(
+      /\0|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/,
+    );
+  });
+
+  it('a SubmitResult defect does not stop the batch, and the log holds no message content', async () => {
+    const logs: Array<string> = [];
+    const logger = Logger.make(({ message }) => {
+      logs.push(JSON.stringify(message));
+    });
+    let submits = 0;
+    const second = request({ id: '00000000-0000-1000-8000-000000000002' });
+    const { calls } = await run({
+      requests: [request(), second],
+      rest: { listMessages: () => Effect.succeed([msg({ content: 'secret member text' })]) },
+      rpc: {
+        'DiscordRead/SubmitResult': (payload: unknown) => {
+          submits += 1;
+          return submits === 1
+            ? Effect.die({ _tag: 'SqlError', message: 'invalid json', cause: payload })
+            : Effect.void;
+        },
+      },
+      logger,
+    });
+
+    const ids = (calls['DiscordRead/SubmitResult'] ?? []).map((a) => (a[0] as { id: string }).id);
+    expect(ids).toEqual([request().id, second.id]);
+    expect(logs.some((l) => l.includes(request().id) && l.includes('SqlError'))).toBe(true);
+    expect(logs.join('\n')).not.toContain('secret member text');
+  });
+
+  it('a raw snowflake outside a known token becomes [id]', async () => {
+    const m = msg({
+      content:
+        'see https://cdn.discordapp.com/attachments/123456789012345678/12345678901234567/f.png and http://discord.com/channels/@me/123456789012345678/123456789012345678 and </přihláška:12345678901234567890> 2024',
+    });
+    const { submitted } = await run({
+      requests: [request()],
+      rest: { listMessages: () => Effect.succeed([m]) },
+    });
+
+    const content = submitted[0]?.result.messages[0]?.content ?? '';
+    expect(content).not.toMatch(/\d{5,}/);
+    expect(content).toContain('2024');
+    expect(content).toContain('[id]');
   });
 });
