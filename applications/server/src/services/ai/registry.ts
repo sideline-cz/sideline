@@ -142,6 +142,22 @@ export const ListDiscordSchema = Schema.Struct({
   limit: Schema.optionalKey(LimitParam),
 });
 
+/** `read_discord_messages`. No id parameter: the channel is a NAME, resolved against the team's
+ *  own Discord mirror. `sinceHours` rather than a date string: the model gets hours from
+ *  `current_datetime`. Max 100 messages = one Discord page. */
+export const ReadDiscordMessagesSchema = Schema.Struct({
+  channel: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(100)),
+  ),
+  sinceHours: Schema.optionalKey(
+    Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 720 }))),
+  ),
+  limit: Schema.optionalKey(
+    Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
+  ),
+});
+
 // ---------------------------------------------------------------------------
 // Catalogue
 // ---------------------------------------------------------------------------
@@ -296,6 +312,33 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'If it returns `discord_not_connected`, tell the user the ' +
       "Sideline bot is not in the team's Discord server.",
     ListDiscordSchema,
+    ['ai:manage_discord'],
+  ),
+  define(
+    'read_discord_messages',
+    "Reads messages LIVE from one channel of the team's Discord server, by the channel name " +
+      'that `list_discord_channels` shows. Pass `sinceHours` for a time window (compute it from ' +
+      '`current_datetime`); without it you get the last `limit` messages (1-100, default 50). ' +
+      'Messages come oldest first. Bot messages are left out. An empty `content` means the ' +
+      'message had only attachments or embeds, or text Discord did not share with the bot: never ' +
+      'guess what it said. If the result has `capped: true`, you saw only the newest part of the ' +
+      'window: say so, never say "all messages". At most two live reads per reply. Errors: ' +
+      "`discord_not_connected`: the Sideline bot is not in the team's Discord server. " +
+      '`channel_not_found`: no such channel, call `list_discord_channels`. ' +
+      '`ambiguous_channel`: more than one channel has that name, ask the user which one. ' +
+      '`channel_not_managed`: the channel is in the Discord server but Sideline does not manage ' +
+      'it and did not create it for a group or roster, so you may not read it; say so, do not ' +
+      'call again. ' +
+      '`no_channel_access`: the user does not have access to this channel through their groups ' +
+      'or rosters, so you may not read it for them; say so plainly, do not call again, and do ' +
+      'not say the channel does not exist. A channel that `list_discord_channels` shows as `not_on_discord` cannot ' +
+      'be read yet. ' +
+      '`bot_unreachable`: the Sideline bot did not pick up the request, it may be offline; do ' +
+      'not retry. `bot_timeout`: the bot picked it up but did not answer in time; do not retry. ' +
+      '`channel_missing`: the channel no longer exists on Discord. `no_access`: the bot cannot ' +
+      'read that channel. `discord_error`: Discord failed, try again later. ' +
+      '`live_read_limit`: the two live reads of this reply are used up; answer with what you have.',
+    ReadDiscordMessagesSchema,
     ['ai:manage_discord'],
   ),
   // Built FROM the action registry (`services/ai/actions.ts`) so a `propose_<action>` tool

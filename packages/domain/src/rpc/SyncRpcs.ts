@@ -4,6 +4,7 @@ import { ActivityRpcGroup } from './activity/ActivityRpcGroup.js';
 import { BotInfoRpcGroup } from './botInfo/BotInfoRpcGroup.js';
 import { CarpoolRpcGroup } from './carpool/CarpoolRpcGroup.js';
 import { ChannelRpcGroup } from './channel/ChannelRpcGroup.js';
+import { DiscordReadRpcGroup } from './discordRead/DiscordReadRpcGroup.js';
 import { EmailRpcGroup } from './email/EmailRpcGroup.js';
 import { EventRpcGroup } from './event/EventRpcGroup.js';
 import { FinanceRpcGroup } from './finance/FinanceRpcGroup.js';
@@ -39,4 +40,5 @@ export class SyncRpcs extends RpcGroup.make().merge(
   RulesRpcGroup,
   RulesQuizRpcGroup,
   MembershipRpcGroup,
+  DiscordReadRpcGroup,
 ) {}

@@ -27,6 +27,7 @@ import { DashboardLayoutsRepository } from '~/repositories/DashboardLayoutsRepos
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
+import { DiscordReadRequestsRepository } from '~/repositories/DiscordReadRequestsRepository.js';
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsRepository.js';
@@ -205,6 +206,7 @@ export const Repositories = Layer.mergeAll(
   PersonalEventOverflowCategoriesRepository.Default,
   SudoSessionsRepository.Default,
   AiActionProposalsRepository.Default,
+  DiscordReadRequestsRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(

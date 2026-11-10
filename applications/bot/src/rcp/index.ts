@@ -1,5 +1,6 @@
 import { AchievementSyncService } from './achievement/index.js';
 import { ChannelBackfillService, ChannelSyncService } from './channel/index.js';
+import { DiscordReadSyncService } from './discordRead/index.js';
 import { EmailSyncService } from './email/index.js';
 import { EventSyncService } from './event/index.js';
 import { FinanceSyncService } from './finance/index.js';
@@ -16,6 +17,7 @@ export {
   AchievementSyncService,
   ChannelBackfillService,
   ChannelSyncService,
+  DiscordReadSyncService,
   EmailSyncService,
   EventSyncService,
   FinanceSyncService,

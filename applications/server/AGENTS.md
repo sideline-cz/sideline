@@ -373,6 +373,7 @@ RPC groups are served via NDJSON over HTTP. Each group has a domain definition a
 | Event | `packages/domain/src/rpc/event/EventRpcGroup.ts` | `src/rpc/event/index.ts` | Event sync |
 | Activity | `packages/domain/src/rpc/activity/ActivityRpcGroup.ts` | `src/rpc/activity/index.ts` | Activity sync |
 | BotInfo | `packages/domain/src/rpc/botInfo/BotInfoRpcGroup.ts` | `src/rpc/botInfo/index.ts` | Bot version reporting (`ReportBotInfo` writes the bot's `APP_VERSION` into the in-memory `BotInfoStore` at startup; `GetServerVersion` returns the server's `APP_VERSION`). Backs the `/version` HTTP endpoint and the bot's `/info` slash command. |
+| DiscordRead | `packages/domain/src/rpc/discordRead/DiscordReadRpcGroup.ts` | `src/rpc/discordRead/index.ts` | Live Discord reads for the AI tool `read_discord_messages` (`discord_read_requests`). `GetUnprocessedRequests` claims rows younger than 30 s and returns `PendingDiscordRead` instances; `SubmitResult` writes the result and is the ack (first write wins). See "A Tool That Waits For The Bot" below. |
 
 **Wiring a new RPC group requires three edits in one PR — miss any one and the build or runtime breaks:**
 
@@ -1352,6 +1353,7 @@ Cron jobs are long-running Effects that repeat on a schedule. Each cron is defin
 | `CoachingStatusCron` | `src/services/CoachingStatusCron.ts` | every minute | Emit a `coaching_status` event once per claimed training on the day of `start_at` (gated to ≥ 07:00 local). Candidate query `TeamSettingsRepository.findEventsNeedingCoachingStatus`; idempotency via `events.coaching_status_sent_at` — see "Self-Healing `*_sent_at` Date-Gated Crons" below. |
 | `EmailSummarizer` | `src/services/EmailSummarizer.ts` | every minute | Claim `email_messages` rows in `received` status, summarize via `LlmClient`, set `pending_approval` + enqueue an `approval_request` `email_post_sync_events` row. The claim (`claimForSummarizing`: `UPDATE ... SET status='summarizing' WHERE status='received'`) is the per-row lock — skip when it returns `Option.none()`. On `LlmError`, `incrementAttemptsAndMaybeFail` caps at `MAX_SUMMARIZE_ATTEMPTS` (3) then sets status `failed` (transient attempts return the row to `received`). See "Status-Claim As Per-Row Lock" below. |
 | `ImapPoller` | `src/services/ImapPoller.ts` | every 5 minutes | Per-team IMAP pull producer feeding `email_messages` at `received` status (the second producer alongside `EmailWebhookLive` — see "Email Ingestion Has Two Producers" below). For each `findImapEnabled()` config: decrypt `imap_secret_encrypted` via `EmailSecretCrypto`, `ImapClient.fetchSince(sinceUid)`, then ingest in ascending UID order. Per-team failures (decrypt, IMAP connect) are isolated via a module-local `SkipTeam` tagged error; the per-team loop runs at `{ concurrency: 2 }`. See "IMAP Watermark Ingestion" below. |
+| `DiscordReadSweepCron` | `src/services/DiscordReadSweepCron.ts` | every minute | Delete every `discord_read_requests` row older than `DISCORD_READ_TTL_MINUTES` (4). The backstop for live reads: the AI tool deletes its own row on read, timeout or a DB defect. 4 minutes plus the one-minute interval keeps the privacy policy's "never longer than five minutes" true. |
 
 ### Pattern
 
@@ -2569,6 +2571,22 @@ Rules:
 4. **`chatWithTools` decodes the provider response through its own `ChatCompletionResponse` schema**, kept separate from `OpenAiResponseSchema` (used by `requestContent`). Never merge tool-call fields into `OpenAiResponseSchema`. Every field of an inbound provider response is `Schema.OptionFromOptionalNullOr` — a gateway that omits `content` entirely must still decode.
 5. **New read tools are registered in `src/services/ai/registry.ts` (`ALL_TOOLS`) and dispatched in `ChatAgent.ts`'s `executeTool` switch, in the same PR.** `executeTool` resolves the call name against the FULL `ALL_TOOLS` catalogue, not against this turn's filtered `tools` array.
 6. **Every executor's effect is `Effect<ToolExecutionResult>` — `E = never`.** Permission and not-found outcomes are encoded as data (`forbiddenResult(permission)` / `notFoundResult`), never raised.
+
+### A Tool That Waits For The Bot (`read_discord_messages`)
+
+The server has no Discord client and no RPC to the bot. A tool that needs live Discord data writes an outbox row and waits for the bot to answer on the same row (`discord_read_requests`, `DiscordReadRequestsRepository`, `waitForRead` in `services/ai/readTools.ts`).
+
+Rules:
+
+1. **Insert, then poll `consume` with `Effect.retry(Schedule.spaced(...))`, then `Effect.timeoutOption`.** Never `Effect.repeat({ schedule, until })`: it returns the SCHEDULE output (the repeat count), not the consumed result.
+2. **Wrap the poll in `Effect.suspend(() => reads.consume(id))`.** `retry` re-runs the effect VALUE it was given. A mock that builds `Effect.succeed(...)` when it is called gives the same answer on every retry, so the test waits for a result that never comes.
+3. **On timeout, `abandon` (delete) the row and use any result it returns.** A result that landed after the last poll is an answer, not a failure. `picked_at` tells `bot_unreachable` (never picked) from `bot_timeout` (picked, too slow).
+4. **`Effect.onInterrupt` also calls `abandon`.** A client disconnect must not leave member content in Postgres; the sweeper is only the backstop. `aiTools.test.ts` "an interrupted wait deletes the row" fails without it.
+5. **`Effect.catchDefect` turns a DB defect during the wait into `{ error: 'discord_error' }`, and calls `abandon` first.** `catchSqlErrors` dies, and a defect would otherwise make the whole chat turn `provider_error`. Without the `abandon`, the bot can still write member messages into the row, and they stay until the sweeper. Interrupts pass through.
+6. **No transaction across the wait.** Every poll is one short statement; a held connection for 15 s per chat turn would drain the pool.
+7. **Read-once.** `consume` is a `DELETE ... RETURNING`, so a result is never read twice and never outlives the turn.
+8. **Per-turn cap in `ChatAgent.ts`.** At most `MAX_LIVE_READS_PER_TURN` (2) live reads per turn that reached the wait. The refusals listed in `PRE_WAIT_ERRORS` do not count; a new error that the executor returns before `insert` must be added to that set, and after the first `bot_unreachable` / `bot_timeout` every later live read in the turn returns that error without running. Each wait can take 15 s and nginx cuts at 60 s. `LoopState.liveReadsUsed` / `liveReadFailure` carry the state; `commitOutcome` must carry them in BOTH branches.
+9. **Caller access, no bypass.** The tool reads only channels Sideline manages (`team_channels`) or created for a group or roster (`discord_channel_mappings`), and only when the bot gives the caller a role that may view the channel (`callerHasChannelAccess`). Let `S` be `GroupsRepository.findActiveGroupsWithAncestorsForMember` (the caller's active groups plus active ancestors). Access is one of: a `team_channel_access` grant to a group in `S`; the channel is group `G`'s channel and `G` is in `S` (the bot gives `G`'s role to the members of `G` and its descendants, `Channel/GetGroupMembers`); the channel is roster `R`'s channel, `R` is active and the caller is in `roster_members` of `R` (`findExpectedRoleHolders`). A mapping without a `discord_role_id` gives no access. Neither source → `channel_not_managed`; no access → `no_channel_access`. Both refuse before any insert. `ai:manage_discord` opens the tool; it does not widen the channels, not even for Admin.
 
 ### The Agent Loop Is `Effect.suspend` Self-Recursion
 

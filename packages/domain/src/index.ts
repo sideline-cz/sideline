@@ -315,6 +315,8 @@ export * as Discord from './models/Discord.js';
 
 export * as DiscordChannelMapping from './models/DiscordChannelMapping.js';
 
+export * as DiscordReadRequest from './models/DiscordReadRequest.js';
+
 /**
  * The four name slots used to resolve a display name.
  * Precedence: profile name → Discord nickname → Discord display name → username.
@@ -566,6 +568,7 @@ export * as CarpoolRpcModels from './rpc/carpool/CarpoolRpcModels.js';
 export * as ChannelRpcEvents from './rpc/channel/ChannelRpcEvents.js';
 export * as ChannelRpcGroup from './rpc/channel/ChannelRpcGroup.js';
 export * as ChannelRpcModels from './rpc/channel/ChannelRpcModels.js';
+export * as DiscordReadRpcGroup from './rpc/discordRead/DiscordReadRpcGroup.js';
 export * as EmailRpcEvents from './rpc/email/EmailRpcEvents.js';
 export * as EmailRpcGroup from './rpc/email/EmailRpcGroup.js';
 export * as EmailRpcModels from './rpc/email/EmailRpcModels.js';

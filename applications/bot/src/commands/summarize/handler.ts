@@ -1,7 +1,6 @@
 import { SummarizeRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
-import type { MessageResponse } from 'dfx/DiscordREST/Generated';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
@@ -9,6 +8,7 @@ import { Array, DateTime, Effect, Metric, Option, pipe } from 'effect';
 import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { toDiscordError } from '~/rest/discordErrors.js';
+import { fetchChannelMessages, newestInWindow } from '~/rest/messages/fetchChannelMessages.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { buildSummaryEmbed } from './buildSummaryEmbed.js';
 
@@ -256,70 +256,12 @@ export const summarizeHandler = Interaction.asEffect().pipe(
         const work = Effect.Do.pipe(
           Effect.bind('rest', () => DiscordREST.asEffect()),
           Effect.bind('rpc', () => SyncRpc.asEffect()),
-          Effect.bind('fetchResult', ({ rest }) => {
-            type FetchResult = { messages: Array<MessageResponse>; capped: boolean };
-
-            const fetchPages = (
-              accumulated: Array<MessageResponse>,
-              before: string | undefined,
-              pagesLeft: number,
-            ): Effect.Effect<FetchResult, unknown> => {
-              if (pagesLeft === 0) {
-                // Hit the page cap — if we had a since window and all messages were
-                // within it, there might be more beyond the cap
-                const capped = Option.isSome(maybeCutoff);
-                return Effect.succeed({ messages: accumulated, capped });
-              }
-
-              const params: { limit: number; before?: string } = { limit: 100 };
-              if (before !== undefined) params.before = before;
-
-              return rest.listMessages(channelId, params).pipe(
-                Effect.flatMap((typedPage) => {
-                  if (typedPage.length === 0) {
-                    return Effect.succeed<FetchResult>({ messages: accumulated, capped: false });
-                  }
-
-                  const allNew = [...accumulated, ...typedPage];
-
-                  // If we have a cutoff, check if the oldest message in this page is within window
-                  if (Option.isSome(maybeCutoff)) {
-                    const cutoff = maybeCutoff.value;
-                    const oldestInPage = typedPage[typedPage.length - 1];
-
-                    if (oldestInPage !== undefined) {
-                      const oldestTs = Date.parse(oldestInPage.timestamp);
-                      const cutoffMs = DateTime.toEpochMillis(cutoff);
-
-                      if (oldestTs < cutoffMs) {
-                        // Page crosses the cutoff boundary — no more pages needed
-                        return Effect.succeed<FetchResult>({ messages: allNew, capped: false });
-                      }
-                    }
-
-                    // All messages in this page are within the since window
-                    if (typedPage.length < 100) {
-                      // Channel exhausted
-                      return Effect.succeed<FetchResult>({ messages: allNew, capped: false });
-                    }
-
-                    // Need more pages (still within window)
-                    const oldestId = typedPage[typedPage.length - 1]?.id;
-                    return fetchPages(allNew, oldestId, pagesLeft - 1);
-                  } else {
-                    // No cutoff — collect up to effectiveLimit
-                    if (typedPage.length < 100 || allNew.length >= effectiveLimit) {
-                      return Effect.succeed<FetchResult>({ messages: allNew, capped: false });
-                    }
-                    const oldestId = typedPage[typedPage.length - 1]?.id;
-                    return fetchPages(allNew, oldestId, pagesLeft - 1);
-                  }
-                }),
-              );
-            };
-
-            return fetchPages([], undefined, 2);
-          }),
+          Effect.bind('fetchResult', ({ rest }) =>
+            fetchChannelMessages(rest, channelId, {
+              cutoff: maybeCutoff,
+              limit: effectiveLimit,
+            }),
+          ),
           Effect.flatMap(({ rest, rpc, fetchResult }) => {
             const { messages: rawMessages, capped: pageCapped } = fetchResult;
 
@@ -331,18 +273,15 @@ export const summarizeHandler = Interaction.asEffect().pipe(
               (msg) => !msg.author.bot && msg.content !== '',
             );
 
-            // Apply since filter (inclusive >=)
-            const filteredMessages = Option.isSome(maybeCutoff)
-              ? nonBotMessages.filter((msg) => {
-                  const ts = Date.parse(msg.timestamp);
-                  const cutoffMs = DateTime.toEpochMillis(maybeCutoff.value);
-                  return ts >= cutoffMs;
-                })
-              : nonBotMessages;
+            const { chronological, capped: filterCapped } = newestInWindow(
+              nonBotMessages,
+              maybeCutoff,
+              effectiveLimit,
+            );
 
             const allBotOrEmpty = hasAnyRawMessages && nonBotMessages.length === 0;
 
-            if (!hasAnyRawMessages || filteredMessages.length === 0) {
+            if (!hasAnyRawMessages || chronological.length === 0) {
               const content = allBotOrEmpty
                 ? m.bot_summarize_only_bot_messages({}, { locale })
                 : m.bot_summarize_no_messages({}, { locale });
@@ -360,25 +299,8 @@ export const summarizeHandler = Interaction.asEffect().pipe(
                 );
             }
 
-            // Reverse to chronological (oldest first).
-            // For the since path: keep the NEWEST effectiveLimit messages (tail of
-            // chronological = most recent). For the no-since path: take the first
-            // effectiveLimit (which are already the newest, since they came newest-first
-            // from Discord and we've reversed).
-            // Keep the NEWEST effectiveLimit messages. reversedToChronological is
-            // oldest→newest, so the tail is the most recent — correct for both the
-            // since path (filtered set may exceed the limit) and the no-since path
-            // (a full page of up to 100 is fetched even when effectiveLimit is smaller,
-            // so slicing from the start would drop the most recent discussion).
-            const reversedToChronological = [...filteredMessages].reverse();
-            const chronological = reversedToChronological.slice(-effectiveLimit);
-
             // Bot-capped: the page budget ran out (more messages may exist in the window)
             const botCapped = pageCapped && Option.isSome(maybeCutoff);
-            // Filter-capped: the filtered set had more than effectiveLimit messages (we dropped some)
-            const filterCapped =
-              Option.isSome(maybeCutoff) && filteredMessages.length > effectiveLimit;
-
             // Determine participants (distinct authors) — dedupe by author.id (unique per user),
             // not by display name, to avoid under-counting when two users share a display name.
             const participantsSet = new Set(chronological.map((msg) => msg.author.id));
@@ -469,7 +391,7 @@ export const summarizeHandler = Interaction.asEffect().pipe(
               ),
             );
           }),
-          // `work`'s error channel is `unknown` (fetchPages is typed `Effect<_, unknown>`),
+          // `work`'s error channel is `unknown` (fetchChannelMessages is typed `Effect<_, unknown>`),
           // so `catchTag` on the dfx transport tags is unavailable here — use the total
           // `mapError(toDiscordError)` instead. In practice every reachable failure is a
           // Discord REST error from `listMessages`; anything unrecognized maps to

@@ -12,6 +12,7 @@ import {
   AchievementSyncService,
   ChannelBackfillService,
   ChannelSyncService,
+  DiscordReadSyncService,
   EmailSyncService,
   EventSyncService,
   FinanceSyncService,
@@ -160,6 +161,8 @@ export const program = Effect.Do.pipe(
   // pointing at the LAST line of the chain, which is a long way from the
   // bind that actually caused it.
 ).pipe(
+  // First bind of the second `.pipe(`: the first one is at the 20-argument ceiling.
+  Effect.bind('discordRead', () => DiscordReadSyncService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
   Effect.andThen(
     ({
@@ -178,6 +181,7 @@ export const program = Effect.Do.pipe(
       emailSync,
       channelBackfill,
       personalEvents,
+      discordRead,
     }) =>
       // `Effect.all`'s tuple overloads stop at 20 elements, and the sync loops
       // alone now exceed that. Nesting them in their own `Effect.all` keeps
@@ -197,6 +201,8 @@ export const program = Effect.Do.pipe(
               pollLoop(eventSync.processTick),
               pollLoop(guildJoin.processTick),
               fastPollLoop(inviteGenerator.processTick),
+              // An AI chat turn waits on the result (15 s budget on the server).
+              fastPollLoop(discordRead.processTick),
               pollLoop(onboarding.processTick),
               pollLoop(achievements.processTick),
               pollLoop(roleProvision.processTick),
@@ -225,6 +231,7 @@ export const program = Effect.Do.pipe(
   | RulesQuizSyncService
   | ChannelSyncService
   | ChannelBackfillService
+  | DiscordReadSyncService
   | EmailSyncService
   | EventSyncService
   | FinanceSyncService
