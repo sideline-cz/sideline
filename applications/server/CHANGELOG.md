@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.84.1
+
+_No notable changes._
+
 ## 0.84.0
 
 ### 🚀 Features
