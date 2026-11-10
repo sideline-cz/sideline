@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.25.0
+
+### 🚀 Features
+- assistant reads Discord messages live (#814)
+
 ## 0.24.0
 
 ### 🚀 Features
