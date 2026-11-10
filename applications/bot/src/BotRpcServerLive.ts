@@ -53,5 +53,9 @@ export const BotRpcServerLive = Option.match(env.BOT_RPC_SECRET, {
     makeBotRpcServer(secret).pipe(
       HttpServer.withLogAddress,
       Layer.provide(NodeHttpServer.layer(createServer, { port: BOT_RPC_PORT })),
+      // Optional server: a bind failure must not take Discord down. The server probe reports it.
+      Layer.catchCause((cause) =>
+        Layer.effectDiscard(Effect.logError('Bot RPC server failed to start', cause)),
+      ),
     ),
 }).pipe(Layer.withSpan('BotRpc'));

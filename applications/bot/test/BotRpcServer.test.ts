@@ -106,8 +106,11 @@ describe('BotRpcServer', () => {
       const healthUrl = `http://127.0.0.1:${port}`;
       const client = yield* HttpClient.HttpClient;
 
-      const error = yield* Effect.flip(ping(client, 's3cret', healthUrl));
-      expect(error._tag).toBe('RpcClientError');
+      // Several paths: a mount at '/rpc' would answer there, not at '/'.
+      for (const path of ['', '/rpc', '/rpc/bot']) {
+        const error = yield* Effect.flip(ping(client, 's3cret', `${healthUrl}${path}`));
+        expect(error._tag).toBe('RpcClientError');
+      }
 
       const healthz = yield* client.get(`${healthUrl}/healthz`);
       expect(healthz.status).toBe(200);
