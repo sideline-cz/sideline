@@ -484,6 +484,20 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isErrorResult = (result: unknown): result is { readonly error: string } =>
   isRecord(result) && typeof result.error === 'string';
 
+// Refusals that return before any row is inserted, so nothing waited. Anything not listed counts
+// against the per-turn cap — a new pre-wait error that is missed here errs toward the safe side.
+const PRE_WAIT_ERRORS: ReadonlySet<string> = new Set([
+  'forbidden',
+  'discord_not_connected',
+  'channel_not_found',
+  'ambiguous_channel',
+  'channel_not_managed',
+  'no_channel_access',
+]);
+
+const liveReadWaited = (result: unknown): boolean =>
+  !(isErrorResult(result) && PRE_WAIT_ERRORS.has(result.error));
+
 const liveReadFailureOf = (result: unknown): Option.Option<LiveReadFailure> =>
   isErrorResult(result) && (result.error === 'bot_unreachable' || result.error === 'bot_timeout')
     ? Option.some(result.error)
@@ -722,7 +736,7 @@ const dispatchOneCall = (
         return bareError({ error: 'invalid_arguments', detail: outcome.detail });
       }
       const processed = capToTotalBudget(state, processToolExecution(state, outcome.result));
-      return isLiveRead
+      return isLiveRead && liveReadWaited(outcome.result.result)
         ? { ...processed, liveRead: { failure: liveReadFailureOf(outcome.result.result) } }
         : processed;
     }),

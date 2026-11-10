@@ -1876,4 +1876,21 @@ describe('ChatAgent.respond — live Discord reads', () => {
       expect(results[2]).toEqual({ error: 'live_read_limit' });
     }),
   );
+
+  it.effect('a read refused before any wait does not use up the limit', () =>
+    Effect.gen(function* () {
+      const reads = makeLiveReadOverrides({
+        consume: Option.some({ outcome: 'ok', capped: false, messages: [] }),
+        abandon: Option.none(),
+      });
+      const results = yield* runLiveTurn(
+        [readCall('r1', 'nope'), readCall('r2', 'alpha'), readCall('r3', 'beta')],
+        reads.layer,
+      );
+
+      expect(results[0]).toEqual({ error: 'channel_not_found' });
+      expect(reads.inserted).toHaveLength(2);
+      expect(results[2]).not.toEqual({ error: 'live_read_limit' });
+    }),
+  );
 });
