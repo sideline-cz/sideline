@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.84.0
+
+### 🚀 Features
+- Discord write actions in the AI assistant (#809)
+- server-to-bot RPC transport (#810)
+
 ## 0.83.0
 
 ### 🚀 Features
