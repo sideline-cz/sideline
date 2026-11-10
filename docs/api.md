@@ -7247,9 +7247,9 @@ A conversational assistant, scoped to one team, that answers questions about the
 
 Discord proposals are refused with `discord_not_connected` when the bot is not in the guild. Archive is refused when no archive category is set or the channel is not on Discord yet; the bot may delete the channel if it cannot move it. Write tools take names, not ids. `list_discord_channels` rows carry `syncStatus`: `synced`, `pending`, `failed`, or `not_on_discord`.
 
-**`POST /teams/:teamId/ai/proposals/:proposalId/confirm`** — Auth: Bearer token, active member. Executes the proposal. `201` with `EventInfo` for `create_event`; `202` with `{ status: 'queued' }` for Discord actions (the change is only queued as a sync event for the bot, not yet applied). Errors: `403` (caller lacks a required permission), `404` (unknown or foreign proposal), `409` (already confirmed or rejected), `410` (expired).
+**`POST /teams/:teamId/ai/proposals/:proposalId/confirm`** — Auth: Bearer token, active member. Executes the proposal. `201` with `EventInfo` for `create_event`; `202` with `{ status: 'queued' }` for Discord actions (the change is only queued as a sync event for the bot, not yet applied). Errors: `403` (caller lacks a required permission), `404` (unknown or foreign proposal, already rejected, or the channel/group/archive category/name changed since the proposal), `409` (already confirmed), `410` (expired).
 
-**`POST /teams/:teamId/ai/proposals/:proposalId/reject`** — Auth: Bearer token, active member. Discards the proposal. `204`. Errors as above.
+**`POST /teams/:teamId/ai/proposals/:proposalId/reject`** — Auth: Bearer token, active member. Discards the proposal. `204`. Errors: `403` (not a member), `404` (unknown, foreign, or already rejected).
 
 **Degradation, never 500.** Every failure path — the kill switch is off, no LLM is configured, the provider call fails, the tool-calling loop exhausts its step budget, or the model returns no usable content — resolves to `200 OK` with `generated: false` and a typed `degradedReason`. There is no error response for a degraded answer; `chat`'s only two declared errors are membership (`AiChatForbidden`) and rate limiting (`AiChatRateLimited`).
 

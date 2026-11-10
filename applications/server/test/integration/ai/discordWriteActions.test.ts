@@ -737,8 +737,18 @@ describe('Discord write actions on real Postgres', () => {
   );
 
   // 18. Drift between propose and confirm: 404, nothing written, proposal still unclaimed.
+  const archiveGeneral = {
+    action: 'archive_discord_channel',
+    args: { channel: 'A-general' },
+  } as const;
+  const grantU20 = {
+    action: 'set_discord_channel_access',
+    args: { channel: 'A-general', group: 'U20', access: 'EDIT' },
+  } as const;
   const drifts: ReadonlyArray<{
     readonly name: string;
+    readonly action: AiActionProposal.AiActionName;
+    readonly args: unknown;
     readonly mutate: (
       sql: SqlClient.SqlClient,
       a: Effect.Success<ReturnType<typeof seedDiscordTeam>>,
@@ -746,35 +756,53 @@ describe('Discord write actions on real Postgres', () => {
   }> = [
     {
       name: 'the channel was archived',
+      ...archiveGeneral,
       mutate: (sql, a) => sql`UPDATE team_channels SET archived = true WHERE id = ${a.generalId}`,
     },
     {
       name: 'the archive category was unset',
+      ...archiveGeneral,
       mutate: (sql, a) =>
         sql`UPDATE team_settings SET discord_archive_category_id = NULL WHERE team_id = ${a.team.id}`,
     },
     {
       name: 'the archive category was deleted in Discord',
+      ...archiveGeneral,
       mutate: (sql, a) =>
         sql`DELETE FROM discord_channels WHERE channel_id = ${a.archiveCategoryId}`,
     },
     {
       name: 'the channel lost its Discord id',
+      ...archiveGeneral,
       mutate: (sql, a) =>
         sql`UPDATE team_channels SET discord_channel_id = NULL WHERE id = ${a.generalId}`,
+    },
+    {
+      name: 'the channel was archived',
+      ...grantU20,
+      mutate: (sql, a) => sql`UPDATE team_channels SET archived = true WHERE id = ${a.generalId}`,
+    },
+    {
+      name: 'the group was archived',
+      ...grantU20,
+      mutate: (sql, a) => sql`UPDATE groups SET is_archived = true WHERE id = ${a.u20}`,
+    },
+    {
+      // Differs only in case: the unique index would let it through, the confirm check must not.
+      name: 'an active channel took the name',
+      action: 'create_discord_channel',
+      args: { name: 'A-parents' },
+      mutate: (sql, a) =>
+        sql`INSERT INTO team_channels (team_id, name) VALUES (${a.team.id}, 'a-PARENTS')`,
     },
   ];
 
   for (const drift of drifts) {
-    it.effect(`archive confirm after drift (${drift.name}): 404, nothing written`, () =>
+    it.effect(`${drift.action} confirm after drift (${drift.name}): 404, nothing written`, () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const { a, admin } = yield* setup;
-        const { proposalId } = yield* proposeOk(
-          'archive_discord_channel',
-          { channel: 'A-general' },
-          admin.ctx,
-        );
+        const { proposalId } = yield* proposeOk(drift.action, drift.args, admin.ctx);
         yield* drift.mutate(sql, a).pipe(Effect.orDie);
         const before = yield* counts;
         const [archivedBefore] = yield* sql<{ archived: boolean }>`
@@ -795,6 +823,42 @@ describe('Discord write actions on real Postgres', () => {
       }).pipe(Effect.provide(SeedLayer)),
     );
   }
+
+  // 18b. The best-effort role backfill fails inside the confirm transaction. Without a savepoint
+  // Postgres turns the COMMIT into a silent ROLLBACK, and the 202 "queued" would be a lie.
+  it.effect('grant to a role-less group: a failed backfill does not undo the confirm', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const { a, admin } = yield* setup;
+      const { proposalId } = yield* proposeOk(
+        'set_discord_channel_access',
+        { channel: 'A-general', group: 'Kids', access: 'VIEW' },
+        admin.ctx,
+      );
+      // The backfill queues a group `channel_created`; make exactly that insert fail.
+      yield* sql`
+        ALTER TABLE channel_sync_events ADD CONSTRAINT test_no_group_backfill
+        CHECK (NOT (entity_type = 'group' AND event_type = 'channel_created')) NOT VALID
+      `;
+
+      const response = yield* confirm(a.team.id, proposalId, admin.token).pipe(
+        Effect.ensuring(
+          sql`ALTER TABLE channel_sync_events DROP CONSTRAINT test_no_group_backfill`.pipe(
+            Effect.orDie,
+          ),
+        ),
+      );
+
+      expect(response.status).toBe(202);
+      const access = yield* sql<{ access_level: string }>`
+        SELECT access_level FROM team_channel_access
+        WHERE team_channel_id = ${a.generalId} AND group_id = ${a.kids}
+      `;
+      expect(access).toEqual([{ access_level: 'VIEW' }]);
+      const [row] = yield* proposalRows;
+      expect(row?.consumed_at).not.toBeNull();
+    }).pipe(Effect.provide(SeedLayer)),
+  );
 
   // 19b. Failed flag, and a retried success that is no longer failed.
   it.effect(
@@ -831,5 +895,36 @@ describe('Discord write actions on real Postgres', () => {
         yield* syncEvents.markProcessed(eventId);
         expect(yield* channelStatus(admin.ctx, 'A-general')).toBe('synced');
       }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  // 19c. One transaction stamps its events with one created_at, and ids are random UUIDs: a
+  // failure anywhere in the latest batch is failed, never a coin toss.
+  it.effect('list_discord_channels: one failed event in the latest batch reports failed', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const { a, admin } = yield* setup;
+      const syncEvents = yield* ChannelSyncEventsRepository.asEffect();
+      for (let i = 0; i < 2; i++) {
+        yield* syncEvents.emitManagedChannelCreated({
+          teamId: a.team.id,
+          teamChannelId: a.generalId as never,
+          discordChannelName: 'A-general',
+        });
+      }
+      yield* sql`
+        UPDATE channel_sync_events SET processed_at = now(), created_at = '2026-01-01T00:00:00Z'
+      `;
+      yield* sql`
+        UPDATE channel_sync_events SET error = 'Missing Access'
+        WHERE id = (SELECT id FROM channel_sync_events ORDER BY id LIMIT 1)
+      `;
+      expect(yield* channelStatus(admin.ctx, 'A-general')).toBe('failed');
+      yield* sql`UPDATE channel_sync_events SET error = NULL`;
+      yield* sql`
+        UPDATE channel_sync_events SET error = 'Missing Access'
+        WHERE id = (SELECT id FROM channel_sync_events ORDER BY id DESC LIMIT 1)
+      `;
+      expect(yield* channelStatus(admin.ctx, 'A-general')).toBe('failed');
+    }).pipe(Effect.provide(SeedLayer)),
   );
 });

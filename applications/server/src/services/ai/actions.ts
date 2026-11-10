@@ -37,6 +37,7 @@ import {
 } from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
 import { DateTime, Effect, Option, type Result, Schema, type ServiceMap } from 'effect';
+import type { SqlClient } from 'effect/unstable/sql';
 import type { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import type { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
@@ -603,6 +604,12 @@ const CreateDiscordChannelArgs = Schema.Struct({
   ),
 });
 
+// Case-insensitive on purpose: stricter than the unique index. Propose and confirm share it.
+const isNameTaken = (
+  existing: ReadonlyArray<{ readonly name: string; readonly archived: boolean }>,
+  name: string,
+) => existing.some((c) => !c.archived && c.name.toLowerCase() === name.toLowerCase());
+
 const proposeCreateDiscordChannel = (rawArgs: unknown, ctx: ToolContext) =>
   Effect.Do.pipe(
     Effect.bind('args', () => decodeArgs(CreateDiscordChannelArgs, rawArgs)),
@@ -611,9 +618,8 @@ const proposeCreateDiscordChannel = (rawArgs: unknown, ctx: ToolContext) =>
         Effect.flatMap((channels) => channels.findAllByTeam(ctx.teamId)),
       ),
     ),
-    // Case-insensitive on purpose: stricter than the unique index.
     Effect.tap(({ args, existing }) =>
-      existing.some((c) => !c.archived && c.name.toLowerCase() === args.name.toLowerCase())
+      isNameTaken(existing, args.name)
         ? Effect.fail('name: a channel with that name already exists')
         : Effect.void,
     ),
@@ -651,6 +657,14 @@ const proposeCreateDiscordChannel = (rawArgs: unknown, ctx: ToolContext) =>
 
 const confirmCreateDiscordChannel = (payloadJson: string, ctx: { readonly teamId: Team.TeamId }) =>
   decodeStoredPayload(CreateDiscordChannelArgs, payloadJson).pipe(
+    Effect.tap((args) =>
+      TeamChannelsRepository.asEffect().pipe(
+        Effect.flatMap((channels) => channels.findAllByTeam(ctx.teamId)),
+        Effect.flatMap((existing) =>
+          isNameTaken(existing, args.name) ? stale('name taken') : Effect.void,
+        ),
+      ),
+    ),
     Effect.flatMap((args) =>
       createManagedChannel({
         teamId: ctx.teamId,
@@ -831,7 +845,8 @@ type ConfirmR =
   | ChannelSyncEventsRepository
   | DiscordChannelMappingRepository
   | TeamsRepository
-  | DiscordChannelsRepository;
+  | DiscordChannelsRepository
+  | SqlClient.SqlClient;
 
 export interface ActionDefinition {
   /** Every one is required. A write action includes the permission of the HTTP endpoint it

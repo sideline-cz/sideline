@@ -3,11 +3,13 @@
  * (`services/ai/actions.ts`, the three Discord actions). Same reason as `EventCreation.ts` for
  * living here and not in `api/channel.ts`: that would drag `api/api.ts` into the AI tool graph.
  *
- * No function here calls `sql.withTransaction` — the caller owns the transaction. Each one only
- * writes Sideline rows and QUEUES `channel_sync_events` rows; the bot applies them later.
+ * The caller owns the transaction; only `setManagedChannelAccessTx` opens a savepoint, for its
+ * best-effort backfill. Each function only writes Sideline rows and QUEUES `channel_sync_events`
+ * rows; the bot applies them later.
  */
 import type { Discord, GroupModel, Team, TeamChannel, TeamChannelAccess } from '@sideline/domain';
 import { Array, Effect, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
@@ -177,26 +179,34 @@ export const setManagedChannelAccessTx = ({
           // Best-effort: enqueue provisioning for role-less groups so they
           // self-heal once the role lands. Guarded by hasUnprocessedForGroups
           // to avoid duplicate events on repeated setAccess calls.
-          // Must NOT fail the request.
-          return DiscordChannelMappingRepository.asEffect().pipe(
-            Effect.flatMap((mappingsRepo) =>
-              channelSync.hasUnprocessedForGroups([...unresolvableGroupIds]).pipe(
-                Effect.flatMap((inFlightIds) => {
-                  const inFlightSet = new Set(inFlightIds);
-                  const toProvision = unresolvableGroupIds.filter((gid) => !inFlightSet.has(gid));
-                  if (toProvision.length === 0) return Effect.void;
-                  return mappingsRepo
-                    .findGroupsMissingRole(Option.some(teamId), toProvision.length * 2)
-                    .pipe(
-                      Effect.flatMap((candidateGroups) => {
-                        const provisionSet = new Set(toProvision);
-                        const toEmit = candidateGroups.filter((g) => provisionSet.has(g.group_id));
-                        return Effect.forEach(toEmit, emitMissingGroupRoleProvision, {
-                          concurrency: 1,
-                        }).pipe(Effect.asVoid);
-                      }),
-                    );
-                }),
+          // Must NOT fail the request. The savepoint matters: a failed statement aborts the
+          // caller's transaction, and Postgres then turns its COMMIT into a silent ROLLBACK.
+          return Effect.all([
+            SqlClient.SqlClient.asEffect(),
+            DiscordChannelMappingRepository.asEffect(),
+          ]).pipe(
+            Effect.flatMap(([sql, mappingsRepo]) =>
+              sql.withTransaction(
+                channelSync.hasUnprocessedForGroups([...unresolvableGroupIds]).pipe(
+                  Effect.flatMap((inFlightIds) => {
+                    const inFlightSet = new Set(inFlightIds);
+                    const toProvision = unresolvableGroupIds.filter((gid) => !inFlightSet.has(gid));
+                    if (toProvision.length === 0) return Effect.void;
+                    return mappingsRepo
+                      .findGroupsMissingRole(Option.some(teamId), toProvision.length * 2)
+                      .pipe(
+                        Effect.flatMap((candidateGroups) => {
+                          const provisionSet = new Set(toProvision);
+                          const toEmit = candidateGroups.filter((g) =>
+                            provisionSet.has(g.group_id),
+                          );
+                          return Effect.forEach(toEmit, emitMissingGroupRoleProvision, {
+                            concurrency: 1,
+                          }).pipe(Effect.asVoid);
+                        }),
+                      );
+                  }),
+                ),
               ),
             ),
             Effect.catchCause((cause) =>

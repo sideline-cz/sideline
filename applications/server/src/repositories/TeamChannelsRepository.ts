@@ -105,32 +105,44 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  // Revoke rows carry no team_channel_id, only existing_channel_id: hence the OR.
+  // One pass over the team's managed events. Revoke rows carry no team_channel_id, only
+  // existing_channel_id: hence the OR. `id` is a random UUID and one transaction stamps all its
+  // events with the same created_at, so "latest" is the whole latest batch: any failure in it
+  // reports failed.
+  // ponytail: the `ev` scan filters on team_id with no index; add
+  // (team_id, created_at DESC) WHERE entity_type = 'managed' if channel_sync_events grows large.
   const findAllByTeamWithSyncStateQuery = SqlSchema.findAll({
     Request: Team.TeamId,
     Result: TeamChannelSyncStateRow,
     execute: (teamId) => sql`
+      WITH ev AS MATERIALIZED (
+        SELECT team_channel_id, existing_channel_id, processed_at, error, created_at
+        FROM channel_sync_events
+        WHERE team_id = ${teamId} AND entity_type = 'managed'
+      ),
+      matched AS (
+        SELECT tc.id AS tc_id, ev.processed_at, ev.error, ev.created_at,
+               max(ev.created_at) OVER (PARTITION BY tc.id) AS latest_at
+        FROM team_channels tc
+        JOIN ev ON ev.team_channel_id = tc.id OR ev.existing_channel_id = tc.discord_channel_id
+        WHERE tc.team_id = ${teamId}
+      ),
+      state AS (
+        SELECT tc_id,
+               bool_or(processed_at IS NULL) AS pending,
+               bool_or(error IS NOT NULL AND created_at = latest_at) AS failed
+        FROM matched
+        GROUP BY tc_id
+      )
       SELECT tc.id, tc.name, tc.category, tc.archived, tc.discord_channel_id,
              (SELECT COUNT(*)::int FROM team_channel_access tca WHERE tca.team_channel_id = tc.id) AS access_count,
              CASE
-               WHEN EXISTS (
-                 SELECT 1 FROM channel_sync_events e
-                 WHERE e.team_id = tc.team_id
-                   AND e.entity_type = 'managed'
-                   AND e.processed_at IS NULL
-                   AND (e.team_channel_id = tc.id OR e.existing_channel_id = tc.discord_channel_id)
-               ) THEN 'pending'
-               WHEN (
-                 SELECT e.error FROM channel_sync_events e
-                 WHERE e.team_id = tc.team_id
-                   AND e.entity_type = 'managed'
-                   AND (e.team_channel_id = tc.id OR e.existing_channel_id = tc.discord_channel_id)
-                 ORDER BY e.created_at DESC, e.id DESC
-                 LIMIT 1
-               ) IS NOT NULL THEN 'failed'
+               WHEN s.pending THEN 'pending'
+               WHEN s.failed THEN 'failed'
                ELSE 'ok'
              END AS sync_state
       FROM team_channels tc
+      LEFT JOIN state s ON s.tc_id = tc.id
       WHERE tc.team_id = ${teamId}
       ORDER BY tc.name, tc.id
     `,

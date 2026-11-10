@@ -974,6 +974,9 @@ export const listDiscordChannels = (
                         onSome: (id) => !mirroredIds.has(id),
                       }),
                     )
+                    // Archived and gone from Discord with nothing in flight: there is nothing to
+                    // report, and `not_on_discord` would claim the bot is about to create it.
+                    .filter((tc) => !(tc.archived && tc.sync_state === 'ok'))
                     .map((tc) => ({
                       discordName: Option.none<string>(),
                       item: {
