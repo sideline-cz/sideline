@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.0
+
+### 🚀 Features
+- bulk fee import from CSV (#808)
+- read-only Discord tools in the AI assistant (#807)
+
 ## 0.22.0
 
 ### 🚀 Features
