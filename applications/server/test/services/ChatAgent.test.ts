@@ -115,7 +115,10 @@ import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewReposit
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
+import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
+import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
 import { MembershipWithRole, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { buildSystemPrompt } from '~/services/ai/systemPrompt.js';
@@ -319,6 +322,20 @@ const unusedRepoLayers = Layer.mergeAll(
   Layer.succeed(CustomAchievementsRepository, {
     findByTeam: () =>
       Effect.die(new Error('ChatAgent.test: CustomAchievementsRepository not stubbed')),
+  } as never),
+  // The Discord write actions (propose) and the `list_discord_channels` sync state.
+  Layer.succeed(TeamChannelsRepository, {
+    findAllByTeam: () =>
+      Effect.die(new Error('ChatAgent.test: TeamChannelsRepository not stubbed')),
+    findAllByTeamWithSyncState: () =>
+      Effect.die(new Error('ChatAgent.test: TeamChannelsRepository not stubbed')),
+  } as never),
+  Layer.succeed(TeamChannelAccessRepository, {
+    findByChannel: () =>
+      Effect.die(new Error('ChatAgent.test: TeamChannelAccessRepository not stubbed')),
+  } as never),
+  Layer.succeed(TeamSettingsRepository, {
+    findByTeamId: () => Effect.die(new Error('ChatAgent.test: TeamSettingsRepository not stubbed')),
   } as never),
 );
 
@@ -1684,34 +1701,34 @@ describe('ChatAgent.respond — propose_create_event dispatch', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildSystemPrompt — canPropose gating (plan §16, `systemPrompt.ts`).
+// buildSystemPrompt — proposeTools gating (`systemPrompt.ts`).
 // ---------------------------------------------------------------------------
 
-describe('buildSystemPrompt — canPropose gating', () => {
+describe('buildSystemPrompt — proposeTools gating', () => {
   const baseInput = {
     teamName: 'Testing FC',
     teamTimezone: 'Europe/Prague',
     todayTeamLocal: '2026-06-01',
   };
 
-  it.effect(
-    'canPropose: false keeps the READ-ONLY paragraph and omits the one-proposal sentence',
-    () =>
-      Effect.sync(() => {
-        const prompt = buildSystemPrompt({ ...baseInput, canPropose: false });
-        expect(prompt).toContain('READ-ONLY');
-        expect(prompt).not.toContain('propose_create_event');
-      }),
+  it.effect('no propose tools keeps the READ-ONLY paragraph and names no propose_ tool', () =>
+    Effect.sync(() => {
+      const prompt = buildSystemPrompt({ ...baseInput, proposeTools: [] });
+      expect(prompt).toContain('READ-ONLY');
+      expect(prompt).not.toContain('propose_');
+    }),
   );
 
-  it.effect(
-    'canPropose: true adds the one-proposal-per-reply sentence and drops the READ-ONLY paragraph',
-    () =>
-      Effect.sync(() => {
-        const prompt = buildSystemPrompt({ ...baseInput, canPropose: true });
-        expect(prompt).toContain('propose_create_event');
-        expect(prompt).toMatch(/one|ONE/);
-        expect(prompt).not.toContain('READ-ONLY');
-      }),
+  it.effect('propose tools are named, the Discord QUEUED rule is present, no READ-ONLY', () =>
+    Effect.sync(() => {
+      const prompt = buildSystemPrompt({
+        ...baseInput,
+        proposeTools: ['propose_create_event', 'propose_archive_discord_channel'],
+      });
+      expect(prompt).toContain('propose_create_event');
+      expect(prompt).toContain('propose_archive_discord_channel');
+      expect(prompt).toContain('QUEUED');
+      expect(prompt).not.toContain('READ-ONLY');
+    }),
   );
 });

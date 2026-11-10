@@ -50,7 +50,7 @@ describe('ACTION_REGISTRY — exhaustiveness', () => {
         expect(Object.keys(ACTION_REGISTRY).sort()).toEqual([...literals].sort());
         for (const name of literals) {
           const def = ACTION_REGISTRY[name];
-          expect(def.permission).toBeTruthy();
+          expect(def.permissions.length).toBeGreaterThan(0);
           expect(def.description.length).toBeGreaterThan(0);
           expect(def.argsSchema).toBeDefined();
           expect(typeof def.propose).toBe('function');

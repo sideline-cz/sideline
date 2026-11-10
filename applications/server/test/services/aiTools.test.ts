@@ -101,11 +101,14 @@ import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewReposit
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
+import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
+import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
 import {
   MembershipWithRole,
   RosterEntry,
   TeamMembersRepository,
 } from '~/repositories/TeamMembersRepository.js';
+import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { ProposeCreateEventArgs } from '~/services/ai/actions.js';
@@ -726,8 +729,33 @@ interface DiscordMappingRowLike {
   readonly discord_role_id: Option.Option<Discord.Snowflake>;
 }
 
+// `TeamChannelsRepository.findAllByTeamWithSyncState` row. The mock returns the rows as given: it
+// does NOT model the SQL that computes `sync_state` (unprocessed / latest-error managed events);
+// `test/integration/ai/discordWriteActions.test.ts` cases 19 / 19b cover that on real Postgres.
+interface TeamChannelSyncStateRowLike {
+  readonly id: string;
+  readonly name: string;
+  readonly category: Option.Option<string>;
+  readonly archived: boolean;
+  readonly discord_channel_id: Option.Option<Discord.Snowflake>;
+  readonly access_count: number;
+  readonly sync_state: 'pending' | 'failed' | 'ok';
+}
+
+const buildSyncStateRow = (
+  overrides: Partial<TeamChannelSyncStateRowLike> & { id: string; name: string },
+): TeamChannelSyncStateRowLike => ({
+  category: Option.none(),
+  archived: false,
+  discord_channel_id: Option.none(),
+  access_count: 0,
+  sync_state: 'ok',
+  ...overrides,
+});
+
 const makeDiscordLayers = (fixtures: {
   readonly guildLinked: boolean;
+  readonly syncStates?: ReadonlyArray<TeamChannelSyncStateRowLike>;
   readonly channels?: ReadonlyArray<DiscordChannelRowLike>;
   readonly roles?: ReadonlyArray<DiscordRoleRowLike>;
   readonly mappings?: ReadonlyArray<DiscordMappingRowLike>;
@@ -753,6 +781,10 @@ const makeDiscordLayers = (fixtures: {
         calls.channels.push(teamId);
         return Effect.succeed(fixtures.channels ?? []);
       },
+    } as never),
+    Layer.succeed(TeamChannelsRepository, {
+      findAllByTeamWithSyncState: (teamId: Team.TeamId) =>
+        Effect.succeed(teamId === TEAM_A ? (fixtures.syncStates ?? []) : []),
     } as never),
     Layer.succeed(DiscordRolesRepository, {
       listByGuild: (guildId: Discord.Snowflake) => {
@@ -1965,6 +1997,7 @@ describe('list_discord_channels', () => {
         managedBySideline: true,
         archived: false,
         accessGroupCount: 2,
+        syncStatus: 'synced',
       });
       expect(items.find((i) => i.name === 'Old seniors')?.archived).toBe(true);
       const lounge = items.find((i) => i.name === 'Lounge');
@@ -2006,6 +2039,76 @@ describe('list_discord_channels', () => {
       );
       expect(itemsOf(capped.result)).toHaveLength(1);
     }),
+  );
+
+  it.effect('a mirrored managed channel carries the sync state of its team channel', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({
+        guildLinked: true,
+        channels: DISCORD_CHANNEL_ROWS,
+        syncStates: [
+          buildSyncStateRow({
+            id: 'tc-1',
+            name: 'Juniors',
+            discord_channel_id: Option.some('200000000000000002' as Discord.Snowflake),
+            access_count: 2,
+            sync_state: 'pending',
+          }),
+          buildSyncStateRow({
+            id: 'tc-2',
+            name: 'Old seniors',
+            archived: true,
+            discord_channel_id: Option.some('200000000000000003' as Discord.Snowflake),
+            access_count: 1,
+            sync_state: 'failed',
+          }),
+        ],
+      });
+      const outcome = yield* listDiscordChannels({}, discordCtx(['ai:manage_discord'])).pipe(
+        Effect.provide(discord.layer),
+      );
+
+      const items = itemsOf(outcome.result);
+      expect(items.find((i) => i.name === 'Juniors')?.syncStatus).toBe('pending');
+      expect(items.find((i) => i.name === 'Old seniors')?.syncStatus).toBe('failed');
+      // Not managed by Sideline: nothing is queued for it.
+      expect(items.find((i) => i.name === 'Lounge')?.syncStatus).toBe('synced');
+      // Both are in the mirror: not appended a second time.
+      expect(items.filter((i) => i.name === 'Juniors')).toHaveLength(1);
+      expectNoIdKeys(items);
+    }),
+  );
+
+  it.effect(
+    'a team channel the bot has not created yet is appended: pending or not_on_discord',
+    () =>
+      Effect.gen(function* () {
+        const discord = makeDiscordLayers({
+          guildLinked: true,
+          channels: DISCORD_CHANNEL_ROWS,
+          syncStates: [
+            buildSyncStateRow({ id: 'tc-3', name: 'Parents', sync_state: 'pending' }),
+            buildSyncStateRow({ id: 'tc-4', name: 'Coaches', sync_state: 'ok', access_count: 1 }),
+          ],
+        });
+        const outcome = yield* listDiscordChannels({}, discordCtx(['ai:manage_discord'])).pipe(
+          Effect.provide(discord.layer),
+        );
+
+        const items = itemsOf(outcome.result);
+        expect(items).toContainEqual({
+          name: 'Parents',
+          type: 'text',
+          category: null,
+          managedBySideline: true,
+          archived: false,
+          accessGroupCount: 0,
+          syncStatus: 'pending',
+        });
+        expect(items.find((i) => i.name === 'Coaches')?.syncStatus).toBe('not_on_discord');
+        expect(items.find((i) => i.name === 'Coaches')?.managedBySideline).toBe(true);
+        expectNoIdKeys(items);
+      }),
   );
 });
 
@@ -2221,8 +2324,30 @@ describe('visibleTools', () => {
       expect(visibleTools(player).map((t) => t.name)).toContain('search_docs');
       const def = ALL_TOOLS.find((t) => t.name === 'search_docs');
       expect(def).toBeDefined();
-      expect(Option.isNone(def?.requiredPermission ?? Option.some('team:manage'))).toBe(true);
+      expect(def?.requiredPermissions).toEqual([]);
     }),
+  );
+
+  it.effect(
+    'offers the three Discord write tools only to a caller holding ai:manage_discord AND group:manage',
+    () =>
+      Effect.sync(() => {
+        const writeTools = [
+          'propose_create_discord_channel',
+          'propose_set_discord_channel_access',
+          'propose_archive_discord_channel',
+        ];
+        const both = visibleTools(discordCtx(['ai:manage_discord', 'group:manage'])).map(
+          (t) => t.name,
+        );
+        const discordOnly = visibleTools(discordCtx(['ai:manage_discord'])).map((t) => t.name);
+        const groupOnly = visibleTools(discordCtx(['group:manage'])).map((t) => t.name);
+        for (const name of writeTools) {
+          expect(both, name).toContain(name);
+          expect(discordOnly, name).not.toContain(name);
+          expect(groupOnly, name).not.toContain(name);
+        }
+      }),
   );
 });
 
@@ -2230,12 +2355,15 @@ describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3
   it.effect('every tool has a well-formed, unique, flat, additionalProperties:false schema', () =>
     Effect.sync(() => {
       // 15 read tools (the original 6, plus `search_docs`, the six database read tools and the
-      // two Discord read tools) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (currently just
-      // `propose_create_event`) — built FROM the registry (`registry.ts`), so this count moves
-      // in lockstep with `AiActionName.literals`.
-      expect(ALL_TOOLS.length).toBe(16);
-      expect(ALL_TOOLS.map((t) => t.name)).toContain('propose_create_event');
+      // two Discord read tools) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (create_event
+      // and the three Discord write actions) — built FROM the registry (`registry.ts`), so this
+      // count moves in lockstep with `AiActionName.literals`.
+      expect(ALL_TOOLS.length).toBe(19);
       for (const added of [
+        'propose_create_event',
+        'propose_create_discord_channel',
+        'propose_set_discord_channel_access',
+        'propose_archive_discord_channel',
         'search_docs',
         'list_fees',
         'get_finance_overview',
@@ -2361,6 +2489,35 @@ const makeProposalsLayer = () => {
   return { layer, inserted };
 };
 
+/** A repository whose every method dies: proves a refused propose never reached it. */
+const dieStub = (label: string) =>
+  new Proxy(
+    {},
+    {
+      get: (_target, key) =>
+        typeof key === 'symbol'
+          ? undefined
+          : () => Effect.die(new Error(`${label}.${key} must not be called`)),
+    },
+  ) as never;
+
+/**
+ * The repositories a Discord write propose can reach besides groups / training types. Only the
+ * guild check answers (`connectedGuildId`: `teams.findById` + `botGuilds.exists`); every channel,
+ * access and settings method dies.
+ */
+const makeDiscordWriteLayers = (guildLinked: boolean) =>
+  Layer.mergeAll(
+    Layer.succeed(TeamsRepository, {
+      findById: () => Effect.succeed(Option.some({ guild_id: GUILD_A })),
+    } as never),
+    Layer.succeed(BotGuildsRepository, { exists: () => Effect.succeed(guildLinked) } as never),
+    Layer.succeed(TeamChannelsRepository, dieStub('TeamChannelsRepository')),
+    Layer.succeed(TeamChannelAccessRepository, dieStub('TeamChannelAccessRepository')),
+    Layer.succeed(TeamSettingsRepository, dieStub('TeamSettingsRepository')),
+    Layer.succeed(DiscordChannelsRepository, dieStub('DiscordChannelsRepository')),
+  );
+
 const CREATOR_CTX_OVERRIDES = { permissions: ['event:create' as Role.Permission] };
 
 const minimalCreateEventArgs = (overrides: Record<string, unknown> = {}) => ({
@@ -2385,6 +2542,7 @@ const runPropose = (
       Layer.mergeAll(
         makeGroupsLayer(fixtures.groups ?? []),
         makeTrainingTypesLayer(fixtures.trainingTypes ?? []),
+        makeDiscordWriteLayers(true),
         proposals.layer,
       ),
     ),
@@ -2528,6 +2686,93 @@ describe('propose_create_event (writeTools.ts#proposeAction)', () => {
         const memberField = summary.find((f) => f.key === 'memberGroup');
         expect(ownerField?.value).toEqual({ type: 'text', value: 'Owner Squad' });
         expect(memberField?.value).toEqual({ type: 'text', value: 'Member Squad' });
+      }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Discord write proposals — the executor gates (`writeTools.ts#proposeAction`). Name lookup,
+// refusals and what is stored are covered on real Postgres in
+// `test/integration/ai/discordWriteActions.test.ts`.
+// ---------------------------------------------------------------------------
+
+describe('Discord write proposals (writeTools.ts#proposeAction)', () => {
+  const DISCORD_ACTIONS = [
+    { action: 'create_discord_channel', args: { name: 'U12 parents' } },
+    {
+      action: 'set_discord_channel_access',
+      args: { channel: 'Juniors', group: 'U20', access: 'EDIT' },
+    },
+    { action: 'archive_discord_channel', args: { channel: 'Juniors' } },
+  ] as const;
+
+  const runDiscordPropose = (
+    action: (typeof DISCORD_ACTIONS)[number]['action'],
+    args: unknown,
+    permissions: ReadonlyArray<Role.Permission>,
+    guildLinked: boolean,
+  ) => {
+    const proposals = makeProposalsLayer();
+    return proposeAction(action, args, discordCtx(permissions)).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(GroupsRepository, dieStub('GroupsRepository')),
+          Layer.succeed(TrainingTypesRepository, dieStub('TrainingTypesRepository')),
+          makeDiscordWriteLayers(guildLinked),
+          proposals.layer,
+        ),
+      ),
+      Effect.map((outcome) => ({ outcome, inserted: proposals.inserted })),
+    );
+  };
+
+  for (const { action, args } of DISCORD_ACTIONS) {
+    it.effect(`${action}: ai:manage_discord without group:manage -> forbidden, no row`, () =>
+      Effect.gen(function* () {
+        const { outcome, inserted } = yield* runDiscordPropose(
+          action,
+          args,
+          ['ai:manage_discord'],
+          true,
+        );
+        expect(outcome.result).toEqual({ error: 'forbidden', permission: 'group:manage' });
+        expect(outcome.proposal).toBeUndefined();
+        expect(inserted).toHaveLength(0);
+      }),
+    );
+
+    it.effect(`${action}: bot not in the guild -> discord_not_connected, no row`, () =>
+      Effect.gen(function* () {
+        const { outcome, inserted } = yield* runDiscordPropose(
+          action,
+          args,
+          ['ai:manage_discord', 'group:manage'],
+          false,
+        );
+        expect(outcome.result).toEqual({ error: 'discord_not_connected' });
+        expect(inserted).toHaveLength(0);
+      }),
+    );
+  }
+
+  it.effect(
+    'propose_create_event does not need Discord: the bot not in the guild still proposes',
+    () =>
+      Effect.gen(function* () {
+        const proposals = makeProposalsLayer();
+        const ctx = buildCtx({ membership: buildMembership(CREATOR_CTX_OVERRIDES) });
+        const outcome = yield* proposeAction('create_event', minimalCreateEventArgs(), ctx).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              makeGroupsLayer([]),
+              makeTrainingTypesLayer([]),
+              makeDiscordWriteLayers(false),
+              proposals.layer,
+            ),
+          ),
+        );
+        expect((outcome.result as Record<string, unknown>).status).toBe('proposed');
+        expect(proposals.inserted).toHaveLength(1);
       }),
   );
 });
