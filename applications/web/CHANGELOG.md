@@ -1,5 +1,11 @@
 # @sideline/web
 
+## 0.75.0
+
+### 🚀 Features
+- bulk fee import from CSV (#808)
+- read-only Discord tools in the AI assistant (#807)
+
 ## 0.74.0
 
 ### 🚀 Features
