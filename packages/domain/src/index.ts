@@ -560,6 +560,7 @@ export * as AchievementRpcEvents from './rpc/achievement/AchievementRpcEvents.js
 export * as AchievementRpcGroup from './rpc/achievement/AchievementRpcGroup.js';
 export * as ActivityRpcGroup from './rpc/activity/ActivityRpcGroup.js';
 export * as ActivityRpcModels from './rpc/activity/ActivityRpcModels.js';
+export * as BotRpcs from './rpc/bot/BotRpcs.js';
 export * as BotInfoRpcGroup from './rpc/botInfo/BotInfoRpcGroup.js';
 export * as CarpoolRpcGroup from './rpc/carpool/CarpoolRpcGroup.js';
 export * as CarpoolRpcModels from './rpc/carpool/CarpoolRpcModels.js';

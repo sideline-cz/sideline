@@ -31,6 +31,10 @@ export const env = createEnv({
     GITHUB_REPORT_TOKEN: Schema.toStandardSchemaV1(
       Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
     ),
+    /** Absent = the bot RPC server (port 9100) does not start. */
+    BOT_RPC_SECRET: Schema.toStandardSchemaV1(
+      Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
+    ),
     GITHUB_REPORT_REPO: Schema.NonEmptyString.pipe(
       Schemas.Optional(() => 'sideline-cz/sideline'),
       Schema.toStandardSchemaV1,

@@ -131,7 +131,8 @@ Build stages are identical in structure to the server Dockerfile: `base` → `de
 **Entry point:** `node applications/bot/build/run.js`
 
 **Ports:**
-- `:9000` (or `$HEALTH_PORT`) — health check only (no external application port)
+- `:9000` (or `$HEALTH_PORT`) — health check only
+- `:9100` — server-to-bot RPC (`BotRpcs`), `Authorization: Bearer` auth; listens only when `BOT_RPC_SECRET` is set. Internal to the cluster, no public domain.
 
 **Health check:** `GET http://localhost:9000/health` (also served on `/healthz`; `/info` on the same port returns version metadata)
 
@@ -219,6 +220,8 @@ Build stages:
 | `DISCORD_JOIN_ENFORCEMENT_ENABLED` | No | `false` | Kill switch for the Discord-join enforcement redirect (`auth.myTeams`). Accepted values are case-insensitive: `true`/`1`/`yes`/`on` enable it, `false`/`0`/`no`/`off`/empty disable it. Any other value is treated as disabled and logs a startup warning — it deliberately never fails server boot, since this flag is the incident-response lever for turning the redirect off fast. When disabled (the default), every team's `discordJoined` status is forced to `'unknown'`, which removes the redirect, the onboarding card, and the badge on the client in one move. |
 | `AI_CHAT_ENABLED` | No | `false` | Kill switch for the read-only in-app AI assistant (`GET/POST /teams/:teamId/ai/*`). Same permissive, case-insensitive parsing as `DISCORD_JOIN_ENFORCEMENT_ENABLED` above and the same never-fail-boot guarantee. When disabled (the default) or when no LLM is configured (`LLM_API_URL` unset), `capabilities.enabled` is `false` and `chat` short-circuits to a 200 degraded response before consuming any rate-limit budget or calling the LLM. **Rate limiting is per replica**: `ChatRateLimiter` (`applications/server/src/services/ChatRateLimiter.ts`) is an in-process, in-memory fixed-window limiter (20 chat turns / 10 minutes and 120 / day per user) with no shared state across replicas, so the effective fleet-wide limit is `replicas × 20` per 10 minutes and `replicas × 120` per day — accepted because the real cost bound is per-request (bounded tool-call iterations and `max_tokens`), not the rate limiter. |
 | `PROFILE_GATE_ENABLED` | No | `true` | Global incident lever for the profile-completeness gate (RSVP / training claim / carpool seat — `EventRsvpProfileIncomplete`/`RsvpProfileIncomplete`/`ClaimProfileIncomplete`/`CarpoolProfileIncomplete`). Unlike `DISCORD_JOIN_ENFORCEMENT_ENABLED` and `AI_CHAT_ENABLED` above, this flag **defaults ON**: the real off switch is the per-team `team_settings.require_complete_profile` column (default `false`), so no team is affected until its captain opts in — this variable exists purely to kill the gate for every team at once during an incident. Same permissive, case-insensitive parsing (`true`/`1`/`yes`/`on` vs `false`/`0`/`no`/`off`), but an empty/unset value and any unrecognised value both resolve to **enabled** (not disabled) — the inverse of the other two flags' safe direction — and an unrecognised value logs a startup warning without failing boot. |
+| `BOT_RPC_URL` | No | — | Base URL of the bot's RPC port (e.g. `http://sideline-bot:9100`). Absent = `BotRpc` answers `not_configured`; boot never fails. The server pings the bot once at boot and logs the result. |
+| `BOT_RPC_SECRET` | No | — | Bearer secret for server-to-bot RPC. Redacted. Must equal the bot's `BOT_RPC_SECRET` in the same class. Absent = `not_configured`. |
 
 ### 3.2 Bot (`applications/bot/src/env.ts`)
 
@@ -238,6 +241,7 @@ Build stages:
 | `WEB_URL` | No | — | Public base URL of the web frontend (e.g. `https://sideline.example.com`). When set, the bot includes a deep-link to `/teams/{teamId}/challenges` in weekly challenge embeds. In production this is set to `${SERVICE_URL_PROXY}` via `docker-compose.yaml`. |
 | `GITHUB_REPORT_TOKEN` | No | — | Fine-grained GitHub PAT with **Issues: read & write** on `GITHUB_REPORT_REPO`, used by `/report` to file issues. Absent = the command replies "not set up"; the bot still boots. |
 | `GITHUB_REPORT_REPO` | No | `sideline-cz/sideline` | `owner/repo` that `/report` files issues against. |
+| `BOT_RPC_SECRET` | No | — | Bearer secret for inbound server RPC on port 9100. Absent = no RPC server, a warning is logged, the bot still boots. Generate with `openssl rand -hex 32`; same value as the server's in the same class. |
 
 ### 3.3 Proxy (runtime environment, from `docker-compose.yaml`)
 
