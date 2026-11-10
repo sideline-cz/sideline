@@ -34,6 +34,7 @@ import { toTrainingTypeInfo } from '~/api/training-type.js';
 import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
@@ -929,6 +930,7 @@ export const listDiscordChannels = (
               DiscordChannelsRepository.asEffect().pipe(
                 Effect.flatMap((channels) => channels.findManagedListByTeam(ctx.teamId)),
                 Effect.map((rows) => {
+                  const { query } = args;
                   const categoryNames = new Map(
                     rows.filter((row) => row.type === 4).map((row) => [row.channel_id, row.name]),
                   );
@@ -944,9 +946,14 @@ export const listDiscordChannels = (
                   return itemsResult(
                     applyLimit(
                       // Sideline name, Discord name and category: a user may ask by any of them.
-                      applyQueryFilter(named, args.query, (entry) =>
-                        [entry.name, entry.row.name, entry.category ?? ''].join(' '),
-                      ),
+                      // Each field on its own, so a query cannot match across two of them.
+                      query === undefined
+                        ? named
+                        : named.filter(({ name, row, category }) =>
+                            [name, row.name, category].some(
+                              (text) => text !== null && matchesQuery(text, query),
+                            ),
+                          ),
                       args.limit,
                     ).map(({ row, name, category }) => ({
                       name,
@@ -964,6 +971,13 @@ export const listDiscordChannels = (
       )
     : Effect.succeed(forbiddenResult('ai:manage_discord'));
 
+// Stable output order of a role's `linkedTo`.
+const DISCORD_ROLE_LINKS: ReadonlyArray<'group' | 'roster' | 'achievement'> = [
+  'group',
+  'roster',
+  'achievement',
+];
+
 export const listDiscordRoles = (
   args: ListDiscordArgs,
   ctx: EntityReadContext,
@@ -975,6 +989,7 @@ export const listDiscordRoles = (
   | DiscordRolesRepository
   | DiscordChannelMappingRepository
   | AchievementRoleMappingsRepository
+  | CustomAchievementsRepository
 > =>
   hasPermission(ctx.membership, 'ai:manage_discord')
     ? connectedGuildId(ctx.teamId).pipe(
@@ -987,10 +1002,24 @@ export const listDiscordRoles = (
                 Effect.bind('mappings', () => DiscordChannelMappingRepository.asEffect()),
                 Effect.bind('roleRows', ({ roles }) => roles.listByGuild(guildId)),
                 Effect.bind('mappingRows', ({ mappings }) => mappings.findAllByTeam(ctx.teamId)),
+                // Built-in achievements keep the role in `achievement_role_mappings`,
+                // custom ones in `custom_achievements.discord_role_id`.
                 Effect.bind('achievementRoleIds', () =>
-                  AchievementRoleMappingsRepository.asEffect().pipe(
-                    Effect.flatMap((achievements) => achievements.findAllByTeam(ctx.teamId)),
-                    Effect.map((rows) => new Set(rows.map((r) => r.discord_role_id))),
+                  Effect.all({
+                    builtIn: AchievementRoleMappingsRepository.asEffect().pipe(
+                      Effect.flatMap((achievements) => achievements.findAllByTeam(ctx.teamId)),
+                    ),
+                    custom: CustomAchievementsRepository.asEffect().pipe(
+                      Effect.flatMap((customs) => customs.findByTeam(ctx.teamId)),
+                    ),
+                  }).pipe(
+                    Effect.map(
+                      ({ builtIn, custom }) =>
+                        new Set([
+                          ...builtIn.map((r) => r.discord_role_id),
+                          ...custom.flatMap((r) => Option.toArray(r.discord_role_id)),
+                        ]),
+                    ),
                   ),
                 ),
                 Effect.map(({ roleRows, mappingRows, achievementRoleIds }) =>
@@ -1002,9 +1031,17 @@ export const listDiscordRoles = (
                       name: row.name,
                       position: row.position,
                       managedByDiscord: row.managed,
-                      linkedTo:
-                        mappingRows.find((m) => Option.contains(m.discord_role_id, row.id))
-                          ?.entity_type ?? (achievementRoleIds.has(row.id) ? 'achievement' : null),
+                      // Every link, not the first: two links on one role is a conflict
+                      // the model must report.
+                      linkedTo: DISCORD_ROLE_LINKS.filter((kind) =>
+                        kind === 'achievement'
+                          ? achievementRoleIds.has(row.id)
+                          : mappingRows.some(
+                              (m) =>
+                                m.entity_type === kind &&
+                                Option.contains(m.discord_role_id, row.id),
+                            ),
+                      ),
                     })),
                   ),
                 ),

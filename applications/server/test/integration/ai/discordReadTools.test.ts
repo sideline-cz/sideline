@@ -13,6 +13,7 @@ import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
@@ -36,6 +37,7 @@ const TestLayer = Layer.mergeAll(
   DiscordChannelMappingRepository.Default,
   GroupsRepository.Default,
   AchievementRoleMappingsRepository.Default,
+  CustomAchievementsRepository.Default,
 ).pipe(Layer.provideMerge(TestPgClient));
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
@@ -143,6 +145,7 @@ const seedDiscordTeam = (digit: string, label: string) =>
           { role_id: id('0200'), name: `${label}-U20`, color: 0, position: 2, managed: false },
           { role_id: id('0201'), name: `${label}-Mod`, color: 0, position: 1, managed: false },
           { role_id: id('0202'), name: `${label}-Champ`, color: 0, position: 0, managed: false },
+          { role_id: id('0203'), name: `${label}-Custom`, color: 0, position: 0, managed: false },
         ]),
       ),
     );
@@ -156,6 +159,21 @@ const seedDiscordTeam = (digit: string, label: string) =>
     );
     yield* AchievementRoleMappingsRepository.asEffect().pipe(
       Effect.andThen((repo) => repo.upsert(team.id, 'first_activity', id('0202'))),
+    );
+    yield* CustomAchievementsRepository.asEffect().pipe(
+      Effect.andThen((repo) =>
+        repo.insert({
+          team_id: team.id,
+          name: `${label} hustler`,
+          description: '',
+          emoji: Option.none(),
+          rule_kind: 'total_activities',
+          threshold: 10,
+          activity_type_slug: Option.none(),
+          discord_role_id: Option.some(id('0203')),
+        }),
+      ),
+      Effect.orDie,
     );
 
     return { team, guildId, id };
@@ -218,9 +236,10 @@ describe('Discord read tools on real Postgres', () => {
 
       const roles = yield* listDiscordRoles({}, ctx);
       const roleItems = itemsOf(roles.result);
-      expect(roleItems.find((i) => i.name === 'A-U20')?.linkedTo).toBe('group');
-      expect(roleItems.find((i) => i.name === 'A-Mod')?.linkedTo).toBeNull();
-      expect(roleItems.find((i) => i.name === 'A-Champ')?.linkedTo).toBe('achievement');
+      expect(roleItems.find((i) => i.name === 'A-U20')?.linkedTo).toEqual(['group']);
+      expect(roleItems.find((i) => i.name === 'A-Mod')?.linkedTo).toEqual([]);
+      expect(roleItems.find((i) => i.name === 'A-Champ')?.linkedTo).toEqual(['achievement']);
+      expect(roleItems.find((i) => i.name === 'A-Custom')?.linkedTo).toEqual(['achievement']);
       expect(JSON.stringify(roles.result)).not.toContain('B-');
     }).pipe(Effect.provide(TestLayer)),
   );

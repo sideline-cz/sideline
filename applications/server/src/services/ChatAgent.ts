@@ -25,6 +25,7 @@ import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRol
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
@@ -210,6 +211,7 @@ interface AgentDeps {
     readonly roles: ServiceMap.Service.Shape<typeof DiscordRolesRepository>;
     readonly mappings: ServiceMap.Service.Shape<typeof DiscordChannelMappingRepository>;
     readonly achievementRoles: ServiceMap.Service.Shape<typeof AchievementRoleMappingsRepository>;
+    readonly customAchievements: ServiceMap.Service.Shape<typeof CustomAchievementsRepository>;
   };
 }
 
@@ -432,6 +434,7 @@ const executeTool = (
           Effect.provideService(DiscordRolesRepository, deps.discord.roles),
           Effect.provideService(DiscordChannelMappingRepository, deps.discord.mappings),
           Effect.provideService(AchievementRoleMappingsRepository, deps.discord.achievementRoles),
+          Effect.provideService(CustomAchievementsRepository, deps.discord.customAchievements),
         ),
       );
     case 'search_docs':
@@ -920,6 +923,7 @@ const make: Effect.Effect<
   | DiscordRolesRepository
   | DiscordChannelMappingRepository
   | AchievementRoleMappingsRepository
+  | CustomAchievementsRepository
 > = Effect.Do.pipe(
   Effect.bind('llm', () => LlmClient.asEffect()),
   Effect.bind('events', () => EventsRepository.asEffect()),
@@ -943,6 +947,7 @@ const make: Effect.Effect<
       roles: DiscordRolesRepository.asEffect(),
       mappings: DiscordChannelMappingRepository.asEffect(),
       achievementRoles: AchievementRoleMappingsRepository.asEffect(),
+      customAchievements: CustomAchievementsRepository.asEffect(),
     }),
   ),
   Effect.map(

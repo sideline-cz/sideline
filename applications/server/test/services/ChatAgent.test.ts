@@ -103,6 +103,7 @@ import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRol
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
@@ -314,6 +315,10 @@ const unusedRepoLayers = Layer.mergeAll(
   Layer.succeed(AchievementRoleMappingsRepository, {
     findAllByTeam: () =>
       Effect.die(new Error('ChatAgent.test: AchievementRoleMappingsRepository not stubbed')),
+  } as never),
+  Layer.succeed(CustomAchievementsRepository, {
+    findByTeam: () =>
+      Effect.die(new Error('ChatAgent.test: CustomAchievementsRepository not stubbed')),
   } as never),
 );
 

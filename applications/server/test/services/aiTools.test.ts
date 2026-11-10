@@ -89,6 +89,7 @@ import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRol
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
@@ -731,12 +732,14 @@ const makeDiscordLayers = (fixtures: {
   readonly roles?: ReadonlyArray<DiscordRoleRowLike>;
   readonly mappings?: ReadonlyArray<DiscordMappingRowLike>;
   readonly achievementRoleIds?: ReadonlyArray<Discord.Snowflake>;
+  readonly customAchievementRoleIds?: ReadonlyArray<Option.Option<Discord.Snowflake>>;
 }) => {
   const calls = {
     channels: [] as Array<Team.TeamId>,
     roles: [] as Array<Discord.Snowflake>,
     mappings: [] as Array<Team.TeamId>,
     achievements: [] as Array<Team.TeamId>,
+    customAchievements: [] as Array<Team.TeamId>,
   };
   const layer = Layer.mergeAll(
     Layer.succeed(TeamsRepository, {
@@ -768,6 +771,14 @@ const makeDiscordLayers = (fixtures: {
         calls.achievements.push(teamId);
         return Effect.succeed(
           (fixtures.achievementRoleIds ?? []).map((id) => ({ slug: 'x', discord_role_id: id })),
+        );
+      },
+    } as never),
+    Layer.succeed(CustomAchievementsRepository, {
+      findByTeam: (teamId: Team.TeamId) => {
+        calls.customAchievements.push(teamId);
+        return Effect.succeed(
+          (fixtures.customAchievementRoleIds ?? []).map((id) => ({ discord_role_id: id })),
         );
       },
     } as never),
@@ -1984,6 +1995,11 @@ describe('list_discord_channels', () => {
         Effect.provide(discord.layer),
       );
       expect(itemsOf(byCategory.result).map((i) => i.name)).toEqual(['General', 'Juniors']);
+      // Each field matches on its own: a query across the Discord name and the category does not.
+      const acrossFields = yield* listDiscordChannels({ query: 'raw general' }, ctx).pipe(
+        Effect.provide(discord.layer),
+      );
+      expect(itemsOf(acrossFields.result)).toEqual([]);
 
       const capped = yield* listDiscordChannels({ limit: 1 }, ctx).pipe(
         Effect.provide(discord.layer),
@@ -2016,6 +2032,7 @@ describe('list_discord_roles', () => {
       expect(discord.calls.roles).toEqual([]);
       expect(discord.calls.mappings).toEqual([]);
       expect(discord.calls.achievements).toEqual([]);
+      expect(discord.calls.customAchievements).toEqual([]);
     }),
   );
 
@@ -2042,8 +2059,8 @@ describe('list_discord_roles', () => {
       expect(outcome.hits).toEqual([]);
       const items = itemsOf(outcome.result);
       expect(items.map((i) => i.name)).toEqual(['U20', 'Moderator']);
-      expect(items[0]).toMatchObject({ name: 'U20', linkedTo: 'group' });
-      expect(items[1]).toMatchObject({ name: 'Moderator', linkedTo: null });
+      expect(items[0]).toMatchObject({ name: 'U20', linkedTo: ['group'] });
+      expect(items[1]).toMatchObject({ name: 'Moderator', linkedTo: [] });
       expectNoIdKeys(items);
     }),
   );
@@ -2062,8 +2079,46 @@ describe('list_discord_roles', () => {
 
       expect(discord.calls.achievements).toEqual([TEAM_A]);
       const items = itemsOf(outcome.result);
-      expect(items[0]).toMatchObject({ name: 'U20', linkedTo: 'group' });
-      expect(items[1]).toMatchObject({ name: 'Moderator', linkedTo: 'achievement' });
+      expect(items[0]).toMatchObject({ name: 'U20', linkedTo: ['group'] });
+      expect(items[1]).toMatchObject({ name: 'Moderator', linkedTo: ['achievement'] });
+    }),
+  );
+
+  it.effect('a custom achievement role reads linkedTo: achievement, scoped to the team', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({
+        guildLinked: true,
+        roles,
+        mappings,
+        customAchievementRoleIds: [Option.none(), Option.some(ROLE_MOD)],
+      });
+      const outcome = yield* listDiscordRoles({}, discordCtx(['ai:manage_discord'])).pipe(
+        Effect.provide(discord.layer),
+      );
+
+      expect(discord.calls.customAchievements).toEqual([TEAM_A]);
+      const items = itemsOf(outcome.result);
+      expect(items[1]).toMatchObject({ name: 'Moderator', linkedTo: ['achievement'] });
+    }),
+  );
+
+  it.effect('a role with a group and an achievement link lists both, once each, in order', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({
+        guildLinked: true,
+        roles,
+        mappings: [...mappings, { entity_type: 'group', discord_role_id: Option.some(ROLE_U20) }],
+        achievementRoleIds: [ROLE_U20],
+        customAchievementRoleIds: [Option.some(ROLE_U20)],
+      });
+      const outcome = yield* listDiscordRoles({}, discordCtx(['ai:manage_discord'])).pipe(
+        Effect.provide(discord.layer),
+      );
+
+      expect(itemsOf(outcome.result)[0]).toMatchObject({
+        name: 'U20',
+        linkedTo: ['group', 'achievement'],
+      });
     }),
   );
 });

@@ -283,8 +283,10 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
   define(
     'list_discord_roles',
     "Lists the roles in the team's Discord server, highest first (name, position, whether " +
-      'Discord or an integration manages it, and whether Sideline links it to a group, a roster ' +
-      'or an achievement; onboarding roles show as not linked). Filter with a free-text `query` ' +
+      'Discord or an integration manages it, and `linkedTo`: every Sideline link of the role, ' +
+      'from `group`, `roster` and `achievement`, empty when not linked; onboarding roles show as ' +
+      'not linked). If a role has more than one link, warn the user: each link changes who has ' +
+      'the role, so they conflict. Filter with a free-text `query` ' +
       'matched against the role name, and/or cap the rows with `limit` (1-50). ' +
       'If the result has `truncated: true`, the list is partial: say so, and call again with a narrower `query`. ' +
       'If it returns `discord_not_connected`, tell the user the ' +
