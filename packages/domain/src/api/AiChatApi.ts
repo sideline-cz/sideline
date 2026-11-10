@@ -166,8 +166,19 @@ export const ProposalFieldKey = Schema.Literals([
   'memberGroup',
   'location',
   'description',
+  'channel',
+  'emoji',
+  'discordName',
+  'group',
+  'currentAccess',
+  'access',
+  'archiveCategory',
 ]);
 export type ProposalFieldKey = typeof ProposalFieldKey.Type;
+
+// A group's access to a Discord channel. `NONE` means no access (a revoke).
+export const ProposalAccessLevel = Schema.Literals(['VIEW', 'EDIT', 'ADMIN', 'NONE']);
+export type ProposalAccessLevel = typeof ProposalAccessLevel.Type;
 
 /**
  * `type`, not `_tag` — these are view-model variants, matching `EntityRef.kind` above
@@ -183,6 +194,7 @@ export const ProposalFieldValue = Schema.Union([
   Schema.Struct({ type: Schema.Literal('instant'), value: Schemas.DateTimeFromIsoString }),
   Schema.Struct({ type: Schema.Literal('date'), value: Schema.String }), // team-local YYYY-MM-DD
   Schema.Struct({ type: Schema.Literal('eventType'), value: EventType }),
+  Schema.Struct({ type: Schema.Literal('accessLevel'), value: ProposalAccessLevel }),
   Schema.Struct({ type: Schema.Literal('none') }),
 ]);
 export type ProposalFieldValue = Schema.Schema.Type<typeof ProposalFieldValue>;
@@ -193,9 +205,9 @@ export class ProposalField extends Schema.Class<ProposalField>('AiProposalField'
 }) {}
 
 /**
- * A pending action awaiting user confirmation. `summary` is always all nine
- * `ProposalFieldKey`s (a field the action left unset still appears, as `{ type: 'none' }`) so
- * the card renders a fixed layout, never a jagged one driven by what the model happened to fill.
+ * A pending action awaiting user confirmation. `summary` lists every field the action writes, in
+ * a fixed order per action; an unset field is `{ type: 'none' }`, never omitted. So the card
+ * renders a fixed layout, never a jagged one driven by what the model happened to fill.
  */
 export class Proposal extends Schema.Class<Proposal>('AiProposal')({
   id: AiActionProposalId,
@@ -203,6 +215,13 @@ export class Proposal extends Schema.Class<Proposal>('AiProposal')({
   summary: Schema.Array(ProposalField),
   expiresAt: Schemas.DateTimeFromIsoString,
 }) {}
+
+/** Confirm of a Discord action: the change is queued for the bot, not applied. */
+export class DiscordChangeQueued extends Schema.Class<DiscordChangeQueued>('AiDiscordChangeQueued')(
+  {
+    status: Schema.Literal('queued'),
+  },
+) {}
 
 export class ChatResponse extends Schema.Class<ChatResponse>('AiChatResponse')({
   answer: Schema.String,
@@ -268,7 +287,10 @@ export class AiChatApiGroup extends HttpApiGroup.make('aiChat')
     // data was already persisted server-side by the `propose` tool call; confirming only needs
     // to know WHICH pending proposal to execute, and that's the path param.
     HttpApiEndpoint.post('confirmProposal', '/teams/:teamId/ai/proposals/:proposalId/confirm', {
-      success: EventApi.EventInfo.pipe(HttpApiSchema.status(201)),
+      success: [
+        EventApi.EventInfo.pipe(HttpApiSchema.status(201)),
+        DiscordChangeQueued.pipe(HttpApiSchema.status(202)),
+      ],
       error: [
         AiChatForbidden.pipe(HttpApiSchema.status(403)),
         AiProposalNotFound.pipe(HttpApiSchema.status(404)),

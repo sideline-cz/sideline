@@ -11,5 +11,10 @@ export type AiActionProposalId = typeof AiActionProposalId.Type;
 
 // Closed union of proposable actions. Adding a case here is meant to force a compile error at
 // every switch over `AiActionName` (the tool registry, the executor) until each is updated.
-export const AiActionName = Schema.Literals(['create_event']);
+export const AiActionName = Schema.Literals([
+  'create_event',
+  'create_discord_channel',
+  'set_discord_channel_access',
+  'archive_discord_channel',
+]);
 export type AiActionName = typeof AiActionName.Type;
