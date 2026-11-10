@@ -17,14 +17,16 @@
 import {
   type AiChatApi,
   type Discord,
+  DiscordReadRequest,
   DisplayName,
   type Event,
   type GroupModel,
   type RosterModel,
   type Team,
+  type TeamChannel,
   type TrainingType,
 } from '@sideline/domain';
-import { DateTime, Effect, Option } from 'effect';
+import { DateTime, Effect, Option, Schedule, type ServiceMap } from 'effect';
 import { toEventInfo } from '~/api/event.js';
 import { toGroupInfo } from '~/api/group.js';
 import { hasPermission } from '~/api/permissions.js';
@@ -37,6 +39,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordReadRequestsRepository } from '~/repositories/DiscordReadRequestsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
@@ -48,10 +51,12 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
+import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
 import { type RosterEntry, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
+import { matchByName } from '~/services/ai/actions.js';
 import { computeCurrentDatetime } from '~/services/ai/currentDatetime.js';
 import {
   buildListResult,
@@ -1090,3 +1095,226 @@ export const listDiscordRoles = (
         ),
       )
     : Effect.succeed(forbiddenResult('ai:manage_discord'));
+
+// ===========================================================================
+// read_discord_messages — `ai:manage_discord`. A LIVE read through the bot: the server has no
+// Discord client, so it writes one `discord_read_requests` row, the bot reads Discord and writes
+// the result back on the same row, and this executor polls for it (read-once). Only channels
+// Sideline manages AND the caller has access to, through the same group set the Discord role
+// sync uses. No bypass for Admin: `ai:manage_discord` opens the tool, not more channels.
+// ===========================================================================
+
+export interface ReadDiscordMessagesArgs {
+  readonly channel: string;
+  readonly sinceHours?: number;
+  readonly limit?: number;
+}
+
+// Text, voice chat, announcement, threads, stage. Not category (4), forum (15), media (16).
+const READABLE_CHANNEL_TYPES: ReadonlySet<number> = new Set([0, 2, 5, 10, 11, 12, 13]);
+const DEFAULT_READ_LIMIT = 50;
+const DISCORD_READ_TIMEOUT = '15 seconds';
+const DISCORD_READ_POLL = '500 millis';
+
+const errorResult = (error: string): ToolExecutionResult => ({ result: { error }, hits: [] });
+
+/** Drops the OLDEST messages until the list fits. A guard only: the bot already capped it. */
+const fitReadBudget = (
+  messages: ReadonlyArray<DiscordReadRequest.DiscordReadMessage>,
+): {
+  readonly messages: ReadonlyArray<DiscordReadRequest.DiscordReadMessage>;
+  readonly dropped: boolean;
+} => {
+  let kept = messages;
+  while (
+    kept.length > 0 &&
+    JSON.stringify(kept).length > DiscordReadRequest.READ_RESULT_CHAR_BUDGET
+  ) {
+    kept = kept.slice(1);
+  }
+  return { messages: kept, dropped: kept.length < messages.length };
+};
+
+// Never puts the channel id, an author id or the request id in the result.
+const toReadResult = (
+  result: DiscordReadRequest.DiscordReadResult,
+  channel: string,
+  since: string | null,
+): ToolExecutionResult => {
+  if (result.outcome !== 'ok') {
+    return errorResult(result.outcome);
+  }
+  const fitted = fitReadBudget(result.messages);
+  return {
+    result: { channel, since, capped: result.capped || fitted.dropped, messages: fitted.messages },
+    hits: [],
+  };
+};
+
+/** The caller sees managed channel `C` iff a `team_channel_access` row grants `C` to one of the
+ *  caller's own active groups or an active ancestor of one — the exact set the group-channel
+ *  role sync gives Discord roles for. Every access level allows ViewChannel. */
+const callerHasChannelAccess = (ctx: EntityReadContext, teamChannelId: TeamChannel.TeamChannelId) =>
+  Effect.all({
+    mine: GroupsRepository.asEffect().pipe(
+      Effect.flatMap((groups) =>
+        groups.findActiveGroupsWithAncestorsForMember(ctx.membership.id, ctx.teamId),
+      ),
+    ),
+    grants: TeamChannelAccessRepository.asEffect().pipe(
+      Effect.flatMap((access) => access.findByChannel(teamChannelId)),
+    ),
+  }).pipe(
+    Effect.map(({ mine, grants }) => {
+      const held = new Set(mine.map((g) => g.id));
+      return grants.some((g) => held.has(g.group_id));
+    }),
+  );
+
+const waitForRead = (
+  reads: ServiceMap.Service.Shape<typeof DiscordReadRequestsRepository>,
+  id: DiscordReadRequest.DiscordReadRequestId,
+  channel: string,
+  since: string | null,
+): Effect.Effect<ToolExecutionResult> =>
+  // `suspend`: every retry must call `consume` again, not re-run one built effect.
+  Effect.suspend(() => reads.consume(id)).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.fail('pending'),
+        onSome: (result) => Effect.succeed(result),
+      }),
+    ),
+    // `retry`, never `repeat`: `repeat` returns the schedule output, not the consumed result.
+    Effect.retry(Schedule.spaced(DISCORD_READ_POLL)),
+    // Unreachable: the schedule never ends, only the timeout below stops the polling.
+    Effect.orDie,
+    Effect.timeoutOption(DISCORD_READ_TIMEOUT),
+    Effect.flatMap(
+      Option.match({
+        onSome: (result) => Effect.succeed(toReadResult(result, channel, since)),
+        // Timeout: delete the row. A result that landed after the last poll is still used.
+        onNone: () =>
+          reads.abandon(id).pipe(
+            Effect.map(
+              Option.match({
+                // Row already gone: an earlier poll consumed it as the timeout fired.
+                onNone: () => errorResult('bot_timeout'),
+                onSome: ({ picked, result }) =>
+                  Option.match(result, {
+                    onSome: (late) => toReadResult(late, channel, since),
+                    onNone: () => errorResult(picked ? 'bot_timeout' : 'bot_unreachable'),
+                  }),
+              }),
+            ),
+          ),
+      }),
+    ),
+    // Client disconnect: never leave a row behind (the sweeper is only the backstop).
+    Effect.onInterrupt(() =>
+      reads
+        .abandon(id)
+        .pipe(
+          Effect.catchCause((cause) => Effect.logWarning('discord read cleanup failed', cause)),
+        ),
+    ),
+    // One DB blip fails this tool honestly instead of the whole chat turn (`catchSqlErrors`
+    // dies). Defects only: an interrupt passes through.
+    Effect.catchDefect((defect) =>
+      Effect.logWarning('discord read wait failed', defect).pipe(
+        Effect.as(errorResult('discord_error')),
+      ),
+    ),
+  );
+
+export const readDiscordMessages = (
+  args: ReadDiscordMessagesArgs,
+  ctx: ToolContext,
+): Effect.Effect<
+  ToolExecutionResult,
+  never,
+  | TeamsRepository
+  | BotGuildsRepository
+  | DiscordChannelsRepository
+  | GroupsRepository
+  | TeamChannelAccessRepository
+  | DiscordReadRequestsRepository
+> =>
+  hasPermission(ctx.membership, 'ai:manage_discord')
+    ? connectedGuildId(ctx.teamId).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.succeed(discordNotConnected),
+            onSome: () =>
+              DiscordChannelsRepository.asEffect().pipe(
+                Effect.flatMap((channels) => channels.findManagedListByTeam(ctx.teamId)),
+                Effect.flatMap((rows) => {
+                  // Match the Sideline name and the Discord name, over ALL readable rows, so an
+                  // unmanaged channel gets the honest `channel_not_managed`, not "not found".
+                  const candidates = rows
+                    .filter((row) => READABLE_CHANNEL_TYPES.has(row.type))
+                    .flatMap((row) => {
+                      const sidelineName = Option.getOrElse(row.team_channel_name, () => row.name);
+                      return sidelineName === row.name
+                        ? [{ name: sidelineName, row }]
+                        : [
+                            { name: sidelineName, row },
+                            { name: row.name, row },
+                          ];
+                    });
+                  const matched = [
+                    ...new Map(
+                      matchByName(candidates, args.channel).map((c) => [c.row.channel_id, c.row]),
+                    ).values(),
+                  ];
+                  const [row, ...rest] = matched;
+                  if (row === undefined) return Effect.succeed(errorResult('channel_not_found'));
+                  if (rest.length > 0) return Effect.succeed(errorResult('ambiguous_channel'));
+                  return Option.match(row.team_channel_id, {
+                    onNone: () => Effect.succeed(errorResult('channel_not_managed')),
+                    onSome: (teamChannelId) =>
+                      callerHasChannelAccess(ctx, teamChannelId).pipe(
+                        Effect.flatMap((allowed) =>
+                          allowed
+                            ? startRead(args, ctx.teamId, row.channel_id, {
+                                name: Option.getOrElse(row.team_channel_name, () => row.name),
+                              })
+                            : Effect.succeed(errorResult('no_channel_access')),
+                        ),
+                      ),
+                  });
+                }),
+              ),
+          }),
+        ),
+      )
+    : Effect.succeed(forbiddenResult('ai:manage_discord'));
+
+const startRead = (
+  args: ReadDiscordMessagesArgs,
+  teamId: Team.TeamId,
+  channelId: Discord.Snowflake,
+  channel: { readonly name: string },
+) =>
+  Effect.Do.pipe(
+    Effect.bind('reads', () => DiscordReadRequestsRepository.asEffect()),
+    Effect.bind('now', () => DateTime.now),
+    Effect.bind('id', ({ reads }) =>
+      reads.insert({
+        teamId,
+        channelId,
+        sinceHours: Option.fromUndefinedOr(args.sinceHours),
+        limit: args.limit ?? DEFAULT_READ_LIMIT,
+      }),
+    ),
+    Effect.flatMap(({ reads, now, id }) =>
+      waitForRead(
+        reads,
+        id,
+        channel.name,
+        args.sinceHours === undefined
+          ? null
+          : DateTime.formatIso(DateTime.subtract(now, { hours: args.sinceHours })),
+      ),
+    ),
+  );

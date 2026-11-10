@@ -480,7 +480,7 @@ const someOr = <A, E>(option: Option.Option<A>, onNone: () => Effect.Effect<neve
 /** Exact (case-sensitive) match first; only when there is none, a case-insensitive one. Both
  *  unique indexes are case-sensitive, so "U12" and "u12" can both exist: the exact step keeps
  *  each one reachable. */
-const matchByName = <T extends { readonly name: string }>(
+export const matchByName = <T extends { readonly name: string }>(
   rows: ReadonlyArray<T>,
   name: string,
 ): ReadonlyArray<T> => {

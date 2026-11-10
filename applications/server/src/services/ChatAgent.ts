@@ -27,6 +27,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordReadRequestsRepository } from '~/repositories/DiscordReadRequestsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
@@ -60,6 +61,7 @@ import {
   listMembershipPlans,
   listRosters,
   listTrainingTypes,
+  readDiscordMessages,
 } from '~/services/ai/readTools.js';
 import { buildTokenMap, entityKeyOf, mintToken } from '~/services/ai/refTokens.js';
 import {
@@ -77,6 +79,7 @@ import {
   ListMembersSchema,
   ListRostersSchema,
   ListTrainingTypesSchema,
+  ReadDiscordMessagesSchema,
   SearchDocsSchema,
   visibleTools,
 } from '~/services/ai/registry.js';
@@ -112,6 +115,9 @@ const MAX_TOKENS = 450;
 // `finish` must never hand back an `answer` longer than what the client can echo back as history
 // on the next turn.
 const MAX_ANSWER_CHARS = 2000;
+// Each live Discord read can wait 15 s for the bot, and nginx cuts the request at 60 s. Two reads
+// per turn, and none after the first bot failure, keep the worst case at 30 s.
+const MAX_LIVE_READS_PER_TURN = 2;
 
 // ---------------------------------------------------------------------------
 // Public result shape
@@ -217,6 +223,7 @@ interface AgentDeps {
     readonly teamChannels: ServiceMap.Service.Shape<typeof TeamChannelsRepository>;
     readonly channelAccess: ServiceMap.Service.Shape<typeof TeamChannelAccessRepository>;
     readonly teamSettings: ServiceMap.Service.Shape<typeof TeamSettingsRepository>;
+    readonly reads: ServiceMap.Service.Shape<typeof DiscordReadRequestsRepository>;
   };
 }
 
@@ -237,7 +244,12 @@ interface LoopState {
   /** At most one pending proposal per turn (blocker 8) — set once a `propose_*` call succeeds,
    *  never cleared within the turn. */
   readonly proposal: Option.Option<AiChatApi.Proposal>;
+  /** `read_discord_messages` calls executed this turn, and the first bot failure among them. */
+  readonly liveReadsUsed: number;
+  readonly liveReadFailure: Option.Option<LiveReadFailure>;
 }
+
+type LiveReadFailure = 'bot_unreachable' | 'bot_timeout';
 
 const fallback = (
   references: ReadonlyArray<AiChatApi.EntityRef>,
@@ -315,6 +327,8 @@ interface CallOutcome {
   readonly content: string;
   readonly newReferences: ReadonlyArray<AiChatApi.EntityRef>;
   readonly proposal?: AiChatApi.Proposal | undefined;
+  /** Set only for an executed `read_discord_messages` call. */
+  readonly liveRead?: { readonly failure: Option.Option<LiveReadFailure> } | undefined;
 }
 
 const bareError = (body: Record<string, unknown>): CallOutcome => ({
@@ -443,6 +457,17 @@ const executeTool = (
           Effect.provideService(CustomAchievementsRepository, deps.discord.customAchievements),
         ),
       );
+    case 'read_discord_messages':
+      return decodeAndRun(ReadDiscordMessagesSchema, parsedArgs, (args) =>
+        readDiscordMessages(args, ctx).pipe(
+          Effect.provideService(TeamsRepository, deps.teams),
+          Effect.provideService(BotGuildsRepository, deps.discord.botGuilds),
+          Effect.provideService(DiscordChannelsRepository, deps.discord.channels),
+          Effect.provideService(GroupsRepository, deps.groups),
+          Effect.provideService(TeamChannelAccessRepository, deps.discord.channelAccess),
+          Effect.provideService(DiscordReadRequestsRepository, deps.discord.reads),
+        ),
+      );
     case 'search_docs':
       // Bundled corpus, no repository and no tenant scope — see `docsTools.ts`.
       return decodeAndRun(SearchDocsSchema, parsedArgs, (args) => searchDocs(args, ctx));
@@ -458,6 +483,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isErrorResult = (result: unknown): result is { readonly error: string } =>
   isRecord(result) && typeof result.error === 'string';
+
+const liveReadFailureOf = (result: unknown): Option.Option<LiveReadFailure> =>
+  isErrorResult(result) && (result.error === 'bot_unreachable' || result.error === 'bot_timeout')
+    ? Option.some(result.error)
+    : Option.none();
 
 const hasItemsArray = (
   result: Record<string, unknown>,
@@ -675,41 +705,54 @@ const dispatchOneCall = (
     return dispatchProposeCall(deps, ctx, state, tool.name, parsedArgs);
   }
 
+  const isLiveRead = tool.name === 'read_discord_messages';
+  if (isLiveRead) {
+    // Neither branch runs the tool, so no row is inserted and nothing waits.
+    if (Option.isSome(state.liveReadFailure)) {
+      return Effect.succeed(bareError({ error: state.liveReadFailure.value }));
+    }
+    if (state.liveReadsUsed >= MAX_LIVE_READS_PER_TURN) {
+      return Effect.succeed(bareError({ error: 'live_read_limit' }));
+    }
+  }
+
   return executeTool(deps, ctx, tool.name, parsedArgs).pipe(
-    Effect.map((outcome) => {
+    Effect.map((outcome): CallOutcome => {
       if (outcome._tag === 'invalidArguments') {
         return bareError({ error: 'invalid_arguments', detail: outcome.detail });
       }
-      return capToTotalBudget(state, processToolExecution(state, outcome.result));
+      const processed = capToTotalBudget(state, processToolExecution(state, outcome.result));
+      return isLiveRead
+        ? { ...processed, liveRead: { failure: liveReadFailureOf(outcome.result.result) } }
+        : processed;
     }),
   );
 };
 
 const commitOutcome = (state: LoopState, outcome: CallOutcome): LoopState => {
-  // A propose outcome always has `newReferences.length === 0` (it mints no `EntityRef`) and
-  // takes THIS branch — the `references`-accumulating branch below never runs for it. Both
-  // branches must carry `proposal` forward, or a propose outcome's card would be silently
-  // dropped from `LoopState` the moment it took this early return.
+  // A propose or live-read outcome always has `newReferences.length === 0` (it mints no
+  // `EntityRef`) and takes the early return below. `base` carries `proposal` and the live-read
+  // counters into BOTH branches, or a card or a bot failure would be silently dropped there.
+  const { liveRead } = outcome;
+  const base: LoopState = {
+    ...state,
+    toolCharsUsed: state.toolCharsUsed + outcome.content.length,
+    proposal: outcome.proposal !== undefined ? Option.some(outcome.proposal) : state.proposal,
+    liveReadsUsed: state.liveReadsUsed + (liveRead === undefined ? 0 : 1),
+    liveReadFailure:
+      liveRead === undefined
+        ? state.liveReadFailure
+        : Option.orElse(state.liveReadFailure, () => liveRead.failure),
+  };
   if (outcome.newReferences.length === 0) {
-    return {
-      ...state,
-      toolCharsUsed: state.toolCharsUsed + outcome.content.length,
-      proposal: outcome.proposal !== undefined ? Option.some(outcome.proposal) : state.proposal,
-    };
+    return base;
   }
   const references = [...state.references, ...outcome.newReferences];
   const entityKeys = new Map(state.entityKeys);
   for (const ref of outcome.newReferences) {
     entityKeys.set(entityKeyOf(ref), ref.ref);
   }
-  return {
-    ...state,
-    references,
-    entityKeys,
-    tokens: buildTokenMap(references),
-    toolCharsUsed: state.toolCharsUsed + outcome.content.length,
-    proposal: outcome.proposal !== undefined ? Option.some(outcome.proposal) : state.proposal,
-  };
+  return { ...base, references, entityKeys, tokens: buildTokenMap(references) };
 };
 
 /**
@@ -894,6 +937,8 @@ const respond = (
         toolCallsUsed: 0,
         toolCharsUsed: 0,
         proposal: Option.none(),
+        liveReadsUsed: 0,
+        liveReadFailure: Option.none(),
       }),
     ),
     Effect.flatMap(({ initialState }) =>
@@ -941,6 +986,7 @@ const make: Effect.Effect<
   | TeamChannelsRepository
   | TeamChannelAccessRepository
   | TeamSettingsRepository
+  | DiscordReadRequestsRepository
 > = Effect.Do.pipe(
   Effect.bind('llm', () => LlmClient.asEffect()),
   Effect.bind('events', () => EventsRepository.asEffect()),
@@ -968,6 +1014,7 @@ const make: Effect.Effect<
       teamChannels: TeamChannelsRepository.asEffect(),
       channelAccess: TeamChannelAccessRepository.asEffect(),
       teamSettings: TeamSettingsRepository.asEffect(),
+      reads: DiscordReadRequestsRepository.asEffect(),
     }),
   ),
   Effect.map(

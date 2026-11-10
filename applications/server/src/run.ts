@@ -16,6 +16,7 @@ import { BankTokenExpiryEventsRepository } from '~/repositories/BankTokenExpiryE
 import { BankTransactionsRepository } from '~/repositories/BankTransactionsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { DiscordReadRequestsRepository } from '~/repositories/DiscordReadRequestsRepository.js';
 import { EmailAttachmentsRepository } from '~/repositories/EmailAttachmentsRepository.js';
 import { EmailForwardingConfigRepository } from '~/repositories/EmailForwardingConfigRepository.js';
 import { EmailMessagesRepository } from '~/repositories/EmailMessagesRepository.js';
@@ -46,6 +47,7 @@ import { AutoApplyCreditCron } from '~/services/AutoApplyCreditCron.js';
 import { BankSyncPoller } from '~/services/BankSyncPoller.js';
 import { BankTokenExpiryCron } from '~/services/BankTokenExpiryCron.js';
 import { CoachingStatusCron } from '~/services/CoachingStatusCron.js';
+import { DiscordReadSweepCron } from '~/services/DiscordReadSweepCron.js';
 import { EmailRetentionCron } from '~/services/EmailRetentionCron.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 import { EmailSummarizer } from '~/services/EmailSummarizer.js';
@@ -267,6 +269,12 @@ const EmailSummarizerCronEffect = EmailSummarizer.asEffect().pipe(
   Effect.provide(LlmClient.Default.pipe(Layer.provide(FetchHttpClient.layer))),
 );
 
+const DiscordReadSweepCronEffect = DiscordReadSweepCron.pipe(
+  Effect.provide(
+    DiscordReadRequestsRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
 const EmailRetentionCronEffect = EmailRetentionCron.pipe(
   Effect.provide(
     EmailMessagesRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
@@ -336,6 +344,7 @@ Effect.Do.pipe(
         InviteAcceptanceSweepCronEffect,
         EmailSummarizerCronEffect,
         EmailRetentionCronEffect,
+        DiscordReadSweepCronEffect,
         ImapPollerCronEffect,
         BankSyncPollerCronEffect,
         BankTokenExpiryCronEffect,

@@ -1126,6 +1126,38 @@ Tracks a team admin's active `/sudo` session, one row per (team, Discord user), 
 
 **Notes**: Added in migration `1790300012_create_sudo_sessions`. Inserted by `Guild/BeginSudoSession` when a team admin enters sudo mode (recording where the audit message was posted and when the session started), and deleted by `Guild/EndSudoSession` when the session ends — via either the "Leave sudo" button or the admin re-running `/sudo` to toggle off. `EndSudoSession` returns the deleted row so the bot can compute the from/to/duration shown on the closed audit message.
 
+#### `discord_read_requests`
+
+The outbox for a live Discord read by the AI tool `read_discord_messages`. The server inserts a row and polls it. The bot claims it on its 1 s poll loop, reads the channel through the Discord REST API and writes the answer back into the same row. Request and result share one row, so the result write is the ack.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `channel_id` | TEXT | NOT NULL | — |
+| `since_at` | TIMESTAMPTZ | nullable | — |
+| `message_limit` | INTEGER | NOT NULL, CHECK `BETWEEN 1 AND 100` | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `picked_at` | TIMESTAMPTZ | nullable | — |
+| `processed_at` | TIMESTAMPTZ | nullable, CHECK `(processed_at IS NULL) = (result IS NULL)` | — |
+| `result` | JSONB | nullable | — |
+
+**Notes**: Added in migration `1795100000_create_discord_read_requests`. Repository: `DiscordReadRequestsRepository`.
+
+- **Who writes what.** The server sets `team_id` from `ToolContext` and `channel_id` from the team's own `discord_channels` mirror row, never from a tool argument. `since_at` is `now() - hours` on the DB clock. `picked_at` is set by `DiscordRead/GetUnprocessedRequests` (`COALESCE`, so a bot restart gets the row again). `processed_at` and `result` are set together by `DiscordRead/SubmitResult`, `WHERE processed_at IS NULL`: the first result wins.
+- **Lifetime.** The bot only picks rows younger than 30 s. The server deletes the row when it reads the result (`consume`, read-once) or when its 15 s wait ends (`abandon`, which keeps a result that landed after the last poll). `DiscordReadSweepCron` deletes every row older than 5 minutes (`DISCORD_READ_TTL_MINUTES`).
+- **No index beyond the PK.** The table holds a few rows at most, so the 1 s poll is a seq scan over almost nothing.
+- **`result` size.** The bot cuts the messages to `READ_RESULT_CHAR_BUDGET` (5000 chars, `packages/domain/src/models/DiscordReadRequest.ts`) before it submits, so Postgres never holds more member content than the model gets.
+
+**GDPR decision.** The table has NO foreign key to `users` or `team_members`. Message authors are stored as Discord display names inside `result`, not as a person FK. So `exportManifest.ts` needs no entry, and `test/integration/gdpr/exportManifest.test.ts` stays green without a change. The content is still personal data (member messages). It is out of scope for Art. 15 export and for erasure because:
+
+1. Discord, not Sideline, is the record holder. Sideline copies a window on request and keeps it for one chat turn.
+2. The server deletes the row when it reads the result (normally under 15 s after insert).
+3. The sweeper deletes every row older than 5 minutes, so an export or erasure run can at most miss content that is gone minutes later.
+4. A team delete cascades.
+
+An export that lists transient cache rows would show "your data" that no longer exists.
+
 ---
 
 ### 8. Activity Tracking
@@ -2399,6 +2431,7 @@ All 110 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1794700000 | `event_series_event_type` | Adds `event_type TEXT NOT NULL DEFAULT 'training'` (with the same kind CHECK as `events`) and `event_type_id UUID` (FK → `event_types(id)` ON DELETE SET NULL) to `event_series`. Creates `event_series_sync_event_type_trg`, reusing `events_sync_event_type()`, BEFORE the backfill, then backfills `event_type_id` through the trigger (`SET event_type = event_type WHERE event_type_id IS NULL`), so existing series resolve exactly as a one-time training event would. An old server's INSERT that omits both columns lands as `'training'` with the id resolved by the trigger. |
 | 1794800000 | `activity_log_seasons` | Adds `activity_logs.season_id` (FK → `seasons` ON DELETE SET NULL), functions `season_at`, `current_season_id`, `season_for_activity_log`, `set_activity_log_season`, trigger `activity_logs_set_season_trg`, backfills `season_id` (UPDATE of NULL rows only; idempotent) and creates `idx_activity_logs_member_season`. `idx_activity_logs_team_member_id` is now a prefix duplicate, to be dropped later. |
 | 1794900000 | `grant_ai_manage_discord_permission` | Backfills `ai:manage_discord` into `role_permissions` for every existing built-in Admin and Captain role; `ON CONFLICT DO NOTHING`. |
+| 1795100000 | `create_discord_read_requests` | Creates `discord_read_requests` (see [7. Discord Integration](#7-discord-integration) above), the outbox for live Discord reads by the AI assistant. No FK to a person, no index beyond the PK; rows live for one chat turn and `DiscordReadSweepCron` deletes any row older than 5 minutes. |
 
 ### After Migrations (seed data)
 
