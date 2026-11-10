@@ -134,7 +134,7 @@ const make = Effect.gen(function* () {
   const markEventProcessed = SqlSchema.void({
     Request: MarkProcessedInput,
     execute: (input) => sql`
-      UPDATE channel_sync_events SET processed_at = now() WHERE id = ${input.id}
+      UPDATE channel_sync_events SET processed_at = now(), error = NULL WHERE id = ${input.id}
     `,
   });
 

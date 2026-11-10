@@ -26,6 +26,21 @@ class ChannelRow extends Schema.Class<ChannelRow>('ChannelRow')({
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
 }) {}
 
+// One team channel plus the state of its queued Discord changes. "pending": a managed sync event
+// for it is not processed yet (not polled, or a transient failure the bot retries). "failed": no
+// pending event, and the latest one failed for good. "ok": everything queued was applied.
+export class TeamChannelSyncStateRow extends Schema.Class<TeamChannelSyncStateRow>(
+  'TeamChannelSyncStateRow',
+)({
+  id: TeamChannel.TeamChannelId,
+  name: Schema.String,
+  category: Schema.OptionFromNullOr(Schema.String),
+  archived: Schema.Boolean,
+  discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  access_count: Schema.Number,
+  sync_state: Schema.Literals(['pending', 'failed', 'ok']),
+}) {}
+
 const FindByIdInput = Schema.Struct({ id: TeamChannel.TeamChannelId });
 const FindByTeamInput = Schema.Struct({ team_id: Team.TeamId });
 
@@ -87,6 +102,37 @@ const make = Effect.gen(function* () {
       FROM team_channels
       WHERE team_id = ${input.team_id}
       ORDER BY category NULLS FIRST, position ASC, name ASC
+    `,
+  });
+
+  // Revoke rows carry no team_channel_id, only existing_channel_id: hence the OR.
+  const findAllByTeamWithSyncStateQuery = SqlSchema.findAll({
+    Request: Team.TeamId,
+    Result: TeamChannelSyncStateRow,
+    execute: (teamId) => sql`
+      SELECT tc.id, tc.name, tc.category, tc.archived, tc.discord_channel_id,
+             (SELECT COUNT(*)::int FROM team_channel_access tca WHERE tca.team_channel_id = tc.id) AS access_count,
+             CASE
+               WHEN EXISTS (
+                 SELECT 1 FROM channel_sync_events e
+                 WHERE e.team_id = tc.team_id
+                   AND e.entity_type = 'managed'
+                   AND e.processed_at IS NULL
+                   AND (e.team_channel_id = tc.id OR e.existing_channel_id = tc.discord_channel_id)
+               ) THEN 'pending'
+               WHEN (
+                 SELECT e.error FROM channel_sync_events e
+                 WHERE e.team_id = tc.team_id
+                   AND e.entity_type = 'managed'
+                   AND (e.team_channel_id = tc.id OR e.existing_channel_id = tc.discord_channel_id)
+                 ORDER BY e.created_at DESC, e.id DESC
+                 LIMIT 1
+               ) IS NOT NULL THEN 'failed'
+               ELSE 'ok'
+             END AS sync_state
+      FROM team_channels tc
+      WHERE tc.team_id = ${teamId}
+      ORDER BY tc.name, tc.id
     `,
   });
 
@@ -170,6 +216,9 @@ const make = Effect.gen(function* () {
   const findAllByTeam = (teamId: Team.TeamId) =>
     findAllByTeamQuery({ team_id: teamId }).pipe(catchSqlErrors);
 
+  const findAllByTeamWithSyncState = (teamId: Team.TeamId) =>
+    findAllByTeamWithSyncStateQuery(teamId).pipe(catchSqlErrors);
+
   const insert = (
     teamId: Team.TeamId,
     name: string,
@@ -246,6 +295,7 @@ const make = Effect.gen(function* () {
   return {
     findById,
     findAllByTeam,
+    findAllByTeamWithSyncState,
     insert,
     insertAdopted,
     rename,

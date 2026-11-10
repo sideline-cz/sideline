@@ -48,6 +48,7 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
+import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
 import { type RosterEntry, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
@@ -880,14 +881,14 @@ export interface ListDiscordArgs {
   readonly limit?: number;
 }
 
-const discordNotConnected: ToolExecutionResult = {
+export const discordNotConnected: ToolExecutionResult = {
   result: { error: 'discord_not_connected' },
   hits: [],
 };
 
 /** The team's guild id when the bot is in it — `teams.guild_id` is NOT NULL, so "no guild"
  *  means "no `bot_guilds` row" (same check as `listChannels`, api/channel.ts:133). */
-const connectedGuildId = (teamId: Team.TeamId) =>
+export const connectedGuildId = (teamId: Team.TeamId) =>
   Effect.Do.pipe(
     Effect.bind('teams', () => TeamsRepository.asEffect()),
     Effect.bind('botGuilds', () => BotGuildsRepository.asEffect()),
@@ -919,7 +920,7 @@ export const listDiscordChannels = (
 ): Effect.Effect<
   ToolExecutionResult,
   never,
-  TeamsRepository | BotGuildsRepository | DiscordChannelsRepository
+  TeamsRepository | BotGuildsRepository | DiscordChannelsRepository | TeamChannelsRepository
 > =>
   hasPermission(ctx.membership, 'ai:manage_discord')
     ? connectedGuildId(ctx.teamId).pipe(
@@ -927,42 +928,78 @@ export const listDiscordChannels = (
           Option.match({
             onNone: () => Effect.succeed(discordNotConnected),
             onSome: () =>
-              DiscordChannelsRepository.asEffect().pipe(
-                Effect.flatMap((channels) => channels.findManagedListByTeam(ctx.teamId)),
-                Effect.map((rows) => {
+              Effect.all({
+                rows: DiscordChannelsRepository.asEffect().pipe(
+                  Effect.flatMap((channels) => channels.findManagedListByTeam(ctx.teamId)),
+                ),
+                teamChannels: TeamChannelsRepository.asEffect().pipe(
+                  Effect.flatMap((channels) => channels.findAllByTeamWithSyncState(ctx.teamId)),
+                ),
+              }).pipe(
+                Effect.map(({ rows, teamChannels }) => {
                   const { query } = args;
+                  const syncState = new Map(teamChannels.map((tc) => [tc.id, tc.sync_state]));
                   const categoryNames = new Map(
                     rows.filter((row) => row.type === 4).map((row) => [row.channel_id, row.name]),
                   );
-                  const named = rows.map((row) => ({
-                    row,
-                    name: Option.getOrElse(row.team_channel_name, () => row.name),
-                    category: Option.getOrNull(
-                      Option.flatMap(row.parent_id, (pid) =>
-                        Option.fromNullishOr(categoryNames.get(pid)),
-                      ),
-                    ),
-                  }));
+                  const mirrored = rows.map((row) => {
+                    const state = Option.match(row.team_channel_id, {
+                      onNone: () => 'ok',
+                      onSome: (id) => syncState.get(id) ?? 'ok',
+                    });
+                    return {
+                      discordName: Option.some(row.name),
+                      item: {
+                        name: Option.getOrElse(row.team_channel_name, () => row.name),
+                        type: DISCORD_CHANNEL_TYPES[row.type] ?? 'other',
+                        category: Option.getOrNull(
+                          Option.flatMap(row.parent_id, (pid) =>
+                            Option.fromNullishOr(categoryNames.get(pid)),
+                          ),
+                        ),
+                        managedBySideline: Option.isSome(row.team_channel_id),
+                        archived: Option.getOrElse(row.team_channel_archived, () => false),
+                        accessGroupCount: row.access_count,
+                        syncStatus: state === 'ok' ? 'synced' : state,
+                      },
+                    };
+                  });
+                  // Sideline channels the bot has not created (or mirrored) yet. Same de-dup key
+                  // as the HTTP `listChannels`: the linked Discord channel id.
+                  const mirroredIds = new Set(rows.map((row) => row.channel_id));
+                  const notOnDiscord = teamChannels
+                    .filter((tc) =>
+                      Option.match(tc.discord_channel_id, {
+                        onNone: () => true,
+                        onSome: (id) => !mirroredIds.has(id),
+                      }),
+                    )
+                    .map((tc) => ({
+                      discordName: Option.none<string>(),
+                      item: {
+                        name: tc.name,
+                        type: 'text',
+                        category: Option.getOrNull(tc.category),
+                        managedBySideline: true,
+                        archived: tc.archived,
+                        accessGroupCount: tc.access_count,
+                        syncStatus: tc.sync_state === 'ok' ? 'not_on_discord' : tc.sync_state,
+                      },
+                    }));
+                  const all = [...mirrored, ...notOnDiscord];
                   return itemsResult(
                     applyLimit(
                       // Sideline name, Discord name and category: a user may ask by any of them.
                       // Each field on its own, so a query cannot match across two of them.
                       query === undefined
-                        ? named
-                        : named.filter(({ name, row, category }) =>
-                            [name, row.name, category].some(
+                        ? all
+                        : all.filter(({ item, discordName }) =>
+                            [item.name, Option.getOrNull(discordName), item.category].some(
                               (text) => text !== null && matchesQuery(text, query),
                             ),
                           ),
                       args.limit,
-                    ).map(({ row, name, category }) => ({
-                      name,
-                      type: DISCORD_CHANNEL_TYPES[row.type] ?? 'other',
-                      category,
-                      managedBySideline: Option.isSome(row.team_channel_id),
-                      archived: Option.getOrElse(row.team_channel_archived, () => false),
-                      accessGroupCount: row.access_count,
-                    })),
+                    ).map(({ item }) => item),
                   );
                 }),
               ),
