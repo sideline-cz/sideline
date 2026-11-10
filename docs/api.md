@@ -4382,6 +4382,53 @@ Creates a new fee.
 
 ---
 
+#### `POST /teams/:teamId/fees/import`
+
+Creates fees and their member assignments from rows the web app parsed out of a CSV file. All or nothing: one invalid row and nothing is written. Rows join one fee only when `feeName` (exact text), `currency` and `dueAt` are the same; the first row of a group sets the fee's `amountMinor`, other amounts become per-member overrides. Creates only `kind = 'manual'`, `target_scope = 'custom'` fees and never adds to an existing fee. Sends no notifications.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:manage_fees`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `ImportFeesRequest` — `{ rows: FeeImportRow[] }`, 1 to 1000 rows (`FEE_IMPORT_MAX_ROWS`)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `line` | `integer ≥ 2` | Yes | 1-based CSV line (header is line 1); echoed back in errors |
+| `member` | `string (non-empty, max 100)` | Yes | Discord username of an active member; matched after trim, one leading `@` removed, lowercase |
+| `feeName` | `string (non-empty)` | Yes | Fee name |
+| `amountMinor` | `integer ≥ 0` | Yes | Amount in minor units; `0` is rejected per row as `invalid_amount` |
+| `currency` | `string (3 chars)` | Yes | ISO 4217 currency code |
+| `dueAt` | `DateTime \| null` | Yes | Due date, or `null` for none |
+
+**Response:** `201 Created` — `FeeImportResult` `{ feeCount: number, assignmentCount: number }`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `FeeImportInvalid` | 400 | One or more rows are invalid. Body: `errors: { line, code }[]`, one entry per bad row |
+
+`FeeImportInvalid` codes (no message text on the wire; the client owns the copy):
+
+| `code` | When |
+|---|---|
+| `invalid_amount` | `amountMinor` is `0` |
+| `member_not_found` | No active team member has this username |
+| `member_ambiguous` | More than one active member has this username |
+| `fee_exists` | A non-archived fee with the same name, currency and due date already exists (set on every row of the group) |
+| `duplicate_member` | The member already appears on an earlier line of the same fee |
+
+A schema violation (0 or more than 1000 rows, negative amount, currency not 3 chars) is the generic HttpApi `400` with no line.
+
+---
+
 #### `GET /teams/:teamId/fees/:feeId`
 
 Returns a single fee.

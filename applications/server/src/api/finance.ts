@@ -3,8 +3,10 @@ import { LogicError } from '@sideline/effect-lib';
 import * as m from '@sideline/i18n/messages';
 import { Array, DateTime, Effect, Option, Schema } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
+import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission, requireReadAccess } from '~/api/permissions.js';
+import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import {
   type AssignmentViewRow,
   FeeAssignmentsRepository,
@@ -19,6 +21,7 @@ import {
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentsRepository, type PaymentViewRow } from '~/repositories/PaymentsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { feeGroupKey, planFeeImport } from '~/utils/planFeeImport.js';
 
 const forbidden = new FinanceApi.FinanceForbidden();
 const feeNotFound = new FinanceApi.FeeNotFound();
@@ -175,7 +178,8 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
     Effect.bind('payments', () => PaymentsRepository.asEffect()),
     Effect.bind('overview', () => FinanceOverviewRepository.asEffect()),
     Effect.bind('credits', () => MemberCreditsRepository.asEffect()),
-    Effect.map(({ members, fees, assignments, payments, overview, credits, notifications }) =>
+    Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
+    Effect.map(({ members, fees, assignments, payments, overview, credits, notifications, sql }) =>
       handlers
         // ------------------------------------------------------------------
         // listFees
@@ -238,6 +242,96 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
             Effect.catchTag(
               'NoSuchElementError',
               LogicError.withMessage(() => 'Fee insert returned no row'),
+            ),
+          ),
+        )
+        // ------------------------------------------------------------------
+        // importFees — all fees, then all assignments, in one transaction
+        // ------------------------------------------------------------------
+        .handle('importFees', ({ params: { teamId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            Effect.tap(({ membership }) =>
+              requirePermission(membership, 'finance:manage_fees', forbidden),
+            ),
+            Effect.bind('teamMembers', () => members.findTeamMembersWithNames(teamId)),
+            // non-archived fees only: an archived fee does not block a re-upload
+            Effect.bind('existing', () => fees.listByTeam(teamId)),
+            Effect.map(({ teamMembers, existing }) =>
+              planFeeImport(
+                payload.rows,
+                teamMembers,
+                new Set(existing.map((f) => feeGroupKey(f.name, f.currency, f.due_at))),
+              ),
+            ),
+            Effect.flatMap((plan) =>
+              plan.errors.length > 0
+                ? Effect.fail(new FinanceApi.FeeImportInvalid({ errors: plan.errors }))
+                : Effect.succeed(plan.fees),
+            ),
+            Effect.flatMap((planned) =>
+              Effect.forEach(
+                planned,
+                (fee) =>
+                  fees
+                    .insert({
+                      team_id: teamId,
+                      name: fee.name,
+                      description: Option.none(),
+                      amount_minor: fee.amountMinor,
+                      currency: fee.currency,
+                      due_at: fee.dueAt,
+                      target_scope: 'custom',
+                    })
+                    .pipe(Effect.map((row) => ({ feeId: row.id, fee }))),
+                { concurrency: 1 },
+              ).pipe(
+                Effect.flatMap((inserted) =>
+                  Effect.forEach(
+                    inserted.flatMap(({ feeId, fee }) =>
+                      Object.values(
+                        Array.groupBy(fee.assignments, (a) => String(a.amountMinor)),
+                      ).map((bucket) => ({ feeId, fee, bucket })),
+                    ),
+                    ({ feeId, fee, bucket }) =>
+                      assignments
+                        .bulkInsert({
+                          feeId,
+                          memberIds: bucket.map((a) => a.memberId),
+                          amountMinorOverride:
+                            bucket[0].amountMinor === fee.amountMinor
+                              ? Option.none()
+                              : Option.some(bucket[0].amountMinor),
+                          dueAtOverride: Option.none(),
+                        })
+                        .pipe(
+                          Effect.tap((rows) =>
+                            rows.length === bucket.length
+                              ? Effect.void
+                              : LogicError.die(
+                                  `Fee import assigned ${rows.length} of ${bucket.length} members`,
+                                ),
+                          ),
+                        ),
+                    { concurrency: 1 },
+                  ),
+                ),
+                Effect.as(
+                  new FinanceApi.FeeImportResult({
+                    feeCount: planned.length,
+                    assignmentCount: planned.reduce((n, f) => n + f.assignments.length, 0),
+                  }),
+                ),
+                sql.withTransaction,
+                catchSqlErrors,
+              ),
+            ),
+            Effect.catchTag(
+              'NoSuchElementError',
+              LogicError.withMessage(() => 'Fee import insert returned no row'),
             ),
           ),
         )

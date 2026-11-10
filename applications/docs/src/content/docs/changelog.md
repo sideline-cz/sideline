@@ -5,6 +5,12 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-11-10 — New: import fees from a CSV file
+
+Treasurers can now create many fees and member charges at once. On **Finances → Fees**, click **Import CSV** and pick a file with the columns `member;fee;amount;currency;dueAt` (one row per member charge, the member's Discord username in the first column). The import is all or nothing: if a row is wrong, nothing is imported and the dialog lists the line numbers to fix. See the [Finances guide](/guides/finances/#importing-fees-from-a-csv-file).
+
+- API integrators: new `POST /teams/:teamId/fees/import` (`201 FeeImportResult`, `400 FeeImportInvalid` with `errors: { line, code }[]`).
+
 ## 2026-11-09 — New: the AI assistant can tell you about your Discord server
 
 Ask the AI assistant which channels and roles your Discord server has, or which Discord role belongs to a group. The answer shows what Sideline last saw from the bot, so a change made in Discord a moment ago may not show yet.

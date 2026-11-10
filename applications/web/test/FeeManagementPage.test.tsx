@@ -38,6 +38,7 @@ vi.mock('~/lib/translations.js', () => ({
       fee_management_colDue: 'Due',
       fee_management_colProgress: 'Progress',
       fee_management_actions: 'Actions',
+      fee_import_button: 'Import CSV',
     };
     return map[key] ?? key;
   },
@@ -134,6 +135,22 @@ describe('FeeManagementPage', () => {
       fireEvent.click(btn);
       expect(onCreateFee).toHaveBeenCalledOnce();
     });
+  });
+
+  describe('import button', () => {
+    it.each([[[]], [[FEE_ANNUAL]]])(
+      'shows "Import CSV" only when canManageFees (fees=%j)',
+      (fees) => {
+        const onImportFees = vi.fn();
+        const { unmount } = render(<FeeManagementPage fees={fees} canManageFees={false} />);
+        expect(screen.queryByRole('button', { name: 'Import CSV' })).toBeNull();
+        unmount();
+
+        render(<FeeManagementPage fees={fees} canManageFees={true} onImportFees={onImportFees} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Import CSV' }));
+        expect(onImportFees).toHaveBeenCalledOnce();
+      },
+    );
   });
 
   describe('fee list rendering', () => {

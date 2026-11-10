@@ -110,6 +110,27 @@ From this page you can:
 - Waive an individual assignment (e.g. hardship exemption).
 - Record a payment directly from the assignment list.
 
+### Importing fees from a CSV file
+
+To charge many members at once — for example when you move from a spreadsheet — click **Import CSV** next to **Create fee** and pick a CSV file. One row is one member charge:
+
+```
+member;fee;amount;currency;dueAt
+alice;Season 2026;1500;CZK;30.9.2026
+bob;Season 2026;1200,50;CZK;2026-09-30
+```
+
+- **member** is the member's Discord username (a leading `@` and upper case are ignored). The member must be active in the team.
+- **amount** may use a comma or a dot as the decimal mark and may contain spaces (`1 500,50`). It must be greater than 0.
+- **currency** is a 3-letter code such as `CZK` or `EUR`.
+- **dueAt** is `YYYY-MM-DD` or `D.M.YYYY`, or empty for no due date.
+- Columns are separated by `;`. Save the file as **CSV UTF-8** — in Excel, *Save As → CSV UTF-8 (Comma delimited)*. A file in another encoding is refused.
+- At most 1000 rows per file.
+
+Rows join one fee only when the fee name (exact text), the currency and the due date are the same. A different spelling, currency or date gives a separate fee with the same name. The first row of a fee sets its amount; a different amount on another row becomes that member's own amount. Before you import, the dialog shows how many rows and how many fees the file makes, so you can see an unwanted split.
+
+The import is all or nothing. If one row is invalid, nothing is imported and the dialog lists every problem by its line number in the file. Fix the file and pick it again. A fee with the same name, currency and due date that already exists also blocks the import — this stops the same file from being imported twice. Archive the old fee or change the name or date if you really want a new one. Imported fees do not send notifications to members.
+
 ## Membership plans
 
 Go to **Team → Finances → Membership plans** (`/teams/:teamId/membership-plans`) to manage the pricing tiers your team offers, such as "Adult membership" or "Junior membership". This page requires the `finance:manage_fees` permission (Admin or Treasurer by default).
