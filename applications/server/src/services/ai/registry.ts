@@ -327,10 +327,11 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       '`channel_not_found`: no such channel, call `list_discord_channels`. ' +
       '`ambiguous_channel`: more than one channel has that name, ask the user which one. ' +
       '`channel_not_managed`: the channel is in the Discord server but Sideline does not manage ' +
-      'it, so you may not read it; say so, do not call again. ' +
-      '`no_channel_access`: the user is not in any group that has access to this channel, so you ' +
-      'may not read it for them; say so plainly, do not call again, and do not say the channel ' +
-      'does not exist. A channel that `list_discord_channels` shows as `not_on_discord` cannot ' +
+      'it and did not create it for a group or roster, so you may not read it; say so, do not ' +
+      'call again. ' +
+      '`no_channel_access`: the user does not have access to this channel through their groups ' +
+      'or rosters, so you may not read it for them; say so plainly, do not call again, and do ' +
+      'not say the channel does not exist. A channel that `list_discord_channels` shows as `not_on_discord` cannot ' +
       'be read yet. ' +
       '`bot_unreachable`: the Sideline bot did not pick up the request, it may be offline; do ' +
       'not retry. `bot_timeout`: the bot picked it up but did not answer in time; do not retry. ' +

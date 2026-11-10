@@ -20,6 +20,7 @@ import { DiscordReadRequestsRepository } from '~/repositories/DiscordReadRequest
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
+import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -43,6 +44,7 @@ const TestLayer = Layer.mergeAll(
   DiscordRolesRepository.Default,
   DiscordChannelMappingRepository.Default,
   GroupsRepository.Default,
+  RostersRepository.Default,
   AchievementRoleMappingsRepository.Default,
   CustomAchievementsRepository.Default,
   TeamChannelsRepository.Default,
@@ -186,7 +188,7 @@ const seedDiscordTeam = (digit: string, label: string) =>
       Effect.orDie,
     );
 
-    return { team, guildId, id };
+    return { team, guildId, id, group };
   });
 
 /** A new member of `teamId` holding only the built-in role `roleName`; returns the tool ctx. */
@@ -393,6 +395,56 @@ describe('read_discord_messages on real Postgres', () => {
 
       expect(yield* readAs(ctx, 'u12-chat')).toEqual({ error: 'no_channel_access' });
       expect(yield* readRowCount).toBe(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // `A-general` has no `team_channels` row: Sideline created it for group `A juniors`
+  // (`discord_channel_mappings` with a role). The bot gives that role to the group's members.
+  it.effect('a group channel Sideline created: a group member reads it, others are refused', () =>
+    Effect.gen(function* () {
+      const a = yield* seedDiscordTeam('1', 'A');
+      const member = yield* memberWithBuiltInRole(a.team.id, a.id('0908'), 'Captain');
+      yield* GroupsRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.addMemberById(a.group.id, member.membership.id)),
+      );
+      const outsider = yield* memberWithBuiltInRole(a.team.id, a.id('0909'), 'Admin');
+
+      expect(yield* readAs(outsider, 'A-general')).toEqual({ error: 'no_channel_access' });
+      expect(yield* readRowCount).toBe(0);
+      yield* readAs(member, 'A-general');
+      expect(yield* readRowCount).toBe(1);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a roster channel Sideline created: a roster member reads it, others are refused', () =>
+    Effect.gen(function* () {
+      const a = yield* seedDiscordTeam('1', 'A');
+      yield* DiscordChannelsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.upsertChannel(a.guildId, a.id('0103'), 'A-first-team', 0, Option.none()),
+        ),
+      );
+      const rosters = yield* RostersRepository.asEffect();
+      const roster = yield* rosters.insert({
+        team_id: a.team.id,
+        name: 'First team',
+        active: true,
+        color: Option.none(),
+        emoji: Option.none(),
+      });
+      yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.insertRoster(a.team.id, roster.id, a.id('0103'), a.id('0201')),
+        ),
+      );
+      const member = yield* memberWithBuiltInRole(a.team.id, a.id('0910'), 'Captain');
+      yield* rosters.addMemberById(roster.id, member.membership.id);
+      const outsider = yield* memberWithBuiltInRole(a.team.id, a.id('0911'), 'Captain');
+
+      expect(yield* readAs(outsider, 'A-first-team')).toEqual({ error: 'no_channel_access' });
+      expect(yield* readRowCount).toBe(0);
+      yield* readAs(member, 'A-first-team');
+      expect(yield* readRowCount).toBe(1);
     }).pipe(Effect.provide(TestLayer)),
   );
 });

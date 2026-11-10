@@ -39,7 +39,7 @@ Please note that email sent to a connected team mailbox may contain personal dat
 
 **The in-app AI assistant, where it is switched on.** When you ask the assistant a question, your question and the information needed to answer it are sent to an external AI provider.
 
-That information is limited to what your own account can already see — the assistant applies exactly the same permissions as the rest of the app, and refuses anything outside them. One exception: people with the **AI Assistant: Manage Discord Setup** permission (Admin and Captain by default) can ask it to read recent messages in a Discord channel that Sideline manages for the team. The assistant then fetches those messages from Discord — author display names, times and text — and sends them to the AI provider to answer. Within that limit it can include other members' names, event details, who attended a training, and amounts owed or paid, where you are entitled to see those things.
+That information is limited to what your own account can already see — the assistant applies exactly the same permissions as the rest of the app, and refuses anything outside them. Within that limit it can include other members' names, event details, who attended a training, and amounts owed or paid, where you are entitled to see those things. One exception: people with the **AI Assistant: Manage Discord Setup** permission (Admin and Captain by default) can ask it to read recent messages in a Discord channel that Sideline manages or creates for the team and that one of their groups or rosters has access to. The assistant then fetches those messages from Discord — author display names, times and text — and sends them to the AI provider to answer.
 
 **We do not store these conversations.** They live in your browser tab while the page is open and are gone when you close or reload it. When the assistant reads Discord messages, our database holds them only until the answer is built — normally a few seconds, and never longer than five minutes — and then deletes them. The AI provider handles the request under its own terms, which may include keeping it for a limited period to monitor abuse.
 
@@ -57,7 +57,7 @@ The assistant also answers questions about how Sideline works, using our public 
 ## 4. Who we share it with
 
 - **Discord** — the product is built on Discord. Your membership, roles, channels, event posts and direct messages pass through it and are covered by [Discord's privacy policy](https://discord.com/privacy).
-- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — receives email content for summarisation where a team has enabled email forwarding, and receives your questions to the in-app AI assistant together with the team data needed to answer them, including Discord messages from a Sideline-managed channel when an admin or captain asks the assistant about that channel.
+- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — receives email content for summarisation where a team has enabled email forwarding, and receives your questions to the in-app AI assistant together with the team data needed to answer them, including Discord messages from a channel that Sideline manages or creates when a member with that permission asks the assistant about that channel.
 - **An inbound-email delivery provider** — receives and forwards email addressed to a connected team mailbox, where enabled.
 - **Our hosting provider** — runs our servers, database and monitoring.
 

@@ -1100,8 +1100,8 @@ export const listDiscordRoles = (
 // read_discord_messages — `ai:manage_discord`. A LIVE read through the bot: the server has no
 // Discord client, so it writes one `discord_read_requests` row, the bot reads Discord and writes
 // the result back on the same row, and this executor polls for it (read-once). Only channels
-// Sideline manages AND the caller has access to, through the same group set the Discord role
-// sync uses. No bypass for Admin: `ai:manage_discord` opens the tool, not more channels.
+// Sideline manages or created (group and roster channels) AND the caller has access to, by the
+// same rule the bot uses to give Discord roles (`callerHasChannelAccess`). No bypass for Admin: `ai:manage_discord` opens the tool, not more channels.
 // ===========================================================================
 
 export interface ReadDiscordMessagesArgs {
@@ -1151,25 +1151,69 @@ const toReadResult = (
   };
 };
 
-/** The caller sees managed channel `C` iff a `team_channel_access` row grants `C` to one of the
- *  caller's own active groups or an active ancestor of one — the exact set the group-channel
- *  role sync gives Discord roles for. Every access level allows ViewChannel. */
-const callerHasChannelAccess = (ctx: EntityReadContext, teamChannelId: TeamChannel.TeamChannelId) =>
-  Effect.all({
+/** What makes a channel "Sideline's": a `team_channels` row (the channel manager) and/or the
+ *  `discord_channel_mappings` rows of the group or roster channel Sideline created for it. */
+interface ChannelSources {
+  readonly teamChannelId: Option.Option<TeamChannel.TeamChannelId>;
+  readonly mappings: ReadonlyArray<{
+    readonly group_id: Option.Option<GroupModel.GroupId>;
+    readonly roster_id: Option.Option<RosterModel.RosterId>;
+    readonly discord_role_id: Option.Option<Discord.Snowflake>;
+  }>;
+}
+
+/** The caller sees channel `C` iff the bot gives them a Discord role that may view `C`:
+ *  - a `team_channel_access` row grants `C` to one of the caller's own active groups or an active
+ *    ancestor of one — the set the group-channel role sync gives Discord roles for. Every access
+ *    level allows ViewChannel.
+ *  - `C` is group `G`'s channel and `G` is in that same set: `G`'s role goes to the members of `G`
+ *    and of every descendant group (`Channel/GetGroupMembers`).
+ *  - `C` is roster `R`'s channel, `R` is active and the caller is in `roster_members` of `R`
+ *    (`findExpectedRoleHolders`, the roster role reconcile).
+ *  A mapping without a Discord role gives nobody access: the channel is hidden from @everyone. */
+const callerHasChannelAccess = (ctx: EntityReadContext, sources: ChannelSources) => {
+  const withRole = sources.mappings.filter((m) => Option.isSome(m.discord_role_id));
+  const rosterIds = withRole.flatMap((m) => Option.toArray(m.roster_id));
+  return Effect.all({
     mine: GroupsRepository.asEffect().pipe(
       Effect.flatMap((groups) =>
         groups.findActiveGroupsWithAncestorsForMember(ctx.membership.id, ctx.teamId),
       ),
     ),
-    grants: TeamChannelAccessRepository.asEffect().pipe(
-      Effect.flatMap((access) => access.findByChannel(teamChannelId)),
-    ),
+    grants: Option.match(sources.teamChannelId, {
+      onNone: () => Effect.succeed([]),
+      onSome: (teamChannelId) =>
+        TeamChannelAccessRepository.asEffect().pipe(
+          Effect.flatMap((access) => access.findByChannel(teamChannelId)),
+        ),
+    }),
+    rosters:
+      rosterIds.length === 0
+        ? Effect.succeed(false)
+        : RostersRepository.asEffect().pipe(
+            Effect.flatMap((rosters) =>
+              Effect.all({
+                active: rosters.findByTeamId(ctx.teamId),
+                held: rosters.findRosterIdsByMember(ctx.membership.id),
+              }),
+            ),
+            Effect.map(({ active, held }) =>
+              rosterIds.some(
+                (id) => held.includes(id) && active.some((r) => r.id === id && r.active),
+              ),
+            ),
+          ),
   }).pipe(
-    Effect.map(({ mine, grants }) => {
-      const held = new Set(mine.map((g) => g.id));
-      return grants.some((g) => held.has(g.group_id));
+    Effect.map(({ mine, grants, rosters }) => {
+      const held = new Set<string>(mine.map((g) => g.id));
+      return (
+        rosters ||
+        grants.some((g) => held.has(g.group_id)) ||
+        withRole.some((m) => Option.exists(m.group_id, (id) => held.has(id)))
+      );
     }),
   );
+};
 
 const waitForRead = (
   reads: ServiceMap.Service.Shape<typeof DiscordReadRequestsRepository>,
@@ -1220,8 +1264,16 @@ const waitForRead = (
     ),
     // One DB blip fails this tool honestly instead of the whole chat turn (`catchSqlErrors`
     // dies). Defects only: an interrupt passes through.
+    // The row goes too: the bot could still write member messages into it.
     Effect.catchDefect((defect) =>
       Effect.logWarning('discord read wait failed', defect).pipe(
+        Effect.andThen(
+          reads
+            .abandon(id)
+            .pipe(
+              Effect.catchCause((cause) => Effect.logWarning('discord read cleanup failed', cause)),
+            ),
+        ),
         Effect.as(errorResult('discord_error')),
       ),
     ),
@@ -1236,7 +1288,9 @@ export const readDiscordMessages = (
   | TeamsRepository
   | BotGuildsRepository
   | DiscordChannelsRepository
+  | DiscordChannelMappingRepository
   | GroupsRepository
+  | RostersRepository
   | TeamChannelAccessRepository
   | DiscordReadRequestsRepository
 > =>
@@ -1262,27 +1316,40 @@ export const readDiscordMessages = (
                             { name: row.name, row },
                           ];
                     });
+                  // Discord names have no `#`, but users (and the model) write "#u12-chat".
                   const matched = [
                     ...new Map(
-                      matchByName(candidates, args.channel).map((c) => [c.row.channel_id, c.row]),
+                      matchByName(candidates, args.channel.replace(/^#/, '')).map((c) => [
+                        c.row.channel_id,
+                        c.row,
+                      ]),
                     ).values(),
                   ];
                   const [row, ...rest] = matched;
                   if (row === undefined) return Effect.succeed(errorResult('channel_not_found'));
                   if (rest.length > 0) return Effect.succeed(errorResult('ambiguous_channel'));
-                  return Option.match(row.team_channel_id, {
-                    onNone: () => Effect.succeed(errorResult('channel_not_managed')),
-                    onSome: (teamChannelId) =>
-                      callerHasChannelAccess(ctx, teamChannelId).pipe(
-                        Effect.flatMap((allowed) =>
-                          allowed
-                            ? startRead(args, ctx.teamId, row.channel_id, {
-                                name: Option.getOrElse(row.team_channel_name, () => row.name),
-                              })
-                            : Effect.succeed(errorResult('no_channel_access')),
-                        ),
-                      ),
-                  });
+                  return DiscordChannelMappingRepository.asEffect().pipe(
+                    Effect.flatMap((mappings) => mappings.findAllByTeam(ctx.teamId)),
+                    Effect.map((all) =>
+                      all.filter((m) => Option.contains(m.discord_channel_id, row.channel_id)),
+                    ),
+                    Effect.flatMap((mappings) =>
+                      Option.isNone(row.team_channel_id) && mappings.length === 0
+                        ? Effect.succeed(errorResult('channel_not_managed'))
+                        : callerHasChannelAccess(ctx, {
+                            teamChannelId: row.team_channel_id,
+                            mappings,
+                          }).pipe(
+                            Effect.flatMap((allowed) =>
+                              allowed
+                                ? startRead(args, ctx.teamId, row.channel_id, {
+                                    name: Option.getOrElse(row.team_channel_name, () => row.name),
+                                  })
+                                : Effect.succeed(errorResult('no_channel_access')),
+                            ),
+                          ),
+                    ),
+                  );
                 }),
               ),
           }),

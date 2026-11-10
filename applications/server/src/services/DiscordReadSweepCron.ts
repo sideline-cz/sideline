@@ -3,10 +3,11 @@ import { withCronMetrics } from '~/metrics.js';
 import { DiscordReadRequestsRepository } from '~/repositories/DiscordReadRequestsRepository.js';
 
 /**
- * Minutes a `discord_read_requests` row may live. The privacy policy quotes this number ("never
- * longer than five minutes"); change both together.
+ * Minutes a `discord_read_requests` row may live. 4, not 5: the sweep runs once a minute, so a
+ * left-behind row lives up to TTL + 1 minute, and the privacy policy promises "never
+ * longer than five minutes". Keep TTL + 1 at or below that number.
  */
-export const DISCORD_READ_TTL_MINUTES = 5;
+export const DISCORD_READ_TTL_MINUTES = 4;
 
 /**
  * The backstop for live Discord reads. The AI tool deletes its row when it reads the result or

@@ -730,6 +730,10 @@ interface DiscordRoleRowLike {
 interface DiscordMappingRowLike {
   readonly entity_type: 'group' | 'roster';
   readonly discord_role_id: Option.Option<Discord.Snowflake>;
+  // Read by `read_discord_messages` only.
+  readonly discord_channel_id?: Option.Option<Discord.Snowflake>;
+  readonly group_id?: Option.Option<string>;
+  readonly roster_id?: Option.Option<string>;
 }
 
 // `TeamChannelsRepository.findAllByTeamWithSyncState` row. The mock returns the rows as given: it
@@ -2324,14 +2328,52 @@ const readLayers = (
     readonly guildLinked?: boolean;
     readonly channels?: ReadonlyArray<DiscordChannelRowLike>;
     readonly access?: Layer.Layer<any>;
+    readonly mappings?: ReadonlyArray<DiscordMappingRowLike>;
+    readonly rosters?: Layer.Layer<any>;
   } = {},
 ) => {
   const discord = makeDiscordLayers({
     guildLinked: opts.guildLinked ?? true,
     channels: opts.channels ?? DISCORD_CHANNEL_ROWS,
+    ...(opts.mappings === undefined ? {} : { mappings: opts.mappings }),
   });
-  return { discord, layer: Layer.mergeAll(discord.layer, opts.access ?? GRANTED, reads) };
+  return {
+    discord,
+    layer: Layer.mergeAll(
+      discord.layer,
+      opts.access ?? GRANTED,
+      opts.rosters ?? makeRosterAccessLayer([], []),
+      reads,
+    ),
+  };
 };
+
+/** `active` = the team's rosters (id + active flag); `held` = the caller's `roster_members`. */
+const makeRosterAccessLayer = (
+  active: ReadonlyArray<{ readonly id: string; readonly active: boolean }>,
+  held: ReadonlyArray<string>,
+) =>
+  Layer.succeed(RostersRepository, {
+    findByTeamId: () => Effect.succeed(active),
+    findRosterIdsByMember: () => Effect.succeed(held),
+  } as never);
+
+// Not in `team_channels`: Sideline created it for a group or a roster (`discord_channel_mappings`).
+const CREATED_CHANNEL_ID = '200000000000000006' as Discord.Snowflake;
+const CREATED_CHANNEL_ROWS = [
+  ...DISCORD_CHANNEL_ROWS,
+  buildDiscordChannelRow({ channel_id: CREATED_CHANNEL_ID, name: 'u12-team' }),
+];
+const createdMapping = (
+  owner: { readonly group_id: string } | { readonly roster_id: string },
+  role: Option.Option<Discord.Snowflake> = Option.some('200000000000000099' as Discord.Snowflake),
+): DiscordMappingRowLike => ({
+  entity_type: 'group_id' in owner ? 'group' : 'roster',
+  discord_role_id: role,
+  discord_channel_id: Option.some(CREATED_CHANNEL_ID),
+  group_id: 'group_id' in owner ? Option.some(owner.group_id) : Option.none(),
+  roster_id: 'roster_id' in owner ? Option.some(owner.roster_id) : Option.none(),
+});
 
 describe('read_discord_messages', () => {
   it.effect('a caller without ai:manage_discord is refused before any lookup', () =>
@@ -2371,6 +2413,89 @@ describe('read_discord_messages', () => {
       }),
     );
   }
+
+  for (const channel of ['#juniors-raw', '#Juniors']) {
+    it.effect(`a leading # is ignored: "${channel}" resolves`, () =>
+      Effect.gen(function* () {
+        const reads = makeReadsLayer({ consume: [Option.some(OK_TWO)] });
+        const { layer } = readLayers(reads.layer);
+        expect(yield* runRead({ channel }, readerCtx, layer)).toMatchObject({ channel: 'Juniors' });
+        expect(reads.calls.insert).toMatchObject([{ channelId: '200000000000000002' }]);
+      }),
+    );
+  }
+
+  for (const [label, opts, expected] of [
+    [
+      'a group channel, caller in the group (or a descendant)',
+      { mappings: [createdMapping({ group_id: 'g-u12' })] },
+      'read',
+    ],
+    [
+      'a group channel, caller not in the group',
+      { mappings: [createdMapping({ group_id: 'g-u14' })] },
+      'no_channel_access',
+    ],
+    [
+      'a group channel with no Discord role yet',
+      { mappings: [createdMapping({ group_id: 'g-u12' }, Option.none())] },
+      'no_channel_access',
+    ],
+    [
+      'a roster channel, caller on the active roster',
+      {
+        mappings: [createdMapping({ roster_id: 'r-1' })],
+        rosters: makeRosterAccessLayer([{ id: 'r-1', active: true }], ['r-1']),
+      },
+      'read',
+    ],
+    [
+      'a roster channel, caller not on the roster',
+      {
+        mappings: [createdMapping({ roster_id: 'r-1' })],
+        rosters: makeRosterAccessLayer([{ id: 'r-1', active: true }], ['r-2']),
+      },
+      'no_channel_access',
+    ],
+    [
+      'a roster channel, roster inactive',
+      {
+        mappings: [createdMapping({ roster_id: 'r-1' })],
+        rosters: makeRosterAccessLayer([{ id: 'r-1', active: false }], ['r-1']),
+      },
+      'no_channel_access',
+    ],
+  ] as const) {
+    it.effect(`${label} → ${expected}`, () =>
+      Effect.gen(function* () {
+        const reads = makeReadsLayer({ consume: [Option.some(OK_TWO)] });
+        const { layer } = readLayers(reads.layer, { channels: CREATED_CHANNEL_ROWS, ...opts });
+        const result = yield* runRead({ channel: 'u12-team' }, readerCtx, layer);
+        if (expected === 'read') {
+          expect(result).toMatchObject({ channel: 'u12-team' });
+          expect(reads.calls.insert).toMatchObject([{ channelId: CREATED_CHANNEL_ID }]);
+        } else {
+          expect(result).toEqual({ error: expected });
+          expect(reads.calls.insert).toEqual([]);
+        }
+      }),
+    );
+  }
+
+  it.effect('an Admin with every permission is refused a group channel of another group', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({});
+      const { layer } = readLayers(reads.layer, {
+        channels: CREATED_CHANNEL_ROWS,
+        mappings: [createdMapping({ group_id: 'g-u14' })],
+        access: makeAccessLayers({}, []),
+      });
+      expect(
+        yield* runRead({ channel: 'u12-team' }, discordCtx(Role.allPermissions), layer),
+      ).toEqual({ error: 'no_channel_access' });
+      expect(reads.calls.insert).toEqual([]);
+    }),
+  );
 
   it.effect('two channels that match only case-insensitively → ambiguous_channel', () =>
     Effect.gen(function* () {
@@ -2507,6 +2632,8 @@ describe('read_discord_messages', () => {
       expect(yield* runRead({ channel: 'Juniors' }, readerCtx, layer)).toEqual({
         error: 'discord_error',
       });
+      // The row goes too, or the bot writes member messages into it for the sweeper to find.
+      expect(reads.calls.abandon).toEqual([READ_REQUEST_ID]);
     }),
   );
 

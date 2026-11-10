@@ -1800,6 +1800,10 @@ const makeLiveReadOverrides = (reads: {
           liveChannelRow(3, 'gamma'),
         ]),
     } as never),
+    // No group or roster channels: every channel above is a `team_channels` one.
+    Layer.succeed(DiscordChannelMappingRepository, {
+      findAllByTeam: () => Effect.succeed([]),
+    } as never),
     Layer.succeed(GroupsRepository, {
       findGroupsByTeamId: () => Effect.succeed([]),
       findActiveGroupsWithAncestorsForMember: () => Effect.succeed([{ id: 'g-1', name: 'g-1' }]),

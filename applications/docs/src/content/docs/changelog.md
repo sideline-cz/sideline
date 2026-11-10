@@ -10,8 +10,8 @@ This page lists user-visible changes to Sideline. For developer-level release no
 Ask the AI assistant what people said in a Discord channel, for example "What did the U12 chat talk about today?". The assistant reads the messages live from Discord through the Sideline bot and answers from them.
 
 - You need the **AI Assistant: Manage Discord Setup** permission. Admin and Captain have it by default.
-- It reads only channels that Sideline manages and that you have access to through one of your groups. Admins get no extra channels.
-- It reads at most 100 messages per request and at most two channels per answer. Bot messages are left out.
+- It reads only channels that Sideline manages or creates for a group or roster, and that you have access to through one of your groups or rosters. Admins get no extra channels.
+- It reads at most 100 messages per request and at most two reads per answer. Bot messages are left out.
 - The messages go to the AI provider to build the answer. Sideline deletes them within five minutes; see the [privacy policy](/legal/privacy/).
 
 ## 2026-11-10 — New: the AI assistant can change your Discord channels (with your confirmation)

@@ -19,7 +19,7 @@ describe('DiscordReadSweepCron', () => {
 
       yield* discordReadSweepEffect.pipe(Effect.provide(repo));
 
-      expect(DISCORD_READ_TTL_MINUTES).toBe(5);
+      expect(DISCORD_READ_TTL_MINUTES).toBe(4);
       expect(calls).toEqual([DISCORD_READ_TTL_MINUTES]);
     }),
   );

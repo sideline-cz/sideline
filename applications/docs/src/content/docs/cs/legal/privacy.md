@@ -39,7 +39,7 @@ Pozor: e-mail poslaný do připojené týmové schránky může obsahovat osobn�
 
 **AI asistent v aplikaci, tam kde je zapnutý.** Když se asistenta na něco zeptáš, tvůj dotaz a údaje potřebné k odpovědi putují externímu poskytovateli AI.
 
-Jsou to vždy jen údaje, které už tvůj účet vidět smí — asistent uplatňuje přesně stejná oprávnění jako zbytek aplikace a cokoli mimo ně odmítne. Jedna výjimka: lidé s oprávněním **AI asistent: spravovat nastavení Discordu** (ve výchozím stavu Admin a Kapitán) ho mohou požádat, aby přečetl nedávné zprávy v discordovém kanálu, který Sideline pro tým spravuje. Asistent pak tyto zprávy načte z Discordu — zobrazovaná jména autorů, časy a text — a pošle je poskytovateli AI, aby mohl odpovědět. V těchto mezích to ale mohou být jména dalších členů, podrobnosti o událostech, kdo byl na tréninku a dlužné či zaplacené částky, pokud na ně máš nárok je vidět.
+Jsou to vždy jen údaje, které už tvůj účet vidět smí — asistent uplatňuje přesně stejná oprávnění jako zbytek aplikace a cokoli mimo ně odmítne. V těchto mezích to ale mohou být jména dalších členů, podrobnosti o událostech, kdo byl na tréninku a dlužné či zaplacené částky, pokud na ně máš nárok je vidět. Jedna výjimka: lidé s oprávněním **AI asistent: spravovat nastavení Discordu** (ve výchozím stavu Admin a Kapitán) ho mohou požádat, aby přečetl nedávné zprávy v discordovém kanálu, který Sideline pro tým spravuje nebo vytváří a ke kterému má přístup některá z jejich skupin nebo soupisek. Asistent pak tyto zprávy načte z Discordu — zobrazovaná jména autorů, časy a text — a pošle je poskytovateli AI, aby mohl odpovědět.
 
 **Tyto konverzace neukládáme.** Žijí jen v záložce tvého prohlížeče, dokud je stránka otevřená, a zavřením nebo načtením stránky zmizí. Když asistent čte zprávy z Discordu, naše databáze je drží jen do sestavení odpovědi — obvykle pár sekund a nikdy déle než pět minut — a pak je smaže. Poskytovatel AI zpracovává požadavek podle svých vlastních podmínek, které mohou zahrnovat jeho uchování po omezenou dobu kvůli sledování zneužití.
 
@@ -57,7 +57,7 @@ Asistent také odpovídá na dotazy, jak Sideline funguje, a to z naší veřejn
 ## 4. Komu je předáváme
 
 - **Discordu** — produkt na něm stojí. Členství, role, kanály, posty k událostem i soukromé zprávy jím procházejí a řídí se [zásadami ochrany osobních údajů Discordu](https://discord.com/privacy).
-- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — dostává obsah e-mailů ke shrnutí u týmů, které si přeposílání zapnuly, a dostává tvoje dotazy na AI asistenta spolu s týmovými údaji potřebnými k odpovědi, včetně zpráv z discordového kanálu spravovaného Sideline, když se na ten kanál asistenta zeptá admin nebo kapitán.
+- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — dostává obsah e-mailů ke shrnutí u týmů, které si přeposílání zapnuly, a dostává tvoje dotazy na AI asistenta spolu s týmovými údaji potřebnými k odpovědi, včetně zpráv z discordového kanálu, který Sideline spravuje nebo vytváří, když se na ten kanál asistenta zeptá člen s tímto oprávněním.
 - **Poskytovateli doručování příchozí pošty** — přijímá a předává nám e-maily poslané na připojenou týmovou schránku, tam kde je to zapnuté.
 - **Poskytovateli hostingu** — provozuje naše servery, databázi a monitoring.
 
