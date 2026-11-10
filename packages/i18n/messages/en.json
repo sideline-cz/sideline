@@ -2652,6 +2652,7 @@
   "role_noRoles": "No roles yet.",
   "role_perm_activityTypeCreate": "Create Activity Types",
   "role_perm_activityTypeDelete": "Delete Activity Types",
+  "role_perm_aiManageDiscord": "AI Assistant: Manage Discord Setup",
   "role_perm_carpoolManage": "Manage Carpools",
   "role_perm_challengeManage": "Manage Challenges",
   "role_perm_eventCancel": "Cancel Events",

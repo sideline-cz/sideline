@@ -21,8 +21,14 @@
 import type { AiActionProposal, AiChatApi } from '@sideline/domain';
 import { Array as Arr, Cause, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { hasPermission } from '~/api/permissions.js';
+import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
+import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
+import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -41,6 +47,8 @@ import {
   currentDatetime,
   getFinanceOverview,
   listActivityLogs,
+  listDiscordChannels,
+  listDiscordRoles,
   listEventAttendance,
   listEventRsvps,
   listEvents,
@@ -57,6 +65,7 @@ import {
   CurrentDatetimeSchema,
   GetFinanceOverviewSchema,
   ListActivityLogsSchema,
+  ListDiscordSchema,
   ListEventAttendanceSchema,
   ListEventRsvpsSchema,
   ListEventsSchema,
@@ -196,6 +205,14 @@ interface AgentDeps {
   readonly attendance: ServiceMap.Service.Shape<typeof EventAttendanceRepository>;
   readonly activityLogs: ServiceMap.Service.Shape<typeof ActivityLogsRepository>;
   readonly membershipPlans: ServiceMap.Service.Shape<typeof MembershipPlansRepository>;
+  readonly discord: {
+    readonly botGuilds: ServiceMap.Service.Shape<typeof BotGuildsRepository>;
+    readonly channels: ServiceMap.Service.Shape<typeof DiscordChannelsRepository>;
+    readonly roles: ServiceMap.Service.Shape<typeof DiscordRolesRepository>;
+    readonly mappings: ServiceMap.Service.Shape<typeof DiscordChannelMappingRepository>;
+    readonly achievementRoles: ServiceMap.Service.Shape<typeof AchievementRoleMappingsRepository>;
+    readonly customAchievements: ServiceMap.Service.Shape<typeof CustomAchievementsRepository>;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +416,25 @@ const executeTool = (
           listMembershipPlans(args, ctx),
           MembershipPlansRepository,
           deps.membershipPlans,
+        ),
+      );
+    case 'list_discord_channels':
+      return decodeAndRun(ListDiscordSchema, parsedArgs, (args) =>
+        listDiscordChannels(args, ctx).pipe(
+          Effect.provideService(TeamsRepository, deps.teams),
+          Effect.provideService(BotGuildsRepository, deps.discord.botGuilds),
+          Effect.provideService(DiscordChannelsRepository, deps.discord.channels),
+        ),
+      );
+    case 'list_discord_roles':
+      return decodeAndRun(ListDiscordSchema, parsedArgs, (args) =>
+        listDiscordRoles(args, ctx).pipe(
+          Effect.provideService(TeamsRepository, deps.teams),
+          Effect.provideService(BotGuildsRepository, deps.discord.botGuilds),
+          Effect.provideService(DiscordRolesRepository, deps.discord.roles),
+          Effect.provideService(DiscordChannelMappingRepository, deps.discord.mappings),
+          Effect.provideService(AchievementRoleMappingsRepository, deps.discord.achievementRoles),
+          Effect.provideService(CustomAchievementsRepository, deps.discord.customAchievements),
         ),
       );
     case 'search_docs':
@@ -882,6 +918,12 @@ const make: Effect.Effect<
   | EventAttendanceRepository
   | ActivityLogsRepository
   | MembershipPlansRepository
+  | BotGuildsRepository
+  | DiscordChannelsRepository
+  | DiscordRolesRepository
+  | DiscordChannelMappingRepository
+  | AchievementRoleMappingsRepository
+  | CustomAchievementsRepository
 > = Effect.Do.pipe(
   Effect.bind('llm', () => LlmClient.asEffect()),
   Effect.bind('events', () => EventsRepository.asEffect()),
@@ -897,6 +939,17 @@ const make: Effect.Effect<
   Effect.bind('attendance', () => EventAttendanceRepository.asEffect()),
   Effect.bind('activityLogs', () => ActivityLogsRepository.asEffect()),
   Effect.bind('membershipPlans', () => MembershipPlansRepository.asEffect()),
+  // One bundled bind, not four: `Effect.Do` inference collapses deps to `unknown` near 19 binds.
+  Effect.bind('discord', () =>
+    Effect.all({
+      botGuilds: BotGuildsRepository.asEffect(),
+      channels: DiscordChannelsRepository.asEffect(),
+      roles: DiscordRolesRepository.asEffect(),
+      mappings: DiscordChannelMappingRepository.asEffect(),
+      achievementRoles: AchievementRoleMappingsRepository.asEffect(),
+      customAchievements: CustomAchievementsRepository.asEffect(),
+    }),
+  ),
   Effect.map(
     (deps): ChatAgentService => ({
       respond: (ctx, history) => respond(deps, ctx, history),

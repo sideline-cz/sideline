@@ -29,6 +29,7 @@ export const Permission = Schema.Literals([
   'challenge:manage',
   'carpool:manage',
   'poll:manage',
+  'ai:manage_discord',
 ]);
 export type Permission = typeof Permission.Type;
 
@@ -60,6 +61,7 @@ export const defaultPermissions: Record<string, ReadonlyArray<Permission>> = {
     'challenge:manage',
     'carpool:manage',
     'poll:manage',
+    'ai:manage_discord',
   ],
   Captain: [
     'roster:view',
@@ -78,6 +80,7 @@ export const defaultPermissions: Record<string, ReadonlyArray<Permission>> = {
     'challenge:manage',
     'carpool:manage',
     'poll:manage',
+    'ai:manage_discord',
   ],
   Player: ['roster:view', 'member:view'],
   Treasurer: ['finance:view', 'finance:manage_fees', 'finance:record_payments'],

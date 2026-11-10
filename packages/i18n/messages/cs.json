@@ -2652,6 +2652,7 @@
   "role_noRoles": "Zatím žádné role.",
   "role_perm_activityTypeCreate": "Vytvářet typy aktivit",
   "role_perm_activityTypeDelete": "Mazat typy aktivit",
+  "role_perm_aiManageDiscord": "AI asistent: spravovat nastavení Discordu",
   "role_perm_carpoolManage": "Spravovat sdílení jízd",
   "role_perm_challengeManage": "Spravovat výzvy",
   "role_perm_eventCancel": "Rušit události",
