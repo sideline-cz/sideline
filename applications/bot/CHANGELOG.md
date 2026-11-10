@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.57.0
+
+### 🚀 Features
+- server-to-bot RPC transport (#810)
+
 ## 0.56.0
 
 _No notable changes._
