@@ -287,7 +287,9 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
   define(
     'list_discord_channels',
     "Lists the channels and categories in the team's Discord server as Sideline last saw them " +
-      '(name, type, category, whether Sideline manages the channel, whether Sideline archived it, ' +
+      '(name, type, category, whether Sideline manages the channel and how — `managedVia` is ' +
+      '`channel_manager`, `group` or `roster` (a channel Sideline created for a group or ' +
+      'roster) — whether Sideline archived it, ' +
       'how many groups have access). Filter with a free-text `query` matched against the channel ' +
       'name, its Discord name or its category, and/or cap the rows with `limit` (1-50). ' +
       'If the result has `truncated: true`, the list is partial: say so, and call again with a narrower `query`. ' +

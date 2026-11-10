@@ -2002,6 +2002,7 @@ describe('list_discord_channels', () => {
         type: 'text',
         category: 'General',
         managedBySideline: true,
+        managedVia: 'channel_manager',
         archived: false,
         accessGroupCount: 2,
         syncStatus: 'synced',
@@ -2013,6 +2014,50 @@ describe('list_discord_channels', () => {
       expect(lounge?.type).toBe('voice');
       expect(items.find((i) => i.name === 'Thread')?.type).toBe('other');
       expectNoIdKeys(items);
+    }),
+  );
+
+  it.effect('group and roster channels Sideline created are managed, via the group or roster', () =>
+    Effect.gen(function* () {
+      const discord = makeDiscordLayers({
+        guildLinked: true,
+        channels: [
+          ...DISCORD_CHANNEL_ROWS,
+          buildDiscordChannelRow({ channel_id: '200000000000000006', name: 'u12' }),
+          buildDiscordChannelRow({ channel_id: '200000000000000007', name: 'a-team' }),
+        ],
+        mappings: [
+          {
+            entity_type: 'group',
+            discord_role_id: Option.none(),
+            discord_channel_id: Option.some('200000000000000006' as Discord.Snowflake),
+          },
+          {
+            entity_type: 'roster',
+            discord_role_id: Option.none(),
+            discord_channel_id: Option.some('200000000000000007' as Discord.Snowflake),
+          },
+          // A role-only mapping (no channel) must not mark any channel.
+          {
+            entity_type: 'group',
+            discord_role_id: Option.none(),
+            discord_channel_id: Option.none(),
+          },
+        ],
+      });
+      const outcome = yield* listDiscordChannels({}, discordCtx(['ai:manage_discord'])).pipe(
+        Effect.provide(discord.layer),
+      );
+
+      const items = itemsOf(outcome.result);
+      const pick = (name: string) => {
+        const item = items.find((i) => i.name === name);
+        return { managedBySideline: item?.managedBySideline, managedVia: item?.managedVia };
+      };
+      expect(pick('u12')).toEqual({ managedBySideline: true, managedVia: 'group' });
+      expect(pick('a-team')).toEqual({ managedBySideline: true, managedVia: 'roster' });
+      expect(pick('Juniors')).toEqual({ managedBySideline: true, managedVia: 'channel_manager' });
+      expect(pick('Lounge')).toEqual({ managedBySideline: false, managedVia: null });
     }),
   );
 
@@ -2108,6 +2153,7 @@ describe('list_discord_channels', () => {
           type: 'text',
           category: null,
           managedBySideline: true,
+          managedVia: 'channel_manager',
           archived: false,
           accessGroupCount: 0,
           syncStatus: 'pending',
