@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.24.0
+
+### 🚀 Features
+- Discord write actions in the AI assistant (#809)
+
 ## 0.23.0
 
 ### 🚀 Features
