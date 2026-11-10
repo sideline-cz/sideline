@@ -70,6 +70,7 @@ import type {
   ActivityLog,
   ActivityType,
   Discord,
+  DiscordReadRequest,
   Event,
   EventRsvp,
   Fee,
@@ -82,7 +83,7 @@ import type {
   User,
 } from '@sideline/domain';
 import { Role } from '@sideline/domain';
-import { DateTime, Effect, Exit, Layer, Option, Schema, type ServiceMap } from 'effect';
+import { DateTime, Effect, Exit, Fiber, Layer, Option, Schema, type ServiceMap } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
 import { toEventInfo } from '~/api/event.js';
 import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
@@ -92,6 +93,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordReadRequestsRepository } from '~/repositories/DiscordReadRequestsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
@@ -128,6 +130,7 @@ import {
   listMembershipPlans,
   listRosters,
   listTrainingTypes,
+  readDiscordMessages,
 } from '~/services/ai/readTools.js';
 import { ALL_TOOLS, visibleTools } from '~/services/ai/registry.js';
 import { makeCanSeeGroup, type ToolContext } from '~/services/ai/toolTypes.js';
@@ -2227,6 +2230,312 @@ describe('list_discord_roles', () => {
 });
 
 // ---------------------------------------------------------------------------
+// read_discord_messages — a live read through the bot (`discord_read_requests` outbox). The
+// reads mock scripts `consume` / `abandon` and records `insert` / `abandon`. The access mocks are
+// flat lookups: they do NOT model the group-tree walk or archived groups —
+// `test/integration/ai/discordReadTools.test.ts` (14b-14d) covers that on real Postgres.
+// ---------------------------------------------------------------------------
+
+const READ_REQUEST_ID = '00000000-0000-1000-8000-00000000d001';
+
+type ReadResultLike = DiscordReadRequest.DiscordReadResult;
+
+const OK_TWO: ReadResultLike = {
+  outcome: 'ok',
+  capped: false,
+  messages: [
+    { author: 'Ann', content: 'first', timestamp: '2026-11-10T10:00:00.000Z' },
+    { author: 'Bob', content: 'second', timestamp: '2026-11-10T10:05:00.000Z' },
+  ],
+};
+
+const makeReadsLayer = (script: {
+  /** One value per `consume` call; the last one repeats. */
+  readonly consume?: ReadonlyArray<Option.Option<ReadResultLike>>;
+  readonly consumeDies?: boolean;
+  readonly abandon?: Option.Option<{ picked: boolean; result: Option.Option<ReadResultLike> }>;
+}) => {
+  const calls = { insert: [] as Array<Record<string, unknown>>, abandon: [] as Array<string> };
+  let consumed = 0;
+  const consumeScript = script.consume ?? [Option.none()];
+  const layer = Layer.succeed(DiscordReadRequestsRepository, {
+    insert: (input: Record<string, unknown>) => {
+      calls.insert.push(input);
+      return Effect.succeed(READ_REQUEST_ID);
+    },
+    consume: () => {
+      if (script.consumeDies) return Effect.die(new Error('db blip'));
+      const next = consumeScript[Math.min(consumed, consumeScript.length - 1)] ?? Option.none();
+      consumed += 1;
+      return Effect.succeed(next);
+    },
+    abandon: (id: string) => {
+      calls.abandon.push(id);
+      return Effect.succeed(script.abandon ?? Option.none());
+    },
+  } as never);
+  return { layer, calls };
+};
+
+/** `grants` is keyed by `team_channel_id`; `mine` is the caller's groups + active ancestors. */
+const makeAccessLayers = (
+  grants: Record<string, ReadonlyArray<string>>,
+  mine: ReadonlyArray<string>,
+) =>
+  Layer.mergeAll(
+    Layer.succeed(GroupsRepository, {
+      findActiveGroupsWithAncestorsForMember: () =>
+        Effect.succeed(mine.map((id) => ({ id, name: id }))),
+    } as never),
+    Layer.succeed(TeamChannelAccessRepository, {
+      findByChannel: (teamChannelId: string) =>
+        Effect.succeed(
+          (grants[teamChannelId] ?? []).map((group_id) => ({
+            team_channel_id: teamChannelId,
+            group_id,
+            access_level: 'VIEW',
+          })),
+        ),
+    } as never),
+  );
+
+const GRANTED = makeAccessLayers({ 'tc-1': ['g-u12'], 'tc-2': ['g-u12'] }, ['g-u12']);
+
+/** Forks the call and moves the TestClock past the 15 s wait, so every case ends. */
+const runRead = (
+  args: Parameters<typeof readDiscordMessages>[0],
+  ctx: ToolContext,
+  layers: Layer.Layer<any>,
+) =>
+  Effect.gen(function* () {
+    const fiber = yield* Effect.forkChild(
+      readDiscordMessages(args, ctx).pipe(Effect.provide(layers)),
+    );
+    yield* TestClock.adjust('16 seconds');
+    const outcome = yield* Fiber.join(fiber);
+    return outcome.result as Record<string, unknown>;
+  });
+
+const readerCtx = discordCtx(['ai:manage_discord']);
+
+const readLayers = (
+  reads: Layer.Layer<DiscordReadRequestsRepository>,
+  opts: {
+    readonly guildLinked?: boolean;
+    readonly channels?: ReadonlyArray<DiscordChannelRowLike>;
+    readonly access?: Layer.Layer<any>;
+  } = {},
+) => {
+  const discord = makeDiscordLayers({
+    guildLinked: opts.guildLinked ?? true,
+    channels: opts.channels ?? DISCORD_CHANNEL_ROWS,
+  });
+  return { discord, layer: Layer.mergeAll(discord.layer, opts.access ?? GRANTED, reads) };
+};
+
+describe('read_discord_messages', () => {
+  it.effect('a caller without ai:manage_discord is refused before any lookup', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({});
+      const { discord, layer } = readLayers(reads.layer);
+      const result = yield* runRead({ channel: 'Juniors' }, discordCtx(['team:manage']), layer);
+
+      expect(result).toEqual({ error: 'forbidden', permission: 'ai:manage_discord' });
+      expect(discord.calls.channels).toEqual([]);
+      expect(reads.calls.insert).toEqual([]);
+    }),
+  );
+
+  it.effect('bot not in the guild → discord_not_connected, no insert', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({});
+      const { layer } = readLayers(reads.layer, { guildLinked: false });
+      expect(yield* runRead({ channel: 'Juniors' }, readerCtx, layer)).toEqual({
+        error: 'discord_not_connected',
+      });
+      expect(reads.calls.insert).toEqual([]);
+    }),
+  );
+
+  for (const [label, channel, error] of [
+    ['an unknown name', 'nope', 'channel_not_found'],
+    ['a category (not readable)', 'General', 'channel_not_found'],
+    ['an unmanaged channel', 'Lounge', 'channel_not_managed'],
+  ] as const) {
+    it.effect(`${label} → ${error}, no insert`, () =>
+      Effect.gen(function* () {
+        const reads = makeReadsLayer({});
+        const { layer } = readLayers(reads.layer);
+        expect(yield* runRead({ channel }, readerCtx, layer)).toEqual({ error });
+        expect(reads.calls.insert).toEqual([]);
+      }),
+    );
+  }
+
+  it.effect('two channels that match only case-insensitively → ambiguous_channel', () =>
+    Effect.gen(function* () {
+      const managed = (n: string, name: string) =>
+        buildDiscordChannelRow({
+          channel_id: `30000000000000000${n}`,
+          name,
+          team_channel_id: Option.some('tc-1'),
+          team_channel_archived: Option.some(false),
+          team_channel_name: Option.some(name),
+        });
+      const reads = makeReadsLayer({});
+      const { layer } = readLayers(reads.layer, {
+        channels: [managed('1', 'Chat'), managed('2', 'CHAT')],
+      });
+      expect(yield* runRead({ channel: 'chat' }, readerCtx, layer)).toEqual({
+        error: 'ambiguous_channel',
+      });
+      expect(reads.calls.insert).toEqual([]);
+    }),
+  );
+
+  it.effect('a VIEW grant to one of the caller groups lets the read proceed', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({ consume: [Option.some(OK_TWO)] });
+      const { layer } = readLayers(reads.layer, {
+        access: makeAccessLayers({ 'tc-1': ['g-u12'] }, ['g-u12']),
+      });
+      yield* runRead({ channel: 'Juniors' }, readerCtx, layer);
+      expect(reads.calls.insert).toHaveLength(1);
+    }),
+  );
+
+  for (const [label, ctx, grants, mine] of [
+    ['a grant the caller does not hold', readerCtx, ['g-u14'], ['g-u12']],
+    ['zero grants', readerCtx, [], ['g-u12']],
+    ['an Admin with every permission but no grant', discordCtx(Role.allPermissions), ['g-u14'], []],
+  ] as const) {
+    it.effect(`${label} → no_channel_access, no insert`, () =>
+      Effect.gen(function* () {
+        const reads = makeReadsLayer({});
+        const { layer } = readLayers(reads.layer, {
+          access: makeAccessLayers({ 'tc-1': grants }, mine),
+        });
+        expect(yield* runRead({ channel: 'Juniors' }, ctx, layer)).toEqual({
+          error: 'no_channel_access',
+        });
+        expect(reads.calls.insert).toEqual([]);
+      }),
+    );
+  }
+
+  it.effect('happy path: inserts the resolved channel, waits, returns the messages, no ids', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({
+        consume: [Option.none(), Option.none(), Option.some(OK_TWO)],
+      });
+      const { layer } = readLayers(reads.layer);
+      const result = yield* runRead({ channel: 'Juniors' }, readerCtx, layer);
+
+      expect(reads.calls.insert).toEqual([
+        {
+          teamId: TEAM_A,
+          channelId: '200000000000000002',
+          sinceHours: Option.none(),
+          limit: 50,
+        },
+      ]);
+      expect(result).toMatchObject({ channel: 'Juniors', capped: false });
+      expect((result.messages as ReadonlyArray<{ content: string }>).map((m) => m.content)).toEqual(
+        ['first', 'second'],
+      );
+      const json = JSON.stringify(result);
+      expect(json).not.toContain('200000000000000002');
+      expect(json).not.toContain(READ_REQUEST_ID);
+      expect(reads.calls.abandon).toEqual([]);
+    }),
+  );
+
+  it.effect('no result and the bot never picked the row → bot_unreachable', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({
+        abandon: Option.some({ picked: false, result: Option.none() }),
+      });
+      const { layer } = readLayers(reads.layer);
+      expect(yield* runRead({ channel: 'Juniors' }, readerCtx, layer)).toEqual({
+        error: 'bot_unreachable',
+      });
+    }),
+  );
+
+  it.effect('picked but no result → bot_timeout', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({
+        abandon: Option.some({ picked: true, result: Option.none() }),
+      });
+      const { layer } = readLayers(reads.layer);
+      expect(yield* runRead({ channel: 'Juniors' }, readerCtx, layer)).toEqual({
+        error: 'bot_timeout',
+      });
+    }),
+  );
+
+  it.effect('a result that lands after the last poll is used, not thrown away', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({
+        abandon: Option.some({ picked: true, result: Option.some(OK_TWO) }),
+      });
+      const { layer } = readLayers(reads.layer);
+      const result = yield* runRead({ channel: 'Juniors' }, readerCtx, layer);
+      expect(result).toMatchObject({ channel: 'Juniors', capped: false });
+      expect(result.messages).toHaveLength(2);
+    }),
+  );
+
+  it.effect('an interrupted wait deletes the row', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({});
+      const { layer } = readLayers(reads.layer);
+      const fiber = yield* Effect.forkChild(
+        readDiscordMessages({ channel: 'Juniors' }, readerCtx).pipe(Effect.provide(layer)),
+      );
+      yield* TestClock.adjust('1 second');
+      yield* Fiber.interrupt(fiber);
+      expect(reads.calls.insert).toHaveLength(1);
+      expect(reads.calls.abandon.length).toBeGreaterThanOrEqual(1);
+    }),
+  );
+
+  it.effect('a DB defect during the wait fails the tool, not the effect', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({ consumeDies: true });
+      const { layer } = readLayers(reads.layer);
+      expect(yield* runRead({ channel: 'Juniors' }, readerCtx, layer)).toEqual({
+        error: 'discord_error',
+      });
+    }),
+  );
+
+  for (const outcome of ['no_access', 'channel_missing'] as const) {
+    it.effect(`a bot outcome ${outcome} is passed on as the error`, () =>
+      Effect.gen(function* () {
+        const reads = makeReadsLayer({
+          consume: [Option.some({ outcome, messages: [], capped: false })],
+        });
+        const { layer } = readLayers(reads.layer);
+        expect(yield* runRead({ channel: 'Juniors' }, readerCtx, layer)).toEqual({
+          error: outcome,
+        });
+      }),
+    );
+  }
+
+  it.effect('a capped window from the bot stays capped', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({ consume: [Option.some({ ...OK_TWO, capped: true })] });
+      const { layer } = readLayers(reads.layer);
+      expect(yield* runRead({ channel: 'Juniors' }, readerCtx, layer)).toMatchObject({
+        capped: true,
+      });
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // visibleTools + registry parity + current_datetime wiring
 // ---------------------------------------------------------------------------
 
@@ -2309,12 +2618,14 @@ describe('visibleTools', () => {
       const holder = visibleTools(discordCtx(['ai:manage_discord'])).map((t) => t.name);
       expect(holder).toContain('list_discord_channels');
       expect(holder).toContain('list_discord_roles');
+      expect(holder).toContain('read_discord_messages');
 
       const everythingElse = visibleTools(
         discordCtx(Role.allPermissions.filter((p) => p !== 'ai:manage_discord')),
       ).map((t) => t.name);
       expect(everythingElse).not.toContain('list_discord_channels');
       expect(everythingElse).not.toContain('list_discord_roles');
+      expect(everythingElse).not.toContain('read_discord_messages');
     }),
   );
 
@@ -2354,11 +2665,11 @@ describe('visibleTools', () => {
 describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3/10)', () => {
   it.effect('every tool has a well-formed, unique, flat, additionalProperties:false schema', () =>
     Effect.sync(() => {
-      // 15 read tools (the original 6, plus `search_docs`, the six database read tools and the
-      // two Discord read tools) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (create_event
+      // 16 read tools (the original 6, plus `search_docs`, the six database read tools and the
+      // three Discord read tools) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (create_event
       // and the three Discord write actions) — built FROM the registry (`registry.ts`), so this
       // count moves in lockstep with `AiActionName.literals`.
-      expect(ALL_TOOLS.length).toBe(19);
+      expect(ALL_TOOLS.length).toBe(20);
       for (const added of [
         'propose_create_event',
         'propose_create_discord_channel',
@@ -2373,6 +2684,7 @@ describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3
         'list_membership_plans',
         'list_discord_channels',
         'list_discord_roles',
+        'read_discord_messages',
       ]) {
         expect(ALL_TOOLS.map((t) => t.name)).toContain(added);
       }

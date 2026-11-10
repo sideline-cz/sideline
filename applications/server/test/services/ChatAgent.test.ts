@@ -95,7 +95,16 @@
 //     says so explicitly.
 
 import { describe, expect, it } from '@effect/vitest';
-import type { Event, GroupModel, Role, Team, TeamMember, TrainingType } from '@sideline/domain';
+import type {
+  Discord,
+  DiscordReadRequest,
+  Event,
+  GroupModel,
+  Role,
+  Team,
+  TeamMember,
+  TrainingType,
+} from '@sideline/domain';
 import { AiChatApi } from '@sideline/domain';
 import { Cause, DateTime, Effect, Exit, Fiber, Layer, Option } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
@@ -106,6 +115,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordReadRequestsRepository } from '~/repositories/DiscordReadRequestsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
@@ -337,6 +347,14 @@ const unusedRepoLayers = Layer.mergeAll(
   Layer.succeed(TeamSettingsRepository, {
     findByTeamId: () => Effect.die(new Error('ChatAgent.test: TeamSettingsRepository not stubbed')),
   } as never),
+  Layer.succeed(DiscordReadRequestsRepository, {
+    insert: () =>
+      Effect.die(new Error('ChatAgent.test: DiscordReadRequestsRepository not stubbed')),
+    consume: () =>
+      Effect.die(new Error('ChatAgent.test: DiscordReadRequestsRepository not stubbed')),
+    abandon: () =>
+      Effect.die(new Error('ChatAgent.test: DiscordReadRequestsRepository not stubbed')),
+  } as never),
 );
 
 /**
@@ -515,6 +533,8 @@ interface Fixtures {
   /** Shared with the caller so a propose test can inspect `inserted` after the run — defaults
    *  to a fresh, unobserved mock when omitted. */
   readonly proposalsLayer?: Layer.Layer<AiActionProposalsRepository>;
+  /** Provided FIRST, so its services win over the default and die-stub layers. */
+  readonly overrides?: Layer.Layer<any>;
 }
 
 const buildLayer = (llmLayer: Layer.Layer<LlmClient>, fixtures: Fixtures = {}) => {
@@ -528,6 +548,7 @@ const buildLayer = (llmLayer: Layer.Layer<LlmClient>, fixtures: Fixtures = {}) =
 
   return Layer.mergeAll(
     ChatAgent.Default.pipe(
+      Layer.provide(fixtures.overrides ?? Layer.empty),
       Layer.provide(llmLayer),
       Layer.provide(eventsLayer),
       Layer.provide(groupsLayer),
@@ -852,10 +873,14 @@ describe('ChatAgent.respond — dispatch never fails, loop continues', () => {
 
   // A missing switch case answers `unknown_tool`, so this runs once per Discord tool name. The
   // die-stubs in `unusedRepoLayers` prove the gate runs before any repository.
-  for (const name of ['list_discord_channels', 'list_discord_roles']) {
+  for (const [name, argumentsJson] of [
+    ['list_discord_channels', '{}'],
+    ['list_discord_roles', '{}'],
+    ['read_discord_messages', '{"channel":"general"}'],
+  ] as const) {
     it.effect(`${name}: a caller without ai:manage_discord gets forbidden from the executor`, () =>
       Effect.gen(function* () {
-        const call: LlmToolCall = { id: 'd1', name, argumentsJson: '{}' };
+        const call: LlmToolCall = { id: 'd1', name, argumentsJson };
         const scripted = makeScriptedLlm([
           toolCallResult(Option.none(), [call]),
           textResult('OK.'),
@@ -1729,6 +1754,126 @@ describe('buildSystemPrompt — proposeTools gating', () => {
       expect(prompt).toContain('propose_archive_discord_channel');
       expect(prompt).toContain('QUEUED');
       expect(prompt).not.toContain('READ-ONLY');
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// read_discord_messages — per-turn cap and short-circuit. Each live read can wait 15 s for the
+// bot; without these, 8 serial calls pass nginx's 60 s. The Discord / group / access stubs below
+// are flat: three managed channels, all granted to the caller's one group.
+// ---------------------------------------------------------------------------
+
+const LIVE_GUILD = '100000000000000001' as Discord.Snowflake;
+
+const liveChannelRow = (n: number, name: string) => ({
+  channel_id: `20000000000000000${String(n)}` as Discord.Snowflake,
+  name,
+  type: 0,
+  parent_id: Option.none(),
+  team_channel_id: Option.some(`tc-${name}`),
+  team_channel_archived: Option.some(false),
+  team_channel_name: Option.some(name),
+  team_channel_emoji: Option.none(),
+  access_count: 1,
+});
+
+const makeLiveReadOverrides = (reads: {
+  readonly consume: Option.Option<DiscordReadRequest.DiscordReadResult>;
+  readonly abandon: Option.Option<{
+    picked: boolean;
+    result: Option.Option<DiscordReadRequest.DiscordReadResult>;
+  }>;
+}) => {
+  const inserted: Array<unknown> = [];
+  const layer = Layer.mergeAll(
+    Layer.succeed(TeamsRepository, {
+      findById: () =>
+        Effect.succeed(Option.some({ name: 'Testing FC', guild_id: LIVE_GUILD } as never)),
+    } as never),
+    Layer.succeed(BotGuildsRepository, { exists: () => Effect.succeed(true) } as never),
+    Layer.succeed(DiscordChannelsRepository, {
+      findManagedListByTeam: () =>
+        Effect.succeed([
+          liveChannelRow(1, 'alpha'),
+          liveChannelRow(2, 'beta'),
+          liveChannelRow(3, 'gamma'),
+        ]),
+    } as never),
+    Layer.succeed(GroupsRepository, {
+      findGroupsByTeamId: () => Effect.succeed([]),
+      findActiveGroupsWithAncestorsForMember: () => Effect.succeed([{ id: 'g-1', name: 'g-1' }]),
+    } as never),
+    Layer.succeed(TeamChannelAccessRepository, {
+      findByChannel: (teamChannelId: string) =>
+        Effect.succeed([{ team_channel_id: teamChannelId, group_id: 'g-1', access_level: 'VIEW' }]),
+    } as never),
+    Layer.succeed(DiscordReadRequestsRepository, {
+      insert: (input: unknown) => {
+        inserted.push(input);
+        return Effect.succeed(`00000000-0000-1000-8000-00000000e00${String(inserted.length)}`);
+      },
+      consume: () => Effect.succeed(reads.consume),
+      abandon: () => Effect.succeed(reads.abandon),
+    } as never),
+  );
+  return { layer, inserted };
+};
+
+const readCall = (id: string, channel: string): LlmToolCall => ({
+  id,
+  name: 'read_discord_messages',
+  argumentsJson: JSON.stringify({ channel }),
+});
+
+/** Forks `respond` and moves the TestClock past one 15 s wait. */
+const runLiveTurn = (calls: ReadonlyArray<LlmToolCall>, overrides: Layer.Layer<any>) =>
+  Effect.gen(function* () {
+    const scripted = makeScriptedLlm([toolCallResult(Option.none(), calls), textResult('Ok.')]);
+    const ctx = buildCtx({ membership: buildMembership({ permissions: ['ai:manage_discord'] }) });
+    const fiber = yield* Effect.forkChild(
+      runRespond(ctx, [userMsg('read discord')], scripted.layer, { overrides }),
+    );
+    yield* TestClock.adjust('16 seconds');
+    const outcome = yield* Fiber.join(fiber);
+    expect(outcome._tag).toBe('Success');
+    return toolMessages(scripted.calls[1]?.messages ?? []).map(parseToolContent);
+  });
+
+describe('ChatAgent.respond — live Discord reads', () => {
+  it.effect('after bot_unreachable, a second read in the same turn does not wait again', () =>
+    Effect.gen(function* () {
+      const reads = makeLiveReadOverrides({
+        consume: Option.none(),
+        abandon: Option.some({ picked: false, result: Option.none() }),
+      });
+      const results = yield* runLiveTurn(
+        [readCall('r1', 'alpha'), readCall('r2', 'beta')],
+        reads.layer,
+      );
+
+      expect(reads.inserted).toHaveLength(1);
+      expect(results[1]).toEqual({ error: 'bot_unreachable' });
+    }),
+  );
+
+  it.effect('at most two live reads per turn: the third gets live_read_limit', () =>
+    Effect.gen(function* () {
+      const reads = makeLiveReadOverrides({
+        consume: Option.some({
+          outcome: 'ok',
+          capped: false,
+          messages: [{ author: 'Ann', content: 'hi', timestamp: '2026-11-10T10:00:00.000Z' }],
+        }),
+        abandon: Option.none(),
+      });
+      const results = yield* runLiveTurn(
+        [readCall('r1', 'alpha'), readCall('r2', 'beta'), readCall('r3', 'gamma')],
+        reads.layer,
+      );
+
+      expect(reads.inserted).toHaveLength(2);
+      expect(results[2]).toEqual({ error: 'live_read_limit' });
     }),
   );
 });

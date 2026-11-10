@@ -7,7 +7,7 @@
 // Fixture helpers mirror `repositories/archivedRoleGrantsNothing.test.ts`.
 
 import { describe, expect, it } from '@effect/vitest';
-import type { Discord, Team, TeamMember, User } from '@sideline/domain';
+import type { Discord, DiscordReadRequest, Team, TeamMember, User } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
@@ -16,14 +16,20 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordReadRequestsRepository } from '~/repositories/DiscordReadRequestsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
+import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
-import { listDiscordChannels, listDiscordRoles } from '~/services/ai/readTools.js';
+import {
+  listDiscordChannels,
+  listDiscordRoles,
+  readDiscordMessages,
+} from '~/services/ai/readTools.js';
 import type { EntityReadContext } from '~/services/ai/toolTypes.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
@@ -40,6 +46,8 @@ const TestLayer = Layer.mergeAll(
   AchievementRoleMappingsRepository.Default,
   CustomAchievementsRepository.Default,
   TeamChannelsRepository.Default,
+  TeamChannelAccessRepository.Default,
+  DiscordReadRequestsRepository.Default,
 ).pipe(Layer.provideMerge(TestPgClient));
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
@@ -265,6 +273,126 @@ describe('Discord read tools on real Postgres', () => {
       expect((yield* listDiscordChannels({}, ctx)).result).toEqual({
         error: 'discord_not_connected',
       });
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// read_discord_messages — team scope and the caller-access walk on real SQL. The refused cases
+// stop before any insert, so they run against the real reads repository. The allowed case keeps
+// the real `insert` but answers `consume` at once, so the test does not wait 15 s for a bot.
+// ---------------------------------------------------------------------------
+
+const OK_READ: DiscordReadRequest.DiscordReadResult = {
+  outcome: 'ok',
+  messages: [],
+  capped: false,
+};
+
+const readRowCount = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ n: number }>`SELECT count(*)::int AS n FROM discord_read_requests`;
+  return rows[0]?.n ?? 0;
+});
+
+const readAs = (ctx: EntityReadContext, channel: string) =>
+  Effect.gen(function* () {
+    const real = yield* DiscordReadRequestsRepository.asEffect();
+    const outcome = yield* readDiscordMessages(
+      { channel },
+      { ...ctx, teamTimezone: 'Europe/Prague' },
+    ).pipe(
+      Effect.provideService(DiscordReadRequestsRepository, {
+        ...real,
+        consume: () => Effect.succeed(Option.some(OK_READ)),
+      } as never),
+    );
+    return outcome.result as Record<string, unknown>;
+  });
+
+/** Team A with groups `Club` -> `U12` and the managed channel `u12-chat` (on `A-general`). */
+const seedAccessTree = Effect.gen(function* () {
+  const a = yield* seedDiscordTeam('1', 'A');
+  const groups = yield* GroupsRepository.asEffect();
+  const club = yield* groups.insertGroup(
+    a.team.id,
+    'Club',
+    Option.none(),
+    Option.none(),
+    Option.none(),
+  );
+  const u12 = yield* groups.insertGroup(
+    a.team.id,
+    'U12',
+    Option.some(club.id),
+    Option.none(),
+    Option.none(),
+  );
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ id: string }>`
+    INSERT INTO team_channels (team_id, name, discord_channel_id)
+    VALUES (${a.team.id}, 'u12-chat', ${a.id('0101')})
+    RETURNING id
+  `;
+  const teamChannelId = rows[0]?.id as never;
+  const grant = (groupId: typeof club.id) =>
+    TeamChannelAccessRepository.asEffect().pipe(
+      Effect.andThen((repo) => repo.upsertGrant(teamChannelId, groupId, 'VIEW')),
+    );
+  const captainIn = (groupId: typeof club.id, discordId: string) =>
+    Effect.gen(function* () {
+      const ctx = yield* memberWithBuiltInRole(a.team.id, a.id(discordId), 'Captain');
+      yield* groups.addMemberById(groupId, ctx.membership.id);
+      return ctx;
+    });
+  return { a, club, u12, grant, captainIn };
+});
+
+describe('read_discord_messages on real Postgres', () => {
+  it.effect('a channel of another team is not found, and nothing is inserted', () =>
+    Effect.gen(function* () {
+      const a = yield* seedDiscordTeam('1', 'A');
+      yield* seedDiscordTeam('2', 'B');
+      const ctx = yield* memberWithBuiltInRole(a.team.id, a.id('0904'), 'Captain');
+
+      expect(yield* readAs(ctx, 'B-general')).toEqual({ error: 'channel_not_found' });
+      expect(yield* readRowCount).toBe(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a member of a child group reads a channel granted to the parent', () =>
+    Effect.gen(function* () {
+      const t = yield* seedAccessTree;
+      yield* t.grant(t.club.id);
+      const ctx = yield* t.captainIn(t.u12.id, '0905');
+
+      yield* readAs(ctx, 'u12-chat');
+      expect(yield* readRowCount).toBe(1);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a member of the parent only is refused a channel granted to the child', () =>
+    Effect.gen(function* () {
+      const t = yield* seedAccessTree;
+      yield* t.grant(t.u12.id);
+      const ctx = yield* t.captainIn(t.club.id, '0906');
+
+      expect(yield* readAs(ctx, 'u12-chat')).toEqual({ error: 'no_channel_access' });
+      expect(yield* readRowCount).toBe(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a grant to an archived group gives no access', () =>
+    Effect.gen(function* () {
+      const t = yield* seedAccessTree;
+      yield* t.grant(t.u12.id);
+      const ctx = yield* t.captainIn(t.u12.id, '0907');
+      yield* GroupsRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.archiveGroupById(t.u12.id)),
+      );
+
+      expect(yield* readAs(ctx, 'u12-chat')).toEqual({ error: 'no_channel_access' });
+      expect(yield* readRowCount).toBe(0);
     }).pipe(Effect.provide(TestLayer)),
   );
 });

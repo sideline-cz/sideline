@@ -7,6 +7,7 @@ import {
   AchievementSyncService,
   ChannelBackfillService,
   ChannelSyncService,
+  DiscordReadSyncService,
   EmailSyncService,
   EventSyncService,
   FinanceSyncService,
@@ -86,6 +87,10 @@ const MockInviteGeneratorServiceLayer = Layer.succeed(InviteGeneratorService, {
   discord: undefined as never,
 } as never);
 
+const MockDiscordReadSyncServiceLayer = Layer.succeed(DiscordReadSyncService, {
+  processTick: Effect.void,
+} as never);
+
 const MockAchievementSyncServiceLayer = Layer.succeed(AchievementSyncService, {
   processTick: Effect.void,
 } as never);
@@ -152,6 +157,7 @@ describe('Bot', () => {
       MockEventSyncServiceLayer,
       MockGuildJoinSyncServiceLayer,
       MockInviteGeneratorServiceLayer,
+      MockDiscordReadSyncServiceLayer,
       MockOnboardingSyncServiceLayer,
       MockAchievementSyncServiceLayer,
       MockRoleProvisionSyncServiceLayer,
