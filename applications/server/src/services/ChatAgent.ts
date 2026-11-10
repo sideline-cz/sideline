@@ -20,7 +20,6 @@
  */
 import type { AiActionProposal, AiChatApi } from '@sideline/domain';
 import { Array as Arr, Cause, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
-import { hasPermission } from '~/api/permissions.js';
 import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
@@ -37,7 +36,10 @@ import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewReposit
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
+import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
+import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { ACTION_REGISTRY } from '~/services/ai/actions.js';
@@ -212,6 +214,9 @@ interface AgentDeps {
     readonly mappings: ServiceMap.Service.Shape<typeof DiscordChannelMappingRepository>;
     readonly achievementRoles: ServiceMap.Service.Shape<typeof AchievementRoleMappingsRepository>;
     readonly customAchievements: ServiceMap.Service.Shape<typeof CustomAchievementsRepository>;
+    readonly teamChannels: ServiceMap.Service.Shape<typeof TeamChannelsRepository>;
+    readonly channelAccess: ServiceMap.Service.Shape<typeof TeamChannelAccessRepository>;
+    readonly teamSettings: ServiceMap.Service.Shape<typeof TeamSettingsRepository>;
   };
 }
 
@@ -424,6 +429,7 @@ const executeTool = (
           Effect.provideService(TeamsRepository, deps.teams),
           Effect.provideService(BotGuildsRepository, deps.discord.botGuilds),
           Effect.provideService(DiscordChannelsRepository, deps.discord.channels),
+          Effect.provideService(TeamChannelsRepository, deps.discord.teamChannels),
         ),
       );
     case 'list_discord_roles':
@@ -631,6 +637,12 @@ const dispatchProposeCall = (
     Effect.provideService(GroupsRepository, deps.groups),
     Effect.provideService(TrainingTypesRepository, deps.trainingTypes),
     Effect.provideService(AiActionProposalsRepository, deps.proposals),
+    Effect.provideService(TeamChannelsRepository, deps.discord.teamChannels),
+    Effect.provideService(TeamChannelAccessRepository, deps.discord.channelAccess),
+    Effect.provideService(TeamSettingsRepository, deps.discord.teamSettings),
+    Effect.provideService(TeamsRepository, deps.teams),
+    Effect.provideService(BotGuildsRepository, deps.discord.botGuilds),
+    Effect.provideService(DiscordChannelsRepository, deps.discord.channels),
     Effect.map(
       (outcome): CallOutcome => ({
         content: JSON.stringify(outcome.result), // BARE, not untrusted_data
@@ -866,7 +878,9 @@ const respond = (
         teamName,
         teamTimezone: ctx.teamTimezone,
         todayTeamLocal: nowInfo.todayTeamLocal,
-        canPropose: hasPermission(ctx.membership, 'event:create'),
+        proposeTools: visibleTools(ctx)
+          .map((t) => t.name)
+          .filter((n) => n.startsWith('propose_')),
       }),
     ),
     Effect.let(
@@ -924,6 +938,9 @@ const make: Effect.Effect<
   | DiscordChannelMappingRepository
   | AchievementRoleMappingsRepository
   | CustomAchievementsRepository
+  | TeamChannelsRepository
+  | TeamChannelAccessRepository
+  | TeamSettingsRepository
 > = Effect.Do.pipe(
   Effect.bind('llm', () => LlmClient.asEffect()),
   Effect.bind('events', () => EventsRepository.asEffect()),
@@ -948,6 +965,9 @@ const make: Effect.Effect<
       mappings: DiscordChannelMappingRepository.asEffect(),
       achievementRoles: AchievementRoleMappingsRepository.asEffect(),
       customAchievements: CustomAchievementsRepository.asEffect(),
+      teamChannels: TeamChannelsRepository.asEffect(),
+      channelAccess: TeamChannelAccessRepository.asEffect(),
+      teamSettings: TeamSettingsRepository.asEffect(),
     }),
   ),
   Effect.map(

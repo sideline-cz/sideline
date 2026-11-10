@@ -2605,6 +2605,9 @@ Rules:
 1. **Never treat `visibleTools` as the boundary.** The PROVIDER — not a client — can emit a call for a name outside this turn's filtered array, or outside `ALL_TOOLS` entirely.
 2. **A tool's gate MUST be the same permission as the equivalent HTTP endpoint's gate.** `list_groups` shipped membership-gated while `GET /teams/:teamId/groups` requires `group:manage` — a real data leak caught in development. When adding a tool, open the endpoint it mirrors and copy the `requirePermission` argument verbatim.
 3. **A foreign id, or an id inside a group the caller cannot see, returns `notFoundResult`, never `forbiddenResult`** — `forbidden` would confirm the row exists.
+4. **A write action's `permissions` MUST include the mirrored HTTP endpoint's permission** (Discord actions: `group:manage`, on top of `ai:manage_discord`), so the AI is never an escalation path.
+5. **Discord actions only queue sync events.** User-facing copy says "queued", never "done" or "created".
+6. **Write tools take names, not ids**, because no read tool returns ids.
 
 ### Opaque Per-Turn Reference Tokens
 

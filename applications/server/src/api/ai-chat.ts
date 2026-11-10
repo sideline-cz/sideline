@@ -9,6 +9,10 @@
  * degraded response WITHOUT touching the rate limiter or `ChatAgent` — matching
  * `docs/deployment.md`'s `AI_CHAT_ENABLED` row and `getCapabilities`' own `enabled` computation
  * below: neither condition alone may spend a caller's rate-limit budget.
+ *
+ * `confirmProposal` serves every `ACTION_REGISTRY` action, not only events: `create_event` answers
+ * 201 with the created `EventInfo`; a Discord action answers 202 `DiscordChangeQueued`, because
+ * confirm only queues the change for the bot.
  */
 import { AiChatApi, Auth, EventApi, type Team } from '@sideline/domain';
 import { DateTime, Effect, Option, type ServiceMap } from 'effect';
@@ -21,11 +25,12 @@ import {
   type LockedProposalRow,
 } from '~/repositories/AiActionProposalsRepository.js';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import type { EventRow } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { AiChatEnabledConfig } from '~/services/AiChatEnabledConfig.js';
-import { ACTION_REGISTRY } from '~/services/ai/actions.js';
+import { ACTION_REGISTRY, type ConfirmResult } from '~/services/ai/actions.js';
 import type { ToolContext } from '~/services/ai/toolTypes.js';
 import { makeCanSeeGroup } from '~/services/ai/toolTypes.js';
 import type { ChatAgentResult } from '~/services/ChatAgent.js';
@@ -73,6 +78,40 @@ const toChatResponse = (result: ChatAgentResult): AiChatApi.ChatResponse =>
     references: result.references,
     proposal: result.proposal,
   });
+
+// Built from the RAW row, after `emitEventCreatedSideEffects` ran.
+const toConfirmedEventInfo = (event: EventRow): EventApi.EventInfo =>
+  new EventApi.EventInfo({
+    eventId: event.id,
+    teamId: event.team_id,
+    title: event.title,
+    eventType: event.event_type,
+    trainingTypeName: Option.none(),
+    // `insert` doesn't join `event_types` — the id is trigger-resolved and
+    // returned, but name and colour are left `None`, the same treatment
+    // `trainingTypeName` gets above and the same as `createEvent`'s own 201.
+    eventTypeId: event.event_type_id,
+    eventTypeName: Option.none(),
+    eventTypeColor: Option.none(),
+    description: event.description,
+    imageUrl: event.image_url,
+    locationUrl: event.location_url,
+    startAt: event.start_at,
+    endAt: event.end_at,
+    location: event.location,
+    status: event.status,
+    seriesId: event.series_id,
+    allDay: event.all_day,
+    startDate: Option.some(event.start_date),
+    endDate: Option.some(event.end_date),
+  });
+
+const toConfirmedResponse = (
+  result: ConfirmResult,
+): EventApi.EventInfo | AiChatApi.DiscordChangeQueued =>
+  result.kind === 'event_created'
+    ? toConfirmedEventInfo(result.event)
+    : new AiChatApi.DiscordChangeQueued({ status: 'queued' });
 
 export const AiChatApiLive = HttpApiBuilder.group(Api, 'aiChat', (handlers) =>
   Effect.Do.pipe(
@@ -170,10 +209,10 @@ export const AiChatApiLive = HttpApiBuilder.group(Api, 'aiChat', (handlers) =>
               Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
               // 2 (permission) / 3 (claim) / 4 (execute) all inside ONE transaction — see
               // `AiActionProposalsRepository`'s doc comment for why the read must happen inside
-              // it too. Permission is re-checked BEFORE the claim so a caller who lost
-              // `event:create` between propose and confirm gets 403 with the row still
+              // it too. Permission is re-checked BEFORE the claim so a caller who lost one of the
+              // action's permissions between propose and confirm gets 403 with the row still
               // claimable, not consumed for nothing.
-              Effect.bind('event', ({ sql, membership, currentUser }) =>
+              Effect.bind('result', ({ sql, membership, currentUser }) =>
                 sql
                   .withTransaction(
                     proposals
@@ -199,10 +238,15 @@ export const AiChatApiLive = HttpApiBuilder.group(Api, 'aiChat', (handlers) =>
                             }),
                         ),
                         Effect.tap((row) =>
-                          requirePermission(
-                            membership,
-                            ACTION_REGISTRY[row.action].permission,
-                            new AiChatApi.AiProposalActionForbidden(),
+                          Effect.forEach(
+                            ACTION_REGISTRY[row.action].permissions,
+                            (permission) =>
+                              requirePermission(
+                                membership,
+                                permission,
+                                new AiChatApi.AiProposalActionForbidden(),
+                              ),
+                            { discard: true },
                           ),
                         ),
                         Effect.tap(() =>
@@ -240,35 +284,16 @@ export const AiChatApiLive = HttpApiBuilder.group(Api, 'aiChat', (handlers) =>
               ),
               // 5. AFTER commit — never inside the transaction (see `EventCreation.ts`'s doc
               // comment: both emitters swallow failures as defects, and a failed statement
-              // inside a Postgres transaction aborts it).
-              Effect.tap(({ event }) => emitEventCreatedSideEffects(teamId, event)),
-              // 6. The view model, built from the RAW row, after the emitter ran.
-              Effect.map(
-                ({ event }) =>
-                  new EventApi.EventInfo({
-                    eventId: event.id,
-                    teamId: event.team_id,
-                    title: event.title,
-                    eventType: event.event_type,
-                    trainingTypeName: Option.none(),
-                    // `insert` doesn't join `event_types` — the id is trigger-resolved and
-                    // returned, but name and colour are left `None`, the same treatment
-                    // `trainingTypeName` gets above and the same as `createEvent`'s own 201.
-                    eventTypeId: event.event_type_id,
-                    eventTypeName: Option.none(),
-                    eventTypeColor: Option.none(),
-                    description: event.description,
-                    imageUrl: event.image_url,
-                    locationUrl: event.location_url,
-                    startAt: event.start_at,
-                    endAt: event.end_at,
-                    location: event.location,
-                    status: event.status,
-                    seriesId: event.series_id,
-                    allDay: event.all_day,
-                    startDate: Option.some(event.start_date),
-                    endDate: Option.some(event.end_date),
-                  }),
+              // inside a Postgres transaction aborts it). A Discord action has no after-commit
+              // work: its sync event was written inside the transaction.
+              Effect.tap(({ result }) =>
+                result.kind === 'event_created'
+                  ? emitEventCreatedSideEffects(teamId, result.event)
+                  : Effect.void,
+              ),
+              // 6. The view model.
+              Effect.map(({ result }): EventApi.EventInfo | AiChatApi.DiscordChangeQueued =>
+                toConfirmedResponse(result),
               ),
             ),
           )

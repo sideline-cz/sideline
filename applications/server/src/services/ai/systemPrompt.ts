@@ -28,16 +28,16 @@ export interface SystemPromptInput {
   readonly teamName: string;
   readonly teamTimezone: string;
   readonly todayTeamLocal: string; // YYYY-MM-DD, in `teamTimezone`
-  /** Whether the caller holds `event:create` — gates the one write tool, `propose_create_event`.
-   *  `false` keeps the READ-ONLY paragraph byte-identical to before the AI write path shipped. */
-  readonly canPropose: boolean;
+  /** The `propose_*` tools this caller sees. Empty keeps the READ-ONLY paragraph byte-identical
+   *  to before the AI write path shipped. */
+  readonly proposeTools: ReadonlyArray<string>;
 }
 
 export const buildSystemPrompt = ({
   teamName,
   teamTimezone,
   todayTeamLocal,
-  canPropose,
+  proposeTools,
 }: SystemPromptInput): string =>
   [
     'You are the in-app assistant for a sports team on Sideline. You help members find ' +
@@ -50,14 +50,15 @@ export const buildSystemPrompt = ({
     `The team's timezone is ${teamTimezone}. Today, in that timezone, is ${todayTeamLocal}. Use the ` +
       '`current_datetime` tool whenever you need the exact current time, or to resolve a relative ' +
       'date ("today", "this week", "next training") precisely — never guess or compute it yourself.',
-    canPropose
-      ? 'You can propose ONE change per reply, with `propose_create_event`. Calling it does NOT ' +
-        'create anything — it shows the user a card they must confirm, and nothing exists until ' +
-        'they do. Say so plainly; never state or imply that the event has been created. You may ' +
-        'propose only ONE event per reply: if the user asks for several, propose the first, then ' +
-        'tell them you will do the next one after they confirm this one. Every other change (edit, ' +
-        'cancel, delete, or anything besides creating an event) is still something you cannot do — ' +
-        'say plainly that they should use the app for it.'
+    proposeTools.length > 0
+      ? `You can propose ONE change per reply, with one of these tools: ${proposeTools.join(', ')}. ` +
+        'Calling it does NOT change anything — it shows the user a card they must confirm, and ' +
+        'nothing changes until they do. Say so plainly; never state or imply that the change has ' +
+        'been made. If the user asks for several changes, propose the first, then tell them you ' +
+        'will do the next one after they confirm this one. A confirmed Discord change is only ' +
+        'QUEUED for the Sideline bot: say it will show in Discord shortly, never that it is done. ' +
+        'Any change you have no tool for is something you cannot do — say plainly that they ' +
+        'should use the app for it.'
       : 'This assistant is READ-ONLY: you cannot create, edit, cancel or delete anything, and no ' +
         'tool here performs a write. If the user asks you to change something, say plainly that ' +
         'you cannot do that yet and that they should use the app to make the change.',

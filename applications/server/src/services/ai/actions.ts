@@ -13,6 +13,10 @@
  * ActionDefinition>` is genuinely exhaustive — adding a literal to `AiActionName` is a compile
  * error here until this record grows a matching entry.
  *
+ * Actions: `create_event`, and three Discord actions that only QUEUE a change for the bot
+ * (`create_discord_channel`, `set_discord_channel_access`, `archive_discord_channel`). The
+ * Discord tools take NAMES, not ids: no read tool gives the model a channel or group id.
+ *
  * `payloadSchema`/`renderSummary` are deliberately NOT registry members — the summary is built
  * once, in `propose`, and ships in the same chat response; `confirm` never re-renders it, and
  * nothing persists card state across a reload, so nothing ever needs to re-derive a summary from
@@ -21,22 +25,38 @@
 import {
   type AiActionProposal,
   AiChatApi,
+  type Discord,
   Event,
   type EventApi,
   GroupModel,
   type Role,
   type Team,
+  TeamChannel,
+  type TeamChannelAccess,
   TrainingType,
 } from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
 import { DateTime, Effect, Option, type Result, Schema, type ServiceMap } from 'effect';
+import type { SqlClient } from 'effect/unstable/sql';
+import type { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
+import type { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import type { EventRow, EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
+import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
 import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
-import type { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
+import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
+import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import type { ToolContext } from '~/services/ai/toolTypes.js';
 import { createEventForMemberTx, resolveEventGroups } from '~/services/EventCreation.js';
+import {
+  archiveManagedChannelTx,
+  createManagedChannel,
+  setManagedChannelAccessTx,
+} from '~/services/ManagedChannels.js';
+import { applyDiscordFormat, DEFAULT_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 
 // ---------------------------------------------------------------------------
 // `create_event`'s args schema — plan §3.
@@ -177,7 +197,7 @@ export const toCreateEventRequest = (args: ProposeCreateEventArgs): EventApi.Cre
 };
 
 // ---------------------------------------------------------------------------
-// `buildCreateEventSummary` — always all nine `ProposalFieldKey`s, fixed order.
+// `buildCreateEventSummary` — the nine event `ProposalFieldKey`s, fixed order.
 // ---------------------------------------------------------------------------
 
 const noneField = (key: AiChatApi.ProposalFieldKey): AiChatApi.ProposalField =>
@@ -390,23 +410,31 @@ const proposeCreateEvent = (
 // `create_event.confirm` — runs INSIDE the caller's transaction.
 // ---------------------------------------------------------------------------
 
-const confirmCreateEvent = (
+/** Decodes a stored payload. Only realistic failure: the payload schema changed mid-deploy
+ *  inside the 15-minute window. A 404 + logged error beats a 500 — the transaction rolls back
+ *  and the row just expires. */
+const decodeStoredPayload = <S extends Schema.Top & { readonly DecodingServices: never }>(
+  schema: S,
   payloadJson: string,
-  ctx: { readonly teamId: Team.TeamId; readonly membership: MembershipWithRole },
-): Effect.Effect<
-  EventRow,
-  EventApi.Forbidden | AiChatApi.AiProposalNotFound,
-  EventsRepository | GroupsRepository | TrainingTypesRepository | TeamSettingsRepository
-> =>
-  Effect.try({ try: () => JSON.parse(payloadJson) as unknown, catch: (e) => e }).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(ProposeCreateEventArgs)),
-    // Only realistic cause: the payload schema changed mid-deploy inside the 15-minute window.
-    // A 404 + logged error beats a 500 — the transaction rolls back and the row just expires.
+): Effect.Effect<S['Type'], AiChatApi.AiProposalNotFound> =>
+  Effect.try({ try: (): unknown => JSON.parse(payloadJson), catch: (e) => e }).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(schema)),
     Effect.catchCause((cause) =>
       Effect.logError('ai proposal payload undecodable', cause).pipe(
         Effect.andThen(Effect.fail(new AiChatApi.AiProposalNotFound())),
       ),
     ),
+  );
+
+const confirmCreateEvent = (
+  payloadJson: string,
+  ctx: { readonly teamId: Team.TeamId; readonly membership: MembershipWithRole },
+): Effect.Effect<
+  ConfirmResult,
+  EventApi.Forbidden | AiChatApi.AiProposalNotFound,
+  EventsRepository | GroupsRepository | TrainingTypesRepository | TeamSettingsRepository
+> =>
+  decodeStoredPayload(ProposeCreateEventArgs, payloadJson).pipe(
     Effect.flatMap((args) =>
       createEventForMemberTx({
         teamId: ctx.teamId,
@@ -414,19 +442,424 @@ const confirmCreateEvent = (
         payload: toCreateEventRequest(args),
       }),
     ),
+    Effect.map((event): ConfirmResult => ({ kind: 'event_created', event })),
+  );
+
+// ---------------------------------------------------------------------------
+// The three Discord actions. Propose writes nothing; confirm only QUEUES a sync event for the
+// bot. Every refusal is a `string` failure (the model sees `invalid_arguments`); every state
+// drift at confirm is `AiProposalNotFound` (`stale`), so the transaction rolls back unclaimed.
+// ---------------------------------------------------------------------------
+
+const DISCORD_NAME_MAX_LENGTH = 100;
+
+const NameParam = Schema.String.pipe(
+  Schema.check(Schema.isMinLength(1)),
+  Schema.check(Schema.isMaxLength(DISCORD_NAME_MAX_LENGTH)),
+);
+
+const decodeArgs = <S extends Schema.Top & { readonly DecodingServices: never }>(
+  schema: S,
+  rawArgs: unknown,
+): Effect.Effect<S['Type'], string> =>
+  Schema.decodeUnknownEffect(schema)(rawArgs).pipe(
+    Effect.mapError((e) => (Schema.isSchemaError(e) ? e.message : String(e))),
+  );
+
+const stale = (reason: string): Effect.Effect<never, AiChatApi.AiProposalNotFound> =>
+  Effect.logWarning('ai proposal stale at confirm', reason).pipe(
+    Effect.andThen(Effect.fail(new AiChatApi.AiProposalNotFound())),
+  );
+
+const someOr = <A, E>(option: Option.Option<A>, onNone: () => Effect.Effect<never, E>) =>
+  Option.match(option, {
+    onNone,
+    onSome: (a): Effect.Effect<A, E> => Effect.succeed(a),
+  });
+
+/** Exact (case-sensitive) match first; only when there is none, a case-insensitive one. Both
+ *  unique indexes are case-sensitive, so "U12" and "u12" can both exist: the exact step keeps
+ *  each one reachable. */
+const matchByName = <T extends { readonly name: string }>(
+  rows: ReadonlyArray<T>,
+  name: string,
+): ReadonlyArray<T> => {
+  const exact = rows.filter((r) => r.name === name);
+  return exact.length > 0 ? exact : rows.filter((r) => r.name.toLowerCase() === name.toLowerCase());
+};
+
+const exactlyOne = <T>(
+  matches: ReadonlyArray<T>,
+  noneMessage: string,
+  severalMessage: string,
+): Effect.Effect<T, string> => {
+  const [only, ...rest] = matches;
+  if (only === undefined) return Effect.fail(noneMessage);
+  return rest.length > 0 ? Effect.fail(severalMessage) : Effect.succeed(only);
+};
+
+const resolveActiveManagedChannel = (teamId: Team.TeamId, name: string) =>
+  TeamChannelsRepository.asEffect().pipe(
+    Effect.flatMap((channels) => channels.findAllByTeam(teamId)),
+    Effect.flatMap((rows) =>
+      exactlyOne(
+        matchByName(
+          rows.filter((r) => !r.archived),
+          name,
+        ),
+        'channel: no active Sideline-managed channel with that name',
+        'channel: several channels match that name; ask the user which one they mean',
+      ),
+    ),
+  );
+
+const resolveGroupByName = (teamId: Team.TeamId, name: string) =>
+  GroupsRepository.asEffect().pipe(
+    Effect.flatMap((groups) => groups.findGroupsByTeamId(teamId)),
+    Effect.flatMap((rows) =>
+      exactlyOne(
+        matchByName(rows, name),
+        'group: no active group with that name',
+        'group: several groups match that name; ask the user which one they mean',
+      ),
+    ),
+  );
+
+/** The team's archive category, only when it still exists in the Discord mirror as a category.
+ *  Without one the bot cannot move the channel: with no category the HTTP path queues nothing,
+ *  and with a deleted one the bot falls back to DELETING the channel. */
+const resolveArchiveCategory = (
+  teamId: Team.TeamId,
+): Effect.Effect<
+  { readonly id: Discord.Snowflake; readonly name: string },
+  string,
+  TeamSettingsRepository | TeamsRepository | DiscordChannelsRepository
+> =>
+  Effect.Do.pipe(
+    Effect.bind('settings', () =>
+      TeamSettingsRepository.asEffect().pipe(Effect.flatMap((r) => r.findByTeamId(teamId))),
+    ),
+    Effect.bind('categoryId', ({ settings }) =>
+      someOr(
+        Option.flatMap(settings, (s) => s.discord_archive_category_id),
+        () =>
+          Effect.fail(
+            'archive: no archive category is set for this team; tell the user to set one in Team settings',
+          ),
+      ),
+    ),
+    Effect.bind('team', () =>
+      TeamsRepository.asEffect().pipe(Effect.flatMap((r) => r.findById(teamId))),
+    ),
+    Effect.bind('category', ({ team, categoryId }) =>
+      Option.match(team, {
+        onNone: () => Effect.succeed(Option.none()),
+        onSome: (t) =>
+          DiscordChannelsRepository.asEffect().pipe(
+            Effect.flatMap((r) => r.findByChannelId(t.guild_id, categoryId)),
+          ),
+      }),
+    ),
+    Effect.flatMap(({ category }) =>
+      someOr(
+        Option.filter(category, (c) => c.type === 4),
+        () =>
+          Effect.fail(
+            'archive: the archive category no longer exists in Discord; tell the user to set a new one in Team settings',
+          ),
+      ),
+    ),
+    Effect.map((category) => ({ id: category.channel_id, name: category.name })),
+  );
+
+/** The channel row by stored id, only while it is still in the team and active. */
+const findActiveChannelForConfirm = (
+  teamId: Team.TeamId,
+  teamChannelId: TeamChannel.TeamChannelId,
+) =>
+  TeamChannelsRepository.asEffect().pipe(
+    Effect.flatMap((channels) => channels.findById(teamChannelId)),
+    Effect.flatMap((found) =>
+      someOr(
+        Option.filter(found, (c) => c.team_id === teamId && !c.archived),
+        () => stale('channel gone, moved or archived'),
+      ),
+    ),
+  );
+
+const accessLevelField = (
+  key: AiChatApi.ProposalFieldKey,
+  value: AiChatApi.ProposalAccessLevel,
+): AiChatApi.ProposalField =>
+  new AiChatApi.ProposalField({ key, value: { type: 'accessLevel', value } });
+
+// --- create_discord_channel ------------------------------------------------
+
+// No `category`: the bot creates the channel with no Discord parent, and
+// `team_channels.category` is a Sideline-only label — a "Category" row would be a false claim.
+const CreateDiscordChannelArgs = Schema.Struct({
+  name: NameParam,
+  emoji: Schema.optionalKey(
+    Schema.String.pipe(Schema.check(Schema.isMinLength(1)), Schema.check(Schema.isMaxLength(32))),
+  ),
+});
+
+// Case-insensitive on purpose: stricter than the unique index. Propose and confirm share it.
+const isNameTaken = (
+  existing: ReadonlyArray<{ readonly name: string; readonly archived: boolean }>,
+  name: string,
+) => existing.some((c) => !c.archived && c.name.toLowerCase() === name.toLowerCase());
+
+const proposeCreateDiscordChannel = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(CreateDiscordChannelArgs, rawArgs)),
+    Effect.bind('existing', () =>
+      TeamChannelsRepository.asEffect().pipe(
+        Effect.flatMap((channels) => channels.findAllByTeam(ctx.teamId)),
+      ),
+    ),
+    Effect.tap(({ args, existing }) =>
+      isNameTaken(existing, args.name)
+        ? Effect.fail('name: a channel with that name already exists')
+        : Effect.void,
+    ),
+    Effect.bind('settings', () =>
+      TeamSettingsRepository.asEffect().pipe(Effect.flatMap((r) => r.findByTeamId(ctx.teamId))),
+    ),
+    // Same inputs as the HTTP `createChannel`, so the preview is the name the bot will use.
+    Effect.let('discordName', ({ args, settings }) =>
+      applyDiscordFormat(
+        Option.match(settings, {
+          onNone: () => DEFAULT_CHANNEL_FORMAT,
+          onSome: (s) => s.discord_channel_format,
+        }),
+        args.name,
+        Option.fromUndefinedOr(args.emoji),
+      ),
+    ),
+    Effect.tap(({ discordName }) =>
+      discordName.length > DISCORD_NAME_MAX_LENGTH
+        ? Effect.fail(
+            'name: the Discord name would be longer than 100 characters; use a shorter name or no emoji',
+          )
+        : Effect.void,
+    ),
+    Effect.map(({ args, discordName }) => ({
+      payloadJson: JSON.stringify(Schema.encodeSync(CreateDiscordChannelArgs)(args)),
+      summary: [
+        textField('channel', args.name),
+        optionalTextField('emoji', Option.fromUndefinedOr(args.emoji)),
+        textField('discordName', discordName),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmCreateDiscordChannel = (payloadJson: string, ctx: { readonly teamId: Team.TeamId }) =>
+  decodeStoredPayload(CreateDiscordChannelArgs, payloadJson).pipe(
+    Effect.tap((args) =>
+      TeamChannelsRepository.asEffect().pipe(
+        Effect.flatMap((channels) => channels.findAllByTeam(ctx.teamId)),
+        Effect.flatMap((existing) =>
+          isNameTaken(existing, args.name) ? stale('name taken') : Effect.void,
+        ),
+      ),
+    ),
+    Effect.flatMap((args) =>
+      createManagedChannel({
+        teamId: ctx.teamId,
+        name: args.name,
+        category: Option.none(),
+        emoji: Option.fromUndefinedOr(args.emoji),
+      }),
+    ),
+    Effect.catchTag('ChannelNameAlreadyTakenError', () => stale('name taken')),
+    Effect.as<ConfirmResult>({ kind: 'discord_queued' }),
+  );
+
+// --- set_discord_channel_access --------------------------------------------
+
+const SetDiscordChannelAccessArgs = Schema.Struct({
+  channel: NameParam,
+  group: NameParam,
+  access: AiChatApi.ProposalAccessLevel,
+});
+
+const SetDiscordChannelAccessPayload = Schema.Struct({
+  teamChannelId: TeamChannel.TeamChannelId,
+  groupId: GroupModel.GroupId,
+  access: AiChatApi.ProposalAccessLevel,
+});
+
+const proposeSetDiscordChannelAccess = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(SetDiscordChannelAccessArgs, rawArgs)),
+    Effect.bind('channel', ({ args }) => resolveActiveManagedChannel(ctx.teamId, args.channel)),
+    Effect.bind('group', ({ args }) => resolveGroupByName(ctx.teamId, args.group)),
+    Effect.bind('current', ({ channel, group }) =>
+      TeamChannelAccessRepository.asEffect().pipe(
+        Effect.flatMap((access) => access.findByChannel(channel.id)),
+        Effect.map(
+          (grants): AiChatApi.ProposalAccessLevel =>
+            grants.find((g) => g.group_id === group.id)?.access_level ?? 'NONE',
+        ),
+      ),
+    ),
+    Effect.tap(({ args, current }) =>
+      current === args.access
+        ? Effect.fail('access: the group already has that access')
+        : Effect.void,
+    ),
+    Effect.map(({ args, channel, group, current }) => ({
+      payloadJson: JSON.stringify(
+        Schema.encodeSync(SetDiscordChannelAccessPayload)({
+          teamChannelId: channel.id,
+          groupId: group.id,
+          access: args.access,
+        }),
+      ),
+      summary: [
+        textField('channel', channel.name),
+        textField('group', group.name),
+        accessLevelField('currentAccess', current),
+        accessLevelField('access', args.access),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmSetDiscordChannelAccess = (
+  payloadJson: string,
+  ctx: { readonly teamId: Team.TeamId },
+) =>
+  Effect.Do.pipe(
+    Effect.bind('payload', () => decodeStoredPayload(SetDiscordChannelAccessPayload, payloadJson)),
+    Effect.bind('channel', ({ payload }) =>
+      findActiveChannelForConfirm(ctx.teamId, payload.teamChannelId),
+    ),
+    Effect.tap(({ payload }) =>
+      GroupsRepository.asEffect().pipe(
+        // `findGroupById` already skips archived groups.
+        Effect.flatMap((groups) => groups.findGroupById(payload.groupId)),
+        Effect.flatMap((found) =>
+          someOr(
+            Option.filter(found, (g) => g.team_id === ctx.teamId),
+            () => stale('group gone or archived'),
+          ),
+        ),
+      ),
+    ),
+    Effect.flatMap(({ payload: { groupId, access }, channel }) =>
+      setManagedChannelAccessTx({
+        teamId: ctx.teamId,
+        channel,
+        toRequested: (current) => {
+          const requested = new Map<GroupModel.GroupId, TeamChannelAccess.AccessLevel>(
+            current.map((g) => [g.group_id, g.access_level] as const),
+          );
+          if (access === 'NONE') requested.delete(groupId);
+          else requested.set(groupId, access);
+          return requested;
+        },
+      }),
+    ),
+    Effect.as<ConfirmResult>({ kind: 'discord_queued' }),
+  );
+
+// --- archive_discord_channel -----------------------------------------------
+
+const ArchiveDiscordChannelArgs = Schema.Struct({ channel: NameParam });
+
+const ArchiveDiscordChannelPayload = Schema.Struct({ teamChannelId: TeamChannel.TeamChannelId });
+
+const NOT_IN_DISCORD_YET =
+  'channel: this channel is not in Discord yet; tell the user to wait until the Sideline bot creates it';
+
+const proposeArchiveDiscordChannel = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(ArchiveDiscordChannelArgs, rawArgs)),
+    Effect.bind('channel', ({ args }) => resolveActiveManagedChannel(ctx.teamId, args.channel)),
+    // Archiving a channel the bot has not created yet queues a move the bot skips, and the
+    // pending create later makes a live channel for an archived row.
+    Effect.tap(({ channel }) =>
+      Option.isNone(channel.discord_channel_id) ? Effect.fail(NOT_IN_DISCORD_YET) : Effect.void,
+    ),
+    Effect.bind('category', () => resolveArchiveCategory(ctx.teamId)),
+    Effect.map(({ channel, category }) => ({
+      payloadJson: JSON.stringify(
+        Schema.encodeSync(ArchiveDiscordChannelPayload)({ teamChannelId: channel.id }),
+      ),
+      summary: [textField('channel', channel.name), textField('archiveCategory', category.name)],
+    })),
+    Effect.result,
+  );
+
+const confirmArchiveDiscordChannel = (payloadJson: string, ctx: { readonly teamId: Team.TeamId }) =>
+  Effect.Do.pipe(
+    Effect.bind('payload', () => decodeStoredPayload(ArchiveDiscordChannelPayload, payloadJson)),
+    Effect.bind('channel', ({ payload }) =>
+      findActiveChannelForConfirm(ctx.teamId, payload.teamChannelId),
+    ),
+    Effect.tap(({ channel }) =>
+      Option.isNone(channel.discord_channel_id) ? stale('channel not in Discord') : Effect.void,
+    ),
+    Effect.bind('category', () =>
+      resolveArchiveCategory(ctx.teamId).pipe(Effect.catch((reason) => stale(reason))),
+    ),
+    Effect.flatMap(({ channel, category }) =>
+      archiveManagedChannelTx({
+        teamId: ctx.teamId,
+        channel,
+        archiveCategoryId: Option.some(category.id),
+      }),
+    ),
+    Effect.as<ConfirmResult>({ kind: 'discord_queued' }),
   );
 
 // ---------------------------------------------------------------------------
 // The registry.
 // ---------------------------------------------------------------------------
 
+/** What `confirm` did. `ai-chat.ts` switches on `kind` for the after-commit work and the
+ *  response: an event needs side effects and an `EventInfo`; a Discord change is only queued. */
+export type ConfirmResult =
+  | { readonly kind: 'event_created'; readonly event: EventRow }
+  | { readonly kind: 'discord_queued' };
+
+export type ProposeR =
+  | GroupsRepository
+  | TrainingTypesRepository
+  | TeamChannelsRepository
+  | TeamChannelAccessRepository
+  | TeamSettingsRepository
+  | TeamsRepository
+  | DiscordChannelsRepository;
+
+type ConfirmR =
+  | EventsRepository
+  | GroupsRepository
+  | TrainingTypesRepository
+  | TeamSettingsRepository
+  | TeamChannelsRepository
+  | TeamChannelAccessRepository
+  | ChannelSyncEventsRepository
+  | DiscordChannelMappingRepository
+  | TeamsRepository
+  | DiscordChannelsRepository
+  | SqlClient.SqlClient;
+
 export interface ActionDefinition {
-  readonly permission: Role.Permission;
+  /** Every one is required. A write action includes the permission of the HTTP endpoint it
+   *  mirrors, so the assistant is never a way around it. */
+  readonly permissions: ReadonlyArray<Role.Permission>;
+  /** `true` = refuse to propose when the Sideline bot is not in the team's guild: the queued
+   *  change would wait for a bot that may never come. */
+  readonly requiresDiscord: boolean;
   readonly description: string;
   /** For `toToolParameters` ONLY — never decoded with its `Type`. */
   readonly argsSchema: Schema.Top;
-  /** Propose-time: decode, validate every referenced id in team, resolve inheritance + names,
-   *  render the summary, hand back the encoded payload. */
+  /** Propose-time: decode, validate every reference in team, resolve names, render the summary,
+   *  hand back the encoded payload. Writes nothing. */
   readonly propose: (
     rawArgs: unknown,
     ctx: ToolContext,
@@ -436,24 +869,31 @@ export interface ActionDefinition {
       string
     >,
     never,
-    GroupsRepository | TrainingTypesRepository
+    ProposeR
   >;
-  /** Confirm-time. Runs INSIDE the caller's transaction — must not swallow a cause. Returns the
-   *  RAW ROW, not a view model: `emitEventCreatedSideEffects` needs `owner_group_id`, which
-   *  `EventApi.EventInfo` does not carry. */
+  /** Confirm-time. Runs INSIDE the caller's transaction — must not swallow a cause. An event
+   *  comes back as the RAW ROW, not a view model: `emitEventCreatedSideEffects` needs
+   *  `owner_group_id`, which `EventApi.EventInfo` does not carry. */
   readonly confirm: (
     payloadJson: string,
     ctx: { readonly teamId: Team.TeamId; readonly membership: MembershipWithRole },
-  ) => Effect.Effect<
-    EventRow,
-    EventApi.Forbidden | AiChatApi.AiProposalNotFound,
-    EventsRepository | GroupsRepository | TrainingTypesRepository | TeamSettingsRepository
-  >;
+  ) => Effect.Effect<ConfirmResult, EventApi.Forbidden | AiChatApi.AiProposalNotFound, ConfirmR>;
 }
+
+const DISCORD_PERMISSIONS: ReadonlyArray<Role.Permission> = ['ai:manage_discord', 'group:manage'];
+
+const DISCORD_COMMON =
+  'This does NOT change anything by itself — it shows the user a card they must confirm. After ' +
+  'they confirm, the change is only QUEUED for the Sideline bot and shows in Discord shortly: ' +
+  'never say it is done. Only Sideline-managed channels (`managedBySideline: true` in ' +
+  '`list_discord_channels`) can be changed. Name channels and groups exactly as ' +
+  '`list_discord_channels` and `list_groups` show them; when a name matches several channels or ' +
+  'groups, ask the user which one they mean. Only one may be proposed per reply.';
 
 export const ACTION_REGISTRY: Record<AiActionProposal.AiActionName, ActionDefinition> = {
   create_event: {
-    permission: 'event:create',
+    permissions: ['event:create'],
+    requiresDiscord: false,
     description:
       'Proposes creating a new event (training, match, tournament, meeting or social). This ' +
       'does NOT create anything by itself — it stages the write and returns a card the user ' +
@@ -464,5 +904,40 @@ export const ACTION_REGISTRY: Record<AiActionProposal.AiActionName, ActionDefini
     argsSchema: ProposeCreateEventArgs,
     propose: proposeCreateEvent,
     confirm: confirmCreateEvent,
+  },
+  create_discord_channel: {
+    permissions: DISCORD_PERMISSIONS,
+    requiresDiscord: true,
+    description:
+      'Proposes creating a new Sideline-managed text channel in the team Discord server. ' +
+      '`name` is the clean channel name; `emoji` is optional. The new channel is hidden: only ' +
+      'admins see it until a group gets access, so offer `propose_set_discord_channel_access` ' +
+      `next. ${DISCORD_COMMON}`,
+    argsSchema: CreateDiscordChannelArgs,
+    propose: proposeCreateDiscordChannel,
+    confirm: confirmCreateDiscordChannel,
+  },
+  set_discord_channel_access: {
+    permissions: DISCORD_PERMISSIONS,
+    requiresDiscord: true,
+    description:
+      "Proposes changing ONE group's access to a Sideline-managed Discord channel: grant, " +
+      'change the level, or remove it. `access` is VIEW (can view), EDIT (can post), ADMIN (can ' +
+      `moderate) or NONE (remove access). ${DISCORD_COMMON}`,
+    argsSchema: SetDiscordChannelAccessArgs,
+    propose: proposeSetDiscordChannelAccess,
+    confirm: confirmSetDiscordChannelAccess,
+  },
+  archive_discord_channel: {
+    permissions: DISCORD_PERMISSIONS,
+    requiresDiscord: true,
+    description:
+      'Proposes archiving a Sideline-managed Discord channel. The bot moves the channel into ' +
+      "the team's archive category; if the move fails, the bot deletes the channel and its " +
+      'messages are lost. Only channels that already exist in Discord can be archived. ' +
+      DISCORD_COMMON,
+    argsSchema: ArchiveDiscordChannelArgs,
+    propose: proposeArchiveDiscordChannel,
+    confirm: confirmArchiveDiscordChannel,
   },
 };

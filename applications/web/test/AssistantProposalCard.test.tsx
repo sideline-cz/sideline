@@ -5,8 +5,8 @@
 // `router.invalidate()` on a successful confirm.
 //
 // Wire contract reminders (authoritative: `packages/domain/src/api/AiChatApi.ts`):
-//   - `Proposal.summary` is ALWAYS all nine `ProposalFieldKey`s, in a fixed order — an action
-//     that left a field unset still emits it as `{ type: 'none' }`, never omits the row.
+//   - `Proposal.summary` lists every field the action writes, in a fixed order per action
+//     (nine for `create_event`) — an unset field is `{ type: 'none' }`, never an omitted row.
 //   - `ProposalFieldValue`'s discriminant is `type` (not `_tag` — that is reserved for tagged
 //     errors and is the component's own LOCAL `CardState` union instead).
 //   - `date` crosses as a bare `YYYY-MM-DD` string and must render VERBATIM, never parsed into
@@ -55,6 +55,32 @@ const TR_MAP: Record<string, string> = {
   assistant_proposal_errorExpired: 'Error copy: expired',
   assistant_proposal_errorForbidden: 'Error copy: forbidden',
   assistant_proposal_errorGeneric: 'Error copy: generic',
+  // Discord write actions (plan .dev-loop/plan.md Task 7)
+  assistant_proposal_field_channel: 'Channel label',
+  assistant_proposal_field_group: 'Group label',
+  assistant_proposal_field_currentAccess: 'Current access label',
+  assistant_proposal_field_archiveCategory: 'Moves to label',
+  channels_emojiLabel: 'Emoji label',
+  channels_namePreview: 'Discord name label',
+  channels_accessLevel_label: 'Access level label',
+  channels_accessLevel_view: 'Can view',
+  channels_accessLevel_edit: 'Can post',
+  channels_accessLevel_admin: 'Can moderate',
+  assistant_proposal_accessNone: 'No access',
+  assistant_proposal_createDiscordChannel_title: 'Create this Discord channel?',
+  assistant_proposal_createDiscordChannel_description: 'Create channel description.',
+  assistant_proposal_createDiscordChannel_confirm: 'Create channel',
+  assistant_proposal_createDiscordChannel_confirmed: 'Queued: create channel.',
+  assistant_proposal_setDiscordChannelAccess_title: 'Change channel access?',
+  assistant_proposal_setDiscordChannelAccess_description: 'Change access description.',
+  assistant_proposal_setDiscordChannelAccess_confirm: 'Change access',
+  assistant_proposal_setDiscordChannelAccess_confirmed: 'Queued: update channel.',
+  assistant_proposal_archiveDiscordChannel_title: 'Archive this channel?',
+  assistant_proposal_archiveDiscordChannel_description: 'Archive description.',
+  assistant_proposal_archiveDiscordChannel_warning:
+    'If the bot cannot move the channel, it deletes the channel instead.',
+  assistant_proposal_archiveDiscordChannel_confirm: 'Archive channel',
+  assistant_proposal_archiveDiscordChannel_confirmed: 'Queued: move channel.',
   // Reused event-form / result-card copy
   event_allDayLabel: 'Full day',
   event_type_training: 'Practice',
@@ -180,6 +206,34 @@ function makeProposal(overrides: { summary?: AiChatApi.ProposalField[] } = {}) {
     expiresAt: EXPIRES_AT,
   });
 }
+
+function makeDiscordProposal(
+  action: 'set_discord_channel_access' | 'archive_discord_channel',
+  fields: ReadonlyArray<Record<string, unknown>>,
+) {
+  return new AiChatApi.Proposal({
+    id: PROPOSAL_ID as any,
+    action,
+    summary: fields.map((f) => new AiChatApi.ProposalField(f as any)),
+    expiresAt: EXPIRES_AT,
+  });
+}
+
+const accessProposal = () =>
+  makeDiscordProposal('set_discord_channel_access', [
+    { key: 'channel', value: { type: 'text', value: 'u12-chat' } },
+    { key: 'group', value: { type: 'text', value: 'Coaches' } },
+    { key: 'currentAccess', value: { type: 'accessLevel', value: 'VIEW' } },
+    { key: 'access', value: { type: 'accessLevel', value: 'NONE' } },
+  ]);
+
+const archiveProposal = () =>
+  makeDiscordProposal('archive_discord_channel', [
+    { key: 'channel', value: { type: 'text', value: 'old-tournament' } },
+    { key: 'archiveCategory', value: { type: 'text', value: 'Archive' } },
+  ]);
+
+const ddFor = (label: string) => screen.getByText(label).closest('dt')?.nextElementSibling;
 
 function makeConfirmedEvent(overrides: { title?: string } = {}) {
   return new EventApi.EventInfo({
@@ -466,6 +520,62 @@ describe('AssistantProposalCard', () => {
       expect(mockInvalidate).toHaveBeenCalledTimes(1);
       // No buttons remain once confirmed.
       expect(screen.queryAllByRole('button')).toHaveLength(0);
+    });
+  });
+
+  describe('Discord actions (plan .dev-loop/plan.md Task 7)', () => {
+    it('set_discord_channel_access renders its four rows with resolved labels, NONE as "No access"', () => {
+      const { container } = renderCard(accessProposal());
+
+      expect(container.querySelectorAll('dt')).toHaveLength(4);
+      expect(ddFor(TR_MAP.assistant_proposal_field_channel)?.textContent).toBe('u12-chat');
+      expect(ddFor(TR_MAP.assistant_proposal_field_group)?.textContent).toBe('Coaches');
+      expect(ddFor(TR_MAP.assistant_proposal_field_currentAccess)?.textContent).toBe('Can view');
+      expect(ddFor(TR_MAP.channels_accessLevel_label)?.textContent).toBe('No access');
+      for (const raw of ['NONE', 'VIEW', 'assistant_proposal_', 'channels_']) {
+        expect(container.textContent).not.toContain(raw);
+      }
+    });
+
+    it('a queued confirm shows the queued alert, no result card, and invalidates the router once', async () => {
+      mockConfirm.mockReturnValueOnce(
+        Effect.succeed(new AiChatApi.DiscordChangeQueued({ status: 'queued' })),
+      );
+      renderCard(accessProposal());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Change access' }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(TR_MAP.assistant_proposal_setDiscordChannelAccess_confirmed),
+        ).not.toBeNull();
+      });
+      // No AssistantResultCard: it renders a link to the created entity.
+      expect(screen.queryAllByRole('link')).toHaveLength(0);
+      expect(screen.queryAllByRole('button')).toHaveLength(0);
+      expect(mockInvalidate).toHaveBeenCalledTimes(1);
+    });
+
+    it('archive shows the delete warning before the buttons and a destructive "Archive channel" button', () => {
+      renderCard(archiveProposal());
+
+      const warning = screen.getByText(TR_MAP.assistant_proposal_archiveDiscordChannel_warning);
+      const accept = screen.getByRole('button', { name: 'Archive channel' });
+      expect(accept.getAttribute('data-variant')).toBe('destructive');
+      // The warning precedes the buttons in DOM order, so a screen reader reads it first.
+      const [firstButton] = screen.getAllByRole('button');
+      expect(
+        warning.compareDocumentPosition(firstButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it('a create_event proposal keeps the default Accept variant and no archive warning', () => {
+      renderCard();
+
+      expect(getConfirmButton().getAttribute('data-variant')).toBe('default');
+      expect(
+        screen.queryByText(TR_MAP.assistant_proposal_archiveDiscordChannel_warning),
+      ).toBeNull();
     });
   });
 

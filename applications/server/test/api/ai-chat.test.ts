@@ -140,6 +140,9 @@ const NON_MEMBER_USER_ID = '00000000-0000-0000-0000-000000000003' as Auth.UserId
 // `isAdmin` is false and `checkCoachScoping`/`checkTrainingTypeOwnerGroup` actually run) — used
 // by the "confirm's registry action fails with EventApi.Forbidden" test (§7).
 const TEST_CREATOR_ID = '00000000-0000-0000-0000-000000000004' as Auth.UserId;
+// A member who holds `ai:manage_discord` but NOT `group:manage` — the Discord write actions need
+// both, so this caller must never confirm one.
+const TEST_DISCORD_ONLY_ID = '00000000-0000-0000-0000-000000000005' as Auth.UserId;
 const TEST_TEAM_ID = '00000000-0000-0000-0000-000000000010' as Team.TeamId;
 // A second, unrelated team — proposal rows scoped to it must never be reachable via
 // `TEST_TEAM_ID`'s confirm/reject URLs (the "other team" 404 case, §7).
@@ -147,6 +150,8 @@ const OTHER_TEAM_ID = '00000000-0000-0000-0000-000000000011' as Team.TeamId;
 const TEST_MEMBER_ID = '00000000-0000-0000-0000-000000000020' as TeamMember.TeamMemberId;
 const TEST_ADMIN_MEMBER_ID = '00000000-0000-0000-0000-000000000021' as TeamMember.TeamMemberId;
 const TEST_CREATOR_MEMBER_ID = '00000000-0000-0000-0000-000000000022' as TeamMember.TeamMemberId;
+const TEST_DISCORD_ONLY_MEMBER_ID =
+  '00000000-0000-0000-0000-000000000023' as TeamMember.TeamMemberId;
 
 const PLAYER_PERMISSIONS: readonly Role.Permission[] = ['roster:view', 'member:view'];
 const ADMIN_PERMISSIONS: readonly Role.Permission[] = [
@@ -218,12 +223,20 @@ usersMap.set(TEST_USER_ID, testUser);
 usersMap.set(TEST_ADMIN_ID, testAdmin as unknown as UserLike);
 usersMap.set(NON_MEMBER_USER_ID, testNonMember as unknown as UserLike);
 usersMap.set(TEST_CREATOR_ID, testCreator as unknown as UserLike);
+usersMap.set(TEST_DISCORD_ONLY_ID, {
+  ...testUser,
+  id: TEST_DISCORD_ONLY_ID,
+  discord_id: '66666',
+  username: 'discordonlyuser',
+  is_profile_complete: true,
+} as unknown as UserLike);
 
 const sessionsStore = new Map<string, Auth.UserId>();
 sessionsStore.set('user-token', TEST_USER_ID);
 sessionsStore.set('admin-token', TEST_ADMIN_ID);
 sessionsStore.set('non-member-token', NON_MEMBER_USER_ID);
 sessionsStore.set('creator-token', TEST_CREATOR_ID);
+sessionsStore.set('discord-only-token', TEST_DISCORD_ONLY_ID);
 
 // NON_MEMBER_USER_ID deliberately has NO entry below — that is the whole point of the
 // non-member/403 test cases.
@@ -245,6 +258,16 @@ membersStore.set(TEST_ADMIN_MEMBER_ID, {
   active: true,
   role_names: ['Admin'],
   permissions: ADMIN_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
+});
+membersStore.set(TEST_DISCORD_ONLY_MEMBER_ID, {
+  id: TEST_DISCORD_ONLY_MEMBER_ID,
+  team_id: TEST_TEAM_ID,
+  user_id: TEST_DISCORD_ONLY_ID,
+  active: true,
+  role_names: ['Discord helper'],
+  permissions: ['ai:manage_discord'],
   is_profile_complete: true,
   require_complete_profile: Option.none(),
 });
@@ -1586,6 +1609,21 @@ describe('AI Chat API', () => {
       const body = await response.json();
       expect(body._tag).toBe('AiProposalActionForbidden');
       expect(lockForConfirmCalls).toHaveLength(1);
+      expect(claimCalls).toHaveLength(0);
+    });
+
+    it('a Discord action confirmed with ai:manage_discord but WITHOUT group:manage: 403 AiProposalActionForbidden, claim never invoked', async () => {
+      const id = seedProposal({
+        user_id: TEST_DISCORD_ONLY_ID,
+        action: 'archive_discord_channel',
+        payload: JSON.stringify({ teamChannelId: '00000000-0000-1000-8000-00000000c001' }),
+      });
+      const response = await enabledApp.handler(
+        new Request(confirmUrl(id), { method: 'POST', headers: authHeaders('discord-only-token') }),
+      );
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body._tag).toBe('AiProposalActionForbidden');
       expect(claimCalls).toHaveLength(0);
     });
 

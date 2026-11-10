@@ -119,6 +119,13 @@ describe('ProposalFieldKey', () => {
       'memberGroup',
       'location',
       'description',
+      'channel',
+      'emoji',
+      'discordName',
+      'group',
+      'currentAccess',
+      'access',
+      'archiveCategory',
     ]);
   });
 });

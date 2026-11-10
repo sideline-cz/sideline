@@ -23,7 +23,7 @@
  * resolved before the model is ever called (see `toolTypes.ts`).
  */
 import { Event, type Role } from '@sideline/domain';
-import { Option, Schema } from 'effect';
+import { Schema } from 'effect';
 import { hasPermission } from '~/api/permissions.js';
 import { ACTION_REGISTRY } from '~/services/ai/actions.js';
 import { toToolParameters } from '~/services/ai/jsonSchema.js';
@@ -151,21 +151,21 @@ export interface ToolDefinition {
   readonly description: string;
   readonly schema: Schema.Top;
   readonly parameters: Record<string, unknown>;
-  /** `None` = every team member may call it; `Some(p)` = requires permission `p`. */
-  readonly requiredPermission: Option.Option<Role.Permission>;
+  /** Every permission the caller must hold; empty = every team member may call it. */
+  readonly requiredPermissions: ReadonlyArray<Role.Permission>;
 }
 
 const define = (
   name: string,
   description: string,
   schema: Schema.Top,
-  requiredPermission: Option.Option<Role.Permission> = Option.none(),
+  requiredPermissions: ReadonlyArray<Role.Permission> = [],
 ): ToolDefinition => ({
   name,
   description,
   schema,
   parameters: toToolParameters(schema),
-  requiredPermission,
+  requiredPermissions,
 });
 
 export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
@@ -197,7 +197,7 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'matched against the name, and/or cap the number of rows returned with `limit` (1-50). ' +
       "Only available to callers who can manage the team's groups.",
     ListGroupsSchema,
-    Option.some('group:manage'),
+    ['group:manage'],
   ),
   define(
     'list_members',
@@ -205,14 +205,14 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'data). Filter with a free-text `query` matched against the display name, `activeOnly` to ' +
       'exclude inactive members, and/or cap the number of rows returned with `limit` (1-50).',
     ListMembersSchema,
-    Option.some('member:view'),
+    ['member:view'],
   ),
   define(
     'list_rosters',
     'Lists the team rosters (name, member count, active status). Filter with a free-text `query` ' +
       'matched against the name, and/or cap the number of rows returned with `limit` (1-50).',
     ListRostersSchema,
-    Option.some('roster:view'),
+    ['roster:view'],
   ),
   define(
     'list_fees',
@@ -220,7 +220,7 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'archived). Filter with a free-text `query` matched against the fee name, and/or cap the ' +
       'number of rows with `limit` (1-50). Only available to callers who can see finances.',
     ListFeesSchema,
-    Option.some('finance:view'),
+    ['finance:view'],
   ),
   define(
     'get_finance_overview',
@@ -228,7 +228,7 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'the total paid, any credit, and how many of their fees are overdue, pending or paid. Use ' +
       'it for "who still owes money" questions. Only available to callers who can see finances.',
     GetFinanceOverviewSchema,
-    Option.some('finance:view'),
+    ['finance:view'],
   ),
   define(
     'list_event_rsvps',
@@ -276,9 +276,13 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'name, its Discord name or its category, and/or cap the rows with `limit` (1-50). ' +
       'If the result has `truncated: true`, the list is partial: say so, and call again with a narrower `query`. ' +
       'If it returns `discord_not_connected`, tell ' +
-      "the user the Sideline bot is not in the team's Discord server.",
+      "the user the Sideline bot is not in the team's Discord server. " +
+      '`syncStatus` is `pending` when a change is queued for the Sideline bot and not applied yet; ' +
+      '`failed` when the bot could not apply the last change (tell the user to check the Channels ' +
+      'page); `not_on_discord` when Sideline has the channel but the bot has not created it. ' +
+      'Never report a pending or failed change as done.',
     ListDiscordSchema,
-    Option.some('ai:manage_discord'),
+    ['ai:manage_discord'],
   ),
   define(
     'list_discord_roles',
@@ -292,12 +296,12 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'If it returns `discord_not_connected`, tell the user the ' +
       "Sideline bot is not in the team's Discord server.",
     ListDiscordSchema,
-    Option.some('ai:manage_discord'),
+    ['ai:manage_discord'],
   ),
   // Built FROM the action registry (`services/ai/actions.ts`) so a `propose_<action>` tool
   // cannot drift from its entry — adding an action there is enough to offer it here too.
   ...Object.entries(ACTION_REGISTRY).map(([name, def]) =>
-    define(`propose_${name}`, def.description, def.argsSchema, Option.some(def.permission)),
+    define(`propose_${name}`, def.description, def.argsSchema, def.permissions),
   ),
 ];
 
@@ -309,8 +313,5 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
  */
 export const visibleTools = (ctx: ToolContext): ReadonlyArray<LlmToolDefinition> =>
   ALL_TOOLS.filter((tool) =>
-    Option.match(tool.requiredPermission, {
-      onNone: () => true,
-      onSome: (permission) => hasPermission(ctx.membership, permission),
-    }),
+    tool.requiredPermissions.every((permission) => hasPermission(ctx.membership, permission)),
   ).map(({ name, description, parameters }) => ({ name, description, parameters }));

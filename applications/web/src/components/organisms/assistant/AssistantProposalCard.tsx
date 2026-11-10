@@ -5,7 +5,7 @@
  * Props are exactly `{ proposal, teamId }`: no callbacks, no hoisted state — `AssistantConversation`
  * threads nothing else through.
  *
- * All nine `ProposalFieldKey`s always render, `{ type: 'none' }` included ("Not set" is a visible
+ * Every key in `summary` always renders, `{ type: 'none' }` included ("Not set" is a visible
  * row, never an omitted one) — a field that silently disappeared could not be verified before the
  * user confirms a write. A `date` field renders its string verbatim, never parsed into a `Date`:
  * it is already a team-local calendar date, and parsing it would re-introduce an off-by-one-day
@@ -18,10 +18,10 @@
  * on wake, so a client-side gate would either block a valid confirm or do nothing at all — the
  * server's `expires_at > now()` is the only gate that matters.
  */
-import { type AiChatApi, type EventApi, Team } from '@sideline/domain';
+import { AiChatApi, type EventApi, Team } from '@sideline/domain';
 import { useRouter } from '@tanstack/react-router';
 import { Cause, DateTime, Effect, Schema } from 'effect';
-import { CircleCheck, Clock, Loader2, OctagonX } from 'lucide-react';
+import { CircleCheck, Clock, Loader2, OctagonX, Send, TriangleAlert } from 'lucide-react';
 import React from 'react';
 import { AssistantResultCard } from '~/components/molecules/assistant/AssistantResultCard.js';
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert.js';
@@ -55,6 +55,8 @@ type CardState =
   | { readonly _tag: 'pending' }
   | { readonly _tag: 'busy'; readonly which: 'confirm' | 'reject' }
   | { readonly _tag: 'confirmed'; readonly event: EventApi.EventInfo }
+  // A Discord change: the server only queued it for the bot. Never rendered as "done".
+  | { readonly _tag: 'queued' }
   | { readonly _tag: 'rejected' }
   | { readonly _tag: 'failed'; readonly reason: ProposalErrorReason };
 
@@ -71,19 +73,45 @@ const proposalFieldLabels: Record<AiChatApi.ProposalFieldKey, () => string> = {
   memberGroup: () => tr('event_memberGroup'),
   location: () => tr('event_location'),
   description: () => tr('event_description'),
+  channel: () => tr('assistant_proposal_field_channel'),
+  emoji: () => tr('channels_emojiLabel'),
+  discordName: () => tr('channels_namePreview'),
+  group: () => tr('assistant_proposal_field_group'),
+  currentAccess: () => tr('assistant_proposal_field_currentAccess'),
+  access: () => tr('channels_accessLevel_label'),
+  archiveCategory: () => tr('assistant_proposal_field_archiveCategory'),
+};
+
+const accessLevelLabels: Record<AiChatApi.ProposalAccessLevel, () => string> = {
+  VIEW: () => tr('channels_accessLevel_view'),
+  EDIT: () => tr('channels_accessLevel_edit'),
+  ADMIN: () => tr('channels_accessLevel_admin'),
+  NONE: () => tr('assistant_proposal_accessNone'),
 };
 
 const proposalTitles: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_title'),
+  create_discord_channel: () => tr('assistant_proposal_createDiscordChannel_title'),
+  set_discord_channel_access: () => tr('assistant_proposal_setDiscordChannelAccess_title'),
+  archive_discord_channel: () => tr('assistant_proposal_archiveDiscordChannel_title'),
 };
 const proposalDescriptions: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_description'),
+  create_discord_channel: () => tr('assistant_proposal_createDiscordChannel_description'),
+  set_discord_channel_access: () => tr('assistant_proposal_setDiscordChannelAccess_description'),
+  archive_discord_channel: () => tr('assistant_proposal_archiveDiscordChannel_description'),
 };
 const proposalConfirmLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirm'),
+  create_discord_channel: () => tr('assistant_proposal_createDiscordChannel_confirm'),
+  set_discord_channel_access: () => tr('assistant_proposal_setDiscordChannelAccess_confirm'),
+  archive_discord_channel: () => tr('assistant_proposal_archiveDiscordChannel_confirm'),
 };
 const proposalSuccessLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirmed'),
+  create_discord_channel: () => tr('assistant_proposal_createDiscordChannel_confirmed'),
+  set_discord_channel_access: () => tr('assistant_proposal_setDiscordChannelAccess_confirmed'),
+  archive_discord_channel: () => tr('assistant_proposal_archiveDiscordChannel_confirmed'),
 };
 
 const proposalErrorMessages: Record<ProposalErrorReason, () => string> = {
@@ -119,7 +147,7 @@ function classifyProposalFailure(squashed: unknown): ProposalErrorReason {
       return 'expired';
     case 'AiChatForbidden':
       // The kill switch renders as "forbidden" too (plan §8 item 8, accepted as-is) — the data
-      // clause ("nothing was created") stays true even when the cause was an operator flipping
+      // clause ("nothing was changed") stays true even when the cause was an operator flipping
       // AI_CHAT_ENABLED, so the user is not misled about state; only the reason is imprecise.
       return 'forbidden';
     case 'AiProposalActionForbidden':
@@ -148,6 +176,8 @@ function renderProposalFieldValue(
       );
     case 'eventType':
       return eventTypeLabels[value.value]();
+    case 'accessLevel':
+      return accessLevelLabels[value.value]();
     case 'none':
       // A visible row, never an omitted one — `memberGroup: none` means everyone on the team
       // sees this event, a visibility decision the user must be able to verify before confirming.
@@ -169,11 +199,16 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
   // user just pressed — never on mount (initial state is `pending`, so this never fires then),
   // and never merely because the card appeared (no `aria-live` here either — the log region
   // that owns this card is already `role='log' aria-live='polite'`; nesting would double-announce).
+  const isTerminal =
+    state._tag === 'confirmed' ||
+    state._tag === 'queued' ||
+    state._tag === 'rejected' ||
+    state._tag === 'failed';
   React.useEffect(() => {
-    if (state._tag === 'confirmed' || state._tag === 'rejected' || state._tag === 'failed') {
+    if (isTerminal) {
       terminalRef.current?.focus();
     }
-  }, [state._tag]);
+  }, [isTerminal]);
 
   const handleConfirm = React.useCallback(async () => {
     setState({ _tag: 'busy', which: 'confirm' });
@@ -183,8 +218,12 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
           params: { teamId: teamIdBranded, proposalId: proposal.id },
         }),
       ),
-      Effect.tap((event) => {
-        setState({ _tag: 'confirmed', event });
+      Effect.tap((result) => {
+        setState(
+          result instanceof AiChatApi.DiscordChangeQueued
+            ? { _tag: 'queued' }
+            : { _tag: 'confirmed', event: result },
+        );
         router.invalidate();
         return Effect.void;
       }),
@@ -221,8 +260,7 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
   }, [run, teamIdBranded, proposal.id]);
 
   const busy = state._tag === 'busy';
-  const isTerminal =
-    state._tag === 'confirmed' || state._tag === 'rejected' || state._tag === 'failed';
+  const isArchive = proposal.action === 'archive_discord_channel';
   const showFieldList = !isTerminal || !(state._tag === 'failed' && state.reason === 'alreadyUsed');
   const showFooter = !isTerminal || (state._tag === 'failed' && state.reason === 'generic');
 
@@ -253,6 +291,14 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
               ))}
             </dl>
           )}
+          {isArchive && !isTerminal && (
+            <Alert variant='warning'>
+              <TriangleAlert className='size-4' aria-hidden='true' />
+              <AlertDescription>
+                {tr('assistant_proposal_archiveDiscordChannel_warning')}
+              </AlertDescription>
+            </Alert>
+          )}
           {isTerminal && (
             <div ref={terminalRef} tabIndex={-1} className='flex flex-col gap-3 outline-none'>
               {state._tag === 'confirmed' && (
@@ -266,6 +312,12 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
                     teamId={teamId}
                   />
                 </>
+              )}
+              {state._tag === 'queued' && (
+                <Alert>
+                  <Send className='size-4' aria-hidden='true' />
+                  <AlertTitle>{proposalSuccessLabels[proposal.action]()}</AlertTitle>
+                </Alert>
               )}
               {state._tag === 'rejected' && (
                 <p className='text-sm text-muted-foreground'>{tr('assistant_proposal_rejected')}</p>
@@ -311,6 +363,7 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
             </Button>
             <Button
               type='button'
+              variant={isArchive ? 'destructive' : 'default'}
               className='w-full sm:w-auto'
               disabled={busy}
               onClick={() => {
