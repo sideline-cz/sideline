@@ -7232,9 +7232,24 @@ Ties are broken by `masteredCount`, then `teamMemberId`, giving a deterministic 
 **Source:** `packages/domain/src/api/AiChatApi.ts`
 **Prefix:** `/teams/:teamId/ai`
 
-A **read-only** conversational assistant, scoped to one team, that answers questions about the team's own events, training types, members, groups and rosters via LLM tool-calling over team-scoped tools (the full list is `ALL_TOOLS` in `applications/server/src/services/ai/registry.ts`). It cannot create, edit, or delete anything — there is no write path. Backed by the same `LlmClient` used by email-forwarding summarization and the Player Rating AI features.
+A conversational assistant, scoped to one team, that answers questions about the team's own events, training types, members, groups and rosters via LLM tool-calling over team-scoped tools (the full list is `ALL_TOOLS` in `applications/server/src/services/ai/registry.ts`). Reads are tool results; the only write path is propose, then confirm or reject. A `propose_*` tool stores a pending proposal (expires after 15 minutes, single use) and the model never changes anything itself. The user must explicitly confirm it. Backed by the same `LlmClient` used by email-forwarding summarization and the Player Rating AI features.
 
 **Every tool result is filtered through the calling user's own permissions** before it ever reaches the model: `list_groups` requires `group:manage`, `list_members` requires `member:view`, `list_rosters` requires `roster:view`, and `list_events` mirrors `GET /teams/:teamId/events`'s own group-visibility rules (a caller who cannot see a group's events cannot ask the assistant about them either, and a non-existent-or-invisible `eventId` reads back as "not found", never as a distinguishable 403). Members are returned as a bespoke allow-listed projection (display name, jersey number, roles, active status) — the assistant never sees or surfaces a member's Discord ID, username, birth date, gender, or raw permission grants. `list_discord_channels` and `list_discord_roles` require `ai:manage_discord`; they return the team's channels and roles from the last bot sync (not a live Discord call; a role's `linkedTo` lists every link it has, in the order `group`, `roster`, `achievement` — built-in and custom achievements both count — and is empty when the role is not linked), and return `{ error: 'discord_not_connected' }` when the bot is not in the guild.
+
+**Write path (propose → confirm/reject).** Four propose tools, each requiring every listed permission (checked at propose time and again at confirm):
+
+| Tool | Permissions |
+|---|---|
+| `propose_create_event` | `event:create` |
+| `propose_create_discord_channel` | `ai:manage_discord`, `group:manage` |
+| `propose_set_discord_channel_access` | `ai:manage_discord`, `group:manage` (one group per proposal: grant, level change, or revoke) |
+| `propose_archive_discord_channel` | `ai:manage_discord`, `group:manage` |
+
+Discord proposals are refused with `discord_not_connected` when the bot is not in the guild. Archive is refused when no archive category is set or the channel is not on Discord yet; the bot may delete the channel if it cannot move it. Write tools take names, not ids. `list_discord_channels` rows carry `syncStatus`: `synced`, `pending`, `failed`, or `not_on_discord`.
+
+**`POST /teams/:teamId/ai/proposals/:proposalId/confirm`** — Auth: Bearer token, active member. Executes the proposal. `201` with `EventInfo` for `create_event`; `202` with `{ status: 'queued' }` for Discord actions (the change is only queued as a sync event for the bot, not yet applied). Errors: `403` (caller lacks a required permission), `404` (unknown or foreign proposal), `409` (already confirmed or rejected), `410` (expired).
+
+**`POST /teams/:teamId/ai/proposals/:proposalId/reject`** — Auth: Bearer token, active member. Discards the proposal. `204`. Errors as above.
 
 **Degradation, never 500.** Every failure path — the kill switch is off, no LLM is configured, the provider call fails, the tool-calling loop exhausts its step budget, or the model returns no usable content — resolves to `200 OK` with `generated: false` and a typed `degradedReason`. There is no error response for a degraded answer; `chat`'s only two declared errors are membership (`AiChatForbidden`) and rate limiting (`AiChatRateLimited`).
 

@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-11-10 — New: the AI assistant can change your Discord channels (with your confirmation)
+
+Ask the AI assistant to create a Discord channel, change one group's access to a channel, or archive a channel. It shows a card with the details, and nothing happens until you accept it. After you accept, the change is queued for the bot and appears in Discord shortly. Until then the assistant reports the channel as pending.
+
+- You need the **AI Assistant: Manage Discord Setup** permission and group-management permission. Admin and Captain have both by default.
+- Every change is confirmed on a card, one at a time.
+- Archiving needs an archive category and a channel that already exists on Discord. If the bot can't move the channel, it may delete it.
+- API integrators: `confirmProposal` returns `202 { status: 'queued' }` for Discord actions (event proposals still return `201` with the event); `Proposal.action` and the summary field keys are widened.
+
 ## 2026-11-10 — New: import fees from a CSV file
 
 Treasurers can now create many fees and member charges at once. On **Finances → Fees**, click **Import CSV** and pick a file with the columns `member;fee;amount;currency;dueAt` (one row per member charge, the member's Discord username in the first column). The import is all or nothing: if a row is wrong, nothing is imported and the dialog lists the line numbers to fix. See the [Finances guide](/guides/finances/#importing-fees-from-a-csv-file).

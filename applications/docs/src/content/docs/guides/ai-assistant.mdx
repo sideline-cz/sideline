@@ -7,8 +7,8 @@ import { Aside, Steps } from '@astrojs/starlight/components';
 
 The AI assistant is a chat panel that answers questions about your team's own data — in plain language, with links to the exact events, members, groups, rosters, and training types it's talking about. It can also answer questions about how Sideline itself works, straight from these documentation pages.
 
-<Aside type="caution" title="It can propose one thing, and only with your confirmation">
-The assistant is almost entirely read-only. The one exception is creating an event: if you ask for one, it shows you a card with the details filled in, and **nothing is created until you confirm it**. You can discard the card instead. It cannot edit, cancel, or delete anything, and it cannot make any other kind of change — use the normal event, roster, or group pages for that.
+<Aside type="caution" title="It can propose changes, and only with your confirmation">
+The assistant is mostly read-only. It can propose creating an event. With the **AI Assistant: Manage Discord Setup** permission plus group-management permission, it can also propose creating a Discord channel, changing one group's access to a channel, or archiving a channel. Each proposal shows up as a card with the details filled in, and **nothing happens until you confirm it**. You can discard the card instead. A confirmed Discord change is queued for the bot and shows up in Discord shortly. Until then, the assistant reports it as pending. It cannot make any other kind of change — use the normal event, roster, or group pages for that.
 </Aside>
 
 ## Where to find it
@@ -29,6 +29,8 @@ Go to **Assistant** in your team's sidebar (`/teams/{teamId}/assistant`). The as
 - **Finances** — "Which fees are outstanding?", "What's the team's payment overview?"
 - **Membership plans and seasons** — "What plans do we offer?", "When does the current season end?"
 - **Your Discord server** — "Which channels does our Discord have?", "Which Discord role belongs to a group?" Only for people with the **AI Assistant: Manage Discord Setup** permission (Admin and Captain by default). It shows what Sideline last saw from the bot, so a change made in Discord a moment ago may not show yet.
+
+- **Changing your Discord server** — "Create a channel called Match day for the U12 group", "Let the U14 group see #coaches", "Archive the old-trainings channel". Each one is a card you accept or discard. Archiving needs an archive category set up and a channel that already exists on Discord. If the bot can't move the channel to the archive, it may delete it instead.
 
 **About Sideline itself:**
 
