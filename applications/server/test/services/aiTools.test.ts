@@ -2482,6 +2482,27 @@ describe('read_discord_messages', () => {
     );
   }
 
+  // Adoption into the channel manager replaces the channel's overwrites, so a leftover group
+  // mapping no longer gives Discord access; only the manager's own grants count.
+  it.effect('an adopted group channel with no grants → no_channel_access despite the mapping', () =>
+    Effect.gen(function* () {
+      const reads = makeReadsLayer({ consume: [Option.some(OK_TWO)] });
+      const { layer } = readLayers(reads.layer, {
+        mappings: [
+          {
+            ...createdMapping({ group_id: 'g-u12' }),
+            discord_channel_id: Option.some('200000000000000002' as Discord.Snowflake),
+          },
+        ],
+        access: makeAccessLayers({}, ['g-u12']),
+      });
+      expect(yield* runRead({ channel: 'Juniors' }, readerCtx, layer)).toEqual({
+        error: 'no_channel_access',
+      });
+      expect(reads.calls.insert).toEqual([]);
+    }),
+  );
+
   it.effect('an Admin with every permission is refused a group channel of another group', () =>
     Effect.gen(function* () {
       const reads = makeReadsLayer({});

@@ -1170,9 +1170,13 @@ interface ChannelSources {
  *    and of every descendant group (`Channel/GetGroupMembers`).
  *  - `C` is roster `R`'s channel, `R` is active and the caller is in `roster_members` of `R`
  *    (`findExpectedRoleHolders`, the roster role reconcile).
- *  A mapping without a Discord role gives nobody access: the channel is hidden from @everyone. */
+ *  A mapping without a Discord role gives nobody access: the channel is hidden from @everyone.
+ *  A `team_channels` row wins over any mapping: adopting a channel into the channel manager
+ *  replaces its overwrites, so a leftover group/roster mapping no longer gives Discord access. */
 const callerHasChannelAccess = (ctx: EntityReadContext, sources: ChannelSources) => {
-  const withRole = sources.mappings.filter((m) => Option.isSome(m.discord_role_id));
+  const withRole = Option.isSome(sources.teamChannelId)
+    ? []
+    : sources.mappings.filter((m) => Option.isSome(m.discord_role_id));
   const rosterIds = withRole.flatMap((m) => Option.toArray(m.roster_id));
   return Effect.all({
     mine: GroupsRepository.asEffect().pipe(
