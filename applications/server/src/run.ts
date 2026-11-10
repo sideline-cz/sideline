@@ -45,6 +45,7 @@ import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { AutoApplyCreditCron } from '~/services/AutoApplyCreditCron.js';
 import { BankSyncPoller } from '~/services/BankSyncPoller.js';
 import { BankTokenExpiryCron } from '~/services/BankTokenExpiryCron.js';
+import { BotRpc } from '~/services/BotRpc.js';
 import { CoachingStatusCron } from '~/services/CoachingStatusCron.js';
 import { EmailRetentionCron } from '~/services/EmailRetentionCron.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
@@ -312,6 +313,16 @@ const BankTokenExpiryCronEffect = BankTokenExpiryCron.asEffect().pipe(
   ),
 );
 
+// One-shot check that the bot RPC address and secret work. Logs only.
+const BotRpcProbe = BotRpc.asEffect().pipe(
+  Effect.flatMap((bot) => bot.ping),
+  Effect.tap((result) => Effect.logInfo(`Bot RPC reachable (bot ${result.version})`)),
+  // catchCause, not catchTag: one member of the Effect.all below that dies interrupts App,
+  // Health and every cron. This probe must never stop the server.
+  Effect.catchCause((cause) => Effect.logWarning('Bot RPC probe failed', cause)),
+  Effect.provide(BotRpc.Default),
+);
+
 Effect.Do.pipe(
   Effect.tap(() => (env.DATABASE_MAIN !== env.DATABASE_NAME ? CreateDb : Effect.void)),
   Effect.tap(() => MigrateBefore),
@@ -321,6 +332,7 @@ Effect.Do.pipe(
         App,
         Health,
         MigrateAfter,
+        BotRpcProbe,
         Cron,
         HorizonCron,
         ReminderCron,

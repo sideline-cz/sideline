@@ -66,6 +66,12 @@ export const env = createEnv({
     FIO_TOKEN_ENCRYPTION_KEY: Schema.toStandardSchemaV1(
       Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
     ),
+    // Server -> bot RPC. Both optional: a missing value makes `BotRpc` answer `not_configured`,
+    // it never fails boot. The secret goes out as `Authorization: Bearer`, which OTEL redacts.
+    BOT_RPC_URL: Schema.toStandardSchemaV1(Schema.OptionFromNullishOr(Schema.NonEmptyString)),
+    BOT_RPC_SECRET: Schema.toStandardSchemaV1(
+      Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
+    ),
     LLM_MODEL: Schema.String.pipe(
       Schemas.Optional(() => 'gpt-4o-mini'),
       Schema.toStandardSchemaV1,
