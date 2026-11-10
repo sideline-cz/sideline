@@ -2,6 +2,11 @@
 
 Discord bot built with dfx (Discord effect library) and Effect-TS.
 
+**The bot exposes no API.** Its only listener is the health endpoint. The bot is always the client:
+it calls the server's sync RPC and polls it for work. When the server needs a Discord change, it
+writes a sync event that the bot picks up on its next poll. Never add an inbound RPC or HTTP server
+to the bot, even behind a secret or a flag.
+
 ## Architecture
 
 ```
@@ -9,7 +14,6 @@ src/
 ├── Bot.ts           — Composes commands + interactions + events into program
 ├── AppLive.ts       — Composable app layer (DiscordIx → HealthServer)
 ├── HealthServerLive.ts — Health check HTTP endpoint with gateway shard status
-├── BotRpcServerLive.ts — inbound RPC from the server (port 9100, Bearer secret)
 ├── env.ts           — Environment config (token, intents, health port)
 ├── run.ts           — Runtime entrypoint (config, logging, NodeRuntime)
 ├── schemas.ts       — Dfx decode schemas (DfxTextChannel, DfxSyncableChannel, DfxGuildMember, DfxUser incl. global_name)
@@ -70,13 +74,6 @@ Follows the **AppLive + run.ts** pattern.
 | `src/rest/utils.ts` | Bot-wide shared helpers (`retryPolicy`, `allow`/`deny`, `formatName`/`formatNamePlain`/`formatNameWithMention`, `joinEntriesWithLimit`) and shared numeric limits (`POLL_BATCH_SIZE = 50`, `EMBED_FIELD_VALUE_LIMIT = 1024`, `YES_EMBED_LIMIT = 20`). | A constant or helper consumed by more than one feature MUST live here, NEVER in a `build<Name>Embed.ts` or a `handle*.ts`. Import it; never re-declare the value at a call site. `YES_EMBED_LIMIT` moved here from the deleted `src/rest/events/buildEventEmbed.ts` for exactly this reason — its four consumers span `src/rest/events/`, `src/rcp/personalEvents/`, and `src/interactions/`. |
 | `src/services/` | Long-lived caches, the sync RPC client, welcome helpers, and **every outbound HTTP client that does not talk to the Discord API** (`githubIssue.ts`). | An outbound non-Discord HTTP client MUST live here as a flat lowercase-filename module exporting plain functions — NEVER under `src/rest/<feature>/`, which is reserved for Discord-REST callers, and never wrapped in an Effect service unless it holds state. `HttpClient.execute` does NOT fail on a non-2xx response; check `response.status` explicitly and raise a tagged error, or a rejected request decodes as a success (same manual check as `applications/server/src/services/FioApiClient.ts`). |
 | `test/rcp/<feature>/` | Tests for the matching processor. | Mirrors `src/rcp/<feature>/` 1:1. |
-
-## Bot RPC Server (`src/BotRpcServerLive.ts`)
-
-The server calls the bot over `BotRpcs` on port 9100. Every request needs `Authorization: Bearer <BOT_RPC_SECRET>`; anything else gets 401 before the RPC app runs. No `BOT_RPC_SECRET` = no server (warning logged).
-
-- **Never mount bot RPC through `HttpRouter.serve` or `RpcServer.layerProtocolHttp`.** Both use the module-level `HttpRouter.layer`, which the health server already builds in the same graph, so RPC would answer WITHOUT auth on health port 9000. Use `RpcServer.toHttpEffect` + `HttpServer.serve` on its own `NodeHttpServer`. `test/BotRpcServer.test.ts` ("RPC does not answer on the health port") guards this.
-- **Never put a secret in a header outside OTEL's redacted list** (`authorization`, `cookie`, `set-cookie`, `x-api-key`). The HTTP tracers write every other header to the trace backend in clear text.
 
 ## Building Message Components
 

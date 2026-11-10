@@ -1,6 +1,5 @@
 import { DiscordIxLive } from 'dfx/gateway';
 import { Layer } from 'effect';
-import { BotRpcServerLive } from '~/BotRpcServerLive.js';
 import { HealthServerLive } from '~/HealthServerLive.js';
 import { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js';
 import {
@@ -48,7 +47,7 @@ const SyncLive = Layer.mergeAll(
   Layer.provide(DiscordIxLive),
 );
 
-export const AppLive = Layer.mergeAll(HealthServerLive, BotRpcServerLive).pipe(
+export const AppLive = HealthServerLive.pipe(
   Layer.provideMerge(DiscordIxLive),
   Layer.provideMerge(SyncLive),
 );

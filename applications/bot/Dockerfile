@@ -76,6 +76,6 @@ ENV RULES_GIF_DIR=/app/rules-gifs
 COPY applications/bot/docker-entrypoint.sh /app/applications/bot/docker-entrypoint.sh
 RUN chmod +x /app/applications/bot/docker-entrypoint.sh
 
-EXPOSE 9000 9100
+EXPOSE 9000
 
 CMD ["/app/applications/bot/docker-entrypoint.sh"]
