@@ -7,6 +7,7 @@ export {
   AchievementSyncService,
   ChannelBackfillService,
   ChannelSyncService,
+  DiscordReadSyncService,
   EmailSyncService,
   EventSyncService,
   FinanceSyncService,

@@ -25,3 +25,8 @@ export const toDiscordTimestamp = (dt: DateTime.Utc, style: DiscordTimestampStyl
  *  pre-this-fix render. */
 export const discordDateInstant = (dateOnly: string, fallbackInstant: DateTime.Utc): DateTime.Utc =>
   Option.getOrElse(DateTime.make(`${dateOnly}T12:00:00Z`), () => fallbackInstant);
+
+/** Matches every Discord timestamp token in a message body, with or without a style. It lives
+ *  here because this file is the one owner of the token format; used to strip tokens from
+ *  member messages before they reach the AI assistant. */
+export const DISCORD_TIMESTAMP_TOKEN = /<t:-?\d+(?::[a-zA-Z])?>/g;

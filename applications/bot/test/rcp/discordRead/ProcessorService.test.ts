@@ -5,7 +5,7 @@
 
 import { DiscordReadRequest } from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
-import { DateTime, Effect, Layer, Option } from 'effect';
+import { DateTime, Effect, Layer, Option, type ServiceMap } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { ProcessorService } from '~/rcp/discordRead/ProcessorService.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
@@ -29,8 +29,8 @@ const request = (overrides: Partial<Request> = {}): Request => ({
   ...overrides,
 });
 
-const makeProxy = <S>(
-  tag: S,
+const makeProxy = <I, S>(
+  tag: ServiceMap.Service<I, S>,
   defaults: Record<string, Fn>,
   overrides: Record<string, Fn>,
   calls: Record<string, unknown[][]>,
@@ -50,7 +50,7 @@ const makeProxy = <S>(
         };
       },
     }),
-  ) as Layer.Layer<never>;
+  ) as Layer.Layer<I>;
 
 const run = (opts: {
   readonly requests: ReadonlyArray<Request>;
@@ -223,6 +223,21 @@ describe('discordRead ProcessorService — processTick', () => {
     expect(result?.capped).toBe(true);
     expect(result?.messages.at(-1)?.content).toBe(messages[0]?.content);
     expect(result?.messages.map((m) => m.content)).not.toContain(messages[39]?.content);
+  });
+
+  it('size cap: a newest message over the budget alone is cut, not dropped', async () => {
+    const { submitted } = await run({
+      requests: [request()],
+      rest: { listMessages: () => Effect.succeed([msg({ content: '"'.repeat(6000) })]) },
+    });
+
+    const result = submitted[0]?.result;
+    expect(result?.messages).toHaveLength(1);
+    expect(result?.messages[0]?.content.endsWith('…')).toBe(true);
+    expect(JSON.stringify(result?.messages).length).toBeLessThanOrEqual(
+      DiscordReadRequest.READ_RESULT_CHAR_BUDGET,
+    );
+    expect(result?.capped).toBe(true);
   });
 
   it('mention tokens and message links become names, never raw ids', async () => {
