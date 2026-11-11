@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.85.1
+
+### 🐛 Fixes
+- list group and roster channels as managed by Sideline (#815)
+
 ## 0.85.0
 
 ### 🚀 Features
