@@ -444,6 +444,7 @@ const executeTool = (
           Effect.provideService(BotGuildsRepository, deps.discord.botGuilds),
           Effect.provideService(DiscordChannelsRepository, deps.discord.channels),
           Effect.provideService(TeamChannelsRepository, deps.discord.teamChannels),
+          Effect.provideService(DiscordChannelMappingRepository, deps.discord.mappings),
         ),
       );
     case 'list_discord_roles':

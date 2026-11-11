@@ -925,7 +925,11 @@ export const listDiscordChannels = (
 ): Effect.Effect<
   ToolExecutionResult,
   never,
-  TeamsRepository | BotGuildsRepository | DiscordChannelsRepository | TeamChannelsRepository
+  | TeamsRepository
+  | BotGuildsRepository
+  | DiscordChannelsRepository
+  | TeamChannelsRepository
+  | DiscordChannelMappingRepository
 > =>
   hasPermission(ctx.membership, 'ai:manage_discord')
     ? connectedGuildId(ctx.teamId).pipe(
@@ -940,14 +944,28 @@ export const listDiscordChannels = (
                 teamChannels: TeamChannelsRepository.asEffect().pipe(
                   Effect.flatMap((channels) => channels.findAllByTeamWithSyncState(ctx.teamId)),
                 ),
+                mappings: DiscordChannelMappingRepository.asEffect().pipe(
+                  Effect.flatMap((mappings) => mappings.findAllByTeam(ctx.teamId)),
+                ),
               }).pipe(
-                Effect.map(({ rows, teamChannels }) => {
+                Effect.map(({ rows, teamChannels, mappings }) => {
                   const { query } = args;
+                  // The group or roster channels Sideline created. The channel manager wins.
+                  const createdFor = new Map(
+                    mappings.flatMap((m) =>
+                      m.entity_type === 'group' || m.entity_type === 'roster'
+                        ? Option.toArray(m.discord_channel_id).map((id) => [id, m.entity_type])
+                        : [],
+                    ),
+                  );
                   const syncState = new Map(teamChannels.map((tc) => [tc.id, tc.sync_state]));
                   const categoryNames = new Map(
                     rows.filter((row) => row.type === 4).map((row) => [row.channel_id, row.name]),
                   );
                   const mirrored = rows.map((row) => {
+                    const managedVia = Option.isSome(row.team_channel_id)
+                      ? 'channel_manager'
+                      : (createdFor.get(row.channel_id) ?? null);
                     const state = Option.match(row.team_channel_id, {
                       onNone: () => 'ok',
                       onSome: (id) => syncState.get(id) ?? 'ok',
@@ -962,7 +980,8 @@ export const listDiscordChannels = (
                             Option.fromNullishOr(categoryNames.get(pid)),
                           ),
                         ),
-                        managedBySideline: Option.isSome(row.team_channel_id),
+                        managedBySideline: managedVia !== null,
+                        managedVia,
                         archived: Option.getOrElse(row.team_channel_archived, () => false),
                         accessGroupCount: row.access_count,
                         syncStatus: state === 'ok' ? 'synced' : state,
@@ -989,6 +1008,7 @@ export const listDiscordChannels = (
                         type: 'text',
                         category: Option.getOrNull(tc.category),
                         managedBySideline: true,
+                        managedVia: 'channel_manager',
                         archived: tc.archived,
                         accessGroupCount: tc.access_count,
                         syncStatus: tc.sync_state === 'ok' ? 'not_on_discord' : tc.sync_state,

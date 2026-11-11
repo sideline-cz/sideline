@@ -885,8 +885,9 @@ const DISCORD_PERMISSIONS: ReadonlyArray<Role.Permission> = ['ai:manage_discord'
 const DISCORD_COMMON =
   'This does NOT change anything by itself — it shows the user a card they must confirm. After ' +
   'they confirm, the change is only QUEUED for the Sideline bot and shows in Discord shortly: ' +
-  'never say it is done. Only Sideline-managed channels (`managedBySideline: true` in ' +
-  '`list_discord_channels`) can be changed. Name channels and groups exactly as ' +
+  'never say it is done. Only channels in the channel manager (`managedVia: ' +
+  '"channel_manager"` in `list_discord_channels`) can be changed; a group or roster channel ' +
+  'follows its group or roster and cannot be changed here. Name channels and groups exactly as ' +
   '`list_discord_channels` and `list_groups` show them; when a name matches several channels or ' +
   'groups, ask the user which one they mean. Only one may be proposed per reply.';
 
