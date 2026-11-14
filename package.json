@@ -45,7 +45,7 @@
     "@vitest/ui": "4.1.11",
     "babel-plugin-annotate-pure-calls": "0.5.0",
     "effect": "4.0.0-beta.40",
-    "glob": "^14.0.4",
+    "glob": "^14.0.5",
     "husky": "9.1.7",
     "lint-staged": "17.3.0",
     "tsc-alias": "^1.9.2",
