@@ -28,6 +28,31 @@ Each application follows an **AppLive + run.ts** pattern:
 
 The **migrations** package exports `MigratorLive` — a layer that only needs a `PgClient` and filesystem. Consumers provide their own `PgClient`, keeping the migration package decoupled from connection config.
 
+### The Bot Calls The Server, Never The Reverse
+
+Traffic between the two services is **one-way: bot → server**. The bot is the RPC client
+(`applications/bot/src/services/SyncRpc.ts`), the server hosts every RPC group
+(`applications/server/src/rpc/index.ts`). The server holds no address for the bot, and must not
+acquire one.
+
+When the server needs Discord work done it **writes an outbox row and returns**. The bot picks the
+row up on its next poll, acts on Discord, and acks over the same bot → server RPC. Reference
+implementation: `ChannelSyncEventsRepository.emitManaged*` (write) → `Event/GetUnprocessedEvents`
+(read) → `Mark*Processed` (ack), driven by the poll tiers in `applications/bot/src/Bot.ts`
+(`fastPollLoop` 1 s, `pollLoop` 5 s, `slowPollLoop` 5 min).
+
+**This holds even when the server needs an answer back.** Write a request row, let the bot poll it,
+have the bot write the result back through an existing server-hosted RPC, and read the result row.
+At the 1 s tier the round trip is fast enough for a user-facing request. Do NOT give the server an
+HTTP client pointed at the bot, and do NOT give the server its own Discord REST client — a second
+Discord client splits the per-token rate-limit buckets and the 429s land on the bot.
+
+Reverted once already: PR #810 added a server → bot RPC transport on bot port 9100 and was removed
+unused by #812. The bot's own side of this rule — that it exposes no API beyond the health
+endpoint — is in `applications/bot/AGENTS.md`; this section is the server-side half, because a
+change that reaches for the bot is written in `applications/server` and never opens that file.
+If the answer seems to require calling the bot, the outbox is the answer.
+
 ### Bank Sync (Fio) — Trigger-Owned Columns, One Lock Order, And A Read-Only Probe
 
 The bank-sync subsystem ingests Fio movements (`applications/server/src/services/BankSyncPoller.ts`, hourly), matches them against `fee_assignments` (`services/BankTransactionMatcher.ts`), and exposes the queue, CSV and PDF at `src/api/bank-sync.ts`. Four invariants span the whole monorepo and are not visible from the call sites that violate them.
