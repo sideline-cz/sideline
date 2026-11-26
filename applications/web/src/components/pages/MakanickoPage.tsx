@@ -7,6 +7,8 @@ import type {
 } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import type { Option } from 'effect';
+import { Plus } from 'lucide-react';
+import React from 'react';
 import {
   isNonCurrentSelection,
   SeasonInfoLine,
@@ -14,9 +16,11 @@ import {
 } from '~/components/molecules/SeasonPicker.js';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList.js';
 import { ActivityStatsCard } from '~/components/organisms/ActivityStatsCard.js';
+import { LogActivityForm } from '~/components/organisms/LogActivityForm.js';
 import { LeaderboardPage } from '~/components/pages/LeaderboardPage.js';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '~/components/ui/sheet';
 import { tr } from '~/lib/translations.js';
 
 interface MakanickoPageProps {
@@ -44,7 +48,7 @@ interface MakanickoPageProps {
     durationMinutes: Option.Option<number>;
     note: Option.Option<string>;
     loggedAtDate: Option.Option<string>;
-  }) => Promise<void>;
+  }) => Promise<boolean>;
   onUpdateLog: (
     logId: ActivityLog.ActivityLogId,
     input: {
@@ -77,6 +81,9 @@ export function MakanickoPage({
 }: MakanickoPageProps) {
   const isPastPeriod = isNonCurrentSelection(seasons, season);
   const busy = isPending ? 'opacity-60 pointer-events-none transition-opacity' : undefined;
+  const [logOpen, setLogOpen] = React.useState(false);
+  // Same gate as the inline form in ActivityLogList: a new log lands in the current season
+  const canLog = !isPastPeriod && !activityLogsError && activityTypes.length > 0;
   return (
     <div className='flex flex-col gap-6'>
       <header>
@@ -87,6 +94,12 @@ export function MakanickoPage({
         </Button>
         <div className='flex flex-wrap items-center gap-3'>
           <h1 className='text-2xl font-bold mr-auto'>{tr('makanicko_title')}</h1>
+          {canLog ? (
+            <Button size='sm' onClick={() => setLogOpen(true)}>
+              <Plus aria-hidden='true' />
+              {tr('activityLog_logActivity')}
+            </Button>
+          ) : null}
           {seasons.length > 0 ? (
             <SeasonPicker seasons={seasons} value={season} onChange={onSeasonChange} />
           ) : null}
@@ -108,6 +121,24 @@ export function MakanickoPage({
         </div>
       </header>
 
+      {canLog ? (
+        <Sheet open={logOpen} onOpenChange={setLogOpen}>
+          <SheetContent>
+            <SheetHeader>
+              <SheetTitle>{tr('activityLog_logActivity')}</SheetTitle>
+            </SheetHeader>
+            <div className='px-4 pb-4'>
+              <LogActivityForm
+                activityTypes={activityTypes}
+                onCreateLog={async (input) => {
+                  if (await onCreateLog(input)) setLogOpen(false);
+                }}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+      ) : null}
+
       <div className='flex flex-col gap-6 lg:grid lg:grid-cols-[1fr_400px]'>
         {/* Left: Activity card */}
         <Card className={busy} aria-busy={isPending}>
@@ -123,7 +154,9 @@ export function MakanickoPage({
               loadError={activityLogsError}
               onRetry={onRetry}
               activityTypes={activityTypes}
-              onCreateLog={onCreateLog}
+              onCreateLog={async (input) => {
+                await onCreateLog(input);
+              }}
               onUpdateLog={onUpdateLog}
               onDeleteLog={onDeleteLog}
             />
