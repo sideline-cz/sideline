@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.0
+
+### 🚀 Features
+- team setting to make activity notes visible to teammates (#844)
+
+### 🐛 Fixes
+- refuse moving a paid member to a fee plan in another currency (#845)
+
 ## 0.27.0
 
 ### 🚀 Features
