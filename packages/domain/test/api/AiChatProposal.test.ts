@@ -131,6 +131,8 @@ describe('ProposalFieldKey', () => {
       'absent',
       'response',
       'message',
+      'member',
+      'roster',
     ]);
   });
 });

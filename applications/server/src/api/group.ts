@@ -1,6 +1,6 @@
 import { Auth, DisplayName, GroupApi, type GroupModel, type Team } from '@sideline/domain';
 import { LogicError, Options } from '@sideline/effect-lib';
-import { Array, Effect, Match, Option, pipe, Result, type ServiceMap } from 'effect';
+import { Array, Effect, Match, Option, pipe, Result } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
@@ -16,6 +16,12 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import {
+  addGroupMemberForMemberTx,
+  createGroupForMemberTx,
+  removeGroupMemberForMemberTx,
+  requireSameTeamParent,
+} from '~/services/GroupRosterWrites.js';
 import {
   applyDiscordFormat,
   DEFAULT_CHANNEL_FORMAT,
@@ -60,46 +66,6 @@ export const toGroupInfo = (
   });
 
 const forbidden = new GroupApi.Forbidden();
-
-/**
- * Every `groups.parent_id` edge must stay inside one team, and BOTH writers of that column
- * (`createGroup`'s insert and `moveGroup`'s update) go through this.
- *
- * It is not a cosmetic tenancy check. `moveGroup` serializes its cycle check on a per-team
- * advisory lock keyed by `hashtext(teamId)`, so a parent belonging to ANOTHER team would sit
- * under a different lock key and two concurrent moves could still jointly close a cycle spanning
- * the two trees — the exact race the lock exists to stop. Guarding only `moveGroup` would not be
- * enough either: a cross-team edge planted at creation time is one a later, perfectly ordinary
- * same-team move can extend into that cycle.
- *
- * A group's `team_id` is immutable (no writer updates it — `updateGroupById`, `archiveGroup` and
- * `moveGroupParent` are the only `UPDATE groups` statements), so the verdict cannot go stale
- * between this read and the write it guards.
- *
- * Fails `Forbidden`, not `GroupNotFound`, for both "no such parent" and "parent is another
- * team's" — deliberately, and not the `assignGroupRole` shape (which answers `RoleNotFound` for
- * its payload-referenced role). `createGroup` does not declare `GroupNotFound` at all
- * (`GroupApi.ts`), so reusing it would be an API contract change; and `moveGroup` already spends
- * `GroupNotFound` on the PATH group, where a second meaning would be ambiguous. Neither verdict
- * leaks more than the other: both are the same answer for missing and for cross-team.
- */
-const requireSameTeamParent = (
-  groups: ServiceMap.Service.Shape<typeof GroupsRepository>,
-  teamId: Team.TeamId,
-  parentId: Option.Option<GroupModel.GroupId>,
-) =>
-  Option.match(parentId, {
-    onNone: () => Effect.void,
-    onSome: (pid) =>
-      groups.findGroupById(pid).pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.fail(forbidden),
-            onSome: (parent) => (parent.team_id === teamId ? Effect.void : Effect.fail(forbidden)),
-          }),
-        ),
-      ),
-  });
 
 export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
   Effect.Do.pipe(
@@ -192,62 +158,17 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               Effect.bind('membership', ({ currentUser }) =>
                 requireMembership(members, teamId, currentUser.id, forbidden),
               ),
-              Effect.tap(({ membership }) =>
-                requirePermission(membership, 'group:manage', forbidden),
-              ),
-              Effect.tap(() => requireSameTeamParent(groups, teamId, payload.parentId)),
-              Effect.bind('group', () =>
-                groups.insertGroup(
+              Effect.flatMap(({ membership }) =>
+                createGroupForMemberTx({
                   teamId,
-                  payload.name,
-                  payload.parentId,
-                  payload.emoji,
-                  payload.color,
-                ),
+                  membership,
+                  name: payload.name,
+                  parentId: payload.parentId,
+                  emoji: payload.emoji,
+                  color: payload.color,
+                }),
               ),
-              Effect.bind('settings', () => teamSettings.findByTeamId(teamId)),
-              Effect.tap(({ group, settings }) => {
-                const channelName = applyDiscordFormat(
-                  Option.match(settings, {
-                    onNone: () => DEFAULT_CHANNEL_FORMAT,
-                    onSome: (s) => s.discord_channel_format,
-                  }),
-                  group.name,
-                  group.emoji,
-                );
-                const roleName = applyDiscordFormat(
-                  Option.match(settings, {
-                    onNone: () => DEFAULT_ROLE_FORMAT,
-                    onSome: (s) => s.discord_role_format,
-                  }),
-                  group.name,
-                  group.emoji,
-                );
-                const discordRoleColor = Option.map(group.color, hexColorToDiscordInt);
-                const createChannel = Option.match(settings, {
-                  onNone: () => true,
-                  onSome: (s) => s.create_discord_channel_on_group,
-                });
-                return channelSync.emitChannelCreated(
-                  teamId,
-                  group.id,
-                  group.name,
-                  Option.none(),
-                  createChannel ? channelName : undefined,
-                  roleName,
-                  discordRoleColor,
-                );
-              }),
-              Effect.map(({ group }) => toGroupInfo(group, 0, true)),
-              Effect.catchTag('GroupNameAlreadyTakenError', () =>
-                Effect.fail(new GroupApi.GroupNameAlreadyTaken()),
-              ),
-              Effect.catchTag(
-                'NoSuchElementError',
-                LogicError.withMessage(
-                  () => `Failed creating group "${payload.name}" — no row returned`,
-                ),
-              ),
+              Effect.map((group) => toGroupInfo(group, 0, true)),
             ),
           )
           .handle('getGroup', ({ params: { teamId, groupId } }) =>
@@ -490,72 +411,14 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               Effect.bind('membership', ({ currentUser }) =>
                 requireMembership(members, teamId, currentUser.id, forbidden),
               ),
-              Effect.tap(({ membership }) =>
-                requirePermission(membership, 'group:manage', forbidden),
+              Effect.flatMap(({ membership }) =>
+                addGroupMemberForMemberTx({
+                  teamId,
+                  membership,
+                  groupId,
+                  memberId: payload.memberId,
+                }),
               ),
-              Effect.bind('_group', () =>
-                groups.findGroupById(groupId).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.fail(new GroupApi.GroupNotFound()),
-                      onSome: (g) =>
-                        g.team_id !== teamId
-                          ? Effect.fail(new GroupApi.GroupNotFound())
-                          : Effect.succeed(g),
-                    }),
-                  ),
-                ),
-              ),
-              Effect.bind('_member', () =>
-                members.findRosterMemberByIds(teamId, payload.memberId).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.fail(new GroupApi.MemberNotFound()),
-                      onSome: Effect.succeed,
-                    }),
-                  ),
-                ),
-              ),
-              Effect.tap(() => groups.addMemberById(groupId, payload.memberId)),
-              Effect.tap(({ _group, _member }) =>
-                users.findById(_member.user_id).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.void,
-                      onSome: (user) =>
-                        Effect.all(
-                          [
-                            channelSync.emitMemberAdded(
-                              teamId,
-                              groupId,
-                              _group.name,
-                              payload.memberId,
-                              user.discord_id,
-                            ),
-                            // Archived-aware: see `rpc/guild/index.ts`'s `applyInviteGroup` (~:306, rationale ~:267-270).
-                            groups
-                              .getActiveAncestors(groupId, teamId)
-                              .pipe(
-                                Effect.flatMap((ancestors) =>
-                                  Effect.forEach(ancestors, (ancestor) =>
-                                    channelSync.emitMemberAdded(
-                                      teamId,
-                                      ancestor.id,
-                                      ancestor.name,
-                                      payload.memberId,
-                                      user.discord_id,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                          { concurrency: 'unbounded' },
-                        ),
-                    }),
-                  ),
-                ),
-              ),
-              Effect.asVoid,
             ),
           )
           .handle('removeGroupMember', ({ params: { teamId, groupId, memberId } }) =>
@@ -564,51 +427,9 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               Effect.bind('membership', ({ currentUser }) =>
                 requireMembership(members, teamId, currentUser.id, forbidden),
               ),
-              Effect.tap(({ membership }) =>
-                requirePermission(membership, 'group:manage', forbidden),
+              Effect.flatMap(({ membership }) =>
+                removeGroupMemberForMemberTx({ teamId, membership, groupId, memberId }),
               ),
-              Effect.bind('_group', () =>
-                groups.findGroupById(groupId).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.fail(new GroupApi.GroupNotFound()),
-                      onSome: (g) =>
-                        g.team_id !== teamId
-                          ? Effect.fail(new GroupApi.GroupNotFound())
-                          : Effect.succeed(g),
-                    }),
-                  ),
-                ),
-              ),
-              Effect.bind('_member', () =>
-                members.findRosterMemberByIds(teamId, memberId).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.fail(new GroupApi.MemberNotFound()),
-                      onSome: Effect.succeed,
-                    }),
-                  ),
-                ),
-              ),
-              Effect.tap(() => groups.removeMemberById(groupId, memberId)),
-              Effect.tap(({ _group, _member }) =>
-                users.findById(_member.user_id).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.void,
-                      onSome: (user) =>
-                        channelSync.emitMemberRemoved(
-                          teamId,
-                          groupId,
-                          _group.name,
-                          memberId,
-                          user.discord_id,
-                        ),
-                    }),
-                  ),
-                ),
-              ),
-              Effect.asVoid,
             ),
           )
           .handle('assignGroupRole', ({ params: { teamId, groupId }, payload }) =>
@@ -730,7 +551,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                     Effect.Do.pipe(
                       Effect.tap(() => sql`SET LOCAL lock_timeout = '5s'`),
                       Effect.tap(() => sql`SELECT pg_advisory_xact_lock(hashtext(${teamId}))`),
-                      Effect.tap(() => requireSameTeamParent(groups, teamId, payload.parentId)),
+                      Effect.tap(() => requireSameTeamParent(teamId, payload.parentId)),
                       Effect.tap(() =>
                         Option.match(payload.parentId, {
                           onNone: () => Effect.void,

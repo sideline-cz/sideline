@@ -20,5 +20,11 @@ export const AiActionName = Schema.Literals([
   'cancel_event',
   'mark_attendance',
   'set_my_rsvp',
+  'create_group',
+  'add_group_member',
+  'remove_group_member',
+  'create_roster',
+  'add_roster_member',
+  'remove_roster_member',
 ]);
 export type AiActionName = typeof AiActionName.Type;

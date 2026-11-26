@@ -2782,6 +2782,9 @@ describe('visibleTools', () => {
           'list_membership_plans',
           'list_rosters',
           'list_training_types',
+          'propose_add_group_member',
+          'propose_create_group',
+          'propose_remove_group_member',
           'propose_set_my_rsvp',
           'search_docs',
         ]);
@@ -2863,15 +2866,22 @@ describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3
     Effect.sync(() => {
       // 16 read tools (the original 6, plus `search_docs`, the six database read tools and the
       // three Discord read tools) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (create_event
-      // the three Discord write actions and the three event write actions) — built FROM the
+      // the three Discord write actions, the three event write actions and the six group / roster
+      // write actions) — built FROM the
       // registry (`registry.ts`), so this count moves in lockstep with `AiActionName.literals`.
-      expect(ALL_TOOLS.length).toBe(24);
+      expect(ALL_TOOLS.length).toBe(30);
       for (const added of [
         'propose_create_event',
         'propose_update_event',
         'propose_cancel_event',
         'propose_mark_attendance',
         'propose_set_my_rsvp',
+        'propose_create_group',
+        'propose_add_group_member',
+        'propose_remove_group_member',
+        'propose_create_roster',
+        'propose_add_roster_member',
+        'propose_remove_roster_member',
         'propose_create_discord_channel',
         'propose_set_discord_channel_access',
         'propose_archive_discord_channel',
@@ -3031,6 +3041,8 @@ const makeDiscordWriteLayers = (guildLinked: boolean) =>
     Layer.succeed(EventsRepository, dieStub('EventsRepository')),
     Layer.succeed(EventAttendanceRepository, dieStub('EventAttendanceRepository')),
     Layer.succeed(EventRsvpsRepository, dieStub('EventRsvpsRepository')),
+    Layer.succeed(TeamMembersRepository, dieStub('TeamMembersRepository')),
+    Layer.succeed(RostersRepository, dieStub('RostersRepository')),
   );
 
 const CREATOR_CTX_OVERRIDES = { permissions: ['event:create' as Role.Permission] };

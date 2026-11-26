@@ -87,6 +87,8 @@ const proposalFieldLabels: Record<AiChatApi.ProposalFieldKey, () => string> = {
   absent: () => tr('assistant_proposal_field_absent'),
   response: () => tr('assistant_proposal_field_response'),
   message: () => tr('assistant_proposal_field_message'),
+  member: () => tr('assistant_proposal_field_member'),
+  roster: () => tr('assistant_proposal_field_roster'),
 };
 
 const accessLevelLabels: Record<AiChatApi.ProposalAccessLevel, () => string> = {
@@ -112,6 +114,12 @@ const proposalTitles: Record<AiChatApi.Proposal['action'], () => string> = {
   cancel_event: () => tr('assistant_proposal_cancelEvent_title'),
   mark_attendance: () => tr('assistant_proposal_markAttendance_title'),
   set_my_rsvp: () => tr('assistant_proposal_setMyRsvp_title'),
+  create_group: () => tr('assistant_proposal_createGroup_title'),
+  add_group_member: () => tr('assistant_proposal_addGroupMember_title'),
+  remove_group_member: () => tr('assistant_proposal_removeGroupMember_title'),
+  create_roster: () => tr('assistant_proposal_createRoster_title'),
+  add_roster_member: () => tr('assistant_proposal_addRosterMember_title'),
+  remove_roster_member: () => tr('assistant_proposal_removeRosterMember_title'),
 };
 const proposalDescriptions: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_description'),
@@ -122,6 +130,12 @@ const proposalDescriptions: Record<AiChatApi.Proposal['action'], () => string> =
   cancel_event: () => tr('assistant_proposal_cancelEvent_description'),
   mark_attendance: () => tr('assistant_proposal_markAttendance_description'),
   set_my_rsvp: () => tr('assistant_proposal_setMyRsvp_description'),
+  create_group: () => tr('assistant_proposal_createGroup_description'),
+  add_group_member: () => tr('assistant_proposal_addGroupMember_description'),
+  remove_group_member: () => tr('assistant_proposal_removeGroupMember_description'),
+  create_roster: () => tr('assistant_proposal_createRoster_description'),
+  add_roster_member: () => tr('assistant_proposal_addRosterMember_description'),
+  remove_roster_member: () => tr('assistant_proposal_removeRosterMember_description'),
 };
 const proposalConfirmLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirm'),
@@ -132,6 +146,12 @@ const proposalConfirmLabels: Record<AiChatApi.Proposal['action'], () => string> 
   cancel_event: () => tr('assistant_proposal_cancelEvent_confirm'),
   mark_attendance: () => tr('assistant_proposal_markAttendance_confirm'),
   set_my_rsvp: () => tr('assistant_proposal_setMyRsvp_confirm'),
+  create_group: () => tr('assistant_proposal_createGroup_confirm'),
+  add_group_member: () => tr('assistant_proposal_addGroupMember_confirm'),
+  remove_group_member: () => tr('assistant_proposal_removeGroupMember_confirm'),
+  create_roster: () => tr('assistant_proposal_createRoster_confirm'),
+  add_roster_member: () => tr('assistant_proposal_addRosterMember_confirm'),
+  remove_roster_member: () => tr('assistant_proposal_removeRosterMember_confirm'),
 };
 const proposalSuccessLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirmed'),
@@ -142,7 +162,19 @@ const proposalSuccessLabels: Record<AiChatApi.Proposal['action'], () => string> 
   cancel_event: () => tr('assistant_proposal_cancelEvent_confirmed'),
   mark_attendance: () => tr('assistant_proposal_markAttendance_confirmed'),
   set_my_rsvp: () => tr('assistant_proposal_setMyRsvp_confirmed'),
+  create_group: () => tr('assistant_proposal_createGroup_confirmed'),
+  add_group_member: () => tr('assistant_proposal_addGroupMember_confirmed'),
+  remove_group_member: () => tr('assistant_proposal_removeGroupMember_confirmed'),
+  create_roster: () => tr('assistant_proposal_createRoster_confirmed'),
+  add_roster_member: () => tr('assistant_proposal_addRosterMember_confirmed'),
+  remove_roster_member: () => tr('assistant_proposal_removeRosterMember_confirmed'),
 };
+
+const discordChannelActions: ReadonlySet<AiChatApi.Proposal['action']> = new Set([
+  'create_discord_channel',
+  'set_discord_channel_access',
+  'archive_discord_channel',
+]);
 
 const proposalErrorMessages: Record<ProposalErrorReason, () => string> = {
   notFound: () => tr('assistant_proposal_errorNotFound'),
@@ -299,6 +331,9 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
   const isDestructive =
     proposal.action === 'archive_discord_channel' || proposal.action === 'cancel_event';
   const isArchive = proposal.action === 'archive_discord_channel';
+  // A channel action's own success copy already says "Queued"; any other action that queued a
+  // Discord change (a group or roster write) gets the note.
+  const showQueuedNote = !discordChannelActions.has(proposal.action);
   const showFieldList = !isTerminal || !(state._tag === 'failed' && state.reason === 'alreadyUsed');
   const showFooter = !isTerminal || (state._tag === 'failed' && state.reason === 'generic');
 
@@ -355,6 +390,9 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
                 <Alert>
                   <Send className='size-4' aria-hidden='true' />
                   <AlertTitle>{proposalSuccessLabels[proposal.action]()}</AlertTitle>
+                  {showQueuedNote && (
+                    <AlertDescription>{tr('assistant_proposal_discordQueued')}</AlertDescription>
+                  )}
                 </Alert>
               )}
               {state._tag === 'applied' && (

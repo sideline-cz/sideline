@@ -43,6 +43,9 @@ const TR_MAP: Record<string, string> = {
   rsvp_comingLater: 'Coming later',
   assistant_proposal_cancelEvent_confirm: 'Cancel event',
   assistant_proposal_cancelEvent_confirmed: 'Event cancelled.',
+  assistant_proposal_addGroupMember_confirm: 'Add to group',
+  assistant_proposal_addGroupMember_confirmed: 'Member added to the group.',
+  assistant_proposal_discordQueued: 'The Discord change is queued.',
   // Card chrome
   assistant_proposal_createEvent_title: 'Create this event?',
   assistant_proposal_createEvent_description: 'Nothing is created until you confirm.',
@@ -555,6 +558,7 @@ describe('AssistantProposalCard', () => {
           screen.getByText(TR_MAP.assistant_proposal_setDiscordChannelAccess_confirmed),
         ).not.toBeNull();
       });
+      expect(screen.queryByText(TR_MAP.assistant_proposal_discordQueued)).toBeNull();
       // No AssistantResultCard: it renders a link to the created entity.
       expect(screen.queryAllByRole('link')).toHaveLength(0);
       expect(screen.queryAllByRole('button')).toHaveLength(0);
@@ -624,6 +628,27 @@ describe('AssistantProposalCard', () => {
       expect(screen.queryAllByRole('link')).toHaveLength(0);
       expect(screen.queryAllByRole('button')).toHaveLength(0);
       expect(mockInvalidate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('group and roster actions', () => {
+    it('a queued group change says the Discord change is queued; a channel action does not repeat it', async () => {
+      mockConfirm.mockReturnValueOnce(
+        Effect.succeed(new AiChatApi.DiscordChangeQueued({ status: 'queued' })),
+      );
+      renderCard(
+        makeDiscordProposal('add_group_member', [
+          { key: 'group', value: { type: 'text', value: 'U12' } },
+          { key: 'member', value: { type: 'text', value: 'Anna' } },
+        ]),
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add to group' }));
+
+      await waitFor(() => {
+        expect(screen.getByText(TR_MAP.assistant_proposal_addGroupMember_confirmed)).not.toBeNull();
+      });
+      expect(screen.getByText(TR_MAP.assistant_proposal_discordQueued)).not.toBeNull();
     });
   });
 

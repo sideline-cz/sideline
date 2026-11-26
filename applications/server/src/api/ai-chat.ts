@@ -125,6 +125,7 @@ const toConfirmedResponse = (result: ConfirmResult): ConfirmedResponse => {
     case 'event_cancelled':
     case 'attendance_confirmed':
     case 'rsvp_submitted':
+    case 'applied':
       return new AiChatApi.AiActionApplied({ status: 'applied' });
   }
 };
@@ -155,6 +156,7 @@ const afterCommit = (
       return emitRsvpSideEffects(teamId, result.submitted);
     case 'discord_queued':
     case 'attendance_confirmed':
+    case 'applied':
       return Effect.void;
   }
 };

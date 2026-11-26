@@ -179,6 +179,8 @@ export const ProposalFieldKey = Schema.Literals([
   'absent',
   'response',
   'message',
+  'member',
+  'roster',
 ]);
 export type ProposalFieldKey = typeof ProposalFieldKey.Type;
 
