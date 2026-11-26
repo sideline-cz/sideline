@@ -65,7 +65,7 @@ function valuesFromPrefs(prefs: TeamApi.MemberEventPreferences): EventPreference
 /** Load-failure sibling of `EventPreferencesCard`. Holds no form state — see the note above. */
 export function EventPreferencesLoadFailed({ onRefresh }: { readonly onRefresh: () => void }) {
   return (
-    <Card className='w-full max-w-md mt-4'>
+    <Card className='w-full'>
       <CardHeader>
         <CardTitle>{tr('eventPrefs_title')}</CardTitle>
         <CardDescription>{tr('eventPrefs_description')}</CardDescription>
@@ -149,7 +149,7 @@ export function EventPreferencesCard({ teamId, prefs, onRefresh }: EventPreferen
 
   return (
     <>
-      <Card className='w-full max-w-md mt-4'>
+      <Card className='w-full'>
         <CardHeader>
           <CardTitle>{tr('eventPrefs_title')}</CardTitle>
           <CardDescription>{tr('eventPrefs_description')}</CardDescription>

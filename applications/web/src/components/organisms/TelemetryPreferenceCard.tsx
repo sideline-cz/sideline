@@ -36,7 +36,7 @@ export function TelemetryPreferenceCard() {
   };
 
   return (
-    <Card className='w-full max-w-md mt-4'>
+    <Card className='w-full'>
       <CardHeader>
         <div className='flex items-center gap-2'>
           <Activity className='size-4 text-muted-foreground' />

@@ -45,7 +45,7 @@ export function DataExportCard() {
   }, [run]);
 
   return (
-    <Card className='w-full max-w-md mt-4'>
+    <Card className='w-full'>
       <CardHeader>
         <div className='flex items-center gap-2'>
           <Download className='size-4 text-muted-foreground' />
