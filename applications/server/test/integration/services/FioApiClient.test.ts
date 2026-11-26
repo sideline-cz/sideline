@@ -275,38 +275,41 @@ describe('FioApiClient — 413 (80)', () => {
 // ---------------------------------------------------------------------------
 
 describe('FioApiClient — 409 retry ladder (76, 77)', () => {
-  it.effect('409 then 200 -> exactly 2 requests, the second only after real elapsed time', () =>
-    Effect.gen(function* () {
-      let calls = 0;
-      const client = yield* buildRealClient(
-        makeMockHttpClientLayer((request) => {
-          calls += 1;
-          return Effect.succeed(
-            calls === 1
-              ? statusResponse(request, 409)
-              : jsonResponse(request, 200, validRawStatement),
-          );
-        }),
-      );
-      const startMillis = yield* Clock.currentTimeMillis;
-      const fiber = yield* Effect.forkChild(client.fetchPeriod(fetchInput()));
+  it.effect('409 then 200 -> exactly 2 requests, the second only after the backoff elapsed', () =>
+    // The old shape drove `it.effect`'s virtual `TestClock` in a bounded loop of 300 adjusts
+    // while the client did REAL SQL throttle reservations between its virtual sleeps — the same
+    // race the per-token throttle test below documents. When the reservation round trip was the
+    // slower side, the loop exhausted every adjust before the fiber reached its next
+    // `Effect.sleep`, nothing advanced the clock again, and `Fiber.join` hung until vitest's 30s
+    // `testTimeout` (CI run 45859314829). Same remedy as the siblings: the real clock, with
+    // `makeReal`'s test-only knobs dialled down — `throttleSeconds: 0` isolates the 409 ladder
+    // from the throttle, and `retryBase` shrinks the ladder's first delay from 30s to 500ms. The
+    // property is unchanged: the second request fires only after the ladder's backoff elapsed.
+    TestClock.withLive(
+      Effect.gen(function* () {
+        const retryBaseMillis = 500;
+        const callTimes: Array<number> = [];
+        const client = yield* buildRealClient(
+          makeMockHttpClientLayer((request) =>
+            Effect.map(Clock.currentTimeMillis, (now) => {
+              callTimes.push(now);
+              return callTimes.length === 1
+                ? statusResponse(request, 409)
+                : jsonResponse(request, 200, validRawStatement);
+            }),
+          ),
+          { throttleSeconds: 0, retryBase: `${retryBaseMillis} millis` },
+        );
 
-      let elapsedAtSecondCall = -1;
-      for (let i = 0; i < 300 && calls < 2; i += 1) {
-        yield* TestClock.adjust('1 second');
-      }
-      if (calls >= 2) {
-        const now = yield* Clock.currentTimeMillis;
-        elapsedAtSecondCall = now - startMillis;
-      }
+        const result = yield* client.fetchPeriod(fetchInput());
 
-      const result = yield* Fiber.join(fiber);
-      expect(calls).toBe(2);
-      // The 409 ladder's first delay is >= 30s (Schedule.exponential('30 seconds', 2)); the
-      // throttle reservation for the SAME token adds on top of that, so the true floor is >= 30s.
-      expect(elapsedAtSecondCall).toBeGreaterThanOrEqual(30_000);
-      expect(result.movements).toEqual([]);
-    }).pipe(Effect.provide(TestPgClient)),
+        expect(callTimes).toHaveLength(2);
+        // `Schedule.exponential(retryBase, 2)`'s first delay is exactly `retryBase`; allow a few
+        // ms for timer granularity. Without the backoff the gap is one SQL round trip.
+        expect(callTimes[1] - callTimes[0]).toBeGreaterThanOrEqual(retryBaseMillis - 10);
+        expect(result.movements).toEqual([]);
+      }),
+    ).pipe(Effect.provide(TestPgClient)),
   );
 
   it.effect('409 forever -> FioRateLimited after the bounded retries, never infinite', () =>
