@@ -170,4 +170,32 @@ authedTest.describe('No horizontal overflow on mobile', () => {
       .evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
     expect(frame.scrollWidth).toBeGreaterThan(frame.clientWidth);
   });
+
+  // With the sidebar open, SidebarInset (a w-full flex item) could not shrink below 100% of the
+  // wrapper, so a matrix wider than the content area pushed the page wide by the sidebar's width.
+  for (const width of [1024, 1100, 1300]) {
+    authedTest(`team activity matrix scrolls inside its frame at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`/teams/${TEAM_ID}/workout/team`);
+
+      await expect(page.getByRole('rowheader', { name: /Jan Novák/ })).toBeVisible({
+        timeout: 30000,
+      });
+      await expect(page.locator('h1').first()).not.toHaveText(/Something went wrong/i);
+
+      const doc = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(
+        doc.scrollWidth,
+        `page overflows by ${doc.scrollWidth - doc.clientWidth}px`,
+      ).toBeLessThanOrEqual(doc.clientWidth + 1);
+
+      const frame = await page
+        .getByTestId('activity-matrix-frame')
+        .evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+      expect(frame.scrollWidth).toBeGreaterThan(frame.clientWidth);
+    });
+  }
 });
