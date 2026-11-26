@@ -1,14 +1,16 @@
-import type { ActivityLogApi, Team } from '@sideline/domain';
+import type { ActivityLogApi, ActivityType, Team } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { Option } from 'effect';
-import { Activity, Users } from 'lucide-react';
+import { Activity, Plus, Users } from 'lucide-react';
 import React from 'react';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { ActivityMatrix } from '~/components/organisms/ActivityMatrix.js';
+import { LogActivityForm, type LogActivityInput } from '~/components/organisms/LogActivityForm.js';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Card } from '~/components/ui/card';
 import { Label } from '~/components/ui/label';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '~/components/ui/sheet';
 import { activityTypeColors, FALLBACK_COLOR } from '~/lib/activityColors.js';
 import { toGroupOptions } from '~/lib/group-options.js';
 import { tr } from '~/lib/translations.js';
@@ -26,6 +28,14 @@ interface WorkoutTeamPageProps {
   activityTypes?: ReadonlyArray<{ name: string; emoji: Option.Option<string> }>;
   isPending?: boolean;
   currentMemberId?: string | null;
+  // Types the viewer can log; empty hides the log button
+  logActivityTypes?: ReadonlyArray<{
+    id: ActivityType.ActivityTypeId;
+    name: string;
+    emoji: Option.Option<string>;
+  }>;
+  // Resolves true once saved (the caller refreshes the matrix)
+  onLogActivity?: (input: LogActivityInput) => Promise<boolean>;
 }
 
 export function WorkoutTeamPage({
@@ -37,7 +47,12 @@ export function WorkoutTeamPage({
   activityTypes = [],
   isPending = false,
   currentMemberId = null,
+  logActivityTypes = [],
+  onLogActivity,
 }: WorkoutTeamPageProps) {
+  const [logOpen, setLogOpen] = React.useState(false);
+  const canLog =
+    currentMemberId !== null && onLogActivity !== undefined && logActivityTypes.length > 0;
   const rows = matrix?.rows ?? [];
   // Only members who logged something in the window get a row
   const activeRows = rows.filter((r) => r.cells.length > 0);
@@ -71,9 +86,37 @@ export function WorkoutTeamPage({
             ← {tr('makanicko_matrix_back')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{tr('makanicko_matrix_title')}</h1>
-        <p className='text-sm text-muted-foreground'>{tr('makanicko_matrix_subtitle')}</p>
+        <div className='flex flex-wrap items-start justify-between gap-3'>
+          <div>
+            <h1 className='text-2xl font-bold'>{tr('makanicko_matrix_title')}</h1>
+            <p className='text-sm text-muted-foreground'>{tr('makanicko_matrix_subtitle')}</p>
+          </div>
+          {canLog ? (
+            <Button size='sm' onClick={() => setLogOpen(true)}>
+              <Plus aria-hidden='true' />
+              {tr('activityLog_logActivity')}
+            </Button>
+          ) : null}
+        </div>
       </header>
+
+      {canLog ? (
+        <Sheet open={logOpen} onOpenChange={setLogOpen}>
+          <SheetContent>
+            <SheetHeader>
+              <SheetTitle>{tr('activityLog_logActivity')}</SheetTitle>
+            </SheetHeader>
+            <div className='px-4 pb-4'>
+              <LogActivityForm
+                activityTypes={logActivityTypes}
+                onCreateLog={async (input) => {
+                  if (await onLogActivity(input)) setLogOpen(false);
+                }}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+      ) : null}
 
       <div className='flex flex-wrap items-end gap-x-6 gap-y-3'>
         <div className='flex w-full flex-col gap-1.5 sm:w-64'>
