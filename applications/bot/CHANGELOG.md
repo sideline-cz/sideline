@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.58.1
+
+### 🐛 Fixes
+- provide HttpClient to handlers so /report can reach GitHub (#824)
+- late-RSVP notice says which answer the member changed from (#825)
+- keep email page indicator custom_id under Discord's 100-char cap (#827)
+
 ## 0.58.0
 
 ### 🚀 Features
