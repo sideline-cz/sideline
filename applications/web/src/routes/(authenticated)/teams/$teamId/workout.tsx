@@ -142,7 +142,7 @@ function MakanickoRoute() {
       note: Option.Option<string>;
       loggedAtDate: Option.Option<string>;
     }) => {
-      if (!memberId) return;
+      if (!memberId) return false;
       const result = await ApiClient.asEffect().pipe(
         Effect.flatMap((api) =>
           api.activityLog.createLog({
@@ -163,9 +163,9 @@ function MakanickoRoute() {
         ),
         run({ success: tr('activityLog_logged') }),
       );
-      if (Option.isSome(result)) {
-        router.invalidate();
-      }
+      if (Option.isNone(result)) return false;
+      router.invalidate();
+      return true;
     },
     [teamId, memberId, run, router],
   );

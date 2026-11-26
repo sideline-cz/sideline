@@ -11,7 +11,7 @@ class PlayerWeekActivityRow extends Schema.Class<PlayerWeekActivityRow>('PlayerW
   team_member_id: TeamMember.TeamMemberId,
   activity_type_id: ActivityType.ActivityTypeId,
   activity_type_name: Schema.String,
-  logged_at: Schema.DateTimeUtc,
+  logged_at: Schema.DateTimeUtcFromDate,
   duration_minutes: Schema.OptionFromNullOr(Schema.Int),
 }) {}
 
@@ -19,7 +19,7 @@ class TeamWeekActivityRow extends Schema.Class<TeamWeekActivityRow>('TeamWeekAct
   team_member_id: TeamMember.TeamMemberId,
   activity_type_id: ActivityType.ActivityTypeId,
   activity_type_name: Schema.String,
-  logged_at: Schema.DateTimeUtc,
+  logged_at: Schema.DateTimeUtcFromDate,
   duration_minutes: Schema.OptionFromNullOr(Schema.Int),
 }) {}
 
@@ -29,7 +29,7 @@ class ActivityCountRow extends Schema.Class<ActivityCountRow>('WeekActivityCount
 
 class NewAchievementRow extends Schema.Class<NewAchievementRow>('WeekNewAchievementRow')({
   slug: Schema.String,
-  earned_at: Schema.DateTimeUtc,
+  earned_at: Schema.DateTimeUtcFromDate,
 }) {}
 
 class TeamAchievementCountRow extends Schema.Class<TeamAchievementCountRow>(
@@ -40,7 +40,7 @@ class TeamAchievementCountRow extends Schema.Class<TeamAchievementCountRow>(
 
 class AllTimeLogRow extends Schema.Class<AllTimeLogRow>('WeekAllTimeLogRow')({
   team_member_id: TeamMember.TeamMemberId,
-  logged_at: Schema.DateTimeUtc,
+  logged_at: Schema.DateTimeUtcFromDate,
 }) {}
 
 class DeliveredCheckRow extends Schema.Class<DeliveredCheckRow>('WeekDeliveredCheckRow')({
@@ -58,8 +58,8 @@ const make = Effect.gen(function* () {
     Request: Schema.Struct({
       team_id: Team.TeamId,
       member_id: TeamMember.TeamMemberId,
-      week_start: Schema.DateTimeUtc,
-      week_end: Schema.DateTimeUtc,
+      week_start: Schema.DateTimeUtcFromDate,
+      week_end: Schema.DateTimeUtcFromDate,
     }),
     Result: PlayerWeekActivityRow,
     execute: (input) => sql`
@@ -83,8 +83,8 @@ const make = Effect.gen(function* () {
   const findPlayerActivityCountQuery = SqlSchema.findOne({
     Request: Schema.Struct({
       member_id: TeamMember.TeamMemberId,
-      start: Schema.DateTimeUtc,
-      end: Schema.DateTimeUtc,
+      start: Schema.DateTimeUtcFromDate,
+      end: Schema.DateTimeUtcFromDate,
     }),
     Result: ActivityCountRow,
     execute: (input) => sql`
@@ -99,8 +99,8 @@ const make = Effect.gen(function* () {
   const findTeamWeekActivityQuery = SqlSchema.findAll({
     Request: Schema.Struct({
       team_id: Team.TeamId,
-      week_start: Schema.DateTimeUtc,
-      week_end: Schema.DateTimeUtc,
+      week_start: Schema.DateTimeUtcFromDate,
+      week_end: Schema.DateTimeUtcFromDate,
     }),
     Result: TeamWeekActivityRow,
     execute: (input) => sql`
@@ -123,8 +123,8 @@ const make = Effect.gen(function* () {
   const findTeamActivityCountQuery = SqlSchema.findOne({
     Request: Schema.Struct({
       team_id: Team.TeamId,
-      start: Schema.DateTimeUtc,
-      end: Schema.DateTimeUtc,
+      start: Schema.DateTimeUtcFromDate,
+      end: Schema.DateTimeUtcFromDate,
     }),
     Result: ActivityCountRow,
     execute: (input) => sql`
@@ -140,8 +140,8 @@ const make = Effect.gen(function* () {
   const findNewAchievementsQuery = SqlSchema.findAll({
     Request: Schema.Struct({
       team_id: Team.TeamId,
-      start: Schema.DateTimeUtc,
-      end: Schema.DateTimeUtc,
+      start: Schema.DateTimeUtcFromDate,
+      end: Schema.DateTimeUtcFromDate,
     }),
     Result: NewAchievementRow,
     execute: (input) => sql`
@@ -158,8 +158,8 @@ const make = Effect.gen(function* () {
   const findTeamAchievementCountQuery = SqlSchema.findOne({
     Request: Schema.Struct({
       team_id: Team.TeamId,
-      start: Schema.DateTimeUtc,
-      end: Schema.DateTimeUtc,
+      start: Schema.DateTimeUtcFromDate,
+      end: Schema.DateTimeUtcFromDate,
     }),
     Result: TeamAchievementCountRow,
     execute: (input) => sql`
@@ -310,8 +310,8 @@ class SyncEventRow extends Schema.Class<SyncEventRow>('WeeklySyncEventRow')({
 const InsertSyncEventInput = Schema.Struct({
   team_id: Team.TeamId,
   channel_id: Discord.Snowflake,
-  week_start: Schema.DateTimeUtc,
-  week_end: Schema.DateTimeUtc,
+  week_start: Schema.DateTimeUtcFromDate,
+  week_end: Schema.DateTimeUtcFromDate,
   payload: Schema.Unknown,
 });
 
@@ -359,7 +359,7 @@ const makeSyncEvents = Effect.gen(function* () {
   const markProcessedQuery = SqlSchema.void({
     Request: Schema.Struct({
       id: Schema.String,
-      delivered_at: Schema.OptionFromNullOr(Schema.DateTimeUtc),
+      delivered_at: Schema.OptionFromNullOr(Schema.DateTimeUtcFromDate),
     }),
     execute: (input) => sql`
       UPDATE weekly_summary_sync_events

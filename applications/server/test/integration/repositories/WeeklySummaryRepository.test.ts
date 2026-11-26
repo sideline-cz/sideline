@@ -1,108 +1,63 @@
-// TDD mode — integration tests written before implementation.
-// These tests require a real PostgreSQL database (testcontainers).
-// All cases are marked .skip so they do not break CI until:
-//   1. WeeklySummaryRepository is implemented in server/src/repositories/
-//   2. The weekly_summary_sync_events (or activity_logs query) migration is run
-//
-// Future devs: remove .skip and run with `pnpm test:integration` once
-// WeeklySummaryRepository.Default is available.
-
 import { describe, expect, it } from '@effect/vitest';
-import type { Team, TeamMember } from '@sideline/domain';
-import { DateTime, Effect } from 'effect';
+import { DateTime, Effect, Layer } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
+import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamsRepository } from '~/repositories/TeamsRepository.js';
+import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { WeeklySummaryRepository } from '~/repositories/WeeklySummaryRepository.js';
+import { createTeam, createTeamMember, createUser, nextDiscordId } from '../bankSyncFixtures.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
-const TEST_TEAM_ID = '00000000-0000-0000-0000-000000000010' as Team.TeamId;
-const TEST_MEMBER_ID = '00000000-0000-0000-0000-000000000020' as TeamMember.TeamMemberId;
+const TestLayer = Layer.mergeAll(
+  WeeklySummaryRepository.Default,
+  UsersRepository.Default,
+  TeamsRepository.Default,
+  TeamMembersRepository.Default,
+).pipe(Layer.provideMerge(TestPgClient));
 
 const WEEK_START = DateTime.makeUnsafe('2026-01-04T23:00:00.000Z');
 const WEEK_END = DateTime.makeUnsafe('2026-01-11T22:59:59.999Z');
 
-// Test layer — skip until WeeklySummaryRepository.Default exists:
-// const TestLayer = WeeklySummaryRepository.Default.pipe(Layer.provideMerge(TestPgClient));
-// Remove the .skip below and replace Effect.gen bodies with TestLayer once implemented.
-
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
 
+// Seeds one member with logs inside and outside the week; pg hands timestamptz back as a JS Date
+const seed = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    INSERT INTO activity_types (team_id, name, slug)
+    VALUES (NULL, 'Gym', 'gym')
+    ON CONFLICT (slug) WHERE team_id IS NULL DO NOTHING
+  `;
+  const user = yield* createUser('weekly');
+  const team = yield* createTeam(nextDiscordId(), user.id);
+  const member = yield* createTeamMember(team.id, user.id);
+  for (const at of ['2026-01-06T10:00:00Z', '2026-01-04T21:00:00Z', '2026-01-12T00:00:00Z']) {
+    yield* sql`
+      INSERT INTO activity_logs (team_member_id, activity_type_id, logged_at, source)
+      SELECT ${member.id}, at.id, ${at}::timestamptz, 'manual'
+      FROM activity_types at WHERE at.slug = 'gym' AND at.team_id IS NULL
+    `;
+  }
+  return { teamId: team.id, memberId: member.id };
+});
+
 describe('WeeklySummaryRepository — integration', () => {
-  it.skip('findPlayerWeekActivity returns only logs within [start, end] in team timezone', () =>
+  it.effect('decodes the logs of a non-empty week', () =>
     Effect.gen(function* () {
-      // Setup: insert activity_logs for TEST_MEMBER_ID
-      //   - one at 2026-01-06T10:00:00Z (inside week)
-      //   - one at 2026-01-04T10:00:00Z (inside week — Monday 11:00 Prague)
-      //   - one at 2026-01-04T21:00:00Z (before Monday 00:00 Prague = outside week)
-      //   - one at 2026-01-12T00:00:00Z (after week end — outside)
-
+      const { teamId, memberId } = yield* seed;
       const repo = yield* WeeklySummaryRepository.asEffect();
 
-      const inside = yield* repo.findPlayerWeekActivity(
-        TEST_TEAM_ID,
-        TEST_MEMBER_ID,
-        WEEK_START,
-        WEEK_END,
-      );
+      const player = yield* repo.findPlayerWeekActivity(teamId, memberId, WEEK_START, WEEK_END);
+      expect(player.map((r) => DateTime.formatIso(r.logged_at))).toEqual([
+        '2026-01-06T10:00:00.000Z',
+      ]);
 
-      expect(inside).toHaveLength(2); // Only the two logs within the range
-      for (const row of inside) {
-        expect(row.logged_at.epochMilliseconds).toBeGreaterThanOrEqual(
-          WEEK_START.epochMilliseconds,
-        );
-        expect(row.logged_at.epochMilliseconds).toBeLessThanOrEqual(WEEK_END.epochMilliseconds);
-      }
-    }));
+      const team = yield* repo.findTeamWeekActivity(teamId, WEEK_START, WEEK_END);
+      expect(team).toHaveLength(1);
 
-  it.skip('findPlayerActivityCountInRange respects half-open interval', () =>
-    Effect.gen(function* () {
-      // Setup: insert 3 logs for TEST_MEMBER_ID, 2 inside [start, end), 1 exactly at end
-      const repo = yield* WeeklySummaryRepository.asEffect();
-
-      const count = yield* repo.findPlayerActivityCountInRange(
-        TEST_MEMBER_ID,
-        WEEK_START,
-        WEEK_END,
-      );
-
-      expect(count).toBeGreaterThanOrEqual(0);
-    }));
-
-  it.skip('findTeamWeekActivity orders by total_activities DESC', () =>
-    Effect.gen(function* () {
-      // Setup: member A has 3 logs, member B has 5 logs this week
-      const repo = yield* WeeklySummaryRepository.asEffect();
-
-      const rows = yield* repo.findTeamWeekActivity(TEST_TEAM_ID, WEEK_START, WEEK_END);
-
-      // Expect member B before member A
-      if (rows.length >= 2) {
-        const firstCount = rows.filter(
-          (r: any) => r.team_member_id === rows[0].team_member_id,
-        ).length;
-        const secondCount = rows.filter(
-          (r: any) => r.team_member_id === rows[1].team_member_id,
-        ).length;
-        expect(firstCount).toBeGreaterThanOrEqual(secondCount);
-      }
-    }));
-
-  it.skip('findNewAchievementsInRange returns only achievements earned within window', () =>
-    Effect.gen(function* () {
-      // Setup: insert earned achievements
-      //   - slug 'first-gym' earned 2026-01-06 (inside)
-      //   - slug 'veteran' earned 2025-12-01 (before week)
-      const repo = yield* WeeklySummaryRepository.asEffect();
-
-      const achievements = yield* repo.findNewAchievementsInRange(
-        TEST_TEAM_ID,
-        WEEK_START,
-        WEEK_END,
-      );
-
-      expect(achievements.length).toBeGreaterThanOrEqual(0);
-      for (const a of achievements) {
-        expect(a.earned_at.epochMilliseconds).toBeGreaterThanOrEqual(WEEK_START.epochMilliseconds);
-        expect(a.earned_at.epochMilliseconds).toBeLessThanOrEqual(WEEK_END.epochMilliseconds);
-      }
-    }));
+      const allTime = yield* repo.findAllTimeLogsForMember(memberId);
+      expect(allTime).toHaveLength(3);
+    }).pipe(Effect.provide(TestLayer)),
+  );
 });
