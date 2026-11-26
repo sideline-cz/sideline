@@ -108,4 +108,19 @@ describe('ActivityMatrix', () => {
     rerender(<ActivityMatrix teamId={teamId} days={days} rows={many.slice(0, 2)} />);
     expect(container.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
   });
+
+  it("pins the viewer's own row first and labels it", () => {
+    render(
+      <ActivityMatrix
+        teamId={'00000000-0000-0000-0000-0000000000aa' as Team.TeamId}
+        days={days}
+        rows={rows}
+        currentMemberId='00000000-0000-0000-0000-000000000002'
+      />,
+    );
+    const headers = screen.getAllByRole('rowheader');
+    expect(headers[0]?.textContent).toContain('Eva Svobodová');
+    expect(headers[0]?.textContent).toContain('makanicko_matrix_you');
+    expect(headers[1]?.textContent).not.toContain('makanicko_matrix_you');
+  });
 });

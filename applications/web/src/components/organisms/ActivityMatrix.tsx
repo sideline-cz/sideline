@@ -17,6 +17,8 @@ interface ActivityMatrixProps {
   // Activity type name -> dot colour class
   colors?: ReadonlyMap<string, string>;
   busy?: boolean;
+  // The viewer's own row is pinned first and highlighted
+  currentMemberId?: string | null;
 }
 
 // Day keys are calendar dates: read them at UTC noon so no zone shifts the day.
@@ -31,10 +33,15 @@ const sumMinutes = (entries: ReadonlyArray<ActivityLogApi.ActivityMatrixEntry>) 
 export function ActivityMatrix({
   teamId,
   days,
-  rows,
+  rows: rowsIn,
   colors = new Map(),
   busy = false,
+  currentMemberId = null,
 }: ActivityMatrixProps) {
+  const rows = React.useMemo(() => {
+    const own = rowsIn.find((r) => r.memberId === currentMemberId);
+    return own === undefined ? rowsIn : [own, ...rowsIn.filter((r) => r !== own)];
+  }, [rowsIn, currentMemberId]);
   const locale = getLocale();
   const fmt = React.useMemo(
     () => ({
@@ -179,11 +186,16 @@ export function ActivityMatrix({
           {rows.map((row, r) => {
             const cells = cellsByRow[r] ?? new Map();
             const activeDays = days.filter((d) => cells.has(d)).length;
+            const isOwn = row.memberId === currentMemberId;
             return (
-              <tr key={row.memberId}>
+              <tr key={row.memberId} className={cn(isOwn && 'bg-primary/10')}>
                 <th
                   scope='row'
-                  className='sticky left-0 z-10 w-(--name-w) bg-card px-3 py-1 text-left font-normal shadow-[1px_0_0_var(--border)]'
+                  className={cn(
+                    'sticky left-0 z-10 w-(--name-w) bg-card px-3 py-1 text-left font-normal shadow-[1px_0_0_var(--border)]',
+                    // Sticky cell must stay opaque: mix the row tint into the card colour
+                    isOwn && 'bg-[color-mix(in_oklab,var(--primary)_10%,var(--card))]',
+                  )}
                 >
                   <Link
                     to='/teams/$teamId/workout/members/$memberId'
@@ -193,6 +205,11 @@ export function ActivityMatrix({
                   >
                     {row.displayName}
                   </Link>
+                  {isOwn ? (
+                    <span className='mr-1 text-xs font-medium text-primary'>
+                      {tr('makanicko_matrix_you')}
+                    </span>
+                  ) : null}
                   <span aria-hidden='true' className='text-xs text-muted-foreground tabular-nums'>
                     {tr('makanicko_matrix_activeDays', { count: activeDays })}
                   </span>
