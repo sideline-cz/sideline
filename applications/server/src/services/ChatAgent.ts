@@ -32,6 +32,7 @@ import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -208,6 +209,7 @@ interface AgentDeps {
   readonly teams: ServiceMap.Service.Shape<typeof TeamsRepository>;
   readonly proposals: ServiceMap.Service.Shape<typeof AiActionProposalsRepository>;
   readonly fees: ServiceMap.Service.Shape<typeof FeesRepository>;
+  readonly feeAssignments: ServiceMap.Service.Shape<typeof FeeAssignmentsRepository>;
   readonly financeOverview: ServiceMap.Service.Shape<typeof FinanceOverviewRepository>;
   readonly rsvps: ServiceMap.Service.Shape<typeof EventRsvpsRepository>;
   readonly attendance: ServiceMap.Service.Shape<typeof EventAttendanceRepository>;
@@ -689,6 +691,9 @@ const dispatchProposeCall = (
     Effect.provideService(GroupsRepository, deps.groups),
     Effect.provideService(TrainingTypesRepository, deps.trainingTypes),
     Effect.provideService(AiActionProposalsRepository, deps.proposals),
+    Effect.provideService(FeesRepository, deps.fees),
+    Effect.provideService(FeeAssignmentsRepository, deps.feeAssignments),
+    Effect.provideService(MembershipPlansRepository, deps.membershipPlans),
     Effect.provideService(TeamChannelsRepository, deps.discord.teamChannels),
     Effect.provideService(TeamChannelAccessRepository, deps.discord.channelAccess),
     Effect.provideService(TeamSettingsRepository, deps.discord.teamSettings),
@@ -994,6 +999,7 @@ const make: Effect.Effect<
   | TeamsRepository
   | AiActionProposalsRepository
   | FeesRepository
+  | FeeAssignmentsRepository
   | FinanceOverviewRepository
   | EventRsvpsRepository
   | EventAttendanceRepository
@@ -1019,6 +1025,7 @@ const make: Effect.Effect<
   Effect.bind('teams', () => TeamsRepository.asEffect()),
   Effect.bind('proposals', () => AiActionProposalsRepository.asEffect()),
   Effect.bind('fees', () => FeesRepository.asEffect()),
+  Effect.bind('feeAssignments', () => FeeAssignmentsRepository.asEffect()),
   Effect.bind('financeOverview', () => FinanceOverviewRepository.asEffect()),
   Effect.bind('rsvps', () => EventRsvpsRepository.asEffect()),
   Effect.bind('attendance', () => EventAttendanceRepository.asEffect()),

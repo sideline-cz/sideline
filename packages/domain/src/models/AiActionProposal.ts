@@ -26,5 +26,8 @@ export const AiActionName = Schema.Literals([
   'create_roster',
   'add_roster_member',
   'remove_roster_member',
+  'record_payment',
+  'create_expense',
+  'assign_membership_plan',
 ]);
 export type AiActionName = typeof AiActionName.Type;

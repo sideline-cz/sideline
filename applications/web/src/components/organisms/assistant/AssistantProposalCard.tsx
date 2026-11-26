@@ -19,6 +19,7 @@
  * server's `expires_at > now()` is the only gate that matters.
  */
 import { AiChatApi, type EventApi, type EventRsvp, Team } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { useRouter } from '@tanstack/react-router';
 import { Cause, DateTime, Effect, Schema } from 'effect';
 import { CircleCheck, Clock, Loader2, OctagonX, Send, TriangleAlert } from 'lucide-react';
@@ -37,6 +38,9 @@ import {
 } from '~/components/ui/card.js';
 import { useFormatDate } from '~/hooks/useFormatDate.js';
 import { eventTypeLabels } from '~/lib/event-labels.js';
+import { expenseCategoryLabels } from '~/lib/finance/expenseCategories.js';
+import { formatMoney } from '~/lib/finance/formatMoney.js';
+import { paymentMethodLabel } from '~/lib/finance/paymentMethodLabels.js';
 import { ApiClient, SilentClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
@@ -89,6 +93,14 @@ const proposalFieldLabels: Record<AiChatApi.ProposalFieldKey, () => string> = {
   message: () => tr('assistant_proposal_field_message'),
   member: () => tr('assistant_proposal_field_member'),
   roster: () => tr('assistant_proposal_field_roster'),
+  fee: () => tr('assistant_proposal_field_fee'),
+  amount: () => tr('assistant_proposal_field_amount'),
+  date: () => tr('assistant_proposal_field_date'),
+  method: () => tr('assistant_proposal_field_method'),
+  note: () => tr('assistant_proposal_field_note'),
+  category: () => tr('assistant_proposal_field_category'),
+  plan: () => tr('assistant_proposal_field_plan'),
+  pricePerTraining: () => tr('assistant_proposal_field_pricePerTraining'),
 };
 
 const accessLevelLabels: Record<AiChatApi.ProposalAccessLevel, () => string> = {
@@ -120,6 +132,9 @@ const proposalTitles: Record<AiChatApi.Proposal['action'], () => string> = {
   create_roster: () => tr('assistant_proposal_createRoster_title'),
   add_roster_member: () => tr('assistant_proposal_addRosterMember_title'),
   remove_roster_member: () => tr('assistant_proposal_removeRosterMember_title'),
+  record_payment: () => tr('assistant_proposal_recordPayment_title'),
+  create_expense: () => tr('assistant_proposal_createExpense_title'),
+  assign_membership_plan: () => tr('assistant_proposal_assignMembershipPlan_title'),
 };
 const proposalDescriptions: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_description'),
@@ -136,6 +151,9 @@ const proposalDescriptions: Record<AiChatApi.Proposal['action'], () => string> =
   create_roster: () => tr('assistant_proposal_createRoster_description'),
   add_roster_member: () => tr('assistant_proposal_addRosterMember_description'),
   remove_roster_member: () => tr('assistant_proposal_removeRosterMember_description'),
+  record_payment: () => tr('assistant_proposal_recordPayment_description'),
+  create_expense: () => tr('assistant_proposal_createExpense_description'),
+  assign_membership_plan: () => tr('assistant_proposal_assignMembershipPlan_description'),
 };
 const proposalConfirmLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirm'),
@@ -152,6 +170,9 @@ const proposalConfirmLabels: Record<AiChatApi.Proposal['action'], () => string> 
   create_roster: () => tr('assistant_proposal_createRoster_confirm'),
   add_roster_member: () => tr('assistant_proposal_addRosterMember_confirm'),
   remove_roster_member: () => tr('assistant_proposal_removeRosterMember_confirm'),
+  record_payment: () => tr('assistant_proposal_recordPayment_confirm'),
+  create_expense: () => tr('assistant_proposal_createExpense_confirm'),
+  assign_membership_plan: () => tr('assistant_proposal_assignMembershipPlan_confirm'),
 };
 const proposalSuccessLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirmed'),
@@ -168,6 +189,9 @@ const proposalSuccessLabels: Record<AiChatApi.Proposal['action'], () => string> 
   create_roster: () => tr('assistant_proposal_createRoster_confirmed'),
   add_roster_member: () => tr('assistant_proposal_addRosterMember_confirmed'),
   remove_roster_member: () => tr('assistant_proposal_removeRosterMember_confirmed'),
+  record_payment: () => tr('assistant_proposal_recordPayment_confirmed'),
+  create_expense: () => tr('assistant_proposal_createExpense_confirmed'),
+  assign_membership_plan: () => tr('assistant_proposal_assignMembershipPlan_confirmed'),
 };
 
 const discordChannelActions: ReadonlySet<AiChatApi.Proposal['action']> = new Set([
@@ -220,6 +244,7 @@ function classifyProposalFailure(squashed: unknown): ProposalErrorReason {
 }
 
 function renderProposalFieldValue(
+  key: AiChatApi.ProposalFieldKey,
   value: AiChatApi.ProposalFieldValue,
   formatDateTime: (date: Date) => string,
 ): React.ReactNode {
@@ -230,11 +255,14 @@ function renderProposalFieldValue(
       return formatDateTime(new Date(Number(DateTime.toEpochMillis(value.value))));
     case 'date':
       // Rendered VERBATIM — never parsed into a `Date`. It is already a team-local calendar
-      // date; parsing it re-introduces an off-by-one-day bug on the client.
-      return (
+      // date; parsing it re-introduces an off-by-one-day bug on the client. Only an event's
+      // start/end is "all day"; a payment or expense date is just a date.
+      return key === 'start' || key === 'end' ? (
         <>
           {value.value} <Badge variant='secondary'>{tr('event_allDayLabel')}</Badge>
         </>
+      ) : (
+        value.value
       );
     case 'eventType':
       return eventTypeLabels[value.value]();
@@ -242,6 +270,14 @@ function renderProposalFieldValue(
       return accessLevelLabels[value.value]();
     case 'rsvpResponse':
       return rsvpResponseLabels[value.value]();
+    case 'money':
+      return formatMoney(value.value.amountMinor, value.value.currency, getLocale());
+    case 'paymentMethod':
+      return paymentMethodLabel(value.value);
+    case 'expenseCategory':
+      return expenseCategoryLabels[value.value]();
+    case 'planName':
+      return value.value ?? tr('membershipPlan_defaultName');
     case 'none':
       // A visible row, never an omitted one — `memberGroup: none` means everyone on the team
       // sees this event, a visibility decision the user must be able to verify before confirming.
@@ -358,7 +394,7 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
                     {proposalFieldLabels[field.key]()}
                   </dt>
                   <dd className='break-words'>
-                    {renderProposalFieldValue(field.value, formatDateTime)}
+                    {renderProposalFieldValue(field.key, field.value, formatDateTime)}
                   </dd>
                 </React.Fragment>
               ))}

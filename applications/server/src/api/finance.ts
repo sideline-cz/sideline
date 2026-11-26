@@ -21,6 +21,7 @@ import {
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentsRepository, type PaymentViewRow } from '~/repositories/PaymentsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { recordPaymentForMemberTx } from '~/services/FinanceWrites.js';
 import { feeGroupKey, planFeeImport } from '~/utils/planFeeImport.js';
 
 const forbidden = new FinanceApi.FinanceForbidden();
@@ -708,62 +709,15 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            Effect.tap(({ membership }) =>
-              requirePermission(membership, 'finance:record_payments', forbidden),
+            Effect.flatMap(({ membership }) =>
+              recordPaymentForMemberTx({ teamId, membership, feeId, assignmentId, payload }),
             ),
-            Effect.bind('fee', () =>
-              fees.findById(feeId).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(feeNotFound),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
-            ),
-            Effect.tap(({ fee }) =>
-              fee.team_id !== teamId ? Effect.fail(feeNotFound) : Effect.void,
-            ),
-            Effect.tap(({ fee }) =>
-              Option.isSome(fee.archived_at) ? Effect.fail(feeArchived) : Effect.void,
-            ),
-            Effect.bind('assignment', () =>
-              assignments.findById(assignmentId).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(assignmentNotFound),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
-            ),
-            Effect.tap(({ assignment }) =>
-              assignment.fee_id !== feeId ? Effect.fail(assignmentNotFound) : Effect.void,
-            ),
-            Effect.tap(() =>
-              payload.amountMinor === 0 ? Effect.fail(invalidAmount) : Effect.void,
-            ),
-            Effect.bind('payment', ({ currentUser, assignment }) =>
-              payments.insert({
-                feeAssignmentId: assignmentId,
-                teamMemberId: assignment.team_member_id,
-                amountMinor: payload.amountMinor,
-                method: payload.method,
-                paidAt: payload.paidAt,
-                note: payload.note,
-                recordedByUserId: currentUser.id,
-              }),
-            ),
-            Effect.map(({ payment }) =>
+            Effect.map((payment) =>
               toPaymentView({
                 ...payment,
                 member_name: Option.none(),
                 recorder_name: Option.none(),
               }),
-            ),
-            Effect.catchTag(
-              'NoSuchElementError',
-              LogicError.withMessage(() => 'Failed recording payment — no row returned'),
             ),
           ),
         )

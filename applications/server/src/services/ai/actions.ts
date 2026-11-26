@@ -16,7 +16,8 @@
  * Actions: `create_event`; `update_event`, `cancel_event` and `mark_attendance`, whose guards
  * live in `services/EventWrites.ts` next to the HTTP handlers'; `set_my_rsvp`, the caller's own
  * RSVP only (`services/RsvpWrites.ts`); six group and roster actions
- * (`services/GroupRosterWrites.ts`), which queue a Discord sync event; and three Discord actions that only QUEUE a change for the bot
+ * (`services/GroupRosterWrites.ts`), which queue a Discord sync event; three finance actions
+ * (`record_payment`, `create_expense`, `assign_membership_plan`, `services/FinanceWrites.ts`); and three Discord actions that only QUEUE a change for the bot
  * (`create_discord_channel`, `set_discord_channel_access`, `archive_discord_channel`). The
  * Discord tools take NAMES, not ids: no read tool gives the model a channel or group id.
  *
@@ -34,7 +35,12 @@ import {
   type EventApi,
   type EventAttendanceApi,
   EventRsvp,
+  Expense,
+  Fee,
+  FeeAssignment,
   GroupModel,
+  MembershipPlan,
+  Payment,
   type Role,
   RosterModel,
   type Team,
@@ -45,8 +51,10 @@ import {
 } from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
 import { DateTime, Effect, Option, Result, Schema, type ServiceMap } from 'effect';
-import type { SqlClient } from 'effect/unstable/sql';
+import { SqlClient } from 'effect/unstable/sql';
+import type { BankTransactionsRepository } from '~/repositories/BankTransactionsRepository.js';
 import type { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
+import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import type { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
@@ -56,7 +64,12 @@ import type {
   EventsRepository,
   EventWithDetails,
 } from '~/repositories/EventsRepository.js';
+import type { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
+import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
+import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
+import type { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
@@ -78,6 +91,11 @@ import {
   confirmAttendanceForMember,
   updateEventForMemberTx,
 } from '~/services/EventWrites.js';
+import {
+  assignMembershipPlanForMemberTx,
+  createExpenseForMemberTx,
+  recordPaymentForMemberTx,
+} from '~/services/FinanceWrites.js';
 import {
   addGroupMemberForMemberTx,
   addRosterMemberForMemberTx,
@@ -1567,6 +1585,323 @@ const confirmRosterMember = (adding: boolean) => (payloadJson: string, ctx: Conf
   );
 
 // ---------------------------------------------------------------------------
+// Finance actions. Every write lives in `services/FinanceWrites.ts`, shared with the HTTP
+// handlers. The stored payload carries the exact amount, currency and date the card showed —
+// confirm writes those, never a re-derived value, and the model never sees the payload. Confirm is
+// idempotent through the proposal claim: `ai-chat.ts` claims the row under `FOR UPDATE` in the
+// same transaction as the write, so a second Accept answers 409 and writes nothing.
+// ---------------------------------------------------------------------------
+
+const AmountMinorParam = Schema.Int.pipe(
+  Schema.check(Schema.isBetween({ minimum: 1, maximum: 1_000_000_000 })),
+);
+const CurrencyParam = Schema.String.pipe(Schema.check(Schema.isPattern(/^[A-Z]{3}$/)));
+const FeeNameParam = Schema.String.pipe(
+  Schema.check(Schema.isMinLength(1)),
+  Schema.check(Schema.isMaxLength(200)),
+);
+const NoteParam = Schema.String.pipe(Schema.check(Schema.isMaxLength(500)));
+
+const moneyField = (amountMinor: number, currency: string): AiChatApi.ProposalField =>
+  new AiChatApi.ProposalField({
+    key: 'amount',
+    value: { type: 'money', value: { amountMinor, currency } },
+  });
+
+const dateField = (value: string): AiChatApi.ProposalField =>
+  new AiChatApi.ProposalField({ key: 'date', value: { type: 'date', value } });
+
+/** Confirm-time: a lost permission is a 403, any other drift (row gone, fee archived) is `stale`. */
+const financeConfirmFailure = (e: {
+  readonly _tag: string;
+}): Effect.Effect<never, AiChatApi.AiProposalNotFound | AiChatApi.AiProposalActionForbidden> =>
+  e._tag === 'FinanceForbidden' ||
+  e._tag === 'ExpenseForbidden' ||
+  e._tag === 'MembershipPlanForbidden'
+    ? Effect.fail(new AiChatApi.AiProposalActionForbidden())
+    : stale(e._tag);
+
+// --- record_payment ------------------------------------------------------------
+
+const RecordPaymentArgs = Schema.Struct({
+  member: NameParam,
+  fee: FeeNameParam,
+  amountMinor: AmountMinorParam,
+  method: Payment.ManualPaymentMethod,
+  paidOn: DateOnly,
+  note: Schema.optionalKey(NoteParam),
+});
+
+const RecordPaymentPayload = Schema.Struct({
+  feeId: Fee.FeeId,
+  assignmentId: FeeAssignment.FeeAssignmentId,
+  amountMinor: Schema.Int,
+  currency: Schema.String,
+  method: Payment.ManualPaymentMethod,
+  paidOn: Schema.String,
+  note: Schema.optionalKey(Schema.String),
+});
+
+const proposeRecordPayment = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(RecordPaymentArgs, rawArgs)),
+    // Inactive members still owe what they owe.
+    Effect.bind('member', ({ args }) => resolveMemberByName(ctx.teamId, args.member, true)),
+    Effect.bind('fee', ({ args }) =>
+      FeesRepository.asEffect().pipe(
+        // Active fees only: the write refuses an archived one.
+        Effect.flatMap((fees) => fees.listByTeam(ctx.teamId)),
+        Effect.flatMap((rows) =>
+          exactlyOne(
+            matchByName(rows, args.fee),
+            'fee: no active fee with that name',
+            'fee: several fees match that name; ask the user which one they mean',
+          ),
+        ),
+      ),
+    ),
+    Effect.bind('assignment', ({ fee, member }) =>
+      FeeAssignmentsRepository.asEffect().pipe(
+        Effect.flatMap((assignments) => assignments.findByFeeAndMember(fee.id, member.id)),
+        Effect.flatMap((found) =>
+          someOr(found, () => Effect.fail('member: that fee is not assigned to this member')),
+        ),
+      ),
+    ),
+    Effect.map(({ args, member, fee, assignment }) => ({
+      payloadJson: JSON.stringify(
+        Schema.encodeSync(RecordPaymentPayload)({
+          feeId: fee.id,
+          assignmentId: assignment.id,
+          amountMinor: args.amountMinor,
+          currency: fee.currency,
+          method: args.method,
+          paidOn: args.paidOn,
+          ...(args.note === undefined ? {} : { note: args.note }),
+        }),
+      ),
+      summary: [
+        textField('member', member.name),
+        textField('fee', fee.name),
+        moneyField(args.amountMinor, fee.currency),
+        dateField(args.paidOn),
+        new AiChatApi.ProposalField({
+          key: 'method',
+          value: { type: 'paymentMethod', value: args.method },
+        }),
+        optionalTextField('note', Option.fromUndefinedOr(args.note)),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmRecordPayment = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(RecordPaymentPayload, payloadJson).pipe(
+    // The card promised this currency. A fee whose currency was edited since would book the same
+    // number in another currency: refuse instead. `FOR SHARE` holds the edit off until commit;
+    // `fees` is the outermost leg of the money lock order (AGENTS.md "Bank Sync"), and the payment
+    // insert below only takes `fee_assignments` after it.
+    Effect.tap((payload) =>
+      SqlClient.SqlClient.asEffect().pipe(
+        Effect.flatMap(
+          (sql) => sql<{ readonly currency: string }>`
+            SELECT currency FROM fees WHERE id = ${payload.feeId} FOR SHARE
+          `,
+        ),
+        catchSqlErrors,
+        Effect.flatMap(([fee]) =>
+          fee?.currency === payload.currency ? Effect.void : stale('fee currency changed'),
+        ),
+      ),
+    ),
+    Effect.flatMap((payload) =>
+      recordPaymentForMemberTx({
+        ...ctx,
+        feeId: payload.feeId,
+        assignmentId: payload.assignmentId,
+        payload: {
+          amountMinor: Schema.decodeSync(Fee.AmountMinor)(payload.amountMinor),
+          method: payload.method,
+          paidAt: dateOnlyToUtcNoon(payload.paidOn),
+          note: Option.fromUndefinedOr(payload.note),
+        },
+      }),
+    ),
+    Effect.as<ConfirmResult>({ kind: 'applied' }),
+    Effect.catchTags({
+      FinanceForbidden: financeConfirmFailure,
+      FeeNotFound: financeConfirmFailure,
+      FeeArchived: financeConfirmFailure,
+      AssignmentNotFound: financeConfirmFailure,
+      InvalidAmount: financeConfirmFailure,
+    }),
+  );
+
+// --- create_expense ------------------------------------------------------------
+
+const CreateExpenseArgs = Schema.Struct({
+  amountMinor: AmountMinorParam,
+  currency: CurrencyParam,
+  spentOn: DateOnly,
+  category: Expense.ExpenseCategory,
+  description: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(500)),
+  ),
+});
+
+const proposeCreateExpense = (rawArgs: unknown, _ctx: ToolContext) =>
+  decodeArgs(CreateExpenseArgs, rawArgs).pipe(
+    Effect.map((args) => ({
+      payloadJson: JSON.stringify(Schema.encodeSync(CreateExpenseArgs)(args)),
+      summary: [
+        moneyField(args.amountMinor, args.currency),
+        dateField(args.spentOn),
+        new AiChatApi.ProposalField({
+          key: 'category',
+          value: { type: 'expenseCategory', value: args.category },
+        }),
+        textField('description', args.description),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmCreateExpense = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(CreateExpenseArgs, payloadJson).pipe(
+    Effect.flatMap((args) =>
+      createExpenseForMemberTx({
+        ...ctx,
+        payload: {
+          amountMinor: Schema.decodeSync(Fee.AmountMinor)(args.amountMinor),
+          currency: Schema.decodeSync(Fee.CurrencyCode)(args.currency),
+          spentAt: dateOnlyToUtcNoon(args.spentOn),
+          category: args.category,
+          description: args.description,
+          bankTransactionId: Option.none(),
+        },
+      }),
+    ),
+    Effect.as<ConfirmResult>({ kind: 'applied' }),
+    Effect.catchTags({
+      ExpenseForbidden: financeConfirmFailure,
+      InvalidExpenseAmount: financeConfirmFailure,
+      InvalidBankTransactionForExpense: financeConfirmFailure,
+      BankTransactionAlreadyExpensed: financeConfirmFailure,
+    }),
+  );
+
+// --- assign_membership_plan ------------------------------------------------------
+
+const AssignPlanArgs = Schema.Struct({ member: NameParam, plan: NameParam });
+
+// The prices are what the card showed; confirm refuses if the plan was repriced since.
+const AssignPlanPayload = Schema.Struct({
+  memberId: TeamMember.TeamMemberId,
+  planId: MembershipPlan.MembershipPlanId,
+  priceMinor: Schema.Int,
+  pricePerTrainingMinor: Schema.Int,
+  currency: Schema.String,
+});
+
+/** The seeded default plan has no name (the web labels it); the model passes `default` for it. */
+const resolvePlanByName = (teamId: Team.TeamId, name: string) =>
+  MembershipPlansRepository.asEffect().pipe(
+    Effect.flatMap((plans) => plans.findMembershipPlansByTeamId(teamId)),
+    Effect.flatMap((rows) => {
+      const named = rows.flatMap((row) =>
+        Option.isSome(row.name) ? [{ row, name: row.name.value }] : [],
+      );
+      const matches = matchByName(named, name).map((m) => m.row);
+      const unnamedDefault = rows.filter((r) => Option.isNone(r.name) && r.is_default);
+      return exactlyOne(
+        matches.length === 0 && name.toLowerCase() === 'default' ? unnamedDefault : matches,
+        'plan: no active membership plan with that name',
+        'plan: several plans match that name; ask the user which one they mean',
+      );
+    }),
+  );
+
+const proposeAssignPlan = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(AssignPlanArgs, rawArgs)),
+    // The write only reaches active members.
+    Effect.bind('member', ({ args }) => resolveMemberByName(ctx.teamId, args.member, false)),
+    Effect.bind('plan', ({ args }) => resolvePlanByName(ctx.teamId, args.plan)),
+    Effect.map(({ member, plan }) => ({
+      payloadJson: JSON.stringify(
+        Schema.encodeSync(AssignPlanPayload)({
+          memberId: member.id,
+          planId: plan.id,
+          priceMinor: plan.price_minor,
+          pricePerTrainingMinor: plan.price_per_training_minor,
+          currency: plan.currency,
+        }),
+      ),
+      summary: [
+        textField('member', member.name),
+        new AiChatApi.ProposalField({
+          key: 'plan',
+          value: { type: 'planName', value: Option.getOrNull(plan.name) },
+        }),
+        moneyField(plan.price_minor, plan.currency),
+        new AiChatApi.ProposalField({
+          key: 'pricePerTraining',
+          value: {
+            type: 'money',
+            value: { amountMinor: plan.price_per_training_minor, currency: plan.currency },
+          },
+        }),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmAssignPlan = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(AssignPlanPayload, payloadJson).pipe(
+    // `FOR SHARE` holds a repricing off until commit. `membership_plans` before `fees` (reached
+    // through the plan-change trigger) is the order `setDefaultMembershipPlan` already uses.
+    Effect.tap((payload) =>
+      SqlClient.SqlClient.asEffect().pipe(
+        Effect.flatMap(
+          (sql) => sql<{
+            readonly price_minor: number;
+            readonly price_per_training_minor: number;
+            readonly currency: string;
+          }>`
+            SELECT price_minor::int AS price_minor,
+                   price_per_training_minor::int AS price_per_training_minor, currency
+            FROM membership_plans
+            WHERE id = ${payload.planId} AND team_id = ${ctx.teamId} AND archived_at IS NULL
+            FOR SHARE
+          `,
+        ),
+        catchSqlErrors,
+        Effect.flatMap(([plan]) =>
+          plan !== undefined &&
+          plan.price_minor === payload.priceMinor &&
+          plan.price_per_training_minor === payload.pricePerTrainingMinor &&
+          plan.currency === payload.currency
+            ? Effect.void
+            : stale('plan changed'),
+        ),
+      ),
+    ),
+    Effect.flatMap((payload) =>
+      assignMembershipPlanForMemberTx({
+        ...ctx,
+        memberId: payload.memberId,
+        membershipPlanId: Option.some(payload.planId),
+      }),
+    ),
+    Effect.as<ConfirmResult>({ kind: 'applied' }),
+    Effect.catchTags({
+      MembershipPlanForbidden: financeConfirmFailure,
+      MembershipPlanNotFound: financeConfirmFailure,
+    }),
+  );
+
+// ---------------------------------------------------------------------------
 // The registry.
 // ---------------------------------------------------------------------------
 
@@ -1588,6 +1923,9 @@ export type ConfirmResult =
 type ConfirmContext = { readonly teamId: Team.TeamId; readonly membership: MembershipWithRole };
 
 export type ProposeR =
+  | FeesRepository
+  | FeeAssignmentsRepository
+  | MembershipPlansRepository
   | EventRsvpsRepository
   | TeamMembersRepository
   | RostersRepository
@@ -1602,6 +1940,12 @@ export type ProposeR =
   | DiscordChannelsRepository;
 
 type ConfirmR =
+  | FeesRepository
+  | FeeAssignmentsRepository
+  | PaymentsRepository
+  | ExpensesRepository
+  | BankTransactionsRepository
+  | MembershipPlansRepository
   | EventRsvpsRepository
   | TeamMembersRepository
   | RostersRepository
@@ -1669,6 +2013,13 @@ const DISCORD_COMMON =
 const EVENT_COMMON =
   'This does NOT change anything by itself — it shows the user a card they must confirm. Only ' +
   'one may be proposed per reply.';
+
+const FINANCE_COMMON =
+  'This does NOT change anything by itself — it shows the user a card with the exact amount, ' +
+  'currency and date, which they must confirm; what they confirm is what is written. Amounts ' +
+  'are integer MINOR units (`amountMinor`, e.g. 150000 = 1500.00), as the finance read tools ' +
+  'show them; dates are team-local `YYYY-MM-DD`. Never guess an amount: ask the user. Only one ' +
+  'may be proposed per reply.';
 
 const GROUP_ROSTER_COMMON =
   'This does NOT change anything by itself — it shows the user a card they must confirm. After ' +
@@ -1837,5 +2188,39 @@ export const ACTION_REGISTRY: Record<AiActionProposal.AiActionName, ActionDefini
     argsSchema: RosterMemberArgs,
     propose: proposeRosterMember(false),
     confirm: confirmRosterMember(false),
+  },
+  record_payment: {
+    permissions: ['finance:record_payments'],
+    requiresDiscord: false,
+    description:
+      'Proposes recording ONE manual payment (cash or bank transfer) a member made towards a fee ' +
+      'assigned to them, by the member name `list_members` shows and the fee name `list_fees` ' +
+      `shows. The currency is the fee's. ${FINANCE_COMMON}`,
+    argsSchema: RecordPaymentArgs,
+    propose: proposeRecordPayment,
+    confirm: confirmRecordPayment,
+  },
+  create_expense: {
+    permissions: ['finance:manage_fees'],
+    requiresDiscord: false,
+    description:
+      'Proposes adding ONE team expense: what was spent (`amountMinor` + ISO `currency`, e.g. ' +
+      `CZK), when (\`spentOn\`), its \`category\` and a short \`description\`. ${FINANCE_COMMON}`,
+    argsSchema: CreateExpenseArgs,
+    propose: proposeCreateExpense,
+    confirm: confirmCreateExpense,
+  },
+  assign_membership_plan: {
+    permissions: ['finance:manage_fees'],
+    requiresDiscord: false,
+    description:
+      'Proposes moving ONE active member onto a membership plan, by the member name `list_members` ' +
+      'shows and the plan name `list_membership_plans` shows; pass `default` for the default plan ' +
+      'whose name is null. This can change what the member owes for the running season. ' +
+      'This does NOT change anything by itself — it shows the user a card they must confirm. ' +
+      'Only one may be proposed per reply.',
+    argsSchema: AssignPlanArgs,
+    propose: proposeAssignPlan,
+    confirm: confirmAssignPlan,
   },
 };

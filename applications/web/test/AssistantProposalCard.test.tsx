@@ -18,10 +18,12 @@
 // trip the "no raw key reaches the DOM" assertions below instead of being silently hidden.
 
 import { AiChatApi, EventApi } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DateTime, Effect, Option } from 'effect';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { formatMoney } from '~/lib/finance/formatMoney.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared before dynamic imports
@@ -46,6 +48,15 @@ const TR_MAP: Record<string, string> = {
   assistant_proposal_addGroupMember_confirm: 'Add to group',
   assistant_proposal_addGroupMember_confirmed: 'Member added to the group.',
   assistant_proposal_discordQueued: 'The Discord change is queued.',
+  assistant_proposal_field_member: 'Member',
+  assistant_proposal_field_fee: 'Fee',
+  assistant_proposal_field_amount: 'Amount',
+  assistant_proposal_field_date: 'Date',
+  assistant_proposal_field_method: 'Payment method',
+  assistant_proposal_field_note: 'Note',
+  assistant_proposal_field_plan: 'Membership plan',
+  finance_payment_method_cash: 'Cash',
+  membershipPlan_defaultName: 'Basic',
   // Card chrome
   assistant_proposal_createEvent_title: 'Create this event?',
   assistant_proposal_createEvent_description: 'Nothing is created until you confirm.',
@@ -649,6 +660,40 @@ describe('AssistantProposalCard', () => {
         expect(screen.getByText(TR_MAP.assistant_proposal_addGroupMember_confirmed)).not.toBeNull();
       });
       expect(screen.getByText(TR_MAP.assistant_proposal_discordQueued)).not.toBeNull();
+    });
+  });
+
+  describe('finance actions', () => {
+    it('a payment card shows the exact amount with its currency, the member and a plain date', () => {
+      renderCard(
+        makeDiscordProposal('record_payment', [
+          { key: 'member', value: { type: 'text', value: 'Anna' } },
+          { key: 'fee', value: { type: 'text', value: 'Spring fee' } },
+          {
+            key: 'amount',
+            value: { type: 'money', value: { amountMinor: 150050, currency: 'EUR' } },
+          },
+          { key: 'date', value: { type: 'date', value: '2026-03-14' } },
+          { key: 'method', value: { type: 'paymentMethod', value: 'cash' } },
+          { key: 'note', value: { type: 'none' } },
+        ]),
+      );
+      expect(ddFor('Member')?.textContent).toBe('Anna');
+      expect(ddFor('Amount')?.textContent).toBe(formatMoney(150050, 'EUR', getLocale()));
+      // A payment date is not an all-day event: no badge.
+      expect(ddFor('Date')?.textContent).toBe('2026-03-14');
+      expect(ddFor('Payment method')?.textContent).toBe('Cash');
+    });
+
+    it('the unnamed default plan renders under its translated name', () => {
+      renderCard(
+        makeDiscordProposal('assign_membership_plan', [
+          { key: 'member', value: { type: 'text', value: 'Anna' } },
+          { key: 'plan', value: { type: 'planName', value: null } },
+          { key: 'amount', value: { type: 'money', value: { amountMinor: 0, currency: 'CZK' } } },
+        ]),
+      );
+      expect(ddFor('Membership plan')?.textContent).toBe('Basic');
     });
   });
 

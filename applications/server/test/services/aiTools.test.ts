@@ -98,6 +98,7 @@ import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, EventWithDetails } from '~/repositories/EventsRepository.js';
+import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -2866,10 +2867,10 @@ describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3
     Effect.sync(() => {
       // 16 read tools (the original 6, plus `search_docs`, the six database read tools and the
       // three Discord read tools) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (create_event
-      // the three Discord write actions, the three event write actions and the six group / roster
-      // write actions) — built FROM the
+      // the three Discord write actions, the three event write actions, the six group / roster
+      // write actions and the three finance write actions) — built FROM the
       // registry (`registry.ts`), so this count moves in lockstep with `AiActionName.literals`.
-      expect(ALL_TOOLS.length).toBe(30);
+      expect(ALL_TOOLS.length).toBe(33);
       for (const added of [
         'propose_create_event',
         'propose_update_event',
@@ -2882,6 +2883,9 @@ describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3
         'propose_create_roster',
         'propose_add_roster_member',
         'propose_remove_roster_member',
+        'propose_record_payment',
+        'propose_create_expense',
+        'propose_assign_membership_plan',
         'propose_create_discord_channel',
         'propose_set_discord_channel_access',
         'propose_archive_discord_channel',
@@ -3043,6 +3047,9 @@ const makeDiscordWriteLayers = (guildLinked: boolean) =>
     Layer.succeed(EventRsvpsRepository, dieStub('EventRsvpsRepository')),
     Layer.succeed(TeamMembersRepository, dieStub('TeamMembersRepository')),
     Layer.succeed(RostersRepository, dieStub('RostersRepository')),
+    Layer.succeed(FeesRepository, dieStub('FeesRepository')),
+    Layer.succeed(FeeAssignmentsRepository, dieStub('FeeAssignmentsRepository')),
+    Layer.succeed(MembershipPlansRepository, dieStub('MembershipPlansRepository')),
   );
 
 const CREATOR_CTX_OVERRIDES = { permissions: ['event:create' as Role.Permission] };
