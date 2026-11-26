@@ -9,6 +9,12 @@ This page lists user-visible changes to Sideline. For developer-level release no
 
 When a member changes their answer after the reminder, the notification in the late-RSVP channel now says what they changed from, for example "changed their answer from **No** to **Yes**".
 
+## 2026-11-26 — New: pick a colour for each activity type
+
+On **Team → Activity types**, use the new **Color** select to choose the dot colour of any activity type, including the built-in ones. The colour applies to your team only. Choose **Automatic** to return to the default.
+
+- API integrators: `ActivityTypeInfo` has a new optional `color`; new `PUT /teams/:teamId/activity-types/:activityTypeId/color` (`204`, body `{ color: string | null }`).
+
 ## 2026-11-10 — New: the AI assistant can read messages in your Discord channels
 
 Ask the AI assistant what people said in a Discord channel, for example "What did the U12 chat talk about today?". The assistant reads the messages live from Discord through the Sideline bot and answers from them.

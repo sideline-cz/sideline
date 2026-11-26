@@ -36,6 +36,7 @@ const toInfo = (t: ActivityTypeRow, usageCount: number): ActivityTypeApi.Activit
     slug: t.slug,
     emoji: t.emoji,
     description: t.description,
+    color: t.color,
     usageCount,
   });
 
@@ -193,6 +194,20 @@ export const ActivityTypeApiLive = HttpApiBuilder.group(Api, 'activityType', (ha
                 }),
               ),
             ),
+          ),
+        )
+        .handle('setActivityTypeColor', ({ params: { teamId, activityTypeId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            Effect.tap(({ membership }) =>
+              // same gate as editing; built-in types are allowed, the colour is per team
+              requirePermission(membership, 'activity-type:create', forbidden),
+            ),
+            Effect.tap(() => findOrFail(activityTypes, activityTypeId, teamId)),
+            Effect.flatMap(() => activityTypes.setColor(activityTypeId, teamId, payload.color)),
           ),
         )
         .handle('deleteActivityType', ({ params: { teamId, activityTypeId } }) =>

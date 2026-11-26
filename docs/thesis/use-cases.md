@@ -597,6 +597,7 @@ flowchart LR
         UC_GET_TYPE["Get Activity Type\n(GET /teams/:teamId/activity-types/:activityTypeId)"]
         UC_CREATE_TYPE["Create Activity Type\n(POST /teams/:teamId/activity-types)\nname · emoji · description"]
         UC_UPDATE_TYPE["Update Activity Type\n(PATCH /teams/:teamId/activity-types/:activityTypeId)\nnot allowed on global built-ins"]
+        UC_COLOR_TYPE["Set Activity Type Colour\n(PUT /teams/:teamId/activity-types/:activityTypeId/color)\nallowed on built-ins; palette key or null"]
         UC_DELETE_TYPE["Delete Activity Type\n(DELETE /teams/:teamId/activity-types/:activityTypeId)\nnot allowed on built-ins or types with logs"]
     end
 
@@ -611,11 +612,13 @@ flowchart LR
     AD --> UC_GET_TYPE
     AD --> UC_CREATE_TYPE
     AD --> UC_UPDATE_TYPE
+    AD --> UC_COLOR_TYPE
     AD --> UC_DELETE_TYPE
 
     CP --> UC_GET_TYPE
     CP --> UC_CREATE_TYPE
     CP --> UC_UPDATE_TYPE
+    CP --> UC_COLOR_TYPE
     CP --> UC_DELETE_TYPE
 
     BOT --> UC_CREATE_LOG

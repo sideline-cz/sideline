@@ -16,6 +16,8 @@ export class ActivityTypeRow extends Schema.Class<ActivityTypeRow>('ActivityType
   slug: Schema.OptionFromNullOr(Schema.String),
   emoji: Schema.OptionFromNullOr(ActivityType.ActivityTypeEmoji),
   description: Schema.OptionFromNullOr(ActivityType.ActivityTypeDescription),
+  // The team's pick from activity_type_colors; always None from the unscoped lookups
+  color: Schema.OptionFromNullOr(ActivityType.ActivityTypeColor),
 }) {}
 
 export class ActivityTypeWithUsageRow extends Schema.Class<ActivityTypeWithUsageRow>(
@@ -27,6 +29,8 @@ export class ActivityTypeWithUsageRow extends Schema.Class<ActivityTypeWithUsage
   slug: Schema.OptionFromNullOr(Schema.String),
   emoji: Schema.OptionFromNullOr(ActivityType.ActivityTypeEmoji),
   description: Schema.OptionFromNullOr(ActivityType.ActivityTypeDescription),
+  // The team's pick from activity_type_colors; always None from the unscoped lookups
+  color: Schema.OptionFromNullOr(ActivityType.ActivityTypeColor),
   usageCount: Schema.Int,
 }) {}
 
@@ -55,6 +59,12 @@ const UpdateCustomInput = Schema.Struct({
   description: Schema.OptionFromNullOr(ActivityType.ActivityTypeDescription),
 });
 
+const SetColorInput = Schema.Struct({
+  id: ActivityType.ActivityTypeId,
+  team_id: Team.TeamId,
+  color: ActivityType.ActivityTypeColor,
+});
+
 const DeleteCustomInput = Schema.Struct({
   id: ActivityType.ActivityTypeId,
   team_id: Team.TeamId,
@@ -68,16 +78,17 @@ const make = Effect.gen(function* () {
     Request: Schema.String,
     Result: ActivityTypeRow,
     execute: (slug) =>
-      sql`SELECT id, team_id, name, slug, emoji, description FROM activity_types WHERE slug = ${slug} AND team_id IS NULL`,
+      sql`SELECT id, team_id, name, slug, emoji, description, NULL AS color FROM activity_types WHERE slug = ${slug} AND team_id IS NULL`,
   });
 
   const findByTeamIdQuery = SqlSchema.findAll({
     Request: Team.TeamId,
     Result: ActivityTypeWithUsageRow,
     execute: (teamId) => sql`
-      SELECT t.id, t.team_id, t.name, t.slug, t.emoji, t.description,
+      SELECT t.id, t.team_id, t.name, t.slug, t.emoji, t.description, tc.color,
              COALESCE(c.cnt, 0)::int AS "usageCount"
       FROM activity_types t
+      LEFT JOIN activity_type_colors tc ON tc.activity_type_id = t.id AND tc.team_id = ${teamId}
       LEFT JOIN (
         SELECT al.activity_type_id, COUNT(*)::int AS cnt
         FROM activity_logs al
@@ -94,21 +105,21 @@ const make = Effect.gen(function* () {
     Request: ActivityType.ActivityTypeId,
     Result: ActivityTypeRow,
     execute: (id) =>
-      sql`SELECT id, team_id, name, slug, emoji, description FROM activity_types WHERE id = ${id}`,
+      sql`SELECT id, team_id, name, slug, emoji, description, NULL AS color FROM activity_types WHERE id = ${id}`,
   });
 
   const findByIdScopedQuery = SqlSchema.findOneOption({
     Request: ScopedRequest,
     Result: ActivityTypeRow,
     execute: (input) =>
-      sql`SELECT id, team_id, name, slug, emoji, description FROM activity_types WHERE id = ${input.id} AND (team_id IS NULL OR team_id = ${input.team_id}) LIMIT 1`,
+      sql`SELECT id, team_id, name, slug, emoji, description, (SELECT color FROM activity_type_colors WHERE activity_type_id = activity_types.id AND team_id = ${input.team_id}) AS color FROM activity_types WHERE id = ${input.id} AND (team_id IS NULL OR team_id = ${input.team_id}) LIMIT 1`,
   });
 
   const findByNameInScopeQuery = SqlSchema.findOneOption({
     Request: NameScopedRequest,
     Result: ActivityTypeRow,
     execute: (input) =>
-      sql`SELECT id, team_id, name, slug, emoji, description FROM activity_types WHERE LOWER(name) = LOWER(${input.name}) AND (team_id IS NULL OR team_id = ${input.team_id}) LIMIT 1`,
+      sql`SELECT id, team_id, name, slug, emoji, description, (SELECT color FROM activity_type_colors WHERE activity_type_id = activity_types.id AND team_id = ${input.team_id}) AS color FROM activity_types WHERE LOWER(name) = LOWER(${input.name}) AND (team_id IS NULL OR team_id = ${input.team_id}) LIMIT 1`,
   });
 
   const insertCustomQuery = SqlSchema.findOneOption({
@@ -117,7 +128,7 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       INSERT INTO activity_types (team_id, name, emoji, description)
       VALUES (${input.team_id}, ${input.name}, ${input.emoji}, ${input.description})
-      RETURNING id, team_id, name, slug, emoji, description
+      RETURNING id, team_id, name, slug, emoji, description, NULL AS color
     `,
   });
 
@@ -128,8 +139,24 @@ const make = Effect.gen(function* () {
       UPDATE activity_types
       SET name = ${input.name}, emoji = ${input.emoji}, description = ${input.description}
       WHERE id = ${input.id} AND team_id = ${input.team_id} AND team_id IS NOT NULL
-      RETURNING id, team_id, name, slug, emoji, description
+      RETURNING id, team_id, name, slug, emoji, description,
+        (SELECT color FROM activity_type_colors WHERE activity_type_id = activity_types.id AND team_id = ${input.team_id}) AS color
     `,
+  });
+
+  const upsertColorQuery = SqlSchema.void({
+    Request: SetColorInput,
+    execute: (input) => sql`
+      INSERT INTO activity_type_colors (team_id, activity_type_id, color)
+      VALUES (${input.team_id}, ${input.id}, ${input.color})
+      ON CONFLICT (team_id, activity_type_id) DO UPDATE SET color = EXCLUDED.color
+    `,
+  });
+
+  const clearColorQuery = SqlSchema.void({
+    Request: ScopedRequest,
+    execute: (input) =>
+      sql`DELETE FROM activity_type_colors WHERE team_id = ${input.team_id} AND activity_type_id = ${input.id}`,
   });
 
   const deleteCustomQuery = SqlSchema.void({
@@ -189,6 +216,16 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const setColor = (
+    id: ActivityType.ActivityTypeId,
+    teamId: Team.TeamId,
+    color: Option.Option<ActivityType.ActivityTypeColor>,
+  ) =>
+    Option.match(color, {
+      onNone: () => clearColorQuery({ id, team_id: teamId }),
+      onSome: (c) => upsertColorQuery({ id, team_id: teamId, color: c }),
+    }).pipe(catchSqlErrors);
+
   const deleteCustom = (id: ActivityType.ActivityTypeId, teamId: Team.TeamId) =>
     deleteCustomQuery({ id, team_id: teamId }).pipe(catchSqlErrors);
 
@@ -211,6 +248,7 @@ const make = Effect.gen(function* () {
     findByNameInScope,
     insertCustom,
     updateCustom,
+    setColor,
     deleteCustom,
     countLogsForType,
   };

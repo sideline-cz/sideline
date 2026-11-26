@@ -1,4 +1,4 @@
-import type { ActivityLogApi, Team } from '@sideline/domain';
+import type { ActivityLogApi, ActivityType, Team } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { Option } from 'effect';
 import { Activity, Users } from 'lucide-react';
@@ -23,7 +23,11 @@ interface WorkoutTeamPageProps {
   onGroupChange: (groupId: string | undefined) => void;
   onRetry: () => void;
   // The team's full type list keeps each type's colour stable across group filters
-  activityTypes?: ReadonlyArray<{ name: string; emoji: Option.Option<string> }>;
+  activityTypes?: ReadonlyArray<{
+    name: string;
+    emoji: Option.Option<string>;
+    color?: Option.Option<ActivityType.ActivityTypeColor>;
+  }>;
   isPending?: boolean;
   currentMemberId?: string | null;
 }
@@ -41,10 +45,7 @@ export function WorkoutTeamPage({
   const rows = matrix?.rows ?? [];
   // Only members who logged something in the window get a row
   const activeRows = rows.filter((r) => r.cells.length > 0);
-  const colors = React.useMemo(
-    () => activityTypeColors(activityTypes.map((t) => t.name)),
-    [activityTypes],
-  );
+  const colors = React.useMemo(() => activityTypeColors(activityTypes), [activityTypes]);
   // Legend: only the types that appear in the grid
   const shownTypes = React.useMemo(() => {
     const seen = new Set(

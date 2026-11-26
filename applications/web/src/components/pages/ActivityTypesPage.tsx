@@ -24,7 +24,19 @@ import {
   FormMessage,
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '~/components/ui/select';
 import { Textarea } from '~/components/ui/textarea';
+import {
+  ACTIVITY_COLOR_CLASSES,
+  activityTypeColors,
+  FALLBACK_COLOR,
+} from '~/lib/activityColors.js';
 import { withFieldErrors } from '~/lib/form';
 import { ApiClient, ClientError, SilentClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
@@ -298,6 +310,49 @@ export function CannotDeleteDialog({
   );
 }
 
+// ─── ColorSelect ──────────────────────────────────────────────────────────────
+
+const AUTO_COLOR = 'auto';
+
+interface ColorSelectProps {
+  name: string;
+  value: Option.Option<ActivityType.ActivityTypeColor>;
+  // The derived colour, shown as the "Automatic" option's dot
+  autoClass: string;
+  onChange: (color: Option.Option<ActivityType.ActivityTypeColor>) => void;
+}
+
+function ColorSelect({ name, value, autoClass, onChange }: ColorSelectProps) {
+  return (
+    <Select
+      value={Option.getOrUndefined(value) ?? AUTO_COLOR}
+      onValueChange={(v) =>
+        onChange(
+          v === AUTO_COLOR
+            ? Option.none()
+            : Option.some(Schema.decodeUnknownSync(ActivityType.ActivityTypeColor)(v)),
+        )
+      }
+    >
+      <SelectTrigger className='w-36' aria-label={tr('activityType_colorFor', { name })}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={AUTO_COLOR}>
+          <span className={`size-3 rounded-full ${autoClass}`} />
+          {tr('activityType_color_auto')}
+        </SelectItem>
+        {ActivityType.ActivityTypeColor.literals.map((color) => (
+          <SelectItem key={color} value={color}>
+            <span className={`size-3 rounded-full ${ACTIVITY_COLOR_CLASSES[color]}`} />
+            {tr(`activityType_color_${color}`)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 interface ActivityTypesPageProps {
@@ -326,6 +381,35 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
   const handleSaved = React.useCallback(() => {
     router.invalidate();
   }, [router]);
+
+  const colors = React.useMemo(() => activityTypeColors(activityTypes), [activityTypes]);
+  // What each type would get with no pick, for the "Automatic" option's dot
+  const autoColors = React.useMemo(
+    () => activityTypeColors(activityTypes.map((t) => ({ name: t.name }))),
+    [activityTypes],
+  );
+
+  const handleColorChange = React.useCallback(
+    async (
+      activityType: ActivityTypeApi.ActivityTypeInfo,
+      color: Option.Option<ActivityType.ActivityTypeColor>,
+    ) => {
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.activityType.setActivityTypeColor({
+            params: { teamId: teamIdBranded, activityTypeId: activityType.id },
+            payload: { color },
+          }),
+        ),
+        Effect.mapError(() => ClientError.make('Failed to save activity type color')),
+        run({ success: tr('activityType_saved') }),
+      );
+      if (Option.isSome(result)) {
+        router.invalidate();
+      }
+    },
+    [teamIdBranded, run, router],
+  );
 
   const handleDelete = React.useCallback(
     async (activityType: ActivityTypeApi.ActivityTypeInfo) => {
@@ -398,6 +482,7 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
               <tr className='border-b text-left text-sm text-muted-foreground'>
                 <th className='py-2 px-2 w-10'>{tr('activityType_emoji')}</th>
                 <th className='py-2 px-3'>{tr('activityType_name')}</th>
+                <th className='py-2 px-3'>{tr('activityType_color')}</th>
                 <th className='hidden sm:table-cell py-2 px-3'>{tr('activityType_description')}</th>
                 <th className='py-2 px-3'>{tr('activityType_inUse')}</th>
                 {canAdmin && <th className='py-2 px-3'>{tr('achievement_admin_table_actions')}</th>}
@@ -420,6 +505,20 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
                         <span className='ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700'>
                           {tr('activityType_builtIn')}
                         </span>
+                      )}
+                    </td>
+                    <td className='py-3 px-3'>
+                      {canAdmin ? (
+                        <ColorSelect
+                          name={activityType.name}
+                          value={activityType.color}
+                          autoClass={autoColors.get(activityType.name) ?? FALLBACK_COLOR}
+                          onChange={(color) => handleColorChange(activityType, color)}
+                        />
+                      ) : (
+                        <span
+                          className={`inline-block size-3 rounded-full ${colors.get(activityType.name) ?? FALLBACK_COLOR}`}
+                        />
                       )}
                     </td>
                     <td className='hidden sm:table-cell py-3 px-3 text-sm text-muted-foreground'>
