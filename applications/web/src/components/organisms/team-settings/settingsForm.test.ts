@@ -46,6 +46,7 @@ const BASE: SettingsFormValues = {
   channelFormat: '{emoji}│{name}',
   requireCompleteProfile: false,
   autoAssignVariableSymbols: false,
+  activityNotesPublic: false,
   autoApplyCreditEnabled: false,
   membershipBillingEnabled: false,
   // Blank = no override, so the whole feature is off in the baseline.
@@ -99,6 +100,7 @@ const EDITED: SettingsFormValues = {
   channelFormat: '{name}',
   requireCompleteProfile: true,
   autoAssignVariableSymbols: true,
+  activityNotesPublic: true,
   autoApplyCreditEnabled: true,
   membershipBillingEnabled: true,
   reminderDaysBefore_training: '1',
@@ -425,6 +427,7 @@ describe('case 7 — a stored per-type `null` survives a save of an unrelated fi
     rsvpRemindersEnabled: true,
     requireCompleteProfile: false,
     autoAssignVariableSymbols: false,
+    activityNotesPublic: false,
     autoApplyCreditEnabled: false,
     membershipBillingEnabled: false,
     rsvpReminderDaysBefore: 2,

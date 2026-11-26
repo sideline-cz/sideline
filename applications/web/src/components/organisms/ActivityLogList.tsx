@@ -253,8 +253,8 @@ export function ActivityLogList({
                           </span>
                         )}
                       </div>
-                      {/* Second wall: the server strips other members' notes already */}
-                      {isOwnProfile && Option.isSome(log.note) && (
+                      {/* The server decides who sees a note (author, or the team when notes are public) */}
+                      {Option.isSome(log.note) && (
                         <p className='truncate text-xs text-muted-foreground'>{log.note.value}</p>
                       )}
                     </div>

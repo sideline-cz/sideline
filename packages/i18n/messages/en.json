@@ -3234,6 +3234,8 @@
   "teamSettings_remindersChannelHelp": "Discord channel where reminders and 'event starting now' messages are posted. Falls back to the events channel if unset.",
   "teamSettings_requireCompleteProfile": "Require a complete profile",
   "teamSettings_requireCompleteProfile_help": "Members without a name, date of birth and gender cannot RSVP, claim trainings or reserve a carpool seat. They get a button in Discord that walks them through it.",
+  "teamSettings_activityNotesPublic": "Teammates can see activity notes",
+  "teamSettings_activityNotesPublic_help": "When on, every team member can read the notes others add to their logged activities. When off, only the author sees their own notes.",
   "teamSettings_roleFormat": "Role format",
   "teamSettings_roleFormatHelp": "How Discord role names are formatted. Available placeholders: {emoji}, {name}.",
   "teamSettings_rosterCategory": "Roster category",

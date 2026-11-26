@@ -248,6 +248,22 @@ export function GeneralLimitsCard({ form: { values, setField } }: GeneralLimitsC
           <p className='text-xs text-muted-foreground'>
             {tr('teamSettings_requireCompleteProfile_help')}
           </p>
+          <Separator />
+          <div className='flex items-center gap-2'>
+            <input
+              id='activity-notes-public'
+              type='checkbox'
+              checked={values.activityNotesPublic}
+              onChange={(e) => setField('activityNotesPublic', e.target.checked)}
+              className='h-4 w-4'
+            />
+            <label htmlFor='activity-notes-public' className='text-sm font-medium'>
+              {tr('teamSettings_activityNotesPublic')}
+            </label>
+          </div>
+          <p className='text-xs text-muted-foreground'>
+            {tr('teamSettings_activityNotesPublic_help')}
+          </p>
         </div>
       </CardContent>
     </Card>

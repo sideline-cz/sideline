@@ -10,12 +10,18 @@ import { Options } from '@sideline/effect-lib';
 import { DateTime, Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
-import { requireMembership, requirePermission, requireReadAccess } from '~/api/permissions.js';
+import {
+  GLOBAL_ADMIN_SENTINEL_ID,
+  requireMembership,
+  requirePermission,
+  requireReadAccess,
+} from '~/api/permissions.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { resolveScope } from '~/repositories/activitySeasonScope.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 
 /**
@@ -46,12 +52,12 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
     Effect.bind('activityLogs', () => ActivityLogsRepository.asEffect()),
     Effect.bind('activityTypes', () => ActivityTypesRepository.asEffect()),
     Effect.bind('groups', () => GroupsRepository.asEffect()),
+    Effect.bind('teamSettings', () => TeamSettingsRepository.asEffect()),
     Effect.bind('evaluatorOpt', () => Effect.serviceOption(AchievementEvaluator)),
-    Effect.map(({ members, activityLogs, activityTypes, groups, evaluatorOpt }) =>
+    Effect.map(({ members, activityLogs, activityTypes, groups, teamSettings, evaluatorOpt }) =>
       handlers
         .handle('listLogs', ({ params: { teamId, memberId }, query }) =>
           Effect.Do.pipe(
-            // The global-admin sentinel id never equals memberId: admins read, but never see notes.
             Effect.bind('membership', () =>
               requireReadAccess(members, teamId, new ActivityLogApi.Forbidden()),
             ),
@@ -66,6 +72,18 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
                     Effect.flatMap(Options.toEffect(() => new ActivityLogApi.MemberNotFound())),
                   ),
             ),
+            // A note is private free text: only its author gets it, unless the team made notes
+            // public — then teammates see them too. A global admin outside the team (the sentinel
+            // membership) never does. The server is the wall.
+            Effect.bind('showNotes', ({ membership, isSelf }) =>
+              isSelf
+                ? Effect.succeed(true)
+                : membership.id === GLOBAL_ADMIN_SENTINEL_ID
+                  ? Effect.succeed(false)
+                  : teamSettings
+                      .findByTeamId(teamId)
+                      .pipe(Effect.map(Option.exists((s) => s.activity_notes_public))),
+            ),
             Effect.bind('scope', () => resolveScope(activityLogs, teamId, query.season)),
             Effect.bind('data', ({ scope }) =>
               Effect.all({
@@ -74,7 +92,7 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
               }),
             ),
             Effect.map(
-              ({ isSelf, data: { logs, seasons } }) =>
+              ({ showNotes, data: { logs, seasons } }) =>
                 new ActivityLogApi.ActivityLogListResponse({
                   logs: logs.map(
                     (l) =>
@@ -85,8 +103,7 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
                         activityTypeEmoji: l.activity_type_emoji,
                         loggedAt: l.logged_at,
                         durationMinutes: l.duration_minutes,
-                        // A note is private free text: only its author gets it. The server is the wall.
-                        note: isSelf ? l.note : Option.none(),
+                        note: showNotes ? l.note : Option.none(),
                         source: l.source,
                       }),
                   ),
