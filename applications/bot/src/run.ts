@@ -35,8 +35,13 @@ const MainLive = AppLive.pipe(
    *
    * The RPC protocol above deliberately stays on undici: it streams NDJSON from
    * the server and is unaffected by any of this.
+   *
+   * `provideMerge`, not `provide`: `DiscordIxLive` consumes an `HttpClient`
+   * but does not re-export one, so with `provide` the client reached Discord
+   * and nothing else — `/report`'s GitHub call died on a missing service and
+   * every report failed.
    */
-  Layer.provide(NodeHttpClient.layerFetch),
+  Layer.provideMerge(NodeHttpClient.layerFetch),
   Layer.provide(NodeSocket.layerWebSocketConstructor),
   Layer.provide(
     DiscordConfig.layerConfig({

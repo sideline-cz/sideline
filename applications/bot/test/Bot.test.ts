@@ -1,6 +1,7 @@
 import { DiscordREST } from 'dfx/DiscordREST';
 import { DiscordGateway, InteractionsRegistry } from 'dfx/gateway';
 import { Effect, Exit, Layer, Option, References } from 'effect';
+import { HttpClient } from 'effect/unstable/http';
 import { describe, expect, it } from 'vitest';
 import { Bot } from '~/index.js';
 import {
@@ -170,6 +171,7 @@ describe('Bot', () => {
       MockOnboardingRoleCacheLayer,
       MockSyncRpcLayer,
       MockInviteCacheLayer,
+      Layer.succeed(HttpClient.HttpClient, {} as never),
     );
 
     const result = await Effect.runPromise(
