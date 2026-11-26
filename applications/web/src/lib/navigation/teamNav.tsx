@@ -18,6 +18,7 @@ import {
   IdCard,
   Landmark,
   Link2,
+  type LucideIcon,
   Receipt,
   ReceiptText,
   Rss,
@@ -32,8 +33,6 @@ import {
   Wallet,
   Wand2,
 } from 'lucide-react';
-import type React from 'react';
-import { DiscordIcon } from '~/components/atoms/DiscordIcon.js';
 import { tr } from '~/lib/translations.js';
 
 export interface NavGroup {
@@ -42,33 +41,19 @@ export interface NavGroup {
   items: ReadonlyArray<NavItem>;
 }
 
-// The nav row already renders the visible label `tr('discord_navTitle')` right next to this
-// icon (`<item.icon /><span>{item.title}</span>`, below) — `DiscordIcon`'s default
-// `role='img' aria-label='Discord'` would announce "Discord, Discord" to a screen reader.
-// `<item.icon />` is rendered with no props for every nav item, so this wrapper is how the
-// Discord entry alone opts into `aria-hidden` without widening `NavItem.icon`'s prop-less type.
-function DiscordNavIcon() {
-  return <DiscordIcon aria-hidden />;
-}
-
 export interface NavItem {
   title: string;
-  // Widened from `LucideIcon` so `DiscordIcon` (a plain function component, not a lucide
-  // `ForwardRefExoticComponent`) can share this list — rendered as `<item.icon />` with no
-  // props, so no lucide-specific prop is ever required here.
-  icon: React.ComponentType;
+  icon: LucideIcon;
   to: string;
   params?: Record<string, string>;
   requiredPermission?: Role.Permission;
   exact?: boolean;
-  /** designer §2.3 — the sidebar nav badge dot. Currently only the Discord item uses this. */
-  needsAttention?: boolean;
 }
 
-export function getTeamNavGroups(
-  teamId: string,
-  discordNeedsAttention: boolean,
-): ReadonlyArray<NavGroup> {
+// No Discord entry: Discord lives on the profile page, and its "needs attention" dot on the
+// Profile item of the user menu (`NavUser`). `/teams/$teamId/connect-discord` still exists for
+// bookmarks and `DiscordConnectCard`'s Connect button.
+export function getTeamNavGroups(teamId: string): ReadonlyArray<NavGroup> {
   return [
     {
       id: 'team',
@@ -80,13 +65,6 @@ export function getTeamNavGroups(
           to: '/teams/$teamId',
           params: { teamId },
           exact: true,
-        },
-        {
-          title: tr('discord_navTitle'),
-          icon: DiscordNavIcon,
-          to: '/teams/$teamId/connect-discord',
-          params: { teamId },
-          needsAttention: discordNeedsAttention,
         },
         {
           title: tr('event_events'),

@@ -26,7 +26,7 @@ function discordAvatarUrl(discordId: string, avatar: string): string {
 /**
  * PR-9 / CC-11 — migrated off PR-5's ad hoc "Join the team Discord" row (which read
  * `getMyPendingDiscordJoin` directly and had no concept of `'unknown'`) onto the SAME
- * `DiscordConnectCard` the dashboard and the sidebar badge read. Exactly one component reads
+ * `DiscordConnectCard` the dashboard and the user-menu dot read. Exactly one component reads
  * `Auth.UserTeam.discordJoined` now, so this page can never disagree with the others. Renders
  * nothing for a team whose state is `'unknown'` (`DiscordConnectCard` itself decides that).
  *
@@ -40,7 +40,7 @@ function DiscordConnectSection({ teams }: { readonly teams: ReadonlyArray<Auth.U
   if (connectableTeams.length === 0) return null;
 
   return (
-    <Card className='w-full max-w-md mt-4'>
+    <Card className='w-full'>
       <CardHeader>
         <CardTitle>{tr('profile_discordJoinTitle')}</CardTitle>
       </CardHeader>
@@ -88,7 +88,7 @@ function EventPreferencesSection({
   return (
     <>
       {connectedTeams.length > 1 && (
-        <div className='w-full max-w-md mt-4'>
+        <div>
           <span id='event-prefs-team-switcher-label' className='text-sm font-medium block mb-2'>
             {tr('eventPrefs_teamSwitcher')}
           </span>
@@ -159,31 +159,39 @@ export function MyProfilePage({ user, teams, onUpdated, prefs, onRefresh }: MyPr
         </div>
       </header>
 
-      <main className='flex flex-1 flex-col items-center px-6 pt-16 pb-24'>
-        <Card className='w-full max-w-md'>
-          <CardHeader className='text-center'>
-            <div className='flex justify-center mb-2'>
-              <Avatar className='size-12'>
-                {Option.isSome(user.avatar) && (
-                  <AvatarImage
-                    src={discordAvatarUrl(user.discordId, user.avatar.value)}
-                    alt={tr('profile_discordAvatar')}
-                  />
-                )}
-                <AvatarFallback>{initials}</AvatarFallback>
-              </Avatar>
-            </div>
-            <CardTitle>{tr('profile_title')}</CardTitle>
-            <CardDescription>@{user.username}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ProfileEditForm user={user} onSuccess={onUpdated} />
-          </CardContent>
-        </Card>
-        <DiscordConnectSection teams={teams} />
-        <EventPreferencesSection teams={teams} prefs={prefs} onRefresh={onRefresh} />
-        <TelemetryPreferenceCard />
-        <DataExportCard />
+      {/* One column on mobile; from `lg:` two — account + Discord + export on the left,
+          preferences on the right. */}
+      <main className='flex-1 px-6 pt-16 pb-24'>
+        <div className='mx-auto grid w-full max-w-md items-start gap-4 lg:max-w-5xl lg:grid-cols-2'>
+          <div className='flex min-w-0 flex-col gap-4'>
+            <Card className='w-full'>
+              <CardHeader className='text-center'>
+                <div className='flex justify-center mb-2'>
+                  <Avatar className='size-12'>
+                    {Option.isSome(user.avatar) && (
+                      <AvatarImage
+                        src={discordAvatarUrl(user.discordId, user.avatar.value)}
+                        alt={tr('profile_discordAvatar')}
+                      />
+                    )}
+                    <AvatarFallback>{initials}</AvatarFallback>
+                  </Avatar>
+                </div>
+                <CardTitle>{tr('profile_title')}</CardTitle>
+                <CardDescription>@{user.username}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ProfileEditForm user={user} onSuccess={onUpdated} />
+              </CardContent>
+            </Card>
+            <DiscordConnectSection teams={teams} />
+            <DataExportCard />
+          </div>
+          <div className='flex min-w-0 flex-col gap-4'>
+            <EventPreferencesSection teams={teams} prefs={prefs} onRefresh={onRefresh} />
+            <TelemetryPreferenceCard />
+          </div>
+        </div>
       </main>
     </div>
   );

@@ -174,3 +174,22 @@ describe('NavUser — version display', () => {
     expect(serverVersionIdx).toBeLessThan(logOutIdx);
   });
 });
+
+describe('NavUser — Discord attention dot', () => {
+  it('shows the dot (on the trigger) when discordNeedsAttention', () => {
+    withQueryClient(
+      <NavUser
+        user={mockUser as never}
+        activeTeamId='t'
+        discordNeedsAttention
+        onLogout={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByText('discord_navNeedsAttention').length).toBeGreaterThan(0);
+  });
+
+  it('shows no dot by default', () => {
+    withQueryClient(<NavUser user={mockUser as never} activeTeamId='t' onLogout={vi.fn()} />);
+    expect(screen.queryByText('discord_navNeedsAttention')).toBeNull();
+  });
+});

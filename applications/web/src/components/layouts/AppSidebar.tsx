@@ -4,7 +4,6 @@ import { Languages, ShieldCheck, UserPlus } from 'lucide-react';
 import type React from 'react';
 import { NavUser } from '~/components/layouts/NavUser';
 import { TeamSwitcher } from '~/components/layouts/TeamSwitcher';
-import { Badge } from '~/components/ui/badge';
 import {
   Sidebar,
   SidebarContent,
@@ -30,10 +29,7 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
 
 export function AppSidebar({ user, teams, activeTeam, onLogout, ...props }: AppSidebarProps) {
   const matchRoute = useMatchRoute();
-  const navGroups = filterNavGroups(
-    getTeamNavGroups(activeTeam.teamId, activeTeam.discordJoined === 'not_connected'),
-    activeTeam.permissions,
-  );
+  const navGroups = filterNavGroups(getTeamNavGroups(activeTeam.teamId), activeTeam.permissions);
 
   return (
     <Sidebar collapsible='icon' {...props}>
@@ -58,11 +54,6 @@ export function AppSidebar({ user, teams, activeTeam, onLogout, ...props }: AppS
                       <Link to={item.to} params={item.params}>
                         <item.icon />
                         <span>{item.title}</span>
-                        {item.needsAttention && (
-                          <Badge variant='destructive' className='ml-auto size-2 rounded-full p-0'>
-                            <span className='sr-only'>{tr('discord_navNeedsAttention')}</span>
-                          </Badge>
-                        )}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -118,7 +109,13 @@ export function AppSidebar({ user, teams, activeTeam, onLogout, ...props }: AppS
         )}
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={user} activeTeamId={activeTeam.teamId} onLogout={onLogout} />
+        <NavUser
+          user={user}
+          activeTeamId={activeTeam.teamId}
+          // Strictly 'not_connected': 'unknown' (join enforcement off) must never raise the dot.
+          discordNeedsAttention={activeTeam.discordJoined === 'not_connected'}
+          onLogout={onLogout}
+        />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

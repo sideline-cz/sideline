@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useCallback } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
+import { Badge } from '~/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,6 +45,7 @@ import { ApiClient, ClientError, SilentClientError, useRun } from '~/lib/runtime
 import { useTheme } from '~/lib/theme.js';
 import { useServerUrl } from '~/lib/translation-overrides-context.js';
 import { tr } from '~/lib/translations.js';
+import { cn } from '~/lib/utils';
 import { APP_VERSION } from '~/lib/version.js';
 
 const VersionsAppLayer = Layer.mergeAll(
@@ -87,7 +89,19 @@ function userInitials(user: Auth.CurrentUser): string {
 interface NavUserProps {
   user: Auth.CurrentUser;
   activeTeamId: string | undefined;
+  /** The active team's Discord is `'not_connected'` — never true for `'unknown'`. */
+  discordNeedsAttention?: boolean;
   onLogout: () => void;
+}
+
+// Discord moved from the sidebar to the profile page, so its dot moved with it: on the Profile
+// item, and on the avatar trigger so it is visible while the menu is closed.
+function AttentionDot({ className }: { readonly className?: string }) {
+  return (
+    <Badge variant='destructive' className={cn('size-2 rounded-full p-0', className)}>
+      <span className='sr-only'>{tr('discord_navNeedsAttention')}</span>
+    </Badge>
+  );
 }
 
 const localeOptions = [
@@ -101,7 +115,12 @@ const themeOptions = [
   { value: 'system' as const, icon: Monitor, label: () => tr('theme_system') },
 ] as const;
 
-export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
+export function NavUser({
+  user,
+  activeTeamId,
+  discordNeedsAttention = false,
+  onLogout,
+}: NavUserProps) {
   const { isMobile } = useSidebar();
   const run = useRun();
   const displayName = user.displayName;
@@ -160,15 +179,20 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
               size='lg'
               className='data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground'
             >
-              <Avatar className='h-8 w-8 rounded-lg'>
-                {Option.isSome(user.avatar) && (
-                  <AvatarImage
-                    src={discordAvatarUrl(user.discordId, user.avatar.value)}
-                    alt={displayName}
-                  />
+              <span className='relative'>
+                <Avatar className='h-8 w-8 rounded-lg'>
+                  {Option.isSome(user.avatar) && (
+                    <AvatarImage
+                      src={discordAvatarUrl(user.discordId, user.avatar.value)}
+                      alt={displayName}
+                    />
+                  )}
+                  <AvatarFallback className='rounded-lg'>{userInitials(user)}</AvatarFallback>
+                </Avatar>
+                {discordNeedsAttention && (
+                  <AttentionDot className='absolute -top-0.5 -right-0.5 ring-2 ring-sidebar' />
                 )}
-                <AvatarFallback className='rounded-lg'>{userInitials(user)}</AvatarFallback>
-              </Avatar>
+              </span>
               <div className='grid flex-1 text-left text-sm leading-tight'>
                 <span className='truncate font-semibold'>{displayName}</span>
                 <span className='truncate text-xs'>{user.username}</span>
@@ -205,6 +229,7 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
                 <Link to='/profile'>
                   <UserIcon />
                   {tr('nav_profile')}
+                  {discordNeedsAttention && <AttentionDot className='ml-auto' />}
                 </Link>
               </DropdownMenuItem>
               {activeTeamId && (

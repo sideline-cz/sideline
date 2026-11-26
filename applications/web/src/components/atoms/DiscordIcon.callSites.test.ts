@@ -1,7 +1,7 @@
 // Should-fix 3 (review of 46806427, fix/discord-onboarding-webapp): the a11y fix (`aria-hidden`
 // prop on `DiscordIcon`, see `DiscordIcon.tsx`'s doc comment) was applied to exactly one of three
 // call sites that render the icon right next to adjacent visible/accessible text —
-// `AppSidebar.discordIcon.test.ts` pins only the sidebar's `DiscordNavIcon` wrapper. `HomePage`'s
+// the sidebar's `DiscordNavIcon` wrapper (since removed with the Discord nav entry). `HomePage`'s
 // "Sign in with Discord" button and `ConnectDiscordPage`'s header (which sits directly above the
 // visible "Join the {team} Discord" title) still rendered the bare, self-announcing icon, so a
 // screen reader said "Discord, Discord" there too.
@@ -42,7 +42,8 @@ describe('every <DiscordIcon /> call site next to adjacent text passes aria-hidd
       (sum, file) => sum + [...readFileSync(file, 'utf8').matchAll(DISCORD_ICON_JSX)].length,
       0,
     );
-    expect(total).toBeGreaterThanOrEqual(3);
+    // HomePage + ConnectDiscordPage (the sidebar's Discord nav entry is gone).
+    expect(total).toBeGreaterThanOrEqual(2);
   });
 
   it('every call site passes aria-hidden', () => {

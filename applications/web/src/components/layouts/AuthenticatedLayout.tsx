@@ -132,12 +132,8 @@ function AuthenticatedLayoutContent({
   const [searchOpen, setSearchOpen] = React.useState(false);
 
   const navGroups = React.useMemo(
-    () =>
-      filterNavGroups(
-        getTeamNavGroups(teamId, activeTeam.discordJoined === 'not_connected'),
-        activeTeam.permissions,
-      ),
-    [teamId, activeTeam.discordJoined, activeTeam.permissions],
+    () => filterNavGroups(getTeamNavGroups(teamId), activeTeam.permissions),
+    [teamId, activeTeam.permissions],
   );
 
   // Read once per open, not on every render: `localStorage` is synchronous and the list only
