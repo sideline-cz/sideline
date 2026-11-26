@@ -1,5 +1,13 @@
 # @sideline/web
 
+## 0.79.0
+
+### 🚀 Features
+- team setting to make activity notes visible to teammates (#844)
+
+### 🐛 Fixes
+- refuse moving a paid member to a fee plan in another currency (#845)
+
 ## 0.78.0
 
 ### 🚀 Features
