@@ -9,7 +9,7 @@ const WeeklySearchSchema = Schema.Struct({
   includeTeam: Schema.optional(Schema.Boolean),
 });
 
-export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout/weekly')({
+export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout_/weekly')({
   ssr: false,
   validateSearch: Schema.toStandardSchemaV1(WeeklySearchSchema),
   component: WeeklySummaryRoute,
