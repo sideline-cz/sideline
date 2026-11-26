@@ -1,11 +1,9 @@
 import { Auth, type Event, EventApi, type EventType } from '@sideline/domain';
-import { LogicError } from '@sideline/effect-lib';
-import * as m from '@sideline/i18n/messages';
 import { Array, DateTime, Effect, Option, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
-import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
-import { checkCoachScoping, checkGroupAccess, checkTrainingTypeOwnerGroup } from '~/api/scoping.js';
+import { hasPermission, requireMembership } from '~/api/permissions.js';
+import { checkGroupAccess } from '~/api/scoping.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, type EventWithDetails } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -14,6 +12,11 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { createEventForMember } from '~/services/EventCreation.js';
+import {
+  cancelEventForMemberTx,
+  emitEventCancelledSideEffects,
+  updateEventForMemberTx,
+} from '~/services/EventWrites.js';
 import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
 
 export const markPersonalMessagesDirtyBestEffort = (
@@ -74,7 +77,6 @@ export const toEventInfo = (e: EventWithDetails): EventApi.EventInfo =>
 
 const forbidden = new EventApi.Forbidden();
 const notFound = new EventApi.EventNotFound();
-const notActive = new EventApi.EventNotActive();
 
 /** All-day events are stored at 00:00 in the team's timezone (plan §10). This
  * resolves an IANA zone by name, falling back to `Europe/Prague` rather than
@@ -137,7 +139,7 @@ const reanchorFromLocal = (dt: DateTime.Utc, timezone: string): DateTime.Utc => 
  * and moves an already-anchored row backwards on every partial PATCH that
  * omits `startAt`.
  */
-const mergeAllDayInstant = (
+export const mergeAllDayInstant = (
   payloadValue: Option.Option<DateTime.Utc>,
   existingValue: DateTime.Utc,
   mergedAllDay: boolean,
@@ -158,7 +160,7 @@ const mergeAllDayInstant = (
 /** Same three-way split as `mergeAllDayInstant`, for `endAt` — preserves the
  * `Option`-of-`Option` shape: "absent" (outer `None`) and "explicitly cleared
  * to `null`" (outer `Some(None)`) must stay distinct. */
-const mergeAllDayEndAt = (
+export const mergeAllDayEndAt = (
   payloadValue: Option.Option<Option.Option<DateTime.Utc>>,
   existingValue: Option.Option<DateTime.Utc>,
   mergedAllDay: boolean,
@@ -348,156 +350,8 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            Effect.tap(({ membership }) => requirePermission(membership, 'event:edit', forbidden)),
-            Effect.bind('teamZone', () =>
-              teamSettings.findByTeamId(teamId).pipe(
-                Effect.map(
-                  Option.match({
-                    onNone: () => 'Europe/Prague',
-                    onSome: (s) => s.timezone,
-                  }),
-                ),
-              ),
-            ),
-            Effect.let('isAdmin', ({ membership }) => hasPermission(membership, 'team:manage')),
-            Effect.bind('existing', () =>
-              events.findEventByIdWithDetails(eventId).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(notFound),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
-            ),
-            Effect.tap(({ existing }) =>
-              existing.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
-            ),
-            // `eventAcceptsRsvp`, NOT `eventRsvpOpen` — and that holds for all six
-            // sites in this file (`:323`, `:325`, this one, `:511`, `:514`, `:557`).
-            // The configurable RSVP deadline narrows the RSVP gate only; edit and
-            // cancel must stay available INSIDE the lock window, or a captain could
-            // not cancel a rained-off match three hours before kickoff. Swapping
-            // this call would break that with no type error and no other failing
-            // test — see the T3 block in `test/Event.test.ts`.
-            Effect.tap(({ existing }) =>
-              !eventAcceptsRsvp(existing, existing.timezone, DateTime.nowUnsafe())
-                ? Effect.fail(notActive)
-                : Effect.void,
-            ),
-            // Check owner group access
-            Effect.tap(({ existing, membership, isAdmin }) =>
-              isAdmin
-                ? Effect.void
-                : checkGroupAccess(groups, membership.id, existing.owner_group_id).pipe(
-                    Effect.flatMap((ok) => (ok ? Effect.void : Effect.fail(forbidden))),
-                  ),
-            ),
-            Effect.tap(({ existing, isAdmin, membership }) =>
-              checkCoachScoping(
-                events,
-                membership.id,
-                Option.match(payload.trainingTypeId, {
-                  onNone: () => existing.training_type_id,
-                  onSome: (v) => v,
-                }),
-                isAdmin,
-                forbidden,
-              ),
-            ),
-            Effect.tap(({ existing, isAdmin, membership }) =>
-              checkTrainingTypeOwnerGroup(
-                trainingTypes,
-                groups,
-                membership.id,
-                Option.match(payload.trainingTypeId, {
-                  onNone: () => existing.training_type_id,
-                  onSome: (v) => v,
-                }),
-                isAdmin,
-                forbidden,
-                teamId,
-              ),
-            ),
-            Effect.let('mergedLocation', ({ existing }) =>
-              Option.getOrElse(payload.location, () => existing.location),
-            ),
-            Effect.let('mergedLocationUrl', ({ existing }) =>
-              Option.getOrElse(payload.locationUrl, () => existing.location_url),
-            ),
-            Effect.tap(({ mergedLocation, mergedLocationUrl }) =>
-              Option.isSome(mergedLocationUrl) && Option.isNone(mergedLocation)
-                ? Effect.fail(forbidden)
-                : Effect.void,
-            ),
-            Effect.bind('updated', ({ existing, mergedLocation, mergedLocationUrl, teamZone }) => {
-              const mergedAllDay = Option.getOrElse(payload.allDay, () => existing.all_day);
-              return events.updateEvent({
-                id: eventId,
-                title: Option.getOrElse(payload.title, () => existing.title),
-                eventType: Option.getOrElse(payload.eventType, () => existing.event_type),
-                // Raw passthrough, NOT merged against `existing.event_type_id` — `None` means
-                // "no change requested" and the repository's `COALESCE` already keeps the
-                // existing column value (see AGENTS.md ownership statement / D7's
-                // title-only-update guard). Re-deriving it here would duplicate the trigger's
-                // own re-resolution when only the kind changes.
-                eventTypeId: payload.eventTypeId,
-                trainingTypeId: Option.match(payload.trainingTypeId, {
-                  onNone: () => existing.training_type_id,
-                  onSome: (v) => v,
-                }),
-                description: Option.match(payload.description, {
-                  onNone: () => existing.description,
-                  onSome: (v) => v,
-                }),
-                imageUrl: Option.match(payload.imageUrl, {
-                  onNone: () => existing.image_url,
-                  onSome: (v) => v,
-                }),
-                // Five-row merge, plan §12 step 4 — branches on what the wire
-                // supplied, never on the merged `allDay` value. See the
-                // `mergeAllDayInstant`/`mergeAllDayEndAt` doc comments.
-                startAt: mergeAllDayInstant(
-                  payload.startAt,
-                  existing.start_at,
-                  mergedAllDay,
-                  existing.all_day,
-                  teamZone,
-                ),
-                endAt: mergeAllDayEndAt(
-                  payload.endAt,
-                  existing.end_at,
-                  mergedAllDay,
-                  existing.all_day,
-                  teamZone,
-                ),
-                location: mergedLocation,
-                locationUrl: mergedLocationUrl,
-                ownerGroupId: Option.match(payload.ownerGroupId, {
-                  onNone: () => existing.owner_group_id,
-                  onSome: (v) => v,
-                }),
-                memberGroupId: Option.match(payload.memberGroupId, {
-                  onNone: () => existing.member_group_id,
-                  onSome: (v) => v,
-                }),
-                allDay: mergedAllDay,
-              });
-            }),
-            Effect.tap(({ existing }) =>
-              Option.isSome(existing.series_id)
-                ? events.markEventSeriesModified(eventId)
-                : Effect.void,
-            ),
-            Effect.bind('detail', () =>
-              events.findEventByIdWithDetails(eventId).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(notFound),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
+            Effect.bind('detail', ({ membership }) =>
+              updateEventForMemberTx({ teamId, membership, eventId, payload }),
             ),
             Effect.tap(({ detail }) => markPersonalMessagesDirtyBestEffort(events, detail.id)),
             Effect.map(
@@ -536,10 +390,6 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   timezone: Option.some(detail.timezone),
                 }),
             ),
-            Effect.catchTag(
-              'NoSuchElementError',
-              LogicError.withMessage(() => 'Failed updating event — no row returned'),
-            ),
           ),
         )
         .handle('cancelEvent', ({ params: { teamId, eventId } }) =>
@@ -548,72 +398,10 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            Effect.tap(({ membership }) =>
-              requirePermission(membership, 'event:cancel', forbidden),
+            Effect.bind('existing', ({ membership }) =>
+              cancelEventForMemberTx({ teamId, membership, eventId }),
             ),
-            Effect.let('isAdmin', ({ membership }) => hasPermission(membership, 'team:manage')),
-            Effect.bind('existing', () =>
-              events.findEventByIdWithDetails(eventId).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(notFound),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
-            ),
-            Effect.tap(({ existing }) =>
-              existing.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
-            ),
-            Effect.tap(({ existing }) =>
-              !eventAcceptsRsvp(existing, existing.timezone, DateTime.nowUnsafe())
-                ? Effect.fail(notActive)
-                : Effect.void,
-            ),
-            // Check owner group access
-            Effect.tap(({ existing, membership, isAdmin }) =>
-              isAdmin
-                ? Effect.void
-                : checkGroupAccess(groups, membership.id, existing.owner_group_id).pipe(
-                    Effect.flatMap((ok) => (ok ? Effect.void : Effect.fail(forbidden))),
-                  ),
-            ),
-            Effect.tap(({ existing, isAdmin, membership }) =>
-              checkCoachScoping(
-                events,
-                membership.id,
-                existing.training_type_id,
-                isAdmin,
-                forbidden,
-              ),
-            ),
-            Effect.tap(() => events.cancelEvent(eventId)),
-            // Only people who said they were coming are told. A "no" or a silence means the
-            // event was already not in their plans, and a cancellation they were never counted
-            // on for is noise.
-            Effect.tap(({ existing }) =>
-              rsvps.findAttendingMemberIdsByEventId(eventId).pipe(
-                Effect.flatMap((memberIds) =>
-                  notifications.notifyMembers(
-                    teamId,
-                    memberIds,
-                    'event_cancelled',
-                    `/teams/${teamId}/events/${eventId}`,
-                    (locale) => ({
-                      title: m.notification_eventCancelled_title({}, { locale }),
-                      body: m.notification_eventCancelled_body(
-                        { title: existing.title },
-                        { locale },
-                      ),
-                    }),
-                  ),
-                ),
-                Effect.catchCause((cause) =>
-                  Effect.logWarning('Failed to notify attendees of cancellation', cause),
-                ),
-              ),
-            ),
-            Effect.tap(({ existing }) => markPersonalMessagesDirtyBestEffort(events, existing.id)),
+            Effect.tap(({ existing }) => emitEventCancelledSideEffects(teamId, existing)),
             Effect.asVoid,
           ),
         ),

@@ -7,6 +7,10 @@ import { Effect, Option, type ServiceMap } from 'effect';
 import type { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
 
+/** Every id-shaped tool parameter carries this — see the comment above it in `registry.ts`. Lives
+ *  here so `actions.ts` can use it without importing `registry.ts`, which imports `actions.ts`. */
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ---------------------------------------------------------------------------
 // ToolContext — built once per request, in the chat handler, from
 // `requireMembership(members, teamId, currentUser.id, new AiChatApi.AiChatForbidden())`.

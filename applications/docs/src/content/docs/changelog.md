@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-11-26 — New: the AI assistant can change, cancel and take attendance for events (with your confirmation)
+
+Ask the AI assistant to move or rename an event, cancel it, or confirm who came to a training, for example "Move Thursday's practice to 19:00" or "Mark Anna and Petr present at today's training". It shows a card with the details, and nothing changes until you accept it.
+
+- You need the same permission as on the event page: **edit events** to change an event or confirm attendance, **cancel events** to cancel one. Captains can only change events of a group they belong to, like on the event page.
+- A change to a recurring event applies to that one occurrence only.
+- Attendance can be confirmed once a training has started. The card lists everyone as present or absent; members you don't name keep what the attendance page shows for them.
+- API integrators: `confirmProposal` returns `200 { status: 'applied' }` for these actions; `Proposal.action` and the summary field keys are widened.
+
 ## 2026-11-26 — Late-RSVP notifications show the previous answer
 
 When a member changes their answer after the reminder, the notification in the late-RSVP channel now says what they changed from, for example "changed their answer from **No** to **Yes**".

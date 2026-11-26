@@ -57,6 +57,8 @@ type CardState =
   | { readonly _tag: 'confirmed'; readonly event: EventApi.EventInfo }
   // A Discord change: the server only queued it for the bot. Never rendered as "done".
   | { readonly _tag: 'queued' }
+  // An existing row changed in place (update, cancel, attendance).
+  | { readonly _tag: 'applied' }
   | { readonly _tag: 'rejected' }
   | { readonly _tag: 'failed'; readonly reason: ProposalErrorReason };
 
@@ -80,6 +82,9 @@ const proposalFieldLabels: Record<AiChatApi.ProposalFieldKey, () => string> = {
   currentAccess: () => tr('assistant_proposal_field_currentAccess'),
   access: () => tr('channels_accessLevel_label'),
   archiveCategory: () => tr('assistant_proposal_field_archiveCategory'),
+  event: () => tr('assistant_proposal_field_event'),
+  present: () => tr('assistant_proposal_field_present'),
+  absent: () => tr('assistant_proposal_field_absent'),
 };
 
 const accessLevelLabels: Record<AiChatApi.ProposalAccessLevel, () => string> = {
@@ -94,24 +99,36 @@ const proposalTitles: Record<AiChatApi.Proposal['action'], () => string> = {
   create_discord_channel: () => tr('assistant_proposal_createDiscordChannel_title'),
   set_discord_channel_access: () => tr('assistant_proposal_setDiscordChannelAccess_title'),
   archive_discord_channel: () => tr('assistant_proposal_archiveDiscordChannel_title'),
+  update_event: () => tr('assistant_proposal_updateEvent_title'),
+  cancel_event: () => tr('assistant_proposal_cancelEvent_title'),
+  mark_attendance: () => tr('assistant_proposal_markAttendance_title'),
 };
 const proposalDescriptions: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_description'),
   create_discord_channel: () => tr('assistant_proposal_createDiscordChannel_description'),
   set_discord_channel_access: () => tr('assistant_proposal_setDiscordChannelAccess_description'),
   archive_discord_channel: () => tr('assistant_proposal_archiveDiscordChannel_description'),
+  update_event: () => tr('assistant_proposal_updateEvent_description'),
+  cancel_event: () => tr('assistant_proposal_cancelEvent_description'),
+  mark_attendance: () => tr('assistant_proposal_markAttendance_description'),
 };
 const proposalConfirmLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirm'),
   create_discord_channel: () => tr('assistant_proposal_createDiscordChannel_confirm'),
   set_discord_channel_access: () => tr('assistant_proposal_setDiscordChannelAccess_confirm'),
   archive_discord_channel: () => tr('assistant_proposal_archiveDiscordChannel_confirm'),
+  update_event: () => tr('assistant_proposal_updateEvent_confirm'),
+  cancel_event: () => tr('assistant_proposal_cancelEvent_confirm'),
+  mark_attendance: () => tr('assistant_proposal_markAttendance_confirm'),
 };
 const proposalSuccessLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirmed'),
   create_discord_channel: () => tr('assistant_proposal_createDiscordChannel_confirmed'),
   set_discord_channel_access: () => tr('assistant_proposal_setDiscordChannelAccess_confirmed'),
   archive_discord_channel: () => tr('assistant_proposal_archiveDiscordChannel_confirmed'),
+  update_event: () => tr('assistant_proposal_updateEvent_confirmed'),
+  cancel_event: () => tr('assistant_proposal_cancelEvent_confirmed'),
+  mark_attendance: () => tr('assistant_proposal_markAttendance_confirmed'),
 };
 
 const proposalErrorMessages: Record<ProposalErrorReason, () => string> = {
@@ -202,6 +219,7 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
   const isTerminal =
     state._tag === 'confirmed' ||
     state._tag === 'queued' ||
+    state._tag === 'applied' ||
     state._tag === 'rejected' ||
     state._tag === 'failed';
   React.useEffect(() => {
@@ -222,7 +240,9 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
         setState(
           result instanceof AiChatApi.DiscordChangeQueued
             ? { _tag: 'queued' }
-            : { _tag: 'confirmed', event: result },
+            : result instanceof AiChatApi.AiActionApplied
+              ? { _tag: 'applied' }
+              : { _tag: 'confirmed', event: result },
         );
         router.invalidate();
         return Effect.void;
@@ -260,6 +280,9 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
   }, [run, teamIdBranded, proposal.id]);
 
   const busy = state._tag === 'busy';
+  // Both lose something for good: archived messages, or a cancelled event that cannot be reopened.
+  const isDestructive =
+    proposal.action === 'archive_discord_channel' || proposal.action === 'cancel_event';
   const isArchive = proposal.action === 'archive_discord_channel';
   const showFieldList = !isTerminal || !(state._tag === 'failed' && state.reason === 'alreadyUsed');
   const showFooter = !isTerminal || (state._tag === 'failed' && state.reason === 'generic');
@@ -319,6 +342,12 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
                   <AlertTitle>{proposalSuccessLabels[proposal.action]()}</AlertTitle>
                 </Alert>
               )}
+              {state._tag === 'applied' && (
+                <Alert>
+                  <CircleCheck className='size-4' aria-hidden='true' />
+                  <AlertTitle>{proposalSuccessLabels[proposal.action]()}</AlertTitle>
+                </Alert>
+              )}
               {state._tag === 'rejected' && (
                 <p className='text-sm text-muted-foreground'>{tr('assistant_proposal_rejected')}</p>
               )}
@@ -363,7 +392,7 @@ export function AssistantProposalCard({ proposal, teamId }: AssistantProposalCar
             </Button>
             <Button
               type='button'
-              variant={isArchive ? 'destructive' : 'default'}
+              variant={isDestructive ? 'destructive' : 'default'}
               className='w-full sm:w-auto'
               disabled={busy}
               onClick={() => {

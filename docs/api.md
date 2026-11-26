@@ -7240,7 +7240,7 @@ A conversational assistant, scoped to one team, that answers questions about the
 
 **Every tool result is filtered through the calling user's own permissions** before it ever reaches the model: `list_groups` requires `group:manage`, `list_members` requires `member:view`, `list_rosters` requires `roster:view`, and `list_events` mirrors `GET /teams/:teamId/events`'s own group-visibility rules (a caller who cannot see a group's events cannot ask the assistant about them either, and a non-existent-or-invisible `eventId` reads back as "not found", never as a distinguishable 403). Members are returned as a bespoke allow-listed projection (display name, jersey number, roles, active status) — the assistant never sees or surfaces a member's Discord ID, username, birth date, gender, or raw permission grants. `list_discord_channels` and `list_discord_roles` require `ai:manage_discord`; they return the team's channels and roles from the last bot sync (not a live Discord call; a role's `linkedTo` lists every link it has, in the order `group`, `roster`, `achievement` — built-in and custom achievements both count — and is empty when the role is not linked), and return `{ error: 'discord_not_connected' }` when the bot is not in the guild.
 
-**Write path (propose → confirm/reject).** Four propose tools, each requiring every listed permission (checked at propose time and again at confirm):
+**Write path (propose → confirm/reject).** Seven propose tools, each requiring every listed permission (checked at propose time and again at confirm):
 
 | Tool | Permissions |
 |---|---|
@@ -7248,10 +7248,13 @@ A conversational assistant, scoped to one team, that answers questions about the
 | `propose_create_discord_channel` | `ai:manage_discord`, `group:manage` |
 | `propose_set_discord_channel_access` | `ai:manage_discord`, `group:manage` (one group per proposal: grant, level change, or revoke) |
 | `propose_archive_discord_channel` | `ai:manage_discord`, `group:manage` |
+| `propose_update_event` | `event:edit` (plus the owner-group and coach-scoping gates of `PATCH /events/:eventId`) |
+| `propose_cancel_event` | `event:cancel` (plus the same row gates as `POST /events/:eventId/cancel`) |
+| `propose_mark_attendance` | `event:edit` (plus `team:manage` or owner-group membership, as `PUT /events/:eventId/attendance`) |
 
 Discord proposals are refused with `discord_not_connected` when the bot is not in the guild. Archive is refused when no archive category is set or the channel is not on Discord yet; the bot may delete the channel if it cannot move it. Write tools take names, not ids. `list_discord_channels` rows carry `syncStatus`: `synced`, `pending`, `failed`, or `not_on_discord`.
 
-**`POST /teams/:teamId/ai/proposals/:proposalId/confirm`** — Auth: Bearer token, active member. Executes the proposal. `201` with `EventInfo` for `create_event`; `202` with `{ status: 'queued' }` for Discord actions (the change is only queued as a sync event for the bot, not yet applied). Errors: `403` (caller lacks a required permission), `404` (unknown or foreign proposal, already rejected, or the channel/group/archive category/name changed since the proposal), `409` (already confirmed), `410` (expired).
+**`POST /teams/:teamId/ai/proposals/:proposalId/confirm`** — Auth: Bearer token, active member. Executes the proposal. `201` with `EventInfo` for `create_event`; `202` with `{ status: 'queued' }` for Discord actions (the change is only queued as a sync event for the bot, not yet applied); `200` with `{ status: 'applied' }` for `update_event`, `cancel_event` and `mark_attendance`. Errors: `403` (caller lacks a required permission), `404` (unknown or foreign proposal, already rejected, or the channel/group/archive category/name changed since the proposal), `409` (already confirmed), `410` (expired).
 
 **`POST /teams/:teamId/ai/proposals/:proposalId/reject`** — Auth: Bearer token, active member. Discards the proposal. `204`. Errors: `403` (not a member), `404` (unknown, foreign, or already rejected).
 

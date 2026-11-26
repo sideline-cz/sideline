@@ -2625,7 +2625,8 @@ Rules:
 3. **A foreign id, or an id inside a group the caller cannot see, returns `notFoundResult`, never `forbiddenResult`** — `forbidden` would confirm the row exists.
 4. **A write action's `permissions` MUST include the mirrored HTTP endpoint's permission** (Discord actions: `group:manage`, on top of `ai:manage_discord`), so the AI is never an escalation path.
 5. **Discord actions only queue sync events.** User-facing copy says "queued", never "done" or "created".
-6. **Write tools take names, not ids**, because no read tool returns ids.
+6. **Write tools take names, not ids**, because read tools return ids only for events (`list_events` items carry `eventId`). Event write tools take that `eventId`; member names inside them are matched like channel names.
+7. **An event write action calls the HTTP handler's own body** (`services/EventWrites.ts`, shared with `api/event.ts` and `api/event-attendance.ts`), so propose and confirm apply the same row gates (owner group, coach scoping) as the event page.
 
 ### Opaque Per-Turn Reference Tokens
 

@@ -31,9 +31,12 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
@@ -72,6 +75,9 @@ const RealRepos = Layer.mergeAll(
   AiActionProposalsRepository.Default,
   EventsRepository.Default,
   EventSyncEventsRepository.Default,
+  EventAttendanceRepository.Default,
+  EventRsvpsRepository.Default,
+  NotificationsRepository.Default,
 );
 
 const SeedLayer = RealRepos.pipe(Layer.provideMerge(TestPgClient));

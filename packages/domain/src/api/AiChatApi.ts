@@ -173,6 +173,9 @@ export const ProposalFieldKey = Schema.Literals([
   'currentAccess',
   'access',
   'archiveCategory',
+  'event',
+  'present',
+  'absent',
 ]);
 export type ProposalFieldKey = typeof ProposalFieldKey.Type;
 
@@ -222,6 +225,11 @@ export class DiscordChangeQueued extends Schema.Class<DiscordChangeQueued>('AiDi
     status: Schema.Literal('queued'),
   },
 ) {}
+
+/** Confirm of an action that changed an existing row in place (update, cancel, attendance). */
+export class AiActionApplied extends Schema.Class<AiActionApplied>('AiActionApplied')({
+  status: Schema.Literal('applied'),
+}) {}
 
 export class ChatResponse extends Schema.Class<ChatResponse>('AiChatResponse')({
   answer: Schema.String,
@@ -290,6 +298,7 @@ export class AiChatApiGroup extends HttpApiGroup.make('aiChat')
       success: [
         EventApi.EventInfo.pipe(HttpApiSchema.status(201)),
         DiscordChangeQueued.pipe(HttpApiSchema.status(202)),
+        AiActionApplied.pipe(HttpApiSchema.status(200)),
       ],
       error: [
         AiChatForbidden.pipe(HttpApiSchema.status(403)),

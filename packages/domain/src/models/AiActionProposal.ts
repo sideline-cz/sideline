@@ -16,5 +16,8 @@ export const AiActionName = Schema.Literals([
   'create_discord_channel',
   'set_discord_channel_access',
   'archive_discord_channel',
+  'update_event',
+  'cancel_event',
+  'mark_attendance',
 ]);
 export type AiActionName = typeof AiActionName.Type;
