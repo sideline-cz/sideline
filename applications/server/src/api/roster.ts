@@ -1,6 +1,13 @@
-import { Auth, type Discord, DisplayName, Roster, type RosterModel } from '@sideline/domain';
+import {
+  Auth,
+  type Discord,
+  DisplayName,
+  Roster,
+  type RosterModel,
+  type Team,
+} from '@sideline/domain';
 import { LogicError, Options } from '@sideline/effect-lib';
-import { Array, DateTime, Effect, Match, Option } from 'effect';
+import { Array, DateTime, Effect, Match, Option, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
@@ -115,6 +122,16 @@ const resolveChannelName = (
   Option.flatMap(channelId, (id) =>
     Option.fromNullishOr(allChannels.find((ch) => ch.channel_id === id)?.name),
   );
+
+/** A roster id from the URL, looked up only within `teamId` — another team's roster reads as missing (404). */
+export const findTeamRoster = (
+  rosters: ServiceMap.Service.Shape<typeof RostersRepository>,
+  teamId: Team.TeamId,
+  rosterId: RosterModel.RosterId,
+) =>
+  rosters
+    .findRosterById(rosterId)
+    .pipe(Effect.map(Option.filter((roster) => roster.team_id === teamId)));
 
 export const toRosterInfo = (
   r: RosterModel.Roster,
@@ -564,7 +581,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                 hasPermission(membership, 'roster:manage'),
               ),
               Effect.bind('roster', () =>
-                rosters.findRosterById(rosterId).pipe(
+                findTeamRoster(rosters, teamId, rosterId).pipe(
                   Effect.flatMap(
                     Option.match({
                       onNone: () => Effect.fail(new Roster.RosterNotFound()),
@@ -616,7 +633,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                 requirePermission(membership, 'roster:manage', new Roster.Forbidden()),
               ),
               Effect.bind('existing', () =>
-                rosters.findRosterById(rosterId).pipe(
+                findTeamRoster(rosters, teamId, rosterId).pipe(
                   Effect.flatMap(
                     Option.match({
                       onNone: () => Effect.fail(new Roster.RosterNotFound()),
@@ -934,7 +951,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                 requirePermission(membership, 'roster:manage', new Roster.Forbidden()),
               ),
               Effect.bind('existing', () =>
-                rosters.findRosterById(rosterId).pipe(
+                findTeamRoster(rosters, teamId, rosterId).pipe(
                   Effect.flatMap(
                     Option.match({
                       onNone: () => Effect.fail(new Roster.RosterNotFound()),
@@ -1104,7 +1121,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                 requirePermission(membership, 'roster:manage', new Roster.Forbidden()),
               ),
               Effect.bind('roster', () =>
-                rosters.findRosterById(rosterId).pipe(
+                findTeamRoster(rosters, teamId, rosterId).pipe(
                   Effect.flatMap(
                     Option.match({
                       onNone: () => Effect.fail(new Roster.RosterNotFound()),
@@ -1145,7 +1162,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                 requirePermission(membership, 'roster:manage', new Roster.Forbidden()),
               ),
               Effect.bind('roster', () =>
-                rosters.findRosterById(rosterId).pipe(
+                findTeamRoster(rosters, teamId, rosterId).pipe(
                   Effect.flatMap(
                     Option.match({
                       onNone: () => Effect.fail(new Roster.RosterNotFound()),
@@ -1153,9 +1170,6 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                     }),
                   ),
                 ),
-              ),
-              Effect.tap(({ roster }) =>
-                roster.team_id !== teamId ? Effect.fail(new Roster.RosterNotFound()) : Effect.void,
               ),
               Effect.bind('rosterMembers', () => rosters.findMemberEntriesById(rosterId)),
               Effect.bind('mapping', () => channelMappings.findByRosterId(teamId, rosterId)),

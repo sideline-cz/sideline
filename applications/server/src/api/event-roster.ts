@@ -1,15 +1,18 @@
 import {
   Auth,
   type Discord,
+  type Event,
   EventRosterApi,
   type RosterModel,
+  type Team,
   type TeamMember,
 } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
-import { Effect, Option } from 'effect';
+import { Effect, Option, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
+import { findTeamRoster } from '~/api/roster.js';
 import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
 import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
@@ -46,6 +49,30 @@ const alreadyLinked = new EventRosterApi.AlreadyLinked();
 const requestNotFound = new EventRosterApi.RequestNotFound();
 const requestAlreadyHandled = new EventRosterApi.RequestAlreadyHandled();
 
+const requireTeamRoster = (
+  rosters: ServiceMap.Service.Shape<typeof RostersRepository>,
+  teamId: Team.TeamId,
+  rosterId: RosterModel.RosterId,
+) =>
+  findTeamRoster(rosters, teamId, rosterId).pipe(
+    Effect.flatMap(
+      Option.match({ onNone: () => Effect.fail(rosterNotFound), onSome: () => Effect.void }),
+    ),
+  );
+
+const requireTeamEvent = (
+  events: ServiceMap.Service.Shape<typeof EventsRepository>,
+  teamId: Team.TeamId,
+  eventId: Event.EventId,
+) =>
+  events
+    .findEventByIdWithDetails(eventId)
+    .pipe(
+      Effect.flatMap((ev) =>
+        Option.exists(ev, (e) => e.team_id === teamId) ? Effect.void : Effect.fail(eventNotFound),
+      ),
+    );
+
 export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (handlers) =>
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
@@ -65,6 +92,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
               Effect.bind('membership', ({ currentUser }) =>
                 requireMembership(members, teamId, currentUser.id, forbidden),
               ),
+              Effect.tap(() => requireTeamEvent(events, teamId, eventId)),
               Effect.flatMap(() =>
                 eventRosters
                   .findByEventId(eventId)
@@ -93,7 +121,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                 ),
               ),
               Effect.bind('roster', () =>
-                rosters.findRosterById(payload.rosterId).pipe(
+                findTeamRoster(rosters, teamId, payload.rosterId).pipe(
                   Effect.flatMap(
                     Option.match({
                       onNone: () => Effect.fail(rosterNotFound),
@@ -253,6 +281,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'roster:manage', forbidden),
               ),
+              Effect.tap(() => requireTeamEvent(events, teamId, eventId)),
               Effect.bind('link', () =>
                 eventRosters.findByEventId(eventId).pipe(
                   Effect.flatMap(
@@ -344,6 +373,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'roster:manage', forbidden),
               ),
+              Effect.tap(() => requireTeamEvent(events, teamId, eventId)),
               // Resolve the link first so we can emit the thread-delete with owners_thread_id
               Effect.bind('link', () =>
                 eventRosters.findByEventId(eventId).pipe(Effect.map(Option.getOrUndefined)),
@@ -395,6 +425,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'roster:manage', forbidden),
               ),
+              Effect.tap(() => requireTeamRoster(rosters, teamId, rosterId)),
               Effect.flatMap(() =>
                 requests.findPendingByRoster(rosterId).pipe(
                   Effect.map((pending) =>
@@ -423,6 +454,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'roster:manage', forbidden),
               ),
+              Effect.tap(() => requireTeamRoster(rosters, teamId, rosterId)),
               Effect.bind('request', () =>
                 requests.findById(requestId).pipe(
                   Effect.flatMap(
@@ -470,6 +502,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'roster:manage', forbidden),
               ),
+              Effect.tap(() => requireTeamRoster(rosters, teamId, rosterId)),
               Effect.bind('request', () =>
                 requests.findById(requestId).pipe(
                   Effect.flatMap(
