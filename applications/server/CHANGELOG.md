@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.86.0
+
+### 🚀 Features
+- AI assistant proposes event updates, cancellations, attendance and your own RSVP (#829)
+- editable dot color on activity types (#828)
+- choose which RSVP answers feed the event roster (#834)
+
+### 🐛 Fixes
+- scope roster and event-roster lookups to the team in the URL (#835)
+- late-RSVP notice says which answer the member changed from (#825)
+
 ## 0.85.1
 
 ### 🐛 Fixes
