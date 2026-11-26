@@ -14,7 +14,8 @@
  * error here until this record grows a matching entry.
  *
  * Actions: `create_event`; `update_event`, `cancel_event` and `mark_attendance`, whose guards
- * live in `services/EventWrites.ts` next to the HTTP handlers'; and three Discord actions that only QUEUE a change for the bot
+ * live in `services/EventWrites.ts` next to the HTTP handlers'; `set_my_rsvp`, the caller's own
+ * RSVP only (`services/RsvpWrites.ts`); and three Discord actions that only QUEUE a change for the bot
  * (`create_discord_channel`, `set_discord_channel_access`, `archive_discord_channel`). The
  * Discord tools take NAMES, not ids: no read tool gives the model a channel or group id.
  *
@@ -31,6 +32,7 @@ import {
   Event,
   type EventApi,
   type EventAttendanceApi,
+  EventRsvp,
   GroupModel,
   type Role,
   type Team,
@@ -46,6 +48,7 @@ import type { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEven
 import type { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
+import type { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import type {
   EventRow,
   EventsRepository,
@@ -73,6 +76,7 @@ import {
   createManagedChannel,
   setManagedChannelAccessTx,
 } from '~/services/ManagedChannels.js';
+import { checkRsvpSubmittable, submitRsvpTx } from '~/services/RsvpWrites.js';
 import { applyDiscordFormat, DEFAULT_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 
 // ---------------------------------------------------------------------------
@@ -1212,6 +1216,86 @@ const confirmMarkAttendance = (payloadJson: string, ctx: ConfirmContext) =>
     }),
   );
 
+// --- set_my_rsvp -------------------------------------------------------------
+// The CALLER's own RSVP only — there is no member parameter, so no way to answer for anyone
+// else. Every rule (profile completeness, deadline, member group, required note) lives in
+// `services/RsvpWrites.ts`, shared with the web `submitRsvp`.
+
+const SetMyRsvpArgs = Schema.Struct({
+  eventId: EventIdParam,
+  response: EventRsvp.RsvpResponse,
+  // Empty string clears the stored note; omitted keeps it — same as the web.
+  message: Schema.optionalKey(Schema.String.pipe(Schema.check(Schema.isMaxLength(500)))),
+});
+type SetMyRsvpArgs = Schema.Schema.Type<typeof SetMyRsvpArgs>;
+
+const rsvpRefusal = (e: { readonly _tag: string }): string => {
+  switch (e._tag) {
+    case 'EventRsvpEventNotFound':
+      return 'eventId: no such event in this team, or it was cancelled';
+    case 'RsvpDeadlinePassed':
+      return 'event: RSVPs for this event are closed';
+    case 'EventRsvpForbidden':
+      return 'event: the user is not invited to this event (it is for a group they are not in)';
+    case 'EventRsvpMessageRequired':
+      return 'message: this answer needs a note (for "coming later" when they arrive, for "maybe" what it depends on); ask the user for it';
+    case 'EventRsvpProfileIncomplete':
+      return 'profile: the team requires a complete profile before answering; tell the user to complete their profile';
+    default:
+      return e._tag;
+  }
+};
+
+const rsvpArgsFor = (a: SetMyRsvpArgs, ctx: ConfirmContext) => ({
+  teamId: ctx.teamId,
+  membership: ctx.membership,
+  isProfileComplete: ctx.membership.is_profile_complete,
+  eventId: a.eventId,
+  response: a.response,
+  message: Option.fromUndefinedOr(a.message),
+});
+
+const proposeSetMyRsvp = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(SetMyRsvpArgs, rawArgs)),
+    Effect.bind('checked', ({ args }) =>
+      checkRsvpSubmittable(rsvpArgsFor(args, ctx)).pipe(Effect.mapError(rsvpRefusal)),
+    ),
+    Effect.map(({ args, checked }) => ({
+      payloadJson: JSON.stringify(Schema.encodeSync(SetMyRsvpArgs)(args)),
+      summary: [
+        textField('event', eventLabel(checked.event)),
+        new AiChatApi.ProposalField({
+          key: 'response',
+          value: { type: 'rsvpResponse', value: args.response },
+        }),
+        // The note the RSVP will carry after the write: the new one, or the kept one.
+        optionalTextField(
+          'message',
+          checked.effectiveClear
+            ? checked.note
+            : Option.orElse(checked.note, () =>
+                Option.flatMap(checked.priorRsvp, (r) => r.message),
+              ),
+        ),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmSetMyRsvp = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(SetMyRsvpArgs, payloadJson).pipe(
+    Effect.flatMap((args) => submitRsvpTx(rsvpArgsFor(args, ctx))),
+    Effect.map((submitted): ConfirmResult => ({ kind: 'rsvp_submitted', submitted })),
+    Effect.catchTags({
+      EventRsvpForbidden: () => Effect.fail(new AiChatApi.AiProposalActionForbidden()),
+      EventRsvpEventNotFound: (e) => stale(e._tag),
+      RsvpDeadlinePassed: (e) => stale(e._tag),
+      EventRsvpMessageRequired: (e) => stale(e._tag),
+      EventRsvpProfileIncomplete: (e) => stale(e._tag),
+    }),
+  );
+
 // ---------------------------------------------------------------------------
 // The registry.
 // ---------------------------------------------------------------------------
@@ -1223,11 +1307,16 @@ export type ConfirmResult =
   | { readonly kind: 'discord_queued' }
   | { readonly kind: 'event_updated'; readonly event: EventWithDetails }
   | { readonly kind: 'event_cancelled'; readonly event: EventWithDetails }
-  | { readonly kind: 'attendance_confirmed' };
+  | { readonly kind: 'attendance_confirmed' }
+  | {
+      readonly kind: 'rsvp_submitted';
+      readonly submitted: Effect.Success<ReturnType<typeof submitRsvpTx>>;
+    };
 
 type ConfirmContext = { readonly teamId: Team.TeamId; readonly membership: MembershipWithRole };
 
 export type ProposeR =
+  | EventRsvpsRepository
   | EventsRepository
   | EventAttendanceRepository
   | GroupsRepository
@@ -1239,6 +1328,7 @@ export type ProposeR =
   | DiscordChannelsRepository;
 
 type ConfirmR =
+  | EventRsvpsRepository
   | EventsRepository
   | EventAttendanceRepository
   | GroupsRepository
@@ -1389,5 +1479,19 @@ export const ACTION_REGISTRY: Record<AiActionProposal.AiActionName, ActionDefini
     argsSchema: MarkAttendanceArgs,
     propose: proposeMarkAttendance,
     confirm: confirmMarkAttendance,
+  },
+  set_my_rsvp: {
+    // Same as the web RSVP buttons: any member, for events they are invited to.
+    permissions: [],
+    requiresDiscord: false,
+    description:
+      "Proposes setting the USER'S OWN answer to an event invitation, by the `eventId` from " +
+      '`list_events`. `response` is yes, no, maybe or coming_later; `maybe` and `coming_later` ' +
+      'need a `message` (when they arrive, or what it depends on) unless one is already saved. ' +
+      "It can never answer for another member: if the user asks to set someone else's RSVP, say " +
+      `that each member answers for themselves. ${EVENT_COMMON}`,
+    argsSchema: SetMyRsvpArgs,
+    propose: proposeSetMyRsvp,
+    confirm: confirmSetMyRsvp,
   },
 };

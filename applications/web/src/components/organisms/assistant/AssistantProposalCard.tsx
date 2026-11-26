@@ -18,7 +18,7 @@
  * on wake, so a client-side gate would either block a valid confirm or do nothing at all — the
  * server's `expires_at > now()` is the only gate that matters.
  */
-import { AiChatApi, type EventApi, Team } from '@sideline/domain';
+import { AiChatApi, type EventApi, type EventRsvp, Team } from '@sideline/domain';
 import { useRouter } from '@tanstack/react-router';
 import { Cause, DateTime, Effect, Schema } from 'effect';
 import { CircleCheck, Clock, Loader2, OctagonX, Send, TriangleAlert } from 'lucide-react';
@@ -85,6 +85,8 @@ const proposalFieldLabels: Record<AiChatApi.ProposalFieldKey, () => string> = {
   event: () => tr('assistant_proposal_field_event'),
   present: () => tr('assistant_proposal_field_present'),
   absent: () => tr('assistant_proposal_field_absent'),
+  response: () => tr('assistant_proposal_field_response'),
+  message: () => tr('assistant_proposal_field_message'),
 };
 
 const accessLevelLabels: Record<AiChatApi.ProposalAccessLevel, () => string> = {
@@ -92,6 +94,13 @@ const accessLevelLabels: Record<AiChatApi.ProposalAccessLevel, () => string> = {
   EDIT: () => tr('channels_accessLevel_edit'),
   ADMIN: () => tr('channels_accessLevel_admin'),
   NONE: () => tr('assistant_proposal_accessNone'),
+};
+
+const rsvpResponseLabels: Record<EventRsvp.RsvpResponse, () => string> = {
+  yes: () => tr('rsvp_yes'),
+  coming_later: () => tr('rsvp_comingLater'),
+  maybe: () => tr('rsvp_maybe'),
+  no: () => tr('rsvp_no'),
 };
 
 const proposalTitles: Record<AiChatApi.Proposal['action'], () => string> = {
@@ -102,6 +111,7 @@ const proposalTitles: Record<AiChatApi.Proposal['action'], () => string> = {
   update_event: () => tr('assistant_proposal_updateEvent_title'),
   cancel_event: () => tr('assistant_proposal_cancelEvent_title'),
   mark_attendance: () => tr('assistant_proposal_markAttendance_title'),
+  set_my_rsvp: () => tr('assistant_proposal_setMyRsvp_title'),
 };
 const proposalDescriptions: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_description'),
@@ -111,6 +121,7 @@ const proposalDescriptions: Record<AiChatApi.Proposal['action'], () => string> =
   update_event: () => tr('assistant_proposal_updateEvent_description'),
   cancel_event: () => tr('assistant_proposal_cancelEvent_description'),
   mark_attendance: () => tr('assistant_proposal_markAttendance_description'),
+  set_my_rsvp: () => tr('assistant_proposal_setMyRsvp_description'),
 };
 const proposalConfirmLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirm'),
@@ -120,6 +131,7 @@ const proposalConfirmLabels: Record<AiChatApi.Proposal['action'], () => string> 
   update_event: () => tr('assistant_proposal_updateEvent_confirm'),
   cancel_event: () => tr('assistant_proposal_cancelEvent_confirm'),
   mark_attendance: () => tr('assistant_proposal_markAttendance_confirm'),
+  set_my_rsvp: () => tr('assistant_proposal_setMyRsvp_confirm'),
 };
 const proposalSuccessLabels: Record<AiChatApi.Proposal['action'], () => string> = {
   create_event: () => tr('assistant_proposal_createEvent_confirmed'),
@@ -129,6 +141,7 @@ const proposalSuccessLabels: Record<AiChatApi.Proposal['action'], () => string> 
   update_event: () => tr('assistant_proposal_updateEvent_confirmed'),
   cancel_event: () => tr('assistant_proposal_cancelEvent_confirmed'),
   mark_attendance: () => tr('assistant_proposal_markAttendance_confirmed'),
+  set_my_rsvp: () => tr('assistant_proposal_setMyRsvp_confirmed'),
 };
 
 const proposalErrorMessages: Record<ProposalErrorReason, () => string> = {
@@ -195,6 +208,8 @@ function renderProposalFieldValue(
       return eventTypeLabels[value.value]();
     case 'accessLevel':
       return accessLevelLabels[value.value]();
+    case 'rsvpResponse':
+      return rsvpResponseLabels[value.value]();
     case 'none':
       // A visible row, never an omitted one — `memberGroup: none` means everyone on the team
       // sees this event, a visibility decision the user must be able to verify before confirming.

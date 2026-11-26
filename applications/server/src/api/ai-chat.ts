@@ -41,6 +41,7 @@ import { ChatRateLimiter } from '~/services/ChatRateLimiter.js';
 import { emitEventCreatedSideEffects } from '~/services/EventCreation.js';
 import { emitEventCancelledSideEffects } from '~/services/EventWrites.js';
 import { LlmClient } from '~/services/LlmClient.js';
+import { emitRsvpSideEffects } from '~/services/RsvpWrites.js';
 
 const forbidden = new AiChatApi.AiChatForbidden();
 
@@ -123,6 +124,7 @@ const toConfirmedResponse = (result: ConfirmResult): ConfirmedResponse => {
     case 'event_updated':
     case 'event_cancelled':
     case 'attendance_confirmed':
+    case 'rsvp_submitted':
       return new AiChatApi.AiActionApplied({ status: 'applied' });
   }
 };
@@ -138,6 +140,7 @@ const afterCommit = (
   never,
   | Effect.Services<ReturnType<typeof emitEventCreatedSideEffects>>
   | Effect.Services<ReturnType<typeof emitEventCancelledSideEffects>>
+  | Effect.Services<ReturnType<typeof emitRsvpSideEffects>>
 > => {
   switch (result.kind) {
     case 'event_created':
@@ -148,6 +151,8 @@ const afterCommit = (
       );
     case 'event_cancelled':
       return emitEventCancelledSideEffects(teamId, result.event);
+    case 'rsvp_submitted':
+      return emitRsvpSideEffects(teamId, result.submitted);
     case 'discord_queued':
     case 'attendance_confirmed':
       return Effect.void;

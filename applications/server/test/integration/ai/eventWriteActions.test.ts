@@ -39,6 +39,7 @@ import { AiChatEnabledConfig } from '~/services/AiChatEnabledConfig.js';
 import { visibleTools } from '~/services/ai/registry.js';
 import type { ToolContext } from '~/services/ai/toolTypes.js';
 import { proposeAction } from '~/services/ai/writeTools.js';
+import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { MockChatAgentLayer, MockChatRateLimiterLayer } from '../../mocks/aiChatMocks.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
@@ -96,6 +97,10 @@ const HandlerLayer = HttpApiBuilder.layer(HttpApi.make('api').add(AiChatApi.AiCh
   Layer.provide(MockChatRateLimiterLayer),
   Layer.provide(LlmClient.Default),
   Layer.provide(Layer.succeed(AiChatEnabledConfig, { asEffect: Effect.succeed(true) })),
+  // Roster provisioning after an RSVP is best-effort and has its own tests; a no-op here.
+  Layer.provide(
+    Layer.succeed(EventRosterProvisioningService, { onRsvp: () => Effect.void } as never),
+  ),
   Layer.provide(RealRepos),
   Layer.provideMerge(TestPgClient),
 );
@@ -196,7 +201,7 @@ const member = (teamId: Team.TeamId, discordId: string, roleName: 'Admin' | 'Cap
       };
       return c;
     });
-    return { memberId: tm.id, roleId: role.id, token, ctx: yield* ctx };
+    return { memberId: tm.id, roleId: role.id, token, ctx: yield* ctx, refreshCtx: ctx };
   });
 
 const insertEvent = (
@@ -521,6 +526,86 @@ describe('AI event write actions on real Postgres', () => {
       );
       expect(outcome.result).toMatchObject({ error: 'invalid_arguments' });
       expect(yield* proposalCount).toBe(0);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+describe('set_my_rsvp on real Postgres', () => {
+  const rsvpRows = (eventId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      return yield* sql<{ team_member_id: string; response: string; message: string | null }>`
+        SELECT team_member_id, response, message FROM event_rsvps WHERE event_id = ${eventId}
+      `;
+    });
+
+  it.effect('every member sees it; propose writes nothing; confirm sets ONLY the caller', () =>
+    Effect.gen(function* () {
+      const { teamA, admin, player, upcoming } = yield* setup;
+      expect(visibleTools(player.ctx).map((t) => t.name)).toContain('propose_set_my_rsvp');
+
+      // An extra member field is not a parameter: it is ignored, never honoured.
+      const { proposalId, summary } = yield* proposeOk(
+        'set_my_rsvp',
+        { eventId: upcoming.id, response: 'yes', memberId: admin.memberId },
+        player.ctx,
+      );
+      expect(summaryValue(summary, 'response')).toEqual({ type: 'rsvpResponse', value: 'yes' });
+      expect(yield* rsvpRows(upcoming.id)).toHaveLength(0);
+
+      const response = yield* confirm(teamA.id, proposalId, player.token);
+      expect(response.status).toBe(200);
+      expect(yield* json(response)).toEqual({ status: 'applied' });
+      const rows = yield* rsvpRows(upcoming.id);
+      expect(rows).toEqual([{ team_member_id: player.memberId, response: 'yes', message: null }]);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('the same rules as the web: note required, deadline, profile completeness', () =>
+    Effect.gen(function* () {
+      const { sql, teamA, player, upcoming, started } = yield* setup;
+      const refusal = (args: Record<string, unknown>, ctx: ToolContext) =>
+        proposeAction('set_my_rsvp', args, ctx).pipe(
+          Effect.map((o) => o.result as { error?: string; detail?: string }),
+        );
+
+      const noNote = yield* refusal({ eventId: upcoming.id, response: 'maybe' }, player.ctx);
+      expect(noNote).toMatchObject({ error: 'invalid_arguments' });
+      expect(noNote.detail).toContain('message');
+      yield* proposeOk(
+        'set_my_rsvp',
+        { eventId: upcoming.id, response: 'maybe', message: 'if work allows' },
+        player.ctx,
+      );
+
+      const late = yield* refusal({ eventId: started.id, response: 'yes' }, player.ctx);
+      expect(late.detail).toContain('closed');
+
+      yield* sql`
+        INSERT INTO team_settings (team_id, require_complete_profile) VALUES (${teamA.id}, true)
+        ON CONFLICT (team_id) DO UPDATE SET require_complete_profile = true
+      `;
+      yield* sql`UPDATE users SET is_profile_complete = false`;
+      const incomplete = yield* refusal(
+        { eventId: upcoming.id, response: 'yes' },
+        yield* player.refreshCtx,
+      );
+      expect(incomplete.detail).toContain('profile');
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('confirm re-checks: event cancelled after propose -> 404, no RSVP written', () =>
+    Effect.gen(function* () {
+      const { sql, teamA, player, upcoming } = yield* setup;
+      const { proposalId } = yield* proposeOk(
+        'set_my_rsvp',
+        { eventId: upcoming.id, response: 'no' },
+        player.ctx,
+      );
+      yield* sql`UPDATE events SET status = 'cancelled' WHERE id = ${upcoming.id}`;
+      const response = yield* confirm(teamA.id, proposalId, player.token);
+      expect(response.status).toBe(404);
+      expect(yield* rsvpRows(upcoming.id)).toHaveLength(0);
     }).pipe(Effect.provide(SeedLayer)),
   );
 });

@@ -129,6 +129,8 @@ describe('ProposalFieldKey', () => {
       'event',
       'present',
       'absent',
+      'response',
+      'message',
     ]);
   });
 });

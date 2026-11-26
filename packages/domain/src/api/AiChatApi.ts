@@ -16,6 +16,7 @@ import * as Roster from '~/api/Roster.js';
 import * as TrainingTypeApi from '~/api/TrainingTypeApi.js';
 import { AiActionName, AiActionProposalId } from '~/models/AiActionProposal.js';
 import { EventType } from '~/models/Event.js';
+import { RsvpResponse } from '~/models/EventRsvp.js';
 import { ExpenseCategory, ExpenseId } from '~/models/Expense.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
@@ -176,6 +177,8 @@ export const ProposalFieldKey = Schema.Literals([
   'event',
   'present',
   'absent',
+  'response',
+  'message',
 ]);
 export type ProposalFieldKey = typeof ProposalFieldKey.Type;
 
@@ -198,6 +201,7 @@ export const ProposalFieldValue = Schema.Union([
   Schema.Struct({ type: Schema.Literal('date'), value: Schema.String }), // team-local YYYY-MM-DD
   Schema.Struct({ type: Schema.Literal('eventType'), value: EventType }),
   Schema.Struct({ type: Schema.Literal('accessLevel'), value: ProposalAccessLevel }),
+  Schema.Struct({ type: Schema.Literal('rsvpResponse'), value: RsvpResponse }),
   Schema.Struct({ type: Schema.Literal('none') }),
 ]);
 export type ProposalFieldValue = Schema.Schema.Type<typeof ProposalFieldValue>;

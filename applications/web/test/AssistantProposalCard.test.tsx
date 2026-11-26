@@ -39,6 +39,8 @@ const TR_MAP: Record<string, string> = {
   event_location: 'Location label',
   event_description: 'Description label',
   assistant_proposal_field_event: 'Event label',
+  assistant_proposal_field_response: 'Answer label',
+  rsvp_comingLater: 'Coming later',
   assistant_proposal_cancelEvent_confirm: 'Cancel event',
   assistant_proposal_cancelEvent_confirmed: 'Event cancelled.',
   // Card chrome
@@ -211,7 +213,7 @@ function makeProposal(overrides: { summary?: AiChatApi.ProposalField[] } = {}) {
 }
 
 function makeDiscordProposal(
-  action: 'set_discord_channel_access' | 'archive_discord_channel' | 'cancel_event',
+  action: AiChatApi.Proposal['action'],
   fields: ReadonlyArray<Record<string, unknown>>,
 ) {
   return new AiChatApi.Proposal({
@@ -588,6 +590,17 @@ describe('AssistantProposalCard', () => {
         { key: 'event', value: { type: 'text', value: 'Thursday Practice' } },
         { key: 'start', value: { type: 'date', value: '2026-07-04' } },
       ]);
+
+    it('set_my_rsvp renders the answer through the RSVP labels, not the raw literal', () => {
+      renderCard(
+        makeDiscordProposal('set_my_rsvp', [
+          { key: 'event', value: { type: 'text', value: 'Thursday Practice' } },
+          { key: 'response', value: { type: 'rsvpResponse', value: 'coming_later' } },
+        ]),
+      );
+
+      expect(ddFor(TR_MAP.assistant_proposal_field_response)?.textContent).toBe('Coming later');
+    });
 
     it('cancel_event names the event and has a destructive confirm button', () => {
       renderCard(cancelProposal());
