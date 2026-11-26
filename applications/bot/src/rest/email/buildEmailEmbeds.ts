@@ -390,7 +390,9 @@ export const buildPageComponents = ({
     UI.button({
       style: Discord.ButtonStyleTypes.SECONDARY,
       label: m.bot_email_page_indicator({ current: pageIndex + 1, total: totalPages }, { locale }),
-      custom_id: `${prefix}-disabled:${teamId}:${emailId}`,
+      // No teamId: with it the original-kind id is 102 chars, over Discord's
+      // 100 cap, and the whole multi-page message is rejected. Never clicked.
+      custom_id: `${prefix}-disabled:${emailId}`,
       disabled: true,
     }),
     UI.button({
