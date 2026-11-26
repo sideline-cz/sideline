@@ -15,6 +15,7 @@
 //   - All configurable hidden → empty-state element present inside configurable region
 //   - layout undefined → falls back to DEFAULT (all 4 visible)
 
+import type { Auth, Team } from '@sideline/domain';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DateTime, Option } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
@@ -715,5 +716,46 @@ describe('TeamDetailPage — Customize button in page header', () => {
     });
     const switches = screen.getAllByRole('switch');
     expect(switches.length).toBe(6);
+  });
+});
+
+describe('TeamDetailPage — Discord card', () => {
+  const makeTeam = (discordJoined: Auth.UserTeam['discordJoined']): Auth.UserTeam => ({
+    teamId: TEAM_ID as Team.TeamId,
+    teamName: 'Ultimate Praha',
+    logoUrl: Option.none(),
+    roleNames: [],
+    permissions: [],
+    discordJoined,
+  });
+
+  it('shows the connect banner when not_connected', () => {
+    render(
+      <TeamDetailPage
+        teamId={TEAM_ID}
+        dashboard={makeDashboard()}
+        team={makeTeam('not_connected')}
+      />,
+    );
+    expect(screen.getByText('discord_connect_bannerTitle')).not.toBeNull();
+    expect(
+      screen.getByRole('link', { name: 'discord_connect_bannerCta' }).getAttribute('href'),
+    ).toBe(`/teams/${TEAM_ID}/connect-discord`);
+  });
+
+  it('shows no Discord card once connected', () => {
+    render(
+      <TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} team={makeTeam('connected')} />,
+    );
+    expect(screen.queryByText('discord_connect_bannerTitle')).toBeNull();
+    expect(screen.queryByText('Discord')).toBeNull();
+  });
+
+  it('shows nothing for unknown (join enforcement off) — not treated as connected or not_connected', () => {
+    render(
+      <TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} team={makeTeam('unknown')} />,
+    );
+    expect(screen.queryByText('discord_connect_bannerTitle')).toBeNull();
+    expect(screen.queryByText('Discord')).toBeNull();
   });
 });

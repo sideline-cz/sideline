@@ -43,7 +43,7 @@ interface TeamDetailPageProps {
   userId?: string;
   /** PR-9 / designer §2.2 — the current user's own view of this team, carrying
    * `discordJoined`. Optional so existing callers/tests that don't exercise the Discord surface
-   * keep compiling; when absent, `DiscordConnectCard` is not mounted. */
+   * keep compiling; when absent, `DiscordConnectCard` is not mounted. Only `not_connected` mounts it. */
   team?: Auth.UserTeam;
   dashboard: DashboardApi.DashboardResponse | undefined;
   myStatus?: ReadonlyArray<MyFinanceStatus>;
@@ -588,10 +588,12 @@ export function TeamDetailPage({
         )}
       </div>
 
-      {/* PR-9 / designer §2.2 — the durable Discord card. Deliberately NOT part of the
-          customizable widget grid below: it is never dismissible and never hidden, which the
-          widget registry's opt-out semantics would otherwise allow. */}
-      {team !== undefined && <DiscordConnectCard team={team} />}
+      {/* PR-9 / designer §2.2 — the durable Discord banner. Deliberately NOT part of the
+          customizable widget grid below: it is never dismissible, which the widget registry's
+          opt-out semantics would otherwise allow. Only the `not_connected` call to action belongs
+          on the dashboard; a `connected` status card is noise here (it lives on the profile), and
+          `unknown` renders nothing. */}
+      {team?.discordJoined === 'not_connected' && <DiscordConnectCard team={team} />}
 
       {/* Configurable widget region — banners are now part of the grid */}
       <DashboardCustomizer
