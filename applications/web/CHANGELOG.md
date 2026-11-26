@@ -1,5 +1,13 @@
 # @sideline/web
 
+## 0.78.0
+
+### 🚀 Features
+- AI assistant proposes payments, expenses and membership plan changes (#842)
+
+### 🐛 Fixes
+- render /workout/weekly instead of the parent workout page (#843)
+
 ## 0.77.1
 
 ### 🐛 Fixes
