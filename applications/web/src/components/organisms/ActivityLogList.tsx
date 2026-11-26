@@ -3,6 +3,7 @@ import { ActivityLogDate } from '@sideline/domain';
 import { Option } from 'effect';
 import { ClipboardList } from 'lucide-react';
 import React from 'react';
+import { LogActivityForm } from '~/components/organisms/LogActivityForm.js';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { DatePicker } from '~/components/ui/date-picker';
@@ -81,14 +82,6 @@ export function ActivityLogList({
   onUpdateLog,
   onDeleteLog,
 }: ActivityLogListProps) {
-  const [selectedTypeId, setSelectedTypeId] = React.useState<ActivityType.ActivityTypeId | null>(
-    null,
-  );
-  const [durationInput, setDurationInput] = React.useState('');
-  const [noteInput, setNoteInput] = React.useState('');
-  const [dateInput, setDateInput] = React.useState<string>('');
-  const [creating, setCreating] = React.useState(false);
-
   const [editingLog, setEditingLog] = React.useState<ActivityLogApi.ActivityLogEntry | null>(null);
   const [editTypeId, setEditTypeId] = React.useState<ActivityType.ActivityTypeId | null>(null);
   const [editDuration, setEditDuration] = React.useState('');
@@ -120,29 +113,6 @@ export function ActivityLogList({
     }
     return [...activityTypes, ...extra];
   }, [activityTypes, logs]);
-
-  const handleCreate = React.useCallback(async () => {
-    if (!selectedTypeId) return;
-    setCreating(true);
-    try {
-      const durationNum = durationInput ? parseInt(durationInput, 10) : null;
-      await onCreateLog({
-        activityTypeId: selectedTypeId,
-        durationMinutes:
-          durationNum !== null && !Number.isNaN(durationNum)
-            ? Option.some(durationNum)
-            : Option.none(),
-        note: noteInput.trim() ? Option.some(noteInput.trim()) : Option.none(),
-        loggedAtDate: dateInput ? Option.some(dateInput) : Option.none<string>(),
-      });
-      setSelectedTypeId(null);
-      setDurationInput('');
-      setNoteInput('');
-      setDateInput('');
-    } finally {
-      setCreating(false);
-    }
-  }, [selectedTypeId, durationInput, noteInput, dateInput, onCreateLog]);
 
   const openEdit = React.useCallback((log: ActivityLogApi.ActivityLogEntry) => {
     setEditingLog(log);
@@ -213,73 +183,7 @@ export function ActivityLogList({
       {canLog && (
         <div ref={logActivityRef} className='mb-6 p-4 border rounded-lg'>
           <p className='text-sm font-medium mb-2'>{tr('activityLog_logActivity')}</p>
-          <div className='flex gap-2 mb-3 flex-wrap'>
-            {activityTypes.map((type) => (
-              <Button
-                key={type.id}
-                type='button'
-                variant={selectedTypeId === type.id ? 'default' : 'outline'}
-                size='sm'
-                onClick={() => setSelectedTypeId(type.id)}
-              >
-                {Option.match(type.emoji, {
-                  onNone: () => null,
-                  onSome: (e) => (
-                    <span aria-hidden='true' className='mr-1'>
-                      {e}
-                    </span>
-                  ),
-                })}
-                {type.name}
-              </Button>
-            ))}
-          </div>
-          {selectedTypeId && (
-            <>
-              <div className='mb-2'>
-                <Label className='text-xs text-muted-foreground'>
-                  {tr('activityLog_dateLabel')}
-                </Label>
-                <DatePicker
-                  value={dateInput}
-                  onChange={setDateInput}
-                  placeholder={tr('activityLog_datePlaceholder')}
-                  fromYear={new Date().getFullYear() - 2}
-                  toYear={new Date().getFullYear() + 2}
-                />
-              </div>
-              <div className='flex gap-2 mb-2'>
-                <div className='flex-1'>
-                  <Label htmlFor='log-duration' className='text-xs text-muted-foreground'>
-                    {tr('activityLog_durationLabel')}
-                  </Label>
-                  <Input
-                    id='log-duration'
-                    type='number'
-                    min={1}
-                    max={1440}
-                    value={durationInput}
-                    onChange={(e) => setDurationInput(e.target.value)}
-                    placeholder={tr('activityLog_durationPlaceholder')}
-                  />
-                </div>
-              </div>
-              <div className='mb-3'>
-                <Label htmlFor='log-note' className='text-xs text-muted-foreground'>
-                  {tr('activityLog_noteLabel')}
-                </Label>
-                <Input
-                  id='log-note'
-                  value={noteInput}
-                  onChange={(e) => setNoteInput(e.target.value)}
-                  placeholder={tr('activityLog_notePlaceholder')}
-                />
-              </div>
-              <Button size='sm' disabled={creating} onClick={handleCreate}>
-                {creating ? tr('activityLog_logging') : tr('activityLog_logActivity')}
-              </Button>
-            </>
-          )}
+          <LogActivityForm activityTypes={activityTypes} onCreateLog={onCreateLog} />
         </div>
       )}
 

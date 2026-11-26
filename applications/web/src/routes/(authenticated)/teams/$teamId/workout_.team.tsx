@@ -1,9 +1,11 @@
 import { GroupModel, Team } from '@sideline/domain';
 import { createFileRoute, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
-import { Effect, Schema } from 'effect';
+import { Effect, Option, Schema } from 'effect';
 import React from 'react';
+import type { LogActivityInput } from '~/components/organisms/LogActivityForm.js';
 import { WorkoutTeamPage } from '~/components/pages/WorkoutTeamPage.js';
-import { ApiClient, warnAndCatchAll } from '~/lib/runtime';
+import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const WorkoutTeamSearchSchema = Schema.Struct({
   group: Schema.optional(Schema.String),
@@ -55,6 +57,38 @@ function WorkoutTeamRoute() {
   const router = useRouter();
   const navigate = useNavigate({ from: Route.fullPath });
   const isPending = useRouterState({ select: (s) => s.status === 'pending' });
+  const run = useRun();
+
+  // Same filter as the personal workout page: training logs come from attendance, not by hand
+  const logActivityTypes = React.useMemo(
+    () => activityTypes.filter((t) => Option.isNone(t.slug) || t.slug.value !== 'training'),
+    [activityTypes],
+  );
+
+  const handleLogActivity = React.useCallback(
+    async (input: LogActivityInput) => {
+      if (currentMemberId === null) return false;
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.activityLog.createLog({
+            params: { teamId, memberId: currentMemberId },
+            payload: input,
+          }),
+        ),
+        Effect.catchTag('ActivityLogInvalidLoggedAtDate', () =>
+          Effect.fail(ClientError.make(tr('activityLog_invalidDate'))),
+        ),
+        Effect.mapError((err) =>
+          err._tag === 'ClientError' ? err : ClientError.make(tr('activityLog_logFailed')),
+        ),
+        run({ success: tr('activityLog_logged') }),
+      );
+      if (Option.isNone(result)) return false;
+      router.invalidate();
+      return true;
+    },
+    [teamId, currentMemberId, run, router],
+  );
 
   const handleGroupChange = React.useCallback(
     (v: string | undefined) => {
@@ -71,6 +105,8 @@ function WorkoutTeamRoute() {
       onGroupChange={handleGroupChange}
       activityTypes={activityTypes}
       currentMemberId={currentMemberId}
+      logActivityTypes={logActivityTypes}
+      onLogActivity={handleLogActivity}
       onRetry={() => {
         router.invalidate();
       }}
