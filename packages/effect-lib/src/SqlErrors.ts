@@ -89,3 +89,15 @@ export const catchUniqueViolationOn =
         () => Effect.fail(onViolation()),
       ),
     );
+
+// Matches on the constraint name alone, whatever the SQLSTATE — for a trigger that raises
+// `USING CONSTRAINT = '<name>'` to give the app one stable handle on a refusal.
+export const catchConstraintOn =
+  <E2>(constraintName: string, onViolation: () => E2) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>) =>
+    self.pipe(
+      Effect.catchIf(
+        (e) => e instanceof SqlError && Option.contains(getConstraintName(e.cause), constraintName),
+        () => Effect.fail(onViolation()),
+      ),
+    );

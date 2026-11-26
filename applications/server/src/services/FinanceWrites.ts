@@ -198,6 +198,9 @@ export const assignMembershipPlanForMemberTx = (
             plan_id: args.membershipPlanId,
           }),
         ),
+        Effect.catchTag('MembershipPlanCurrencyHasPaymentsError', () =>
+          Effect.fail(new MembershipPlanApi.MembershipPlanCurrencyHasPayments()),
+        ),
       ),
     ),
     // 0 rows IS the Atomic Conditional UPDATE's combined guard result. ONE 404 covers both "plan

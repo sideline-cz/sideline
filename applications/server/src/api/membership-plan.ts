@@ -93,6 +93,8 @@ const toSeasonInfo = (row: {
 const forbidden = new MembershipPlanApi.Forbidden();
 const notFound = new MembershipPlanApi.MembershipPlanNotFound();
 const selectionClosed = new MembershipPlanApi.MembershipSelectionClosed();
+const toCurrencyError = () =>
+  Effect.fail(new MembershipPlanApi.MembershipPlanCurrencyHasPayments());
 
 export const MembershipPlanApiLive = HttpApiBuilder.group(
   Api,
@@ -350,11 +352,13 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                 requireMembership(members, teamId, currentUser.id, forbidden),
               ),
               Effect.bind('rowsAffected', ({ membership }) =>
-                plans.selectMembershipPlan({
-                  member_id: membership.id,
-                  team_id: teamId,
-                  plan_id: payload.membershipPlanId,
-                }),
+                plans
+                  .selectMembershipPlan({
+                    member_id: membership.id,
+                    team_id: teamId,
+                    plan_id: payload.membershipPlanId,
+                  })
+                  .pipe(Effect.catchTag('MembershipPlanCurrencyHasPaymentsError', toCurrencyError)),
               ),
               // 0 rows affected is the Atomic Conditional UPDATE's combined guard result (not a
               // real member / wrong team / archived-or-foreign plan / deadline passed) — re-read
@@ -441,11 +445,13 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                 requirePermission(membership, 'finance:manage_fees', forbidden),
               ),
               Effect.bind('rowsAffected', () =>
-                plans.reassignMembershipPlan({
-                  team_id: teamId,
-                  from_plan_id: payload.fromMembershipPlanId,
-                  to_plan_id: payload.toMembershipPlanId,
-                }),
+                plans
+                  .reassignMembershipPlan({
+                    team_id: teamId,
+                    from_plan_id: payload.fromMembershipPlanId,
+                    to_plan_id: payload.toMembershipPlanId,
+                  })
+                  .pipe(Effect.catchTag('MembershipPlanCurrencyHasPaymentsError', toCurrencyError)),
               ),
               // The real guard stays in the SQL; this re-read only chooses the reply. A `None`
               // target has no plan to validate, so it can only ever be the no-op. Its TOCTOU (a

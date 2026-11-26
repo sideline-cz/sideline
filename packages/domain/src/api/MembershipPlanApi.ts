@@ -253,6 +253,13 @@ export class MembershipPlanNotFound extends Schema.TaggedErrorClass<MembershipPl
   {},
 ) {}
 
+// The member has payments on their current plan's open fees and the target plan bills in a
+// different currency. Refused, never converted: the old plan must be settled or cleared first.
+export class MembershipPlanCurrencyHasPayments extends Schema.TaggedErrorClass<MembershipPlanCurrencyHasPayments>()(
+  'MembershipPlanCurrencyHasPayments',
+  {},
+) {}
+
 export class MembershipPlanNameAlreadyTaken extends Schema.TaggedErrorClass<MembershipPlanNameAlreadyTaken>()(
   'MembershipPlanNameAlreadyTaken',
   {},
@@ -374,6 +381,7 @@ export class MembershipPlanApiGroup extends HttpApiGroup.make('membershipPlan')
         Forbidden.pipe(HttpApiSchema.status(403)),
         MembershipPlanNotFound.pipe(HttpApiSchema.status(404)),
         MembershipSelectionClosed.pipe(HttpApiSchema.status(409)),
+        MembershipPlanCurrencyHasPayments.pipe(HttpApiSchema.status(409)),
       ],
       payload: SelectMembershipPlanRequest,
       params: { teamId: TeamId },
@@ -434,6 +442,7 @@ export class MembershipPlanApiGroup extends HttpApiGroup.make('membershipPlan')
         error: [
           Forbidden.pipe(HttpApiSchema.status(403)),
           MembershipPlanNotFound.pipe(HttpApiSchema.status(404)),
+          MembershipPlanCurrencyHasPayments.pipe(HttpApiSchema.status(409)),
         ],
         payload: AssignMembershipPlanRequest,
         params: { teamId: TeamId, memberId: TeamMemberId },
@@ -452,6 +461,7 @@ export class MembershipPlanApiGroup extends HttpApiGroup.make('membershipPlan')
       error: [
         Forbidden.pipe(HttpApiSchema.status(403)),
         MembershipPlanNotFound.pipe(HttpApiSchema.status(404)),
+        MembershipPlanCurrencyHasPayments.pipe(HttpApiSchema.status(409)),
       ],
       payload: ReassignMembershipPlanRequest,
       params: { teamId: TeamId },
