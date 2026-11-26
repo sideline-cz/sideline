@@ -32,6 +32,20 @@ export const ActivityTypeEmoji = Schema.String.pipe(
 );
 export type ActivityTypeEmoji = typeof ActivityTypeEmoji.Type;
 
+// Character-identical to the CHECK in 1795200000_create_activity_type_colors.ts, and the order the
+// web derives a colour in when a team has not picked one.
+export const ActivityTypeColor = Schema.Literals([
+  'emerald',
+  'sky',
+  'amber',
+  'violet',
+  'rose',
+  'teal',
+  'orange',
+  'fuchsia',
+]);
+export type ActivityTypeColor = typeof ActivityTypeColor.Type;
+
 export class ActivityType extends Model.Class<ActivityType>('ActivityType')({
   id: Model.Generated(ActivityTypeId),
   team_id: Schema.OptionFromNullOr(TeamId),

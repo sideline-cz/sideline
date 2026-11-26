@@ -77,6 +77,7 @@ function makeEditing(name: string) {
     slug: Option.none() as any,
     emoji: Option.none() as any,
     description: Option.none() as any,
+    color: Option.none(),
     usageCount: 0,
   };
 }

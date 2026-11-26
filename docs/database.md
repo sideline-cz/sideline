@@ -1180,6 +1180,18 @@ Catalogue of activity kinds. Global built-ins have `team_id = NULL`; teams may a
 
 **Unique**: `idx_activity_types_global_slug` — partial unique index on `(slug) WHERE team_id IS NULL`; `idx_activity_types_global_lower_name` — partial unique index on `(LOWER(name)) WHERE team_id IS NULL`; `idx_activity_types_team_lower_name` — partial unique index on `(team_id, LOWER(name)) WHERE team_id IS NOT NULL`
 
+#### `activity_type_colors`
+
+Per-team dot colour for an activity type. A separate table because built-in types are one global row shared by all teams. No row = the web derives the colour from the type's position.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `activity_type_id` | UUID | NOT NULL, FK → `activity_types(id)` ON DELETE CASCADE | — |
+| `color` | TEXT | NOT NULL, CHECK in (`emerald`, `sky`, `amber`, `violet`, `rose`, `teal`, `orange`, `fuchsia`) | — |
+
+**Primary key**: `(team_id, activity_type_id)`
+
 **Global built-ins** (seeded by after-migration `1739630400_init`; emojis backfilled by migration `1781000000`):
 
 | slug | name | emoji |
@@ -2434,6 +2446,7 @@ All 110 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1794900000 | `grant_ai_manage_discord_permission` | Backfills `ai:manage_discord` into `role_permissions` for every existing built-in Admin and Captain role; `ON CONFLICT DO NOTHING`. |
 | 1795100000 | `create_discord_read_requests` | Creates `discord_read_requests` (see [7. Discord Integration](#7-discord-integration) above), the outbox for live Discord reads by the AI assistant. No FK to a person, no index beyond the PK; rows live for one chat turn and `DiscordReadSweepCron` deletes any row older than 4 minutes. |
 | 1795200000 | `event_roster_rsvp_answers` | Adds `event_rosters.rsvp_answers TEXT[] NOT NULL DEFAULT '{yes,coming_later}'` with a CHECK (non-empty, subset of `yes`/`coming_later`/`maybe`). |
+| 1795200000 | `create_activity_type_colors` | Creates `activity_type_colors` (team_id FK CASCADE, activity_type_id FK CASCADE, color TEXT CHECK in the 8 palette keys; PK on (team_id, activity_type_id)) |
 
 ### After Migrations (seed data)
 

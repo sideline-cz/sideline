@@ -3120,6 +3120,7 @@ Activity types are the catalogue of activity kinds members can log. The four glo
 | `slug` | `string \| null` | Yes | Machine-readable slug for built-in types |
 | `emoji` | `string \| null` | Yes | Single grapheme-cluster emoji |
 | `description` | `string \| null` | Yes | Short description (max 200 characters) |
+| `color` | `string \| null` | Yes | Team's dot colour palette key (`emerald`, `sky`, `amber`, `violet`, `rose`, `teal`, `orange`, `fuchsia`); `null`/absent = derived by the web |
 | `usageCount` | `number` | No | Number of activity log entries using this type |
 
 ---
@@ -3237,6 +3238,36 @@ Updates a team-specific activity type. Global built-ins (`team_id IS NULL`) cann
 | `ActivityTypeNotFound` | 404 | Activity type does not exist |
 | `ActivityTypeProtected` | 422 | Cannot update a global built-in type |
 | `ActivityTypeNameAlreadyTaken` | 409 | Name already used in this team (case-insensitive) |
+
+---
+
+#### `PUT /teams/:teamId/activity-types/:activityTypeId/color`
+
+Sets or clears the team's dot colour for an activity type. Unlike `PATCH`, this works on global built-ins too: the colour is stored per team in `activity_type_colors`.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `activityTypeId` | `ActivityTypeId` (string) | Activity type ID |
+
+**Request Body:** `SetActivityTypeColorRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `color` | `string \| null` | Yes | Palette key (`emerald`, `sky`, `amber`, `violet`, `rose`, `teal`, `orange`, `fuchsia`); `null` clears the pick |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `ActivityTypeForbidden` | 403 | Missing `activity-type:create` permission |
+| `ActivityTypeNotFound` | 404 | Activity type does not exist |
 
 ---
 

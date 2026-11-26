@@ -585,6 +585,47 @@ describe('ActivityTypesRepository', () => {
     );
   });
 
+  describe('setColor', () => {
+    it.effect('stores a per-team colour on a built-in type and clears it again', () =>
+      Effect.Do.pipe(
+        Effect.tap(() => seedGlobalTypes()),
+        Effect.bind('gymId', () => getGlobalTypeId('gym')),
+        Effect.bind('userId', () => createUser('500000000000000031', 'at-user-31')),
+        Effect.bind('teamA', ({ userId }) =>
+          createTeam('531313131313131311' as Discord.Snowflake, userId),
+        ),
+        Effect.bind('teamB', ({ userId }) =>
+          createTeam('531313131313131312' as Discord.Snowflake, userId),
+        ),
+        Effect.bind('repo', () => ActivityTypesRepository.asEffect()),
+        Effect.tap(({ repo, gymId, teamA }) => repo.setColor(gymId, teamA.id, Option.some('sky'))),
+        // second pick overwrites the first
+        Effect.tap(({ repo, gymId, teamA }) => repo.setColor(gymId, teamA.id, Option.some('rose'))),
+        Effect.bind('listA', ({ repo, teamA }) => repo.findByTeamId(teamA.id)),
+        Effect.bind('listB', ({ repo, teamB }) => repo.findByTeamId(teamB.id)),
+        Effect.bind('scopedA', ({ repo, gymId, teamA }) => repo.findByIdScoped(gymId, teamA.id)),
+        Effect.tap(({ listA, listB, scopedA, gymId }) =>
+          Effect.sync(() => {
+            const gymA = listA.find((t) => t.id === gymId);
+            const gymB = listB.find((t) => t.id === gymId);
+            expect(gymA?.color).toEqual(Option.some('rose'));
+            // the global row is shared: team B must not see team A's pick
+            expect(gymB?.color).toEqual(Option.none());
+            expect(Option.flatMap(scopedA, (t) => t.color)).toEqual(Option.some('rose'));
+          }),
+        ),
+        Effect.tap(({ repo, gymId, teamA }) => repo.setColor(gymId, teamA.id, Option.none())),
+        Effect.bind('cleared', ({ repo, teamA }) => repo.findByTeamId(teamA.id)),
+        Effect.tap(({ cleared, gymId }) =>
+          Effect.sync(() => {
+            expect(cleared.find((t) => t.id === gymId)?.color).toEqual(Option.none());
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+    );
+  });
+
   describe('countLogsForType', () => {
     it.effect('returns the number of activity_logs referencing that activity_type_id', () =>
       Effect.Do.pipe(

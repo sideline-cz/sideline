@@ -742,6 +742,12 @@ erDiagram
         TIMESTAMPTZ updated_at
     }
 
+    activity_type_colors {
+        UUID team_id PK,FK
+        UUID activity_type_id PK,FK
+        TEXT color
+    }
+
     activity_logs {
         UUID id PK
         UUID team_member_id FK
@@ -819,6 +825,8 @@ erDiagram
     teams ||--o{ custom_achievements : "defines"
     teams ||--o{ discord_role_provision_events : "queues"
     activity_types ||--o{ activity_logs : "categorises"
+    teams ||--o{ activity_type_colors : "colours"
+    activity_types ||--o{ activity_type_colors : "coloured by"
     team_members ||--o{ activity_logs : "records"
     team_members ||--o{ earned_achievements : "earns"
     team_members ||--o{ achievement_sync_events : "triggers"
@@ -1591,6 +1599,7 @@ erDiagram
 | `event_sync_events` | Outbox records driving event announcements and updates in Discord. |
 | `channel_event_dividers` | Tracked the divider message ID posted in the shared events channel to separate past from upcoming events; retired with the shared events board (remove-global-events-board release) and dropped in a follow-up migration. |
 | `activity_types` | Catalogue of activity kinds; four global built-ins (gym, running, stretching, training) plus optional team-specific custom types. Each type carries an optional emoji and description. |
+| `activity_type_colors` | Per-team dot colour pick for an activity type (one of 8 palette keys); no row means the colour is derived. |
 | `activity_logs` | Individual physical activity session records belonging to a team member. |
 | `earned_achievements` | Records which achievements a team member has earned; each achievement is earned at most once per member. |
 | `achievement_role_mappings` | Maps an achievement slug to the Discord role that should be granted when a team member earns it. |

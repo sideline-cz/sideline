@@ -2,6 +2,7 @@ import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import {
+  ActivityTypeColor,
   ActivityTypeDescription,
   ActivityTypeEmoji,
   ActivityTypeId,
@@ -16,6 +17,9 @@ export class ActivityTypeInfo extends Schema.Class<ActivityTypeInfo>('ActivityTy
   slug: Schema.OptionFromNullOr(Schema.String),
   emoji: Schema.OptionFromNullOr(ActivityTypeEmoji),
   description: Schema.OptionFromNullOr(ActivityTypeDescription),
+  // The team's picked colour; None = derive it. OptionFromOptionalKey so an old server's
+  // response (no key) still decodes during a rolling deploy.
+  color: Schema.OptionFromOptionalKey(ActivityTypeColor),
   usageCount: Schema.Number,
 }) {}
 
@@ -39,6 +43,12 @@ export const UpdateActivityTypeRequest = Schema.Struct({
   description: Schema.OptionFromOptional(Schema.OptionFromNullOr(ActivityTypeDescription)),
 });
 export type UpdateActivityTypeRequest = Schema.Schema.Type<typeof UpdateActivityTypeRequest>;
+
+export const SetActivityTypeColorRequest = Schema.Struct({
+  // null clears the pick, so the colour is derived again
+  color: Schema.OptionFromNullOr(ActivityTypeColor),
+});
+export type SetActivityTypeColorRequest = Schema.Schema.Type<typeof SetActivityTypeColorRequest>;
 
 export class ActivityTypeNotFound extends Schema.TaggedErrorClass<ActivityTypeNotFound>()(
   'ActivityTypeNotFound',
@@ -103,6 +113,23 @@ export class ActivityTypeApiGroup extends HttpApiGroup.make('activityType')
       payload: UpdateActivityTypeRequest,
       params: { teamId: TeamId, activityTypeId: ActivityTypeId },
     }).middleware(AuthMiddleware),
+  )
+  .add(
+    // Separate from updateActivityType: built-in types are protected there, but a colour is a
+    // per-team pick that every type can take.
+    HttpApiEndpoint.put(
+      'setActivityTypeColor',
+      '/teams/:teamId/activity-types/:activityTypeId/color',
+      {
+        success: Schema.Void.pipe(HttpApiSchema.status(204)),
+        error: [
+          Forbidden.pipe(HttpApiSchema.status(403)),
+          ActivityTypeNotFound.pipe(HttpApiSchema.status(404)),
+        ],
+        payload: SetActivityTypeColorRequest,
+        params: { teamId: TeamId, activityTypeId: ActivityTypeId },
+      },
+    ).middleware(AuthMiddleware),
   )
   .add(
     HttpApiEndpoint.delete('deleteActivityType', '/teams/:teamId/activity-types/:activityTypeId', {
