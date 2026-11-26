@@ -2477,7 +2477,7 @@
   "membershipPlan_bulk_billingNotice": "This month's training charges are recalculated the next time attendance changes, not right now. Earlier months stay as they are.",
   "membershipPlan_bulk_button": "Move all members",
   "membershipPlan_bulk_confirm": "Move members",
-  "membershipPlan_bulk_currencyWarning": "These two plans use different currencies. A member who already paid this month will end it holding two open fees in two currencies.",
+  "membershipPlan_bulk_currencyWarning": "These two plans use different currencies. If any member being moved already has payments on their current plan, the whole move is refused until those payments are settled or cleared.",
   "membershipPlan_bulk_defaultOption": "No plan chosen (team default)",
   "membershipPlan_bulk_failed": "Failed to move members.",
   "membershipPlan_bulk_fromLabel": "Move from",
@@ -3472,5 +3472,8 @@
   "finance_window_label": "Time range",
   "finance_window_allTime": "All time",
   "finance_window_season": "This season",
-  "finance_window_since": "Since {date}"
+  "finance_window_since": "Since {date}",
+  "membershipPlan_currencyHasPayments": "This member already has payments on their current plan in a different currency. Settle or clear the old plan's payments before moving them to a plan in another currency.",
+  "membershipPlan_bulk_currencyHasPayments": "Nobody was moved: some of these members already have payments on their current plan in a different currency. Settle or clear the old plan's payments first.",
+  "bot_membership_err_currency_has_payments": "You already have payments on your current plan in a different currency, so you can't switch to this plan. Ask your treasurer to settle the old plan first."
 }

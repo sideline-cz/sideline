@@ -9,6 +9,18 @@ export class MembershipPlanNameAlreadyTakenError extends Schema.TaggedErrorClass
   {},
 ) {}
 
+// The member has payments on their current plan's open fees and the target plan bills in another
+// currency. Raised by `team_members_plan_currency_guard_trg` (1795270000) on every plan write.
+export class MembershipPlanCurrencyHasPaymentsError extends Schema.TaggedErrorClass<MembershipPlanCurrencyHasPaymentsError>()(
+  'MembershipPlanCurrencyHasPaymentsError',
+  {},
+) {}
+
+const catchCurrencyHasPayments = SqlErrors.catchConstraintOn(
+  'team_members_plan_currency_has_payments',
+  () => new MembershipPlanCurrencyHasPaymentsError(),
+);
+
 // Internal only — never leaves `setDefaultMembershipPlan`. Signals that `markDefaultQuery`
 // matched no row, so the transaction must roll back rather than commit a cleared default.
 class MarkDefaultNoOp extends Schema.TaggedErrorClass<MarkDefaultNoOp>()('MarkDefaultNoOp', {}) {}
@@ -736,6 +748,7 @@ const make = Effect.gen(function* () {
   }) =>
     selectMembershipPlanQuery(input).pipe(
       Effect.map((rows) => rows.length),
+      catchCurrencyHasPayments,
       catchSqlErrors,
     );
 
@@ -800,6 +813,7 @@ const make = Effect.gen(function* () {
   }) =>
     assignMembershipPlanQuery(input).pipe(
       Effect.map((rows) => rows.length),
+      catchCurrencyHasPayments,
       catchSqlErrors,
     );
 
@@ -810,6 +824,7 @@ const make = Effect.gen(function* () {
   }) =>
     reassignMembershipPlanQuery(input).pipe(
       Effect.map((rows) => rows.length),
+      catchCurrencyHasPayments,
       catchSqlErrors,
     );
 

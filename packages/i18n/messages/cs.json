@@ -2477,7 +2477,7 @@
   "membershipPlan_bulk_billingNotice": "Poplatky za tréninky v aktuálním měsíci se přepočítají až při nejbližší změně účasti, ne hned teď. Starší měsíce zůstanou beze změny.",
   "membershipPlan_bulk_button": "Hromadně přesunout členy",
   "membershipPlan_bulk_confirm": "Přesunout členy",
-  "membershipPlan_bulk_currencyWarning": "Tyto dva typy členství mají různé měny. Členovi, který už tento měsíc zaplatil, zůstanou dvě otevřené platby ve dvou měnách.",
+  "membershipPlan_bulk_currencyWarning": "Tyto dva typy členství mají různé měny. Pokud má některý z přesouvaných členů na současném typu členství platby, celý přesun se odmítne, dokud se tyto platby nevyrovnají nebo nezruší.",
   "membershipPlan_bulk_defaultOption": "Bez vlastního výběru (výchozí typ týmu)",
   "membershipPlan_bulk_failed": "Přesun členů selhal.",
   "membershipPlan_bulk_fromLabel": "Přesunout z",
@@ -3472,5 +3472,8 @@
   "finance_window_label": "Časové období",
   "finance_window_allTime": "Celé období",
   "finance_window_season": "Tato sezóna",
-  "finance_window_since": "Od {date}"
+  "finance_window_since": "Od {date}",
+  "membershipPlan_currencyHasPayments": "Tento člen už má na současném typu členství platby v jiné měně. Než ho přesunete na typ členství v jiné měně, vyrovnejte nebo zrušte platby starého typu.",
+  "membershipPlan_bulk_currencyHasPayments": "Nikdo nebyl přesunut: někteří z těchto členů už mají na současném typu členství platby v jiné měně. Nejdřív vyrovnejte nebo zrušte platby starého typu.",
+  "bot_membership_err_currency_has_payments": "Na současném typu členství už máš platby v jiné měně, takže na tenhle typ přejít nemůžeš. Požádej pokladníka, ať starý typ nejdřív vyrovná."
 }

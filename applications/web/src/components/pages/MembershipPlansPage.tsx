@@ -727,7 +727,9 @@ export function MembershipPlansPage({
         Effect.mapError((e) =>
           e._tag === 'MembershipSelectionClosed'
             ? ClientError.make(tr('membershipPlan_selectionClosed'))
-            : ClientError.make(tr('membershipPlan_chooseFailed')),
+            : e._tag === 'MembershipPlanCurrencyHasPayments'
+              ? ClientError.make(tr('membershipPlan_currencyHasPayments'))
+              : ClientError.make(tr('membershipPlan_chooseFailed')),
         ),
         run({ success: tr('membershipPlan_chosen') }),
       );
@@ -850,7 +852,15 @@ export function MembershipPlansPage({
           }),
         ),
         Effect.tapError(() => Effect.sync(() => router.invalidate())),
-        Effect.mapError(() => ClientError.make(tr('membershipPlan_assign_failed'))),
+        Effect.mapError((e) =>
+          ClientError.make(
+            tr(
+              e._tag === 'MembershipPlanCurrencyHasPayments'
+                ? 'membershipPlan_currencyHasPayments'
+                : 'membershipPlan_assign_failed',
+            ),
+          ),
+        ),
         run({ success: tr('membershipPlan_assign_saved') }),
       );
       setSavingMemberId(null);

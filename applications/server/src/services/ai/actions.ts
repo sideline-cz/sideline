@@ -1898,6 +1898,7 @@ const confirmAssignPlan = (payloadJson: string, ctx: ConfirmContext) =>
     Effect.catchTags({
       MembershipPlanForbidden: financeConfirmFailure,
       MembershipPlanNotFound: financeConfirmFailure,
+      MembershipPlanCurrencyHasPayments: financeConfirmFailure,
     }),
   );
 

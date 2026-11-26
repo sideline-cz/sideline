@@ -5,6 +5,7 @@ import { MembershipPlanId } from '~/models/MembershipPlan.js';
 import {
   MembershipGuildNotFound,
   MembershipNotMember,
+  MembershipPlanCurrencyLocked,
   MembershipPlanUnavailable,
   MembershipSelectionLocked,
   MembershipSelectionView,
@@ -33,6 +34,7 @@ export const MembershipRpcGroup = RpcGroup.make(
       MembershipNotMember,
       MembershipPlanUnavailable,
       MembershipSelectionLocked,
+      MembershipPlanCurrencyLocked,
     ]),
   }),
 ).prefix('Membership/');

@@ -378,6 +378,14 @@ export const MembershipPlanButton = Effect.Do.pipe(
           'membership-plan: closed',
         ),
       ),
+      Effect.catchTag('MembershipPlanCurrencyLocked', () =>
+        replyWebhook(
+          rest,
+          interaction,
+          { content: m.bot_membership_err_currency_has_payments({}, { locale }) },
+          'membership-plan: currency has payments',
+        ),
+      ),
       Effect.catchTag('MembershipPlanUnavailable', () =>
         replyWebhook(
           rest,

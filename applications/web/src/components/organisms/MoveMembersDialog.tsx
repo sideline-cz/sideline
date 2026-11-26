@@ -190,7 +190,15 @@ export function MoveMembersDialog({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(tr('membershipPlan_bulk_failed'))),
+      Effect.mapError((e) =>
+        ClientError.make(
+          tr(
+            e._tag === 'MembershipPlanCurrencyHasPayments'
+              ? 'membershipPlan_bulk_currencyHasPayments'
+              : 'membershipPlan_bulk_failed',
+          ),
+        ),
+      ),
       run({}),
     );
     setMoving(false);

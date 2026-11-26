@@ -59,6 +59,13 @@ export class MembershipPlanUnavailable extends Schema.TaggedErrorClass<Membershi
   {},
 ) {}
 
+// Same tag-collision dodge as above: the member has payments on their current plan and the
+// picked plan bills in another currency.
+export class MembershipPlanCurrencyLocked extends Schema.TaggedErrorClass<MembershipPlanCurrencyLocked>()(
+  'MembershipPlanCurrencyLocked',
+  {},
+) {}
+
 export class MembershipSelectionLocked extends Schema.TaggedErrorClass<MembershipSelectionLocked>()(
   'MembershipSelectionLocked',
   {},

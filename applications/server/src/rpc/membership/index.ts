@@ -126,11 +126,17 @@ const rpcHandlers = Effect.Do.pipe(
           // and all — that guard lives inside the UPDATE's own WHERE, so the bot cannot bypass
           // the deadline even by accident and the two surfaces can never disagree.
           Effect.bind('rowsAffected', ({ plans, team, membership }) =>
-            plans.selectMembershipPlan({
-              member_id: membership.id,
-              team_id: team.id,
-              plan_id,
-            }),
+            plans
+              .selectMembershipPlan({
+                member_id: membership.id,
+                team_id: team.id,
+                plan_id,
+              })
+              .pipe(
+                Effect.catchTag('MembershipPlanCurrencyHasPaymentsError', () =>
+                  Effect.fail(new MembershipRpcModels.MembershipPlanCurrencyLocked()),
+                ),
+              ),
           ),
           // 0 rows = the UPDATE's combined guard result. Re-read ONCE only to pick the better
           // error tag, exactly as `api/membership-plan.ts` does; best-effort under concurrency,
