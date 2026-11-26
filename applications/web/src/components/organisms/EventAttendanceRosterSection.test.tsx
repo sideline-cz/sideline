@@ -13,9 +13,10 @@ vi.mock('~/lib/translations.js', () => ({
   setTranslationOverrides: vi.fn(),
 }));
 
-const { createAndLinkSpy, createChannelSpy } = vi.hoisted(() => ({
+const { createAndLinkSpy, createChannelSpy, patchSpy } = vi.hoisted(() => ({
   createAndLinkSpy: vi.fn(),
   createChannelSpy: vi.fn(),
+  patchSpy: vi.fn(),
 }));
 
 vi.mock('~/lib/runtime', async () => {
@@ -24,7 +25,10 @@ vi.mock('~/lib/runtime', async () => {
     ApiClient: {
       asEffect: () =>
         RealEffect.succeed({
-          eventRoster: { createAndLinkRoster: (args: unknown) => createAndLinkSpy(args) },
+          eventRoster: {
+            createAndLinkRoster: (args: unknown) => createAndLinkSpy(args),
+            patchEventRosterLink: (args: unknown) => patchSpy(args),
+          },
           roster: { createChannel: (args: unknown) => createChannelSpy(args) },
         }),
     },
@@ -54,6 +58,7 @@ const link = {
   rosterId: ROSTER_ID,
   rosterName: 'Nationals',
   autoApprove: false,
+  rsvpAnswers: ['yes', 'coming_later'],
   hasOwnerGroup: true,
   memberCount: 0,
   backfillAdded: Option.none(),
@@ -91,6 +96,7 @@ const renderSection = (
 beforeEach(() => {
   createAndLinkSpy.mockReset().mockReturnValue(Effect.succeed(link));
   createChannelSpy.mockReset().mockReturnValue(Effect.void);
+  patchSpy.mockReset().mockReturnValue(Effect.succeed(link));
   onRefresh.mockReset();
 });
 
@@ -145,5 +151,35 @@ describe('EventAttendanceRosterSection — Discord channel', () => {
     renderSection([rosterInfo({ discordChannelProvisioning: true })], Option.some(link));
     expect(screen.getByText('discord_channelProvisioning')).toBeTruthy();
     expect(screen.queryByText('eventRoster_createDiscordChannel')).toBeNull();
+  });
+});
+
+describe('EventAttendanceRosterSection — RSVP answers', () => {
+  it('creates the roster with the default answers (yes + coming later)', async () => {
+    createRoster(false);
+    await waitFor(() => expect(createAndLinkSpy).toHaveBeenCalledTimes(1));
+    expect(createAndLinkSpy.mock.calls[0]?.[0].payload.rsvpAnswers).toEqual([
+      'yes',
+      'coming_later',
+    ]);
+  });
+
+  it('patches the linked roster with the new answer set, keeping auto-approve', async () => {
+    renderSection([rosterInfo()], Option.some(link));
+    fireEvent.click(screen.getByLabelText('rsvp_maybe'));
+    await waitFor(() => expect(patchSpy).toHaveBeenCalledTimes(1));
+    expect(patchSpy.mock.calls[0]?.[0].payload).toEqual({
+      autoApprove: false,
+      rsvpAnswers: ['yes', 'coming_later', 'maybe'],
+    });
+  });
+
+  it('never lets the last answer be unticked', () => {
+    renderSection(
+      [rosterInfo()],
+      Option.some({ ...link, rsvpAnswers: ['yes'] } as unknown as EventRosterApi.EventRosterLink),
+    );
+    expect((screen.getByLabelText('rsvp_yes') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText('rsvp_maybe') as HTMLButtonElement).disabled).toBe(false);
   });
 });

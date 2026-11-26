@@ -9,6 +9,17 @@ import { TeamMemberId } from '~/models/TeamMember.js';
 export const EventRosterId = Schema.String.pipe(Schema.brand('EventRosterId'));
 export type EventRosterId = typeof EventRosterId.Type;
 
+/** RSVP answers that can feed an event roster. `no` never can. */
+export const RosterRsvpAnswer = Schema.Literals(['yes', 'coming_later', 'maybe']);
+export type RosterRsvpAnswer = typeof RosterRsvpAnswer.Type;
+
+/** Pre-existing behaviour: "coming later" has always counted as a yes. */
+export const DEFAULT_ROSTER_RSVP_ANSWERS: ReadonlyArray<RosterRsvpAnswer> = ['yes', 'coming_later'];
+
+export const RosterRsvpAnswers = Schema.Array(RosterRsvpAnswer).pipe(
+  Schema.check(Schema.isMinLength(1)),
+);
+
 export class EventRoster extends Model.Class<EventRoster>('EventRoster')({
   id: Model.Generated(EventRosterId),
   event_id: EventId,

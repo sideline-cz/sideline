@@ -17,6 +17,7 @@
 import {
   type Discord,
   type Event,
+  EventRosterModel,
   EventRpcModels,
   type GroupModel,
   type RosterModel,
@@ -24,7 +25,7 @@ import {
   type TeamMember,
 } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
-import { Data, Effect, Layer, Option, ServiceMap } from 'effect';
+import { Data, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
 import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
@@ -33,7 +34,6 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { type RosterEntry, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
-import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -84,8 +84,10 @@ type BackfillParams = {
    *  descendants of this group will be processed.  When absent, all yes-responders
    *  are treated as eligible (caller is expected to pre-scope the list). */
   readonly memberGroupId?: Option.Option<GroupModel.GroupId>;
-  readonly yesResponders: ReadonlyArray<{
+  /** Every RSVP on the event; only answers in the link's `rsvp_answers` are processed. */
+  readonly responders: ReadonlyArray<{
     readonly team_member_id: TeamMember.TeamMemberId;
+    readonly response: string;
     readonly discord_user_id: Option.Option<Discord.Snowflake>;
     readonly display_name: Option.Option<string>;
   }>;
@@ -108,11 +110,21 @@ type SeedPendingParams = {
     readonly start_at: import('effect').DateTime.Utc;
     readonly all_day: boolean;
   };
-  readonly yesResponders: ReadonlyArray<{
+  /** Every RSVP on the event; only answers in the link's `rsvp_answers` are processed. */
+  readonly responders: ReadonlyArray<{
     readonly team_member_id: TeamMember.TeamMemberId;
+    readonly response: string;
     readonly display_name: Option.Option<string>;
   }>;
 };
+
+/** Whether `response` is one of the answers a linked roster takes. */
+const feedsRoster = (
+  rsvpAnswers: ReadonlyArray<EventRosterModel.RosterRsvpAnswer>,
+  response: string,
+): boolean => (rsvpAnswers as ReadonlyArray<string>).includes(response);
+
+const couldFeedAnyRoster = Schema.is(EventRosterModel.RosterRsvpAnswer);
 
 type BackfillResult = {
   readonly added: number;
@@ -264,13 +276,13 @@ const make = Effect.Do.pipe(
       const onRsvp = (params: OnRsvpParams): Effect.Effect<void, never, never> => {
         const { teamId, event, memberId, priorResponse, newResponse, displayName } = params;
 
-        const isAttending = isAttendingRsvpResponse(newResponse);
-        const wasAttending =
-          Option.isSome(priorResponse) && isAttendingRsvpResponse(priorResponse.value);
-        const isWithdraw = wasAttending && !isAttending;
-
-        // Not attending and not a withdrawal of an attending response → nothing to do
-        if (!isAttending && !isWithdraw) return Effect.void;
+        // Neither answer can feed any roster (e.g. no → no) → skip the link lookup
+        if (
+          !couldFeedAnyRoster(newResponse) &&
+          !(Option.isSome(priorResponse) && couldFeedAnyRoster(priorResponse.value))
+        ) {
+          return Effect.void;
+        }
 
         const inner = eventRosters.findByEventId(event.id).pipe(
           Effect.flatMap(
@@ -283,6 +295,12 @@ const make = Effect.Do.pipe(
                 const auto_approve = link.auto_approve;
                 const owners_thread_id = safeOption(link.owners_thread_id);
                 const owner_channel_id = safeOption(link.owner_channel_id);
+
+                // "Attending" means "in the link's answer set". Any answer outside it takes the
+                // withdraw branch, exactly like yes → no always did — keyed off the member's
+                // active request, not the prior answer, because the set may have been narrowed
+                // since that request was made. With no pending/approved row it is a no-op (T10b).
+                const isAttending = feedsRoster(link.rsvp_answers, newResponse);
 
                 if (isAttending) {
                   // ---- Yes branch (T1–T5) ----------------------------------------
@@ -586,14 +604,16 @@ const make = Effect.Do.pipe(
        * Never fails: a link must succeed even if the queue cannot be filled.
        */
       const seedPending = (params: SeedPendingParams): Effect.Effect<number, never, never> => {
-        const { eventId, teamId, rosterId, event, yesResponders } = params;
-
-        if (yesResponders.length === 0) return Effect.succeed(0);
+        const { eventId, teamId, rosterId, event } = params;
 
         return eventRosters.findByEventId(eventId).pipe(
           Effect.flatMap((linkOption) => {
             if (Option.isNone(linkOption)) return Effect.succeed(0);
             const link = linkOption.value;
+            const yesResponders = params.responders.filter((r) =>
+              feedsRoster(link.rsvp_answers, r.response),
+            );
+            if (yesResponders.length === 0) return Effect.succeed(0);
 
             // Auto-approve ON is `backfill`'s job, not this one.
             if (link.auto_approve) return Effect.succeed(0);
@@ -689,7 +709,7 @@ const make = Effect.Do.pipe(
       };
 
       const backfill = (params: BackfillParams): Effect.Effect<BackfillResult, never, never> => {
-        const { eventId, teamId, rosterId, yesResponders } = params;
+        const { eventId, teamId, rosterId } = params;
 
         return eventRosters.findByEventId(eventId).pipe(
           Effect.flatMap((linkOption) => {
@@ -697,6 +717,9 @@ const make = Effect.Do.pipe(
               return Effect.succeed<BackfillResult>({ added: 0, cancelled: 0 });
             }
             const link = linkOption.value;
+            const yesResponders = params.responders.filter((r) =>
+              feedsRoster(link.rsvp_answers, r.response),
+            );
 
             // Determine member-group filter: use explicit param, then link member_group_id, then allow all
             const paramGroupId = safeOption(params.memberGroupId);

@@ -203,6 +203,7 @@ let eventRosterStore: Map<
     event_id: Event.EventId;
     roster_id: RosterModel.RosterId;
     auto_approve: boolean;
+    rsvp_answers: ReadonlyArray<string>;
     owners_thread_id: Option.Option<Discord.Snowflake>;
     roster_name: string;
     owner_group_id: Option.Option<string>;
@@ -475,6 +476,7 @@ const MockEventRostersRepositoryLayer = Layer.succeed(EventRostersRepository, {
     eventId: Event.EventId;
     rosterId: RosterModel.RosterId;
     autoApprove: boolean;
+    rsvpAnswers?: ReadonlyArray<string>;
   }) => {
     const existing = eventRosterStore.get(input.eventId);
     if (existing) {
@@ -485,6 +487,7 @@ const MockEventRostersRepositoryLayer = Layer.succeed(EventRostersRepository, {
       event_id: input.eventId,
       roster_id: input.rosterId,
       auto_approve: input.autoApprove,
+      rsvp_answers: input.rsvpAnswers ?? ['yes', 'coming_later'],
       owners_thread_id: Option.none<Discord.Snowflake>(),
       roster_name: 'Test Roster',
       owner_group_id: Option.none<string>(),
@@ -501,6 +504,13 @@ const MockEventRostersRepositoryLayer = Layer.succeed(EventRostersRepository, {
     const row = eventRosterStore.get(eventId);
     if (row) {
       eventRosterStore.set(eventId, { ...row, auto_approve: autoApprove });
+    }
+    return Effect.void;
+  },
+  setRsvpAnswers: (eventId: Event.EventId, rsvpAnswers: ReadonlyArray<string>) => {
+    const row = eventRosterStore.get(eventId);
+    if (row) {
+      eventRosterStore.set(eventId, { ...row, rsvp_answers: rsvpAnswers });
     }
     return Effect.void;
   },
@@ -1052,6 +1062,7 @@ describe('Event Roster API — PATCH autoApprove', () => {
       event_id: TEST_EVENT_ID,
       roster_id: TEST_ROSTER_ID,
       auto_approve: false,
+      rsvp_answers: ['yes', 'coming_later'],
       owners_thread_id: Option.none(),
       roster_name: 'Test Roster',
       owner_group_id: Option.none(),
@@ -1074,6 +1085,44 @@ describe('Event Roster API — PATCH autoApprove', () => {
     const body = await response.json();
     // Response may include added/cancelled counts
     expect(body).toBeDefined();
+  });
+
+  it('PATCH rsvpAnswers while auto-approve stays ON stores them and re-runs backfill', async () => {
+    eventRosterStore.set(TEST_EVENT_ID, {
+      id: TEST_EVENT_ROSTER_ID,
+      event_id: TEST_EVENT_ID,
+      roster_id: TEST_ROSTER_ID,
+      auto_approve: true,
+      rsvp_answers: ['yes', 'coming_later'],
+      owners_thread_id: Option.none(),
+      roster_name: 'Test Roster',
+      owner_group_id: Option.none(),
+      member_count: 0,
+    });
+    const before = backfillCallCount;
+
+    const response = await handler(
+      new Request(`${EVENT_BASE}/roster`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoApprove: true, rsvpAnswers: ['yes', 'maybe'] }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(backfillCallCount).toBe(before + 1);
+    expect(eventRosterStore.get(TEST_EVENT_ID)?.rsvp_answers).toEqual(['yes', 'maybe']);
+    expect((await response.json()).rsvpAnswers).toEqual(['yes', 'maybe']);
+  });
+
+  it('PATCH rejects an empty rsvpAnswers set', async () => {
+    const response = await handler(
+      new Request(`${EVENT_BASE}/roster`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoApprove: true, rsvpAnswers: [] }),
+      }),
+    );
+    expect(response.status).toBe(400);
   });
 
   it('PATCH without roster:manage → 403', async () => {
@@ -1099,6 +1148,7 @@ describe('Event Roster API — unlink', () => {
       event_id: TEST_EVENT_ID,
       roster_id: TEST_ROSTER_ID,
       auto_approve: false,
+      rsvp_answers: ['yes', 'coming_later'],
       owners_thread_id: Option.none(),
       roster_name: 'Test Roster',
       owner_group_id: Option.none(),
@@ -1287,6 +1337,7 @@ describe('Event Roster API — web approve/decline (real service, B1 regression)
           event_id: TEST_EVENT_ID,
           roster_id: TEST_ROSTER_ID,
           auto_approve: false,
+          rsvp_answers: ['yes', 'coming_later'],
           owners_thread_id: Option.none<Discord.Snowflake>(),
           roster_name: 'Tournament Squad',
           owner_group_id: Option.none<GroupModel.GroupId>(),

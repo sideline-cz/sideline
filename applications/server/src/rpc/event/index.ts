@@ -50,7 +50,6 @@ import {
   foldAttendingGenderCounts,
 } from '~/utils/attendingGenderCounts.js';
 import { requireCompleteProfile } from '~/utils/requireCompleteProfile.js';
-import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 import {
   isLeavingRequiredNoteResponse,
   isRsvpMessageRequiredAndMissing,
@@ -1698,19 +1697,18 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
             }
             return svc.rsvps.findRsvpsByEventId(event_id).pipe(
               Effect.flatMap((allRsvps) => {
-                const yesResponders = allRsvps
-                  .filter((r) => isAttendingRsvpResponse(r.response))
-                  .map((r) => ({
-                    team_member_id: r.team_member_id,
-                    discord_user_id: Option.none<Discord.Snowflake>(),
-                    display_name: r.display_name,
-                  }));
+                const responders = allRsvps.map((r) => ({
+                  team_member_id: r.team_member_id,
+                  response: r.response,
+                  discord_user_id: Option.none<Discord.Snowflake>(),
+                  display_name: r.display_name,
+                }));
                 return svc.provisioning
                   .backfill({
                     eventId: event_id,
                     teamId: team_id,
                     rosterId: link.roster_id,
-                    yesResponders,
+                    responders,
                   })
                   .pipe(
                     Effect.map(

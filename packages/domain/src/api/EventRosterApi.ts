@@ -3,7 +3,11 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/ht
 import { AuthMiddleware } from '~/api/Auth.js';
 import { HexColor } from '~/api/GroupApi.js';
 import { EventId } from '~/models/Event.js';
-import { EventRosterId, EventRosterRequestId } from '~/models/EventRosterModel.js';
+import {
+  EventRosterId,
+  EventRosterRequestId,
+  RosterRsvpAnswers,
+} from '~/models/EventRosterModel.js';
 import { RosterId } from '~/models/RosterModel.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
@@ -16,6 +20,9 @@ export class EventRosterLink extends Schema.Class<EventRosterLink>('EventRosterL
   rosterId: RosterId,
   rosterName: Schema.String,
   autoApprove: Schema.Boolean,
+  // RSVP answers that feed the roster (auto-approve or approval request). Always sent by the
+  // server; optional only so a client survives a server rollback (absent = yes + coming later).
+  rsvpAnswers: Schema.optionalKey(RosterRsvpAnswers),
   hasOwnerGroup: Schema.Boolean,
   memberCount: Schema.Number,
   /** Present on PATCH response when a backfill was triggered (auto_approve toggled ON). */
@@ -24,9 +31,12 @@ export class EventRosterLink extends Schema.Class<EventRosterLink>('EventRosterL
   backfillCancelled: Schema.OptionFromNullOr(Schema.Number),
 }) {}
 
+// `rsvpAnswers` is optional on every write so older clients keep working; absent means the
+// stored value (or the column default — yes + coming later — on link).
 export const LinkEventRosterRequest = Schema.Struct({
   rosterId: RosterId,
   autoApprove: Schema.Boolean,
+  rsvpAnswers: Schema.optionalKey(RosterRsvpAnswers),
 });
 export type LinkEventRosterRequest = Schema.Schema.Type<typeof LinkEventRosterRequest>;
 
@@ -35,11 +45,13 @@ export const CreateAndLinkRosterRequest = Schema.Struct({
   color: Schema.OptionFromNullOr(HexColor),
   emoji: Schema.OptionFromNullOr(Schema.String),
   autoApprove: Schema.Boolean,
+  rsvpAnswers: Schema.optionalKey(RosterRsvpAnswers),
 });
 export type CreateAndLinkRosterRequest = Schema.Schema.Type<typeof CreateAndLinkRosterRequest>;
 
 export const PatchEventRosterRequest = Schema.Struct({
   autoApprove: Schema.Boolean,
+  rsvpAnswers: Schema.optionalKey(RosterRsvpAnswers),
 });
 export type PatchEventRosterRequest = Schema.Schema.Type<typeof PatchEventRosterRequest>;
 

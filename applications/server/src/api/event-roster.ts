@@ -1,4 +1,10 @@
-import { Auth, EventRosterApi, type RosterModel } from '@sideline/domain';
+import {
+  Auth,
+  type Discord,
+  EventRosterApi,
+  type RosterModel,
+  type TeamMember,
+} from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -12,7 +18,26 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
-import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
+
+const toResponders = (
+  allRsvps: ReadonlyArray<{
+    readonly team_member_id: TeamMember.TeamMemberId;
+    readonly response: string;
+    readonly display_name: Option.Option<string>;
+  }>,
+) =>
+  allRsvps.map((r) => ({
+    team_member_id: r.team_member_id,
+    response: r.response,
+    discord_user_id: Option.none<Discord.Snowflake>(),
+    display_name: r.display_name,
+  }));
+
+const sameAnswers = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => {
+  const sa = new Set(a);
+  const sb = new Set(b);
+  return sa.size === sb.size && [...sa].every((x) => sb.has(x));
+};
 
 const forbidden = new EventRosterApi.Forbidden();
 const eventNotFound = new EventRosterApi.EventNotFound();
@@ -83,6 +108,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                     eventId,
                     rosterId: payload.rosterId,
                     autoApprove: payload.autoApprove,
+                    rsvpAnswers: payload.rsvpAnswers,
                   })
                   .pipe(
                     Effect.catchTag('EventRosterAlreadyLinked', () => Effect.fail(alreadyLinked)),
@@ -104,12 +130,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                         start_at: event.start_at,
                         all_day: event.all_day,
                       },
-                      yesResponders: allRsvps
-                        .filter((r) => isAttendingRsvpResponse(r.response))
-                        .map((r) => ({
-                          team_member_id: r.team_member_id,
-                          display_name: r.display_name,
-                        })),
+                      responders: toResponders(allRsvps),
                     }),
                   ),
                   Effect.catchCause((cause) =>
@@ -125,6 +146,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                     rosterId: row.roster_id,
                     rosterName: roster.name,
                     autoApprove: row.auto_approve,
+                    rsvpAnswers: row.rsvp_answers,
                     hasOwnerGroup: Option.isSome(event.owner_group_id),
                     memberCount: 0,
                     backfillAdded: Option.none(),
@@ -175,6 +197,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                     eventId,
                     rosterId: roster.id,
                     autoApprove: payload.autoApprove,
+                    rsvpAnswers: payload.rsvpAnswers,
                   })
                   .pipe(
                     Effect.catchTag('EventRosterAlreadyLinked', () => Effect.fail(alreadyLinked)),
@@ -196,12 +219,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                         start_at: event.start_at,
                         all_day: event.all_day,
                       },
-                      yesResponders: allRsvps
-                        .filter((r) => isAttendingRsvpResponse(r.response))
-                        .map((r) => ({
-                          team_member_id: r.team_member_id,
-                          display_name: r.display_name,
-                        })),
+                      responders: toResponders(allRsvps),
                     }),
                   ),
                   Effect.catchCause((cause) =>
@@ -217,6 +235,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                     rosterId: row.roster_id,
                     rosterName: roster.name,
                     autoApprove: row.auto_approve,
+                    rsvpAnswers: row.rsvp_answers,
                     hasOwnerGroup: Option.isSome(event.owner_group_id),
                     memberCount: 0,
                     backfillAdded: Option.none(),
@@ -245,32 +264,74 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                 ),
               ),
               Effect.tap(() => eventRosters.setAutoApprove(eventId, payload.autoApprove)),
-              // If toggling auto_approve ON from OFF, run backfill
+              Effect.tap(() =>
+                payload.rsvpAnswers === undefined
+                  ? Effect.void
+                  : eventRosters.setRsvpAnswers(eventId, payload.rsvpAnswers),
+              ),
+              // Backfill when auto-approve turns ON, or when the answer set changes while it is ON.
+              // With auto-approve OFF a changed set seeds approval requests for the newly
+              // included answers instead. Narrowing the set never removes anyone already in.
               Effect.bind('backfillResult', ({ link }) => {
-                if (!payload.autoApprove || link.auto_approve) return Effect.succeed(undefined);
-                return rsvps.findRsvpsByEventId(eventId).pipe(
-                  Effect.flatMap((allRsvps) => {
-                    const yesResponders = allRsvps
-                      .filter((r) => isAttendingRsvpResponse(r.response))
-                      .map((r) => ({
-                        team_member_id: r.team_member_id,
-                        discord_user_id:
-                          Option.none<import('@sideline/domain').Discord.Snowflake>(),
-                        display_name: r.display_name,
-                      }));
-                    return provisioning
-                      .backfill({
+                const answersChanged =
+                  payload.rsvpAnswers !== undefined &&
+                  !sameAnswers(payload.rsvpAnswers, link.rsvp_answers);
+                const toggledOn = payload.autoApprove && !link.auto_approve;
+                if (payload.autoApprove && (toggledOn || answersChanged)) {
+                  return rsvps.findRsvpsByEventId(eventId).pipe(
+                    Effect.flatMap((allRsvps) =>
+                      provisioning.backfill({
                         eventId,
                         teamId,
                         rosterId: link.roster_id,
-                        yesResponders,
-                      })
-                      .pipe(Effect.map((r) => r));
-                  }),
-                );
+                        responders: toResponders(allRsvps),
+                      }),
+                    ),
+                  );
+                }
+                if (!payload.autoApprove && answersChanged) {
+                  return Effect.all([
+                    events.findEventByIdWithDetails(eventId),
+                    rsvps.findRsvpsByEventId(eventId),
+                  ]).pipe(
+                    Effect.flatMap(([event, allRsvps]) =>
+                      Option.match(event, {
+                        onNone: () => Effect.void,
+                        onSome: (ev) =>
+                          provisioning.seedPending({
+                            eventId,
+                            teamId,
+                            rosterId: link.roster_id,
+                            event: {
+                              owner_group_id: ev.owner_group_id,
+                              member_group_id: ev.member_group_id,
+                              title: ev.title,
+                              start_at: ev.start_at,
+                              all_day: ev.all_day,
+                            },
+                            responders: toResponders(allRsvps),
+                          }),
+                      }),
+                    ),
+                    Effect.catchCause((cause) =>
+                      Effect.logWarning('Failed seeding roster requests on answer change', cause),
+                    ),
+                    Effect.as(undefined),
+                  );
+                }
+                return Effect.succeed(undefined);
               }),
               Effect.map(({ link, backfillResult }) =>
-                toEventRosterLink({ ...link, auto_approve: payload.autoApprove }, backfillResult),
+                toEventRosterLink(
+                  {
+                    ...link,
+                    auto_approve: payload.autoApprove,
+                    rsvp_answers: payload.rsvpAnswers
+                      ? [...new Set(payload.rsvpAnswers)]
+                      : link.rsvp_answers,
+                  },
+                  backfillResult,
+                ),
               ),
             ),
           )
@@ -457,6 +518,9 @@ const toEventRosterLink = (
     readonly event_id: import('@sideline/domain').Event.EventId;
     readonly roster_id: RosterModel.RosterId;
     readonly auto_approve: boolean;
+    readonly rsvp_answers: ReadonlyArray<
+      import('@sideline/domain').EventRosterModel.RosterRsvpAnswer
+    >;
     readonly roster_name: string;
     readonly owner_group_id: Option.Option<unknown>;
     readonly member_count: number;
@@ -469,6 +533,7 @@ const toEventRosterLink = (
     rosterId: link.roster_id,
     rosterName: link.roster_name,
     autoApprove: link.auto_approve,
+    rsvpAnswers: link.rsvp_answers,
     hasOwnerGroup: Option.isSome(link.owner_group_id),
     memberCount: link.member_count,
     backfillAdded: backfill !== undefined ? Option.some(backfill.added) : Option.none(),
