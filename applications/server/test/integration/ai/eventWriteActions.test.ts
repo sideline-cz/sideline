@@ -27,6 +27,7 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
+import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
@@ -64,6 +65,7 @@ const RealRepos = Layer.mergeAll(
   EventAttendanceRepository.Default,
   EventRsvpsRepository.Default,
   NotificationsRepository.Default,
+  RostersRepository.Default,
 );
 
 const SeedLayer = RealRepos.pipe(Layer.provideMerge(TestPgClient));

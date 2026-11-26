@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-11-26 — New: the AI assistant can change groups and rosters (with your confirmation)
+
+Ask the AI assistant to create a group or a roster, or to add or remove a member, for example "Add Anna to U12" or "Take Petr off the first team". It shows a card with the details, and nothing changes until you accept it.
+
+- You need the same permission as on the Groups or Rosters page: **manage groups** or **manage rosters**.
+- After you accept, the matching Discord role or channel change is queued for the Sideline bot and shows in Discord shortly; the card says so.
+- A new group starts at the top level; move it under another group on the Groups page.
+- API integrators: `confirmProposal` returns `202 { status: 'queued' }` for these actions (or `200 { status: 'applied' }` for a roster when your team does not create roster channels); `Proposal.action` and the summary field keys are widened.
+
 ## 2026-11-26 — New: the AI assistant can change, cancel and take attendance for events, and answer invitations for you (with your confirmation)
 
 Ask the AI assistant to move or rename an event, cancel it, confirm who came to a training, or answer an invitation for yourself, for example "Move Thursday's practice to 19:00", "Mark Anna and Petr present at today's training" or "I'm coming late to Thursday's training, around 19:30". It shows a card with the details, and nothing changes until you accept it.

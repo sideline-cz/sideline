@@ -31,13 +31,13 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import {
-  applyDiscordFormat,
-  DEFAULT_CHANNEL_FORMAT,
-  DEFAULT_ROLE_FORMAT,
-} from '~/utils/applyDiscordFormat.js';
+  addRosterMemberForMemberTx,
+  createRosterForMemberTx,
+  deriveChannelNames,
+  removeRosterMemberForMemberTx,
+} from '~/services/GroupRosterWrites.js';
 import { backfillRosterRoleMembers } from '~/utils/backfillRosterRoleMembers.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
-import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
 import { reconcileRosterRoleExtras } from '~/utils/reconcileRosterRoleExtras.js';
 
 export const toEffectiveRoles = (entry: RosterEntry) =>
@@ -84,36 +84,6 @@ export const toRosterPlayer = (entry: RosterEntry) =>
   });
 
 type ChannelLike = { readonly channel_id: Discord.Snowflake; readonly name: string };
-
-type SettingsRow = {
-  readonly discord_channel_format: string;
-  readonly discord_role_format: string;
-};
-
-const deriveChannelNames = (
-  settings: Option.Option<SettingsRow>,
-  name: string,
-  emoji: Option.Option<string>,
-  color: Option.Option<string>,
-) => ({
-  channelName: applyDiscordFormat(
-    Option.match(settings, {
-      onNone: () => DEFAULT_CHANNEL_FORMAT,
-      onSome: (s) => s.discord_channel_format,
-    }),
-    name,
-    emoji,
-  ),
-  roleName: applyDiscordFormat(
-    Option.match(settings, {
-      onNone: () => DEFAULT_ROLE_FORMAT,
-      onSome: (s) => s.discord_role_format,
-    }),
-    name,
-    emoji,
-  ),
-  discordRoleColor: Option.map(color, hexColorToDiscordInt),
-});
 
 const resolveChannelName = (
   channelId: Option.Option<Discord.Snowflake>,
@@ -516,57 +486,16 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               Effect.bind('membership', ({ currentUser }) =>
                 requireMembership(members, teamId, currentUser.id, new Roster.Forbidden()),
               ),
-              Effect.tap(({ membership }) =>
-                requirePermission(membership, 'roster:manage', new Roster.Forbidden()),
-              ),
-              Effect.bind('roster', () =>
-                rosters.insert({
-                  team_id: teamId,
+              Effect.flatMap(({ membership }) =>
+                createRosterForMemberTx({
+                  teamId,
+                  membership,
                   name: payload.name,
-                  active: true,
                   color: payload.color,
                   emoji: payload.emoji,
                 }),
               ),
-              Effect.bind('settings', () => teamSettings.findByTeamId(teamId)),
-              Effect.tap(({ roster, settings }) => {
-                const { channelName, roleName, discordRoleColor } = deriveChannelNames(
-                  settings,
-                  roster.name,
-                  roster.emoji,
-                  roster.color,
-                );
-                return Option.match(settings, {
-                  onNone: () =>
-                    channelSync.emitRosterChannelCreated(
-                      teamId,
-                      roster.id,
-                      roster.name,
-                      Option.none(),
-                      channelName,
-                      roleName,
-                      discordRoleColor,
-                    ),
-                  onSome: (s) =>
-                    s.create_discord_channel_on_roster
-                      ? channelSync.emitRosterChannelCreated(
-                          teamId,
-                          roster.id,
-                          roster.name,
-                          Option.none(),
-                          channelName,
-                          roleName,
-                          discordRoleColor,
-                          s.discord_roster_category_id,
-                        )
-                      : Effect.void,
-                });
-              }),
               Effect.map(({ roster }) => toRosterInfo(roster, 0, [], false)),
-              Effect.catchTag(
-                'NoSuchElementError',
-                LogicError.withMessage(() => 'Failed creating roster — no row returned'),
-              ),
             ),
           )
           .handle('getRoster', ({ params: { teamId, rosterId } }) =>
@@ -1017,48 +946,14 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               Effect.bind('membership', ({ currentUser }) =>
                 requireMembership(members, teamId, currentUser.id, new Roster.Forbidden()),
               ),
-              Effect.tap(({ membership }) =>
-                requirePermission(membership, 'roster:manage', new Roster.Forbidden()),
+              Effect.flatMap(({ membership }) =>
+                addRosterMemberForMemberTx({
+                  teamId,
+                  membership,
+                  rosterId,
+                  memberId: payload.memberId,
+                }),
               ),
-              Effect.bind('_roster', () =>
-                rosters.findRosterById(rosterId).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.fail(new Roster.RosterNotFound()),
-                      onSome: Effect.succeed,
-                    }),
-                  ),
-                ),
-              ),
-              Effect.bind('_member', () =>
-                members.findRosterMemberByIds(teamId, payload.memberId).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.fail(new Roster.PlayerNotFound()),
-                      onSome: Effect.succeed,
-                    }),
-                  ),
-                ),
-              ),
-              Effect.tap(() => rosters.addMemberById(rosterId, payload.memberId)),
-              Effect.tap(({ _roster, _member }) =>
-                users.findById(_member.user_id).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.void,
-                      onSome: (user) =>
-                        channelSync.emitRosterMemberAdded(
-                          teamId,
-                          rosterId,
-                          _roster.name,
-                          payload.memberId,
-                          Option.some(user.discord_id),
-                        ),
-                    }),
-                  ),
-                ),
-              ),
-              Effect.asVoid,
             ),
           )
           .handle('removeRosterMember', ({ params: { teamId, rosterId, memberId } }) =>
@@ -1067,48 +962,9 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               Effect.bind('membership', ({ currentUser }) =>
                 requireMembership(members, teamId, currentUser.id, new Roster.Forbidden()),
               ),
-              Effect.tap(({ membership }) =>
-                requirePermission(membership, 'roster:manage', new Roster.Forbidden()),
+              Effect.flatMap(({ membership }) =>
+                removeRosterMemberForMemberTx({ teamId, membership, rosterId, memberId }),
               ),
-              Effect.bind('_roster', () =>
-                rosters.findRosterById(rosterId).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.fail(new Roster.RosterNotFound()),
-                      onSome: Effect.succeed,
-                    }),
-                  ),
-                ),
-              ),
-              Effect.bind('_member', () =>
-                members.findRosterMemberByIds(teamId, memberId).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.fail(new Roster.PlayerNotFound()),
-                      onSome: Effect.succeed,
-                    }),
-                  ),
-                ),
-              ),
-              Effect.tap(() => rosters.removeMemberById(rosterId, memberId)),
-              Effect.tap(({ _roster, _member }) =>
-                users.findById(_member.user_id).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.void,
-                      onSome: (user) =>
-                        channelSync.emitRosterMemberRemoved(
-                          teamId,
-                          rosterId,
-                          _roster.name,
-                          memberId,
-                          Option.some(user.discord_id),
-                        ),
-                    }),
-                  ),
-                ),
-              ),
-              Effect.asVoid,
             ),
           )
           .handle('createChannel', ({ params: { teamId, rosterId } }) =>

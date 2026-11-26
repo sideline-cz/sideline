@@ -15,7 +15,8 @@
  *
  * Actions: `create_event`; `update_event`, `cancel_event` and `mark_attendance`, whose guards
  * live in `services/EventWrites.ts` next to the HTTP handlers'; `set_my_rsvp`, the caller's own
- * RSVP only (`services/RsvpWrites.ts`); and three Discord actions that only QUEUE a change for the bot
+ * RSVP only (`services/RsvpWrites.ts`); six group and roster actions
+ * (`services/GroupRosterWrites.ts`), which queue a Discord sync event; and three Discord actions that only QUEUE a change for the bot
  * (`create_discord_channel`, `set_discord_channel_access`, `archive_discord_channel`). The
  * Discord tools take NAMES, not ids: no read tool gives the model a channel or group id.
  *
@@ -35,6 +36,7 @@ import {
   EventRsvp,
   GroupModel,
   type Role,
+  RosterModel,
   type Team,
   TeamChannel,
   type TeamChannelAccess,
@@ -55,12 +57,17 @@ import type {
   EventWithDetails,
 } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
-import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
+import {
+  type MembershipWithRole,
+  TeamMembersRepository,
+} from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
+import type { UsersRepository } from '~/repositories/UsersRepository.js';
 import { type ToolContext, UUID_PATTERN } from '~/services/ai/toolTypes.js';
 import { createEventForMemberTx, resolveEventGroups } from '~/services/EventCreation.js';
 import {
@@ -71,6 +78,14 @@ import {
   confirmAttendanceForMember,
   updateEventForMemberTx,
 } from '~/services/EventWrites.js';
+import {
+  addGroupMemberForMemberTx,
+  addRosterMemberForMemberTx,
+  createGroupForMemberTx,
+  createRosterForMemberTx,
+  removeGroupMemberForMemberTx,
+  removeRosterMemberForMemberTx,
+} from '~/services/GroupRosterWrites.js';
 import {
   archiveManagedChannelTx,
   createManagedChannel,
@@ -1297,6 +1312,261 @@ const confirmSetMyRsvp = (payloadJson: string, ctx: ConfirmContext) =>
   );
 
 // ---------------------------------------------------------------------------
+// Group and roster actions. Every write lives in `services/GroupRosterWrites.ts`, shared with the
+// HTTP handlers, and queues its Discord sync event in the same transaction — so confirm answers
+// `discord_queued`. Tools take names, like the Discord actions; members by the display name
+// `list_members` shows.
+// ---------------------------------------------------------------------------
+
+const memberDisplayName = (row: {
+  readonly name: Option.Option<string>;
+  readonly discord_nickname: Option.Option<string>;
+  readonly discord_display_name: Option.Option<string>;
+  readonly username: string;
+}): string =>
+  Option.getOrElse(
+    DisplayName.pickDisplayName({
+      name: row.name,
+      nickname: row.discord_nickname,
+      displayName: row.discord_display_name,
+      username: Option.some(row.username),
+    }),
+    () => row.username,
+  );
+
+/** Inactive members count only for a removal: a deactivated member can still sit in a group. */
+const resolveMemberByName = (teamId: Team.TeamId, name: string, includeInactive: boolean) =>
+  TeamMembersRepository.asEffect().pipe(
+    Effect.flatMap((members) => members.findRosterByTeam(teamId, includeInactive)),
+    Effect.map((rows) => rows.map((r) => ({ id: r.member_id, name: memberDisplayName(r) }))),
+    Effect.flatMap((rows) =>
+      exactlyOne(
+        matchByName(rows, name),
+        'member: no team member with that name',
+        'member: several members match that name; ask the user which one they mean',
+      ),
+    ),
+  );
+
+const resolveRosterByName = (teamId: Team.TeamId, name: string) =>
+  RostersRepository.asEffect().pipe(
+    Effect.flatMap((rosters) => rosters.findByTeamId(teamId)),
+    Effect.flatMap((rows) =>
+      exactlyOne(
+        matchByName(rows, name),
+        'roster: no roster with that name',
+        'roster: several rosters match that name; ask the user which one they mean',
+      ),
+    ),
+  );
+
+/** Confirm-time: a lost permission is a 403, any other drift (row gone, name taken) is `stale`. */
+const groupRosterConfirmFailure = (e: {
+  readonly _tag: string;
+}): Effect.Effect<never, AiChatApi.AiProposalNotFound | AiChatApi.AiProposalActionForbidden> =>
+  e._tag === 'GroupForbidden' || e._tag === 'Forbidden'
+    ? Effect.fail(new AiChatApi.AiProposalActionForbidden())
+    : stale(e._tag);
+
+const EmojiParam = Schema.optionalKey(
+  Schema.String.pipe(Schema.check(Schema.isMinLength(1)), Schema.check(Schema.isMaxLength(32))),
+);
+
+const CreateNamedArgs = Schema.Struct({ name: NameParam, emoji: EmojiParam });
+
+const nameTaken = (rows: ReadonlyArray<{ readonly name: string }>, name: string) =>
+  rows.some((r) => r.name.toLowerCase() === name.toLowerCase());
+
+// --- create_group ------------------------------------------------------------
+
+const proposeCreateGroup = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(CreateNamedArgs, rawArgs)),
+    Effect.tap(({ args }) =>
+      GroupsRepository.asEffect().pipe(
+        Effect.flatMap((groups) => groups.findGroupsByTeamId(ctx.teamId)),
+        Effect.flatMap((rows) =>
+          nameTaken(rows, args.name)
+            ? Effect.fail('name: a group with that name already exists')
+            : Effect.void,
+        ),
+      ),
+    ),
+    Effect.map(({ args }) => ({
+      payloadJson: JSON.stringify(Schema.encodeSync(CreateNamedArgs)(args)),
+      summary: [
+        textField('group', args.name),
+        optionalTextField('emoji', Option.fromUndefinedOr(args.emoji)),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmCreateGroup = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(CreateNamedArgs, payloadJson).pipe(
+    Effect.flatMap((args) =>
+      createGroupForMemberTx({
+        ...ctx,
+        name: args.name,
+        parentId: Option.none(),
+        emoji: Option.fromUndefinedOr(args.emoji),
+        color: Option.none(),
+      }),
+    ),
+    Effect.as<ConfirmResult>({ kind: 'discord_queued' }),
+    Effect.catchTags({
+      GroupForbidden: groupRosterConfirmFailure,
+      GroupNameAlreadyTaken: groupRosterConfirmFailure,
+    }),
+  );
+
+// --- add_group_member / remove_group_member ------------------------------------
+
+const GroupMemberArgs = Schema.Struct({ group: NameParam, member: NameParam });
+
+const GroupMemberPayload = Schema.Struct({
+  groupId: GroupModel.GroupId,
+  memberId: TeamMember.TeamMemberId,
+});
+
+const proposeGroupMember = (adding: boolean) => (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(GroupMemberArgs, rawArgs)),
+    Effect.bind('group', ({ args }) => resolveGroupByName(ctx.teamId, args.group)),
+    Effect.bind('member', ({ args }) => resolveMemberByName(ctx.teamId, args.member, !adding)),
+    Effect.tap(({ group, member }) =>
+      GroupsRepository.asEffect().pipe(
+        Effect.flatMap((groups) => groups.findMembersByGroupId(group.id)),
+        Effect.flatMap((rows) => {
+          const isIn = rows.some((r) => r.member_id === member.id);
+          return isIn === adding
+            ? Effect.fail(
+                adding
+                  ? 'member: already in that group'
+                  : 'member: not in that group directly (they may be in a subgroup)',
+              )
+            : Effect.void;
+        }),
+      ),
+    ),
+    Effect.map(({ group, member }) => ({
+      payloadJson: JSON.stringify(
+        Schema.encodeSync(GroupMemberPayload)({ groupId: group.id, memberId: member.id }),
+      ),
+      summary: [textField('group', group.name), textField('member', member.name)],
+    })),
+    Effect.result,
+  );
+
+const confirmGroupMember = (adding: boolean) => (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(GroupMemberPayload, payloadJson).pipe(
+    Effect.flatMap((payload) =>
+      adding
+        ? addGroupMemberForMemberTx({ ...ctx, ...payload })
+        : removeGroupMemberForMemberTx({ ...ctx, ...payload }),
+    ),
+    Effect.as<ConfirmResult>({ kind: 'discord_queued' }),
+    Effect.catchTags({
+      GroupForbidden: groupRosterConfirmFailure,
+      GroupNotFound: groupRosterConfirmFailure,
+      GroupMemberNotFound: groupRosterConfirmFailure,
+    }),
+  );
+
+// --- create_roster -------------------------------------------------------------
+
+const proposeCreateRoster = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(CreateNamedArgs, rawArgs)),
+    Effect.tap(({ args }) =>
+      RostersRepository.asEffect().pipe(
+        Effect.flatMap((rosters) => rosters.findByTeamId(ctx.teamId)),
+        Effect.flatMap((rows) =>
+          nameTaken(rows, args.name)
+            ? Effect.fail('name: a roster with that name already exists')
+            : Effect.void,
+        ),
+      ),
+    ),
+    Effect.map(({ args }) => ({
+      payloadJson: JSON.stringify(Schema.encodeSync(CreateNamedArgs)(args)),
+      summary: [
+        textField('roster', args.name),
+        optionalTextField('emoji', Option.fromUndefinedOr(args.emoji)),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmCreateRoster = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(CreateNamedArgs, payloadJson).pipe(
+    Effect.flatMap((args) =>
+      createRosterForMemberTx({
+        ...ctx,
+        name: args.name,
+        color: Option.none(),
+        emoji: Option.fromUndefinedOr(args.emoji),
+      }),
+    ),
+    // The team can turn off channel creation for rosters; then nothing is queued.
+    Effect.map(
+      ({ discordQueued }): ConfirmResult => ({
+        kind: discordQueued ? 'discord_queued' : 'applied',
+      }),
+    ),
+    Effect.catchTag('Forbidden', groupRosterConfirmFailure),
+  );
+
+// --- add_roster_member / remove_roster_member ----------------------------------
+
+const RosterMemberArgs = Schema.Struct({ roster: NameParam, member: NameParam });
+
+const RosterMemberPayload = Schema.Struct({
+  rosterId: RosterModel.RosterId,
+  memberId: TeamMember.TeamMemberId,
+});
+
+const proposeRosterMember = (adding: boolean) => (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(RosterMemberArgs, rawArgs)),
+    Effect.bind('roster', ({ args }) => resolveRosterByName(ctx.teamId, args.roster)),
+    Effect.bind('member', ({ args }) => resolveMemberByName(ctx.teamId, args.member, !adding)),
+    Effect.tap(({ roster, member }) =>
+      RostersRepository.asEffect().pipe(
+        Effect.flatMap((rosters) => rosters.findMemberEntriesById(roster.id)),
+        Effect.flatMap((rows) => {
+          const isIn = rows.some((r) => r.member_id === member.id);
+          return isIn === adding
+            ? Effect.fail(adding ? 'member: already on that roster' : 'member: not on that roster')
+            : Effect.void;
+        }),
+      ),
+    ),
+    Effect.map(({ roster, member }) => ({
+      payloadJson: JSON.stringify(
+        Schema.encodeSync(RosterMemberPayload)({ rosterId: roster.id, memberId: member.id }),
+      ),
+      summary: [textField('roster', roster.name), textField('member', member.name)],
+    })),
+    Effect.result,
+  );
+
+const confirmRosterMember = (adding: boolean) => (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(RosterMemberPayload, payloadJson).pipe(
+    Effect.flatMap((payload) =>
+      adding
+        ? addRosterMemberForMemberTx({ ...ctx, ...payload })
+        : removeRosterMemberForMemberTx({ ...ctx, ...payload }),
+    ),
+    Effect.as<ConfirmResult>({ kind: 'discord_queued' }),
+    Effect.catchTags({
+      Forbidden: groupRosterConfirmFailure,
+      RosterNotFound: groupRosterConfirmFailure,
+      PlayerNotFound: groupRosterConfirmFailure,
+    }),
+  );
+
+// ---------------------------------------------------------------------------
 // The registry.
 // ---------------------------------------------------------------------------
 
@@ -1311,12 +1581,16 @@ export type ConfirmResult =
   | {
       readonly kind: 'rsvp_submitted';
       readonly submitted: Effect.Success<ReturnType<typeof submitRsvpTx>>;
-    };
+    }
+  // Changed in place with no Discord side effect (a roster when the team creates no channels).
+  | { readonly kind: 'applied' };
 
 type ConfirmContext = { readonly teamId: Team.TeamId; readonly membership: MembershipWithRole };
 
 export type ProposeR =
   | EventRsvpsRepository
+  | TeamMembersRepository
+  | RostersRepository
   | EventsRepository
   | EventAttendanceRepository
   | GroupsRepository
@@ -1329,6 +1603,9 @@ export type ProposeR =
 
 type ConfirmR =
   | EventRsvpsRepository
+  | TeamMembersRepository
+  | RostersRepository
+  | UsersRepository
   | EventsRepository
   | EventAttendanceRepository
   | GroupsRepository
@@ -1392,6 +1669,13 @@ const DISCORD_COMMON =
 const EVENT_COMMON =
   'This does NOT change anything by itself — it shows the user a card they must confirm. Only ' +
   'one may be proposed per reply.';
+
+const GROUP_ROSTER_COMMON =
+  'This does NOT change anything by itself — it shows the user a card they must confirm. After ' +
+  'they confirm, the matching Discord role or channel change is QUEUED for the Sideline bot: ' +
+  'say the Discord side updates shortly, never that it is already done. When a name matches ' +
+  'several groups, rosters or members, ask the user which one they mean. Only one may be ' +
+  'proposed per reply.';
 
 export const ACTION_REGISTRY: Record<AiActionProposal.AiActionName, ActionDefinition> = {
   create_event: {
@@ -1493,5 +1777,65 @@ export const ACTION_REGISTRY: Record<AiActionProposal.AiActionName, ActionDefini
     argsSchema: SetMyRsvpArgs,
     propose: proposeSetMyRsvp,
     confirm: confirmSetMyRsvp,
+  },
+  create_group: {
+    permissions: ['group:manage'],
+    requiresDiscord: false,
+    description:
+      'Proposes creating a new top-level group. `name` is the group name; `emoji` is optional. ' +
+      `Sideline also creates its Discord role (and channel, if the team has that on). ${GROUP_ROSTER_COMMON}`,
+    argsSchema: CreateNamedArgs,
+    propose: proposeCreateGroup,
+    confirm: confirmCreateGroup,
+  },
+  add_group_member: {
+    permissions: ['group:manage'],
+    requiresDiscord: false,
+    description:
+      'Proposes adding ONE member to a group, by the group name `list_groups` shows and the ' +
+      `member name \`list_members\` shows. ${GROUP_ROSTER_COMMON}`,
+    argsSchema: GroupMemberArgs,
+    propose: proposeGroupMember(true),
+    confirm: confirmGroupMember(true),
+  },
+  remove_group_member: {
+    permissions: ['group:manage'],
+    requiresDiscord: false,
+    description:
+      'Proposes removing ONE member from a group they are directly in (not a subgroup), by the ' +
+      `group name \`list_groups\` shows and the member name \`list_members\` shows. ${GROUP_ROSTER_COMMON}`,
+    argsSchema: GroupMemberArgs,
+    propose: proposeGroupMember(false),
+    confirm: confirmGroupMember(false),
+  },
+  create_roster: {
+    permissions: ['roster:manage'],
+    requiresDiscord: false,
+    description:
+      'Proposes creating a new roster. `name` is the roster name; `emoji` is optional. Sideline ' +
+      `also creates its Discord channel and role unless the team turned that off. ${GROUP_ROSTER_COMMON}`,
+    argsSchema: CreateNamedArgs,
+    propose: proposeCreateRoster,
+    confirm: confirmCreateRoster,
+  },
+  add_roster_member: {
+    permissions: ['roster:manage'],
+    requiresDiscord: false,
+    description:
+      'Proposes adding ONE member to a roster, by the roster name `list_rosters` shows and the ' +
+      `member name \`list_members\` shows. ${GROUP_ROSTER_COMMON}`,
+    argsSchema: RosterMemberArgs,
+    propose: proposeRosterMember(true),
+    confirm: confirmRosterMember(true),
+  },
+  remove_roster_member: {
+    permissions: ['roster:manage'],
+    requiresDiscord: false,
+    description:
+      'Proposes removing ONE member from a roster, by the roster name `list_rosters` shows and ' +
+      `the member name \`list_members\` shows. ${GROUP_ROSTER_COMMON}`,
+    argsSchema: RosterMemberArgs,
+    propose: proposeRosterMember(false),
+    confirm: confirmRosterMember(false),
   },
 };
