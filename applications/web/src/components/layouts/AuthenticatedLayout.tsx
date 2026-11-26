@@ -219,7 +219,7 @@ function AuthenticatedLayoutContent({
   return (
     <>
       <AppSidebar user={user} teams={teams} activeTeam={activeTeam} onLogout={onLogout} />
-      <SidebarInset>
+      <SidebarInset className='min-w-0'>
         <header className='sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 bg-background/95 backdrop-blur transition-[width,height] ease-linear supports-[backdrop-filter]:bg-background/60 group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12 pt-[env(safe-area-inset-top)]'>
           <div className='flex flex-1 min-w-0 items-center gap-2 px-4'>
             <SidebarTrigger className='-ml-1' />
