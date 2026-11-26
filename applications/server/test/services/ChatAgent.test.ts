@@ -120,6 +120,7 @@ import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository, EventWithDetails } from '~/repositories/EventsRepository.js';
+import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -290,6 +291,7 @@ const unusedRepoLayers = Layer.mergeAll(
   Layer.succeed(FeesRepository, {
     listByTeam: () => Effect.die(new Error('ChatAgent.test: FeesRepository not stubbed')),
   } as never),
+  Layer.succeed(FeeAssignmentsRepository, {} as never),
   Layer.succeed(FinanceOverviewRepository, {
     overviewByTeam: () =>
       Effect.die(new Error('ChatAgent.test: FinanceOverviewRepository not stubbed')),

@@ -18,6 +18,7 @@ import { AiActionName, AiActionProposalId } from '~/models/AiActionProposal.js';
 import { EventType } from '~/models/Event.js';
 import { RsvpResponse } from '~/models/EventRsvp.js';
 import { ExpenseCategory, ExpenseId } from '~/models/Expense.js';
+import { ManualPaymentMethod } from '~/models/Payment.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
@@ -181,6 +182,14 @@ export const ProposalFieldKey = Schema.Literals([
   'message',
   'member',
   'roster',
+  'fee',
+  'amount',
+  'date',
+  'method',
+  'note',
+  'category',
+  'plan',
+  'pricePerTraining',
 ]);
 export type ProposalFieldKey = typeof ProposalFieldKey.Type;
 
@@ -204,6 +213,15 @@ export const ProposalFieldValue = Schema.Union([
   Schema.Struct({ type: Schema.Literal('eventType'), value: EventType }),
   Schema.Struct({ type: Schema.Literal('accessLevel'), value: ProposalAccessLevel }),
   Schema.Struct({ type: Schema.Literal('rsvpResponse'), value: RsvpResponse }),
+  // Minor units + ISO code, exactly as written: the card formats it, the server never rounds.
+  Schema.Struct({
+    type: Schema.Literal('money'),
+    value: Schema.Struct({ amountMinor: Schema.Int, currency: Schema.String }),
+  }),
+  Schema.Struct({ type: Schema.Literal('paymentMethod'), value: ManualPaymentMethod }),
+  Schema.Struct({ type: Schema.Literal('expenseCategory'), value: ExpenseCategory }),
+  // `null` = the team's unnamed default plan, labelled client-side like everywhere else.
+  Schema.Struct({ type: Schema.Literal('planName'), value: Schema.NullOr(Schema.String) }),
   Schema.Struct({ type: Schema.Literal('none') }),
 ]);
 export type ProposalFieldValue = Schema.Schema.Type<typeof ProposalFieldValue>;

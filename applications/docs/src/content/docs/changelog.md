@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-11-26 — New: the AI assistant can record payments, add expenses and change membership plans (with your confirmation)
+
+Ask the AI assistant to record a payment, add an expense or move a member to another membership plan, for example "Anna paid 1 500 Kč for the spring fee in cash today" or "Add a 1 200 Kč field rent expense for March". It shows a card with the exact amount, currency, member and date, and nothing is written until you accept it. What you accept is exactly what is recorded.
+
+- You need the same permission as on the Finance page: **record payments** for payments, **manage fees** for expenses and plans.
+- Accepting the same card twice records it once.
+- If the fee's currency or the plan's price changes before you accept, the card no longer applies; ask again.
+- API integrators: `confirmProposal` returns `200 { status: 'applied' }` for these actions; `Proposal.action`, the summary field keys and the summary value types (`money`, `paymentMethod`, `expenseCategory`, `planName`) are widened.
+
 ## 2026-11-26 — New: the AI assistant can change groups and rosters (with your confirmation)
 
 Ask the AI assistant to create a group or a roster, or to add or remove a member, for example "Add Anna to U12" or "Take Petr off the first team". It shows a card with the details, and nothing changes until you accept it.

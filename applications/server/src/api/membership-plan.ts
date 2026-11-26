@@ -16,6 +16,7 @@ import {
   selectionWindowHasClosed,
 } from '~/repositories/MembershipPlansRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { assignMembershipPlanForMemberTx } from '~/services/FinanceWrites.js';
 
 type MembershipPlanRowLike = {
   readonly id: MembershipPlan.MembershipPlanId;
@@ -417,22 +418,13 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               Effect.bind('membership', ({ currentUser }) =>
                 requireMembership(members, teamId, currentUser.id, forbidden),
               ),
-              Effect.tap(({ membership }) =>
-                requirePermission(membership, 'finance:manage_fees', forbidden),
-              ),
-              Effect.bind('rowsAffected', () =>
-                plans.assignMembershipPlan({
-                  member_id: memberId,
-                  team_id: teamId,
-                  plan_id: payload.membershipPlanId,
+              Effect.flatMap(({ membership }) =>
+                assignMembershipPlanForMemberTx({
+                  teamId,
+                  membership,
+                  memberId,
+                  membershipPlanId: payload.membershipPlanId,
                 }),
-              ),
-              // 0 rows IS the Atomic Conditional UPDATE's combined guard result. ONE 404 covers
-              // both "plan bad/archived/foreign" and "member gone/inactive/wrong team" — unlike
-              // `selectMembershipPlan` there is no deadline to tell apart, both mean "reload the
-              // page", and classifying would cost a query. Deliberately NO re-read.
-              Effect.flatMap(({ rowsAffected }) =>
-                rowsAffected === 0 ? Effect.fail(notFound) : Effect.void,
               ),
             ),
           )

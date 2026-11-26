@@ -133,6 +133,14 @@ describe('ProposalFieldKey', () => {
       'message',
       'member',
       'roster',
+      'fee',
+      'amount',
+      'date',
+      'method',
+      'note',
+      'category',
+      'plan',
+      'pricePerTraining',
     ]);
   });
 });

@@ -27,6 +27,7 @@ import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { AiChatApiLive } from '~/api/ai-chat.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
 import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
+import { BankTransactionsRepository } from '~/repositories/BankTransactionsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
@@ -35,8 +36,13 @@ import { EventAttendanceRepository } from '~/repositories/EventAttendanceReposit
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
+import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
+import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { MembershipPlansRepository } from '~/repositories/MembershipPlansRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
+import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -80,6 +86,12 @@ const RealRepos = Layer.mergeAll(
   EventRsvpsRepository.Default,
   NotificationsRepository.Default,
   RostersRepository.Default,
+  BankTransactionsRepository.Default,
+  ExpensesRepository.Default,
+  FeeAssignmentsRepository.Default,
+  FeesRepository.Default,
+  MembershipPlansRepository.Default,
+  PaymentsRepository.Default,
 );
 
 const SeedLayer = RealRepos.pipe(Layer.provideMerge(TestPgClient));
