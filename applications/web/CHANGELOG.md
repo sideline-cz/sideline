@@ -1,5 +1,21 @@
 # @sideline/web
 
+## 0.77.0
+
+### 🚀 Features
+- AI assistant proposes group and roster changes (#833)
+- AI assistant proposes event updates, cancellations, attendance and your own RSVP (#829)
+- log your own activity from the team workout page (#832)
+- editable dot color on activity types (#828)
+- pin and highlight your own row in the activity matrix (#830)
+- choose which RSVP answers feed the event roster (#834)
+- move Discord from the sidebar to the profile page (#831)
+- create the roster's Discord channel from the event roster card (#826)
+
+### 🐛 Fixes
+- let the page own vertical scroll for the activity matrix on phones (#822)
+- hide the Discord card on the team dashboard once connected (#823)
+
 ## 0.76.0
 
 ### 🚀 Features
