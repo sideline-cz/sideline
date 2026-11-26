@@ -115,12 +115,14 @@ export function ActivityMatrix({
 
   return (
     // `relative`: the sr-only spans are absolute; without a positioned frame they escape the
-    // scroller and widen the page
+    // scroller and widen the page. Below sm there is no max-height: a nested vertical scroller
+    // inside the scrolling page traps the swipe, so the page scrolls and the date header scrolls
+    // away with it (the name column stays sticky)
     <div
       ref={frameRef}
       data-testid='activity-matrix-frame'
       aria-busy={busy}
-      className='relative max-h-[70vh] overflow-auto [--name-w:8.5rem] scroll-pl-(--name-w) sm:[--name-w:11rem]'
+      className='relative overflow-x-auto [--name-w:8.5rem] scroll-pl-(--name-w) sm:max-h-[70vh] sm:overflow-auto sm:[--name-w:11rem]'
     >
       <table
         className='border-separate border-spacing-0 table-fixed text-sm'
