@@ -2446,7 +2446,7 @@ All 110 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1794900000 | `grant_ai_manage_discord_permission` | Backfills `ai:manage_discord` into `role_permissions` for every existing built-in Admin and Captain role; `ON CONFLICT DO NOTHING`. |
 | 1795100000 | `create_discord_read_requests` | Creates `discord_read_requests` (see [7. Discord Integration](#7-discord-integration) above), the outbox for live Discord reads by the AI assistant. No FK to a person, no index beyond the PK; rows live for one chat turn and `DiscordReadSweepCron` deletes any row older than 4 minutes. |
 | 1795200000 | `event_roster_rsvp_answers` | Adds `event_rosters.rsvp_answers TEXT[] NOT NULL DEFAULT '{yes,coming_later}'` with a CHECK (non-empty, subset of `yes`/`coming_later`/`maybe`). |
-| 1795200000 | `create_activity_type_colors` | Creates `activity_type_colors` (team_id FK CASCADE, activity_type_id FK CASCADE, color TEXT CHECK in the 8 palette keys; PK on (team_id, activity_type_id)) |
+| 1795210000 | `create_activity_type_colors` | Creates `activity_type_colors` (team_id FK CASCADE, activity_type_id FK CASCADE, color TEXT CHECK in the 8 palette keys; PK on (team_id, activity_type_id)) |
 
 ### After Migrations (seed data)
 
