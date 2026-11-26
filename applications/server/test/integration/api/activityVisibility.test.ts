@@ -29,6 +29,7 @@ import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { createTeam, createUser, nextDiscordId } from '../bankSyncFixtures.js';
@@ -70,6 +71,7 @@ const RealRepos = Layer.mergeAll(
   GroupsRepository.Default,
   EarnedAchievementsRepository.Default,
   LeaderboardRepository.Default,
+  TeamSettingsRepository.Default,
 );
 
 const TestLayer = HttpApiBuilder.layer(SmallApi).pipe(
@@ -271,6 +273,24 @@ describe('activity visibility and seasons', () => {
     expect(res.body.logs.length).toBeGreaterThan(0);
     for (const log of res.body.logs) expect(log.note).toBeNull();
     expect(res.text).not.toContain('secret-note');
+  });
+
+  it("team with public notes: a teammate reads another member's notes", async () => {
+    const f = await seedFixture();
+    await runSeeded(
+      SqlClient.SqlClient.asEffect().pipe(
+        Effect.andThen(
+          (sql) => sql`
+            INSERT INTO team_settings (team_id, activity_notes_public)
+            VALUES (${f.t1}, true)
+            ON CONFLICT (team_id) DO UPDATE SET activity_notes_public = true
+          `,
+        ),
+      ),
+    );
+    const res = await get('a', logsPath(f, f.members.b));
+    expect(res.status).toBe(200);
+    expect(res.body.logs.map((l: any) => l.note)).toContain('secret-note');
   });
 
   it('owner reads own notes', async () => {

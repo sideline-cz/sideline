@@ -75,6 +75,7 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   // `TeamMembersRepository.autoAssignVariableSymbol`. DEFAULT false; turning it on does NOT
   // backfill existing members, that stays the bulk dialog's job.
   auto_assign_variable_symbols: Schema.Boolean,
+  activity_notes_public: Schema.Boolean,
   auto_apply_credit_by_user_id: Schema.OptionFromNullOr(Schema.String),
   membership_billing_by_user_id: Schema.OptionFromNullOr(Schema.String),
 }) {}
@@ -134,6 +135,7 @@ const TeamSettingsUpsertInput = Schema.Struct({
   rules_quiz_time: Schema.String,
   require_complete_profile: Schema.Boolean,
   auto_assign_variable_symbols: Schema.Boolean,
+  activity_notes_public: Schema.Boolean,
   auto_apply_credit_by_user_id: Schema.OptionFromNullOr(Schema.String),
   membership_billing_by_user_id: Schema.OptionFromNullOr(Schema.String),
 });
@@ -223,6 +225,7 @@ const make = Effect.gen(function* () {
              TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time,
              require_complete_profile,
              auto_assign_variable_symbols,
+             activity_notes_public,
              auto_apply_credit_by_user_id,
              membership_billing_by_user_id
       FROM team_settings
@@ -290,6 +293,7 @@ const make = Effect.gen(function* () {
                                  rules_quiz_time,
                                  require_complete_profile,
                                  auto_assign_variable_symbols,
+                                 activity_notes_public,
                                  auto_apply_credit_by_user_id,
                                  membership_billing_by_user_id)
       VALUES (${input.team_id}, ${input.event_horizon_days},
@@ -321,6 +325,7 @@ const make = Effect.gen(function* () {
               ${input.rules_quiz_time},
               ${input.require_complete_profile},
               ${input.auto_assign_variable_symbols},
+              ${input.activity_notes_public},
               ${input.auto_apply_credit_by_user_id},
               ${input.membership_billing_by_user_id})
       ON CONFLICT (team_id) DO UPDATE SET
@@ -355,6 +360,7 @@ const make = Effect.gen(function* () {
         rules_quiz_time = ${input.rules_quiz_time},
         require_complete_profile = ${input.require_complete_profile},
         auto_assign_variable_symbols = ${input.auto_assign_variable_symbols},
+        activity_notes_public = ${input.activity_notes_public},
         auto_apply_credit_by_user_id = ${input.auto_apply_credit_by_user_id},
         membership_billing_by_user_id = ${input.membership_billing_by_user_id},
         updated_at = now()
@@ -387,6 +393,7 @@ const make = Effect.gen(function* () {
                 TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time,
                 require_complete_profile,
                 auto_assign_variable_symbols,
+                activity_notes_public,
                 auto_apply_credit_by_user_id,
                 membership_billing_by_user_id
     `,
@@ -550,6 +557,7 @@ const make = Effect.gen(function* () {
     rulesQuizTime = '18:00',
     requireCompleteProfile = false,
     autoAssignVariableSymbols = false,
+    activityNotesPublic = false,
     autoApplyCreditByUserId = Option.none<string>(),
     membershipBillingByUserId = Option.none<string>(),
   }: {
@@ -585,6 +593,7 @@ const make = Effect.gen(function* () {
     rulesQuizTime?: string;
     requireCompleteProfile?: boolean;
     autoAssignVariableSymbols?: boolean;
+    activityNotesPublic?: boolean;
     autoApplyCreditByUserId?: Option.Option<string>;
     membershipBillingByUserId?: Option.Option<string>;
   }) =>
@@ -621,6 +630,7 @@ const make = Effect.gen(function* () {
       rules_quiz_time: rulesQuizTime,
       require_complete_profile: requireCompleteProfile,
       auto_assign_variable_symbols: autoAssignVariableSymbols,
+      activity_notes_public: activityNotesPublic,
       auto_apply_credit_by_user_id: autoApplyCreditByUserId,
       membership_billing_by_user_id: membershipBillingByUserId,
     }).pipe(catchSqlErrors);

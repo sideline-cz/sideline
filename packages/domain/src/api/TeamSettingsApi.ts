@@ -47,6 +47,9 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
   // usual reason: web bundles a FROZEN copy of this schema, so a new bundle served against a
   // server that predates the column must not take the settings page down.
   autoAssignVariableSymbols: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+  // Lets teammates read every member's activity-log notes. Off = a note is seen by its author
+  // only. Tolerant decode for the usual frozen-web-bundle reason.
+  activityNotesPublic: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   // Spends a member's held credit against what they owe without a treasurer clicking Settle.
   // A BOOLEAN projection of `team_settings.auto_apply_credit_by_user_id` -- the server stores a
   // user id (NULL = off) because the resulting `payments` rows need a recorder, and nothing
@@ -137,6 +140,7 @@ export const UpdateTeamSettingsRequest = Schema.Struct({
   rsvpRemindersEnabled: Schema.OptionFromOptional(Schema.Boolean),
   requireCompleteProfile: Schema.OptionFromOptional(Schema.Boolean),
   autoAssignVariableSymbols: Schema.OptionFromOptional(Schema.Boolean),
+  activityNotesPublic: Schema.OptionFromOptional(Schema.Boolean),
   autoApplyCreditEnabled: Schema.OptionFromOptional(Schema.Boolean),
   membershipBillingEnabled: Schema.OptionFromOptional(Schema.Boolean),
   rsvpReminderDaysBefore: Schema.OptionFromOptional(

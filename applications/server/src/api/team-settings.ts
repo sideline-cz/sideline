@@ -95,6 +95,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordEventsChannelId: Option.none(),
                     requireCompleteProfile: false,
                     autoAssignVariableSymbols: false,
+                    activityNotesPublic: false,
                     autoApplyCreditEnabled: false,
                     membershipBillingEnabled: false,
                   }),
@@ -132,6 +133,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordEventsChannelId: s.discord_events_channel_id,
                     requireCompleteProfile: s.require_complete_profile,
                     autoAssignVariableSymbols: s.auto_assign_variable_symbols,
+                    activityNotesPublic: s.activity_notes_public,
                     autoApplyCreditEnabled: Option.isSome(s.auto_apply_credit_by_user_id),
                     membershipBillingEnabled: Option.isSome(s.membership_billing_by_user_id),
                   }),
@@ -269,6 +271,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                             ),
                             autoAssignVariableSymbols: Option.getOrElse(
                               payload.autoAssignVariableSymbols,
+                              () => false,
+                            ),
+                            activityNotesPublic: Option.getOrElse(
+                              payload.activityNotesPublic,
                               () => false,
                             ),
                             // The boolean the client sends is PROJECTED onto a user id: enabling
@@ -427,6 +433,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                             autoAssignVariableSymbols: Option.getOrElse(
                               payload.autoAssignVariableSymbols,
                               () => s.auto_assign_variable_symbols,
+                            ),
+                            activityNotesPublic: Option.getOrElse(
+                              payload.activityNotesPublic,
+                              () => s.activity_notes_public,
                             ),
                             // Absent field leaves the stored id (and therefore the recorder)
                             // exactly as it was; present-and-true RE-STAMPS the current caller, so
@@ -602,6 +612,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   discordEventsChannelId: result.discord_events_channel_id,
                   requireCompleteProfile: result.require_complete_profile,
                   autoAssignVariableSymbols: result.auto_assign_variable_symbols,
+                  activityNotesPublic: result.activity_notes_public,
                   autoApplyCreditEnabled: Option.isSome(result.auto_apply_credit_by_user_id),
                   membershipBillingEnabled: Option.isSome(result.membership_billing_by_user_id),
                 }),

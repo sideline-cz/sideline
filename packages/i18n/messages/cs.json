@@ -3234,6 +3234,8 @@
   "teamSettings_remindersChannelHelp": "Discord kanál, kam se posílají připomínky a oznámení o začátku události. Pokud není nastaven, použije se kanál událostí.",
   "teamSettings_requireCompleteProfile": "Vyžadovat dokončený profil",
   "teamSettings_requireCompleteProfile_help": "Členové bez jména, data narození a pohlaví nemohou zapisovat účast, brát si tréninky ani si rezervovat místo ve spolujízdě. V Discordu dostanou tlačítko, které je provede vyplněním.",
+  "teamSettings_activityNotesPublic": "Poznámky k aktivitám vidí celý tým",
+  "teamSettings_activityNotesPublic_help": "Když je zapnuto, každý člen týmu uvidí poznámky, které ostatní připíší ke svým zapsaným aktivitám. Když je vypnuto, poznámku vidí jen její autor.",
   "teamSettings_roleFormat": "Formát rolí",
   "teamSettings_roleFormatHelp": "Jak se formátují názvy Discord rolí. Dostupné zástupce: {emoji}, {name}.",
   "teamSettings_rosterCategory": "Kategorie pro soupisky",

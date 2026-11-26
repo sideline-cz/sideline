@@ -19,8 +19,9 @@ const log = new ActivityLogApi.ActivityLogEntry({
 });
 
 describe('ActivityLogList', () => {
-  // Second wall: the server strips other members' notes, the list must not render one either.
-  it('hides note when not own profile', () => {
+  // The server decides who gets a note (author, or teammates when the team made notes public);
+  // the list renders whatever arrives, on someone else's profile too.
+  it("shows a note the server sent on another member's profile", () => {
     render(
       <ActivityLogList
         logs={[log]}
@@ -31,8 +32,7 @@ describe('ActivityLogList', () => {
         onDeleteLog={async () => {}}
       />,
     );
-    expect(screen.getByText('Gym')).not.toBeNull();
-    expect(screen.queryByText('private-note')).toBeNull();
+    expect(screen.getByText('private-note')).not.toBeNull();
   });
 
   // A new log goes to the current season, so a past-scope list would hide it and invite a re-log.
