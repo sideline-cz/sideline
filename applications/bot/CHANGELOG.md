@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.58.2
+
+### 🐛 Fixes
+- refuse moving a paid member to a fee plan in another currency (#845)
+
 ## 0.58.1
 
 ### 🐛 Fixes
