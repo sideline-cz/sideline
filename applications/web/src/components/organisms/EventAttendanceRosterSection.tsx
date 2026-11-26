@@ -1,6 +1,7 @@
 import type { EventRosterApi, Roster as RosterDomain } from '@sideline/domain';
 import { Event, RosterModel, Team } from '@sideline/domain';
 import { Effect, Option, Schema } from 'effect';
+import { Loader2 } from 'lucide-react';
 import React from 'react';
 
 import { ColorPicker } from '~/components/atoms/ColorPicker.js';
@@ -55,6 +56,7 @@ export function EventAttendanceRosterSection({
   const [newRosterEmoji, setNewRosterEmoji] = React.useState('');
   const [newRosterColor, setNewRosterColor] = React.useState<string | undefined>(undefined);
   const [autoApprove, setAutoApprove] = React.useState(false);
+  const [createDiscordChannel, setCreateDiscordChannel] = React.useState(false);
 
   // Backfill dialog
   const [backfillDialogOpen, setBackfillDialogOpen] = React.useState(false);
@@ -68,6 +70,18 @@ export function EventAttendanceRosterSection({
   // Linking an event to an archived roster is never the intent; the linked roster itself is
   // rendered from `link`, so hiding inactive ones here cannot hide an existing link.
   const activeRosters = React.useMemo(() => rosters.filter((r) => r.active), [rosters]);
+
+  // Channel state lives on the roster list, not the link; `onRefresh` reloads both.
+  const linkedRoster =
+    link === null ? undefined : rosters.find((r) => r.rosterId === link.rosterId);
+  const channelProvisioning = linkedRoster?.discordChannelProvisioning ?? false;
+
+  // Same polling as the roster page while the bot provisions the channel.
+  React.useEffect(() => {
+    if (!channelProvisioning) return;
+    const id = setInterval(onRefresh, 5000);
+    return () => clearInterval(id);
+  }, [channelProvisioning, onRefresh]);
 
   // Sync link state back from prop when the parent reloads
   React.useEffect(() => {
@@ -130,6 +144,26 @@ export function EventAttendanceRosterSection({
     // Revert the pending change — no-op since autoApprove state wasn't changed yet
   };
 
+  const requestDiscordChannel = React.useCallback(
+    (rosterId: RosterModel.RosterId) =>
+      ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.roster.createChannel({ params: { teamId: teamIdBranded, rosterId } }),
+        ),
+        Effect.mapError(() => ClientError.make(tr('roster_channelCreateFailed'))),
+        run({ success: tr('roster_channelCreateRequested') }),
+      ),
+    [teamIdBranded, run],
+  );
+
+  const handleCreateChannel = React.useCallback(async () => {
+    if (link === null) return;
+    setSubmitting(true);
+    await requestDiscordChannel(link.rosterId);
+    setSubmitting(false);
+    onRefresh();
+  }, [link, requestDiscordChannel, onRefresh]);
+
   const handleLinkExisting = React.useCallback(async () => {
     if (!selectedRosterId) return;
     const rosterId = Schema.decodeSync(RosterModel.RosterId)(selectedRosterId);
@@ -176,19 +210,25 @@ export function EventAttendanceRosterSection({
       Effect.mapError(() => ClientError.make(tr('eventRoster_createFailed'))),
       run({ success: tr('eventRoster_autoApprove') }),
     );
-    setSubmitting(false);
     if (Option.isSome(result)) {
+      // The roster is linked either way; a failed channel request surfaces its own toast and
+      // leaves the "Create Discord channel" button on the linked card as the retry.
+      if (createDiscordChannel) await requestDiscordChannel(result.value.rosterId);
       setLink(result.value);
       setNewRosterName('');
       setNewRosterEmoji('');
       setNewRosterColor(undefined);
+      setCreateDiscordChannel(false);
       onRefresh();
     }
+    setSubmitting(false);
   }, [
     newRosterName,
     newRosterEmoji,
     newRosterColor,
     autoApprove,
+    createDiscordChannel,
+    requestDiscordChannel,
     teamIdBranded,
     eventIdBranded,
     run,
@@ -251,6 +291,34 @@ export function EventAttendanceRosterSection({
                   {tr('eventRoster_unlink')}
                 </Button>
               </div>
+
+              {linkedRoster !== undefined && (
+                <div className='flex items-center justify-between gap-2'>
+                  {channelProvisioning ? (
+                    <p className='flex items-center gap-2 text-sm text-muted-foreground'>
+                      <Loader2 className='size-4 animate-spin' />
+                      {tr('discord_channelProvisioning')}
+                    </p>
+                  ) : Option.isSome(linkedRoster.discordChannelId) ? (
+                    <p className='text-sm'>
+                      {tr('eventRoster_discordChannel', {
+                        name: Option.getOrElse(linkedRoster.discordChannelName, () =>
+                          linkedRoster.discordChannelId.pipe(Option.getOrElse(() => '')),
+                        ),
+                      })}
+                    </p>
+                  ) : (
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={handleCreateChannel}
+                      disabled={submitting}
+                    >
+                      {tr('eventRoster_createDiscordChannel')}
+                    </Button>
+                  )}
+                </div>
+              )}
 
               <div className='flex items-center gap-2'>
                 <Switch
@@ -337,6 +405,16 @@ export function EventAttendanceRosterSection({
                         placeholder={tr('roster_rosterNamePlaceholder')}
                       />
                     </div>
+                  </div>
+                  <div className='flex items-center gap-2'>
+                    <Switch
+                      id='new-roster-create-discord-channel'
+                      checked={createDiscordChannel}
+                      onCheckedChange={setCreateDiscordChannel}
+                    />
+                    <Label htmlFor='new-roster-create-discord-channel'>
+                      {tr('eventRoster_alsoCreateDiscordChannel')}
+                    </Label>
                   </div>
                   <Button
                     onClick={handleCreateAndLink}
