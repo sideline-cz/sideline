@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.87.0
+
+### 🚀 Features
+- AI assistant proposes group and roster changes (#833)
+
 ## 0.86.0
 
 ### 🚀 Features
