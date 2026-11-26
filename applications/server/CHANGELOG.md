@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.88.0
+
+### 🚀 Features
+- AI assistant proposes payments, expenses and membership plan changes (#842)
+
 ## 0.87.1
 
 ### 🐛 Fixes
