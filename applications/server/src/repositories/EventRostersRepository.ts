@@ -18,6 +18,7 @@ class EventRosterRow extends Schema.Class<EventRosterRow>('EventRosterRow')({
   event_id: Event.EventId,
   roster_id: RosterModel.RosterId,
   auto_approve: Schema.Boolean,
+  rsvp_answers: EventRosterModel.RosterRsvpAnswers,
   owners_thread_id: Schema.OptionFromNullOr(Discord.Snowflake),
   created_at: Schema.DateTimeUtcFromDate,
   updated_at: Schema.DateTimeUtcFromDate,
@@ -32,6 +33,7 @@ class EventRosterLinkRow extends Schema.Class<EventRosterLinkRow>('EventRosterLi
   event_id: Event.EventId,
   roster_id: RosterModel.RosterId,
   auto_approve: Schema.Boolean,
+  rsvp_answers: EventRosterModel.RosterRsvpAnswers,
   owners_thread_id: Schema.OptionFromNullOr(Discord.Snowflake),
   created_at: Schema.DateTimeUtcFromDate,
   updated_at: Schema.DateTimeUtcFromDate,
@@ -60,7 +62,7 @@ const make = Effect.gen(function* () {
     Request: Event.EventId,
     Result: EventRosterLinkRow,
     execute: (eventId) => sql`
-      SELECT er.id, er.event_id, er.roster_id, er.auto_approve, er.owners_thread_id,
+      SELECT er.id, er.event_id, er.roster_id, er.auto_approve, er.rsvp_answers, er.owners_thread_id,
              er.created_at, er.updated_at,
              r.name AS roster_name,
              e.owner_group_id,
@@ -84,13 +86,14 @@ const make = Effect.gen(function* () {
       event_id: Event.EventId,
       roster_id: RosterModel.RosterId,
       auto_approve: Schema.Boolean,
+      rsvp_answers: EventRosterModel.RosterRsvpAnswers,
     }),
     Result: EventRosterRow,
     execute: (input) => sql`
-      INSERT INTO event_rosters (event_id, roster_id, auto_approve)
-      VALUES (${input.event_id}, ${input.roster_id}, ${input.auto_approve})
+      INSERT INTO event_rosters (event_id, roster_id, auto_approve, rsvp_answers)
+      VALUES (${input.event_id}, ${input.roster_id}, ${input.auto_approve}, ${input.rsvp_answers}::text[])
       ON CONFLICT (event_id) DO NOTHING
-      RETURNING id, event_id, roster_id, auto_approve, owners_thread_id, created_at, updated_at
+      RETURNING id, event_id, roster_id, auto_approve, rsvp_answers, owners_thread_id, created_at, updated_at
     `,
   });
 
@@ -103,6 +106,17 @@ const make = Effect.gen(function* () {
     Request: Schema.Struct({ event_id: Event.EventId, auto_approve: Schema.Boolean }),
     execute: (input) => sql`
       UPDATE event_rosters SET auto_approve = ${input.auto_approve} WHERE event_id = ${input.event_id}
+    `,
+  });
+
+  const _setRsvpAnswers = SqlSchema.void({
+    Request: Schema.Struct({
+      event_id: Event.EventId,
+      rsvp_answers: EventRosterModel.RosterRsvpAnswers,
+    }),
+    execute: (input) => sql`
+      UPDATE event_rosters SET rsvp_answers = ${input.rsvp_answers}::text[]
+      WHERE event_id = ${input.event_id}
     `,
   });
 
@@ -142,11 +156,13 @@ const make = Effect.gen(function* () {
     readonly eventId: Event.EventId;
     readonly rosterId: RosterModel.RosterId;
     readonly autoApprove: boolean;
+    readonly rsvpAnswers?: ReadonlyArray<EventRosterModel.RosterRsvpAnswer> | undefined;
   }) =>
     _link({
       event_id: input.eventId,
       roster_id: input.rosterId,
       auto_approve: input.autoApprove,
+      rsvp_answers: [...new Set(input.rsvpAnswers ?? EventRosterModel.DEFAULT_ROSTER_RSVP_ANSWERS)],
     }).pipe(
       catchSqlErrors,
       Effect.flatMap(
@@ -161,6 +177,14 @@ const make = Effect.gen(function* () {
 
   const setAutoApprove = (eventId: Event.EventId, autoApprove: boolean) =>
     _setAutoApprove({ event_id: eventId, auto_approve: autoApprove }).pipe(catchSqlErrors);
+
+  const setRsvpAnswers = (
+    eventId: Event.EventId,
+    rsvpAnswers: ReadonlyArray<EventRosterModel.RosterRsvpAnswer>,
+  ) =>
+    _setRsvpAnswers({ event_id: eventId, rsvp_answers: [...new Set(rsvpAnswers)] }).pipe(
+      catchSqlErrors,
+    );
 
   /**
    * Atomically saves the thread id if not already set.
@@ -188,6 +212,7 @@ const make = Effect.gen(function* () {
     link,
     unlink,
     setAutoApprove,
+    setRsvpAnswers,
     saveThreadIfAbsent,
     clearThread,
   };
@@ -206,6 +231,7 @@ export type EventRosterLinkInfo = {
   readonly event_id: Event.EventId;
   readonly roster_id: RosterModel.RosterId;
   readonly auto_approve: boolean;
+  readonly rsvp_answers: ReadonlyArray<EventRosterModel.RosterRsvpAnswer>;
   readonly owners_thread_id: Option.Option<Discord.Snowflake>;
   readonly created_at: DateTime.Utc;
   readonly updated_at: DateTime.Utc;
@@ -222,6 +248,7 @@ export type EventRosterBasicRow = {
   readonly event_id: Event.EventId;
   readonly roster_id: RosterModel.RosterId;
   readonly auto_approve: boolean;
+  readonly rsvp_answers: ReadonlyArray<EventRosterModel.RosterRsvpAnswer>;
   readonly owners_thread_id: Option.Option<Discord.Snowflake>;
   readonly created_at: DateTime.Utc;
   readonly updated_at: DateTime.Utc;

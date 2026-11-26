@@ -279,9 +279,10 @@ describe('EventRosterProvisioningService — roster member_added discord_user_id
                 teamId: team.id,
                 rosterId: roster.id,
                 // discord_user_id is Option.none() — simulating the bug: caller never resolved it
-                yesResponders: [
+                responders: [
                   {
                     team_member_id: tm.id,
+                    response: 'yes',
                     discord_user_id: Option.none(),
                     display_name: Option.none(),
                   },

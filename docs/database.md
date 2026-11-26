@@ -660,13 +660,14 @@ Links a single event to a roster for attendance tracking. One event can have at 
 | `event_id` | UUID | NOT NULL, FK → `events(id)` ON DELETE CASCADE, UNIQUE | — |
 | `roster_id` | UUID | NOT NULL, FK → `rosters(id)` ON DELETE CASCADE | — |
 | `auto_approve` | BOOLEAN | NOT NULL | `false` |
+| `rsvp_answers` | TEXT[] | NOT NULL | `{yes,coming_later}` |
 | `owners_thread_id` | TEXT | — | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
 **Indexes**: `idx_event_rosters_roster` on `(roster_id)`
 
-**Notes**: Added in migration `1789500000_create_event_rosters`. When `auto_approve = true`, a "yes" RSVP from a non-member automatically adds that member to the linked roster (via `EventRosterProvisioningService`); withdrawing the RSVP removes them if `was_member_before = false` on their `event_roster_requests` row. When `auto_approve = false`, a "yes" RSVP creates a `pending` request and the bot posts an Approve/Decline embed in a dedicated Discord thread (`owners_thread_id`) in the event owner-group's channel. `owners_thread_id` is written back by the bot after it creates the per-event approval thread; it is cleared via `Event/ClearEventRosterThread` if the thread is deleted. Enabling auto-approve via `PATCH /teams/:teamId/events/:eventId/roster` triggers a backfill: all current "yes" RSVPs for non-members are processed immediately and the response includes `backfillAdded` and `backfillCancelled` counts.
+**Notes**: Added in migration `1789500000_create_event_rosters`. When `auto_approve = true`, a "yes" RSVP from a non-member automatically adds that member to the linked roster (via `EventRosterProvisioningService`); withdrawing the RSVP removes them if `was_member_before = false` on their `event_roster_requests` row. When `auto_approve = false`, a "yes" RSVP creates a `pending` request and the bot posts an Approve/Decline embed in a dedicated Discord thread (`owners_thread_id`) in the event owner-group's channel. `owners_thread_id` is written back by the bot after it creates the per-event approval thread; it is cleared via `Event/ClearEventRosterThread` if the thread is deleted. Enabling auto-approve via `PATCH /teams/:teamId/events/:eventId/roster` triggers a backfill: all current "yes" RSVPs for non-members are processed immediately and the response includes `backfillAdded` and `backfillCancelled` counts. `rsvp_answers` (migration `1795200000_event_roster_rsvp_answers`) is the set of RSVP answers that count as "yes" for this link — auto-approve, approval requests and backfill all read it, and an answer moving out of the set withdraws the member exactly like yes → no. A CHECK keeps it non-empty and a subset of `yes`, `coming_later`, `maybe`; the default is the pre-column behaviour.
 
 ---
 
@@ -2432,6 +2433,7 @@ All 110 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1794800000 | `activity_log_seasons` | Adds `activity_logs.season_id` (FK → `seasons` ON DELETE SET NULL), functions `season_at`, `current_season_id`, `season_for_activity_log`, `set_activity_log_season`, trigger `activity_logs_set_season_trg`, backfills `season_id` (UPDATE of NULL rows only; idempotent) and creates `idx_activity_logs_member_season`. `idx_activity_logs_team_member_id` is now a prefix duplicate, to be dropped later. |
 | 1794900000 | `grant_ai_manage_discord_permission` | Backfills `ai:manage_discord` into `role_permissions` for every existing built-in Admin and Captain role; `ON CONFLICT DO NOTHING`. |
 | 1795100000 | `create_discord_read_requests` | Creates `discord_read_requests` (see [7. Discord Integration](#7-discord-integration) above), the outbox for live Discord reads by the AI assistant. No FK to a person, no index beyond the PK; rows live for one chat turn and `DiscordReadSweepCron` deletes any row older than 4 minutes. |
+| 1795200000 | `event_roster_rsvp_answers` | Adds `event_rosters.rsvp_answers TEXT[] NOT NULL DEFAULT '{yes,coming_later}'` with a CHECK (non-empty, subset of `yes`/`coming_later`/`maybe`). |
 
 ### After Migrations (seed data)
 

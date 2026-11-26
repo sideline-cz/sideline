@@ -98,10 +98,12 @@ const makeEventRostersRepository = (
     ownerChannelId?: Option.Option<Discord.Snowflake>;
     rosterName?: string;
     memberGroupId?: Option.Option<GroupModel.GroupId>;
+    rsvpAnswers?: ReadonlyArray<string>;
   } = {},
 ): Layer.Layer<EventRostersRepository> => {
   const {
     autoApprove = false,
+    rsvpAnswers = ['yes', 'coming_later'],
     ownerThreadId = Option.none(),
     ownerChannelId = Option.some(OWNER_CHANNEL_ID),
     rosterName = 'Tournament Squad',
@@ -116,6 +118,7 @@ const makeEventRostersRepository = (
           event_id: EVENT_ID,
           roster_id: ROSTER_ID,
           auto_approve: autoApprove,
+          rsvp_answers: rsvpAnswers,
           owners_thread_id: ownerThreadId,
           owner_channel_id: ownerChannelId,
           roster_name: rosterName,
@@ -1390,8 +1393,9 @@ describe('EventRosterProvisioningService — seedPending', () => {
           teamId: TEAM_ID,
           rosterId: ROSTER_ID,
           event: { ...seedEvent, owner_group_id: opts.ownerGroup ?? seedEvent.owner_group_id },
-          yesResponders: (opts.responders ?? [MEMBER_ID]).map((id) => ({
+          responders: (opts.responders ?? [MEMBER_ID]).map((id) => ({
             team_member_id: id,
+            response: 'yes',
             display_name: Option.some('Player'),
           })),
         }),
@@ -1997,7 +2001,7 @@ describe('EventRosterProvisioningService — backfill (T12)', () => {
             eventId: EVENT_ID,
             teamId: TEAM_ID,
             rosterId: ROSTER_ID,
-            yesResponders: yesResponders as any,
+            responders: yesResponders.map((r) => ({ ...r, response: 'yes' })) as any,
           }),
         ),
         Effect.tap((result) =>

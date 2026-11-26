@@ -1,5 +1,5 @@
 import type { EventRosterApi, Roster as RosterDomain } from '@sideline/domain';
-import { Event, RosterModel, Team } from '@sideline/domain';
+import { Event, EventRosterModel, RosterModel, Team } from '@sideline/domain';
 import { Effect, Option, Schema } from 'effect';
 import { Loader2 } from 'lucide-react';
 import React from 'react';
@@ -18,6 +18,7 @@ import {
 } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
+import { Checkbox } from '~/components/ui/checkbox';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { Switch } from '~/components/ui/switch';
@@ -56,6 +57,9 @@ export function EventAttendanceRosterSection({
   const [newRosterEmoji, setNewRosterEmoji] = React.useState('');
   const [newRosterColor, setNewRosterColor] = React.useState<string | undefined>(undefined);
   const [autoApprove, setAutoApprove] = React.useState(false);
+  const [rsvpAnswers, setRsvpAnswers] = React.useState<
+    ReadonlyArray<EventRosterModel.RosterRsvpAnswer>
+  >(EventRosterModel.DEFAULT_ROSTER_RSVP_ANSWERS);
   const [createDiscordChannel, setCreateDiscordChannel] = React.useState(false);
 
   // Backfill dialog
@@ -134,6 +138,29 @@ export function EventAttendanceRosterSection({
     [teamIdBranded, eventIdBranded, run, onRefresh],
   );
 
+  const handlePatchRsvpAnswers = React.useCallback(
+    async (next: ReadonlyArray<EventRosterModel.RosterRsvpAnswer>) => {
+      if (link === null) return;
+      setSubmitting(true);
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.eventRoster.patchEventRosterLink({
+            params: { teamId: teamIdBranded, eventId: eventIdBranded },
+            payload: { autoApprove: link.autoApprove, rsvpAnswers: next },
+          }),
+        ),
+        Effect.mapError(() => ClientError.make(tr('eventRoster_patchFailed'))),
+        run({ success: tr('eventRoster_rsvpAnswersSaved') }),
+      );
+      setSubmitting(false);
+      if (Option.isSome(result)) {
+        setLink(result.value);
+        onRefresh();
+      }
+    },
+    [link, teamIdBranded, eventIdBranded, run, onRefresh],
+  );
+
   const handleBackfillConfirm = async () => {
     setBackfillDialogOpen(false);
     await handlePatchAutoApprove(pendingAutoApproveValue);
@@ -172,7 +199,7 @@ export function EventAttendanceRosterSection({
       Effect.flatMap((api) =>
         api.eventRoster.linkEventRoster({
           params: { teamId: teamIdBranded, eventId: eventIdBranded },
-          payload: { rosterId, autoApprove },
+          payload: { rosterId, autoApprove, rsvpAnswers },
         }),
       ),
       Effect.catchTag('EventRosterAlreadyLinked', () =>
@@ -187,7 +214,7 @@ export function EventAttendanceRosterSection({
       setSelectedRosterId('');
       onRefresh();
     }
-  }, [selectedRosterId, autoApprove, teamIdBranded, eventIdBranded, run, onRefresh]);
+  }, [selectedRosterId, autoApprove, rsvpAnswers, teamIdBranded, eventIdBranded, run, onRefresh]);
 
   const handleCreateAndLink = React.useCallback(async () => {
     if (!newRosterName.trim()) return;
@@ -201,6 +228,7 @@ export function EventAttendanceRosterSection({
             emoji: newRosterEmoji ? Option.some(newRosterEmoji) : Option.none(),
             color: newRosterColor ? Option.some(newRosterColor) : Option.none(),
             autoApprove,
+            rsvpAnswers,
           },
         }),
       ),
@@ -227,6 +255,7 @@ export function EventAttendanceRosterSection({
     newRosterEmoji,
     newRosterColor,
     autoApprove,
+    rsvpAnswers,
     createDiscordChannel,
     requestDiscordChannel,
     teamIdBranded,
@@ -332,6 +361,12 @@ export function EventAttendanceRosterSection({
               <p className='text-xs text-muted-foreground -mt-2'>
                 {tr('eventRoster_autoApproveHelp')}
               </p>
+              <RsvpAnswersPicker
+                idPrefix='event-roster-rsvp-answer'
+                value={link.rsvpAnswers ?? EventRosterModel.DEFAULT_ROSTER_RSVP_ANSWERS}
+                onChange={handlePatchRsvpAnswers}
+                disabled={submitting}
+              />
             </>
           ) : (
             // Unlinked state
@@ -438,6 +473,12 @@ export function EventAttendanceRosterSection({
               <p className='text-xs text-muted-foreground -mt-2'>
                 {tr('eventRoster_autoApproveHelp')}
               </p>
+              <RsvpAnswersPicker
+                idPrefix='event-roster-rsvp-answer-unlinked'
+                value={rsvpAnswers}
+                onChange={setRsvpAnswers}
+                disabled={submitting}
+              />
             </>
           )}
         </CardContent>
@@ -477,5 +518,54 @@ export function EventAttendanceRosterSection({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+const RSVP_ANSWER_ORDER: ReadonlyArray<EventRosterModel.RosterRsvpAnswer> = [
+  'yes',
+  'coming_later',
+  'maybe',
+];
+
+function RsvpAnswersPicker({
+  idPrefix,
+  value,
+  onChange,
+  disabled,
+}: {
+  idPrefix: string;
+  value: ReadonlyArray<EventRosterModel.RosterRsvpAnswer>;
+  onChange: (next: ReadonlyArray<EventRosterModel.RosterRsvpAnswer>) => void;
+  disabled: boolean;
+}) {
+  const labels: Record<EventRosterModel.RosterRsvpAnswer, string> = {
+    yes: tr('rsvp_yes'),
+    coming_later: tr('rsvp_comingLater'),
+    maybe: tr('rsvp_maybe'),
+  };
+  return (
+    <fieldset className='flex flex-col gap-2'>
+      <legend className='mb-1 text-sm font-medium'>{tr('eventRoster_rsvpAnswers')}</legend>
+      <div className='flex flex-wrap gap-4'>
+        {RSVP_ANSWER_ORDER.map((answer) => {
+          const checked = value.includes(answer);
+          const id = `${idPrefix}-${answer}`;
+          return (
+            <div key={answer} className='flex items-center gap-2'>
+              <Checkbox
+                id={id}
+                checked={checked}
+                // The set can never be empty, so the last ticked answer stays ticked.
+                disabled={disabled || (checked && value.length === 1)}
+                onCheckedChange={(next) =>
+                  onChange(next === true ? [...value, answer] : value.filter((a) => a !== answer))
+                }
+              />
+              <Label htmlFor={id}>{labels[answer]}</Label>
+            </div>
+          );
+        })}
+      </div>
+    </fieldset>
   );
 }

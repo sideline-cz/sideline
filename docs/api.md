@@ -6253,6 +6253,7 @@ Returns the current event–roster link, or `null` if no roster is linked.
 | `rosterId` | `RosterId` | No | Roster ID |
 | `rosterName` | `string` | No | Roster display name |
 | `autoApprove` | `boolean` | No | Whether new "yes" RSVPs are auto-approved onto the roster |
+| `rsvpAnswers` | `("yes" \| "coming_later" \| "maybe")[]` | No | Non-empty set of RSVP answers that feed the roster (auto-approve, approval requests, backfill). Default `["yes", "coming_later"]` |
 | `hasOwnerGroup` | `boolean` | No | Whether the event has an owner group (determines if the approval thread flow is available) |
 | `memberCount` | `number` | No | Current member count on the linked roster |
 | `backfillAdded` | `number \| null` | Yes | Number of members added during a backfill (present only on `PATCH` response when auto-approve was toggled ON) |
@@ -6280,6 +6281,7 @@ Links an existing roster to the event.
 |---|---|---|---|
 | `rosterId` | `RosterId` | Yes | ID of the roster to link |
 | `autoApprove` | `boolean` | Yes | Whether to auto-approve "yes" RSVPs onto the roster |
+| `rsvpAnswers` | `("yes" \| "coming_later" \| "maybe")[]` | No | Non-empty set of RSVP answers that feed the roster; default `["yes", "coming_later"]` |
 
 **Response:** `201 Created` — `EventRosterLink`
 
@@ -6309,6 +6311,7 @@ Creates a new roster and immediately links it to the event.
 | `color` | `string \| null` | Yes | Hex colour string (null for none) |
 | `emoji` | `string \| null` | Yes | Emoji (null for none) |
 | `autoApprove` | `boolean` | Yes | Whether to auto-approve "yes" RSVPs onto the roster |
+| `rsvpAnswers` | `("yes" \| "coming_later" \| "maybe")[]` | No | Non-empty set of RSVP answers that feed the roster; default `["yes", "coming_later"]` |
 
 **Response:** `201 Created` — `EventRosterLink`
 
@@ -6324,7 +6327,7 @@ Creates a new roster and immediately links it to the event.
 
 #### `PATCH /teams/:teamId/events/:eventId/roster`
 
-Updates the `autoApprove` flag on the existing event–roster link. Toggling `autoApprove` to `true` triggers an immediate backfill: all current "yes" RSVPs from non-members are approved and added to the roster; any existing `pending` requests are cancelled. The `backfillAdded` and `backfillCancelled` fields in the response carry the counts.
+Updates the `autoApprove` flag, and optionally `rsvpAnswers`, on the existing event–roster link. Toggling `autoApprove` to `true`, or changing `rsvpAnswers` while it is `true`, triggers an immediate backfill over the RSVPs whose answer is in the set; changing `rsvpAnswers` while `autoApprove` is `false` seeds approval requests for the newly matching RSVPs. Narrowing the set never removes anyone already on the roster. Toggling `autoApprove` to `true` triggers an immediate backfill: all current "yes" RSVPs from non-members are approved and added to the roster; any existing `pending` requests are cancelled. The `backfillAdded` and `backfillCancelled` fields in the response carry the counts.
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `roster:manage`
@@ -6334,6 +6337,7 @@ Updates the `autoApprove` flag on the existing event–roster link. Toggling `au
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `autoApprove` | `boolean` | Yes | New auto-approve state |
+| `rsvpAnswers` | `("yes" \| "coming_later" \| "maybe")[]` | No | New non-empty answer set; omitted keeps the stored one |
 
 **Response:** `200 OK` — `EventRosterLink` (with `backfillAdded` and `backfillCancelled` populated)
 
