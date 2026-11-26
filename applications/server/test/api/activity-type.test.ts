@@ -220,6 +220,7 @@ type ActivityTypeRecord = {
   slug: Option.Option<string>;
   emoji: Option.Option<string>;
   description: Option.Option<string>;
+  color: Option.Option<string>;
   usageCount: number;
 };
 
@@ -235,6 +236,7 @@ const resetStores = () => {
     slug: Option.some('gym'),
     emoji: Option.none(),
     description: Option.none(),
+    color: Option.none(),
     usageCount: 0,
   });
   // Custom type for TEST_TEAM_ID
@@ -245,6 +247,7 @@ const resetStores = () => {
     slug: Option.none(),
     emoji: Option.some('🏊'),
     description: Option.some('Water sport'),
+    color: Option.none(),
     usageCount: 0,
   });
   // Custom type for OTHER_TEAM_ID (different team)
@@ -255,6 +258,7 @@ const resetStores = () => {
     slug: Option.none(),
     emoji: Option.none(),
     description: Option.none(),
+    color: Option.none(),
     usageCount: 0,
   });
   // Custom type for TEST_TEAM_ID with usage count > 0
@@ -265,6 +269,7 @@ const resetStores = () => {
     slug: Option.none(),
     emoji: Option.none(),
     description: Option.none(),
+    color: Option.none(),
     usageCount: 3,
   });
   // Custom type for TEST_TEAM_ID used for admin DELETE happy-path
@@ -275,6 +280,7 @@ const resetStores = () => {
     slug: Option.none(),
     emoji: Option.none(),
     description: Option.none(),
+    color: Option.none(),
     usageCount: 0,
   });
 };
@@ -368,6 +374,7 @@ const MockActivityTypesRepositoryLayer = Layer.succeed(ActivityTypesRepository, 
       slug: Option.none(),
       emoji: input.emoji,
       description: input.description,
+      color: Option.none(),
       usageCount: 0,
     };
     activityTypesStore.set(id, record);
@@ -405,6 +412,17 @@ const MockActivityTypesRepositoryLayer = Layer.succeed(ActivityTypesRepository, 
     ) {
       activityTypesStore.delete(id);
     }
+    return Effect.void;
+  },
+  // ponytail: one colour per record, not per team; the per-team split is covered by the
+  // ActivityTypesRepository integration test
+  setColor: (
+    id: ActivityType.ActivityTypeId,
+    _teamId: Team.TeamId,
+    color: Option.Option<string>,
+  ) => {
+    const existing = activityTypesStore.get(id);
+    if (existing) activityTypesStore.set(id, { ...existing, color });
     return Effect.void;
   },
   countLogsForType: (id: ActivityType.ActivityTypeId) => {
@@ -1077,6 +1095,36 @@ describe('Activity Types API', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.name).toBe('CaptainRenamed');
+    });
+  });
+
+  describe('PUT /teams/:teamId/activity-types/:activityTypeId/color', () => {
+    const colorRequest = (token: string, color: string | null) =>
+      new Request(`${BASE}/${GLOBAL_GYM_ID}/color`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color }),
+      });
+
+    it('returns 204 for Captain colouring a built-in type, and the list reports it', async () => {
+      const response = await handler(colorRequest('captain-token', 'sky'));
+      expect(response.status).toBe(204);
+      const list = await handler(
+        new Request(BASE, { headers: { Authorization: 'Bearer captain-token' } }),
+      );
+      const body = await list.json();
+      const gym = body.activityTypes.find((t: { id: string }) => t.id === GLOBAL_GYM_ID);
+      expect(gym.color).toBe('sky');
+    });
+
+    it('returns 403 Forbidden for Player', async () => {
+      const response = await handler(colorRequest('user-token', 'sky'));
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 400 for a colour outside the palette', async () => {
+      const response = await handler(colorRequest('admin-token', 'chartreuse'));
+      expect(response.status).toBe(400);
     });
   });
 
