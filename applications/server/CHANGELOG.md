@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.87.1
+
+### 🐛 Fixes
+- weekly workout summary 500s on any week with activity; log activity from the workout header (#841)
+
 ## 0.87.0
 
 ### 🚀 Features
