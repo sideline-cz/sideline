@@ -25,6 +25,7 @@ interface WorkoutTeamPageProps {
   // The team's full type list keeps each type's colour stable across group filters
   activityTypes?: ReadonlyArray<{ name: string; emoji: Option.Option<string> }>;
   isPending?: boolean;
+  currentMemberId?: string | null;
 }
 
 export function WorkoutTeamPage({
@@ -35,6 +36,7 @@ export function WorkoutTeamPage({
   onRetry,
   activityTypes = [],
   isPending = false,
+  currentMemberId = null,
 }: WorkoutTeamPageProps) {
   const rows = matrix?.rows ?? [];
   // Only members who logged something in the window get a row
@@ -152,6 +154,7 @@ export function WorkoutTeamPage({
             rows={activeRows}
             colors={colors}
             busy={isPending}
+            currentMemberId={currentMemberId}
           />
         </Card>
       )}

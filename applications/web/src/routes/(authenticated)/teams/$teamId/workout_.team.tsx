@@ -34,6 +34,11 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout_/te
             Effect.map((r) => r.activityTypes),
             Effect.catch(() => Effect.succeed([])),
           ),
+          // Only pins/highlights the viewer's row: without it the matrix is still usable
+          currentMemberId: api.roster.listMembers({ params: { teamId } }).pipe(
+            Effect.map((ms) => ms.find((m) => m.userId === context.user?.id)?.memberId ?? null),
+            Effect.catch(() => Effect.succeed(null)),
+          ),
         }),
       ),
       warnAndCatchAll,
@@ -45,7 +50,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout_/te
 function WorkoutTeamRoute() {
   const { teamId: teamIdRaw } = Route.useParams();
   const teamId = Schema.decodeSync(Team.TeamId)(teamIdRaw);
-  const { matrix, activityTypes } = Route.useLoaderData();
+  const { matrix, activityTypes, currentMemberId } = Route.useLoaderData();
   const { group } = Route.useSearch();
   const router = useRouter();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -65,6 +70,7 @@ function WorkoutTeamRoute() {
       groupId={group}
       onGroupChange={handleGroupChange}
       activityTypes={activityTypes}
+      currentMemberId={currentMemberId}
       onRetry={() => {
         router.invalidate();
       }}
