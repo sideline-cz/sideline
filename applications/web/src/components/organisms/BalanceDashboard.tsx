@@ -1,4 +1,5 @@
 import type { Expense } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { ArrowDown, ArrowUp, Minus } from 'lucide-react';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { pickDominantCurrency } from '~/lib/finance/pickDominantCurrency.js';
@@ -76,22 +77,15 @@ function fillMonthGaps(items: ReadonlyArray<MonthlyItem>): ReadonlyArray<Monthly
   return out;
 }
 
-/** 'YYYY-MM-01' → a short month label, without constructing a Date from the key. */
-const MONTH_LABELS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
-const monthLabel = (key: string) => MONTH_LABELS[Number(key.slice(5, 7)) - 1] ?? key;
+/** 'YYYY-MM-01' → a short month label in the app locale. Built from the key's parts in UTC, so no
+ * browser timezone can shift it into the neighbouring month. */
+const monthLabel = (key: string) => {
+  const month = Number(key.slice(5, 7));
+  if (!(month >= 1 && month <= 12)) return key;
+  return new Intl.DateTimeFormat(getLocale(), { month: 'short', timeZone: 'UTC' }).format(
+    Date.UTC(Number(key.slice(0, 4)), month - 1, 1),
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Category colors for the stacked bar (matching ExpenseCategoryBadge palette)

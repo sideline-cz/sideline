@@ -19,6 +19,10 @@ const distPkg = {
       types: './runtime.d.ts',
       import: './runtime.js',
     },
+    './server': {
+      types: './server.d.ts',
+      import: './server.js',
+    },
     './registry': {
       types: './registry.d.ts',
       import: './registry.js',

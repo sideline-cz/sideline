@@ -1,5 +1,6 @@
 import type { ActivityLog, ActivityLogApi, ActivityType } from '@sideline/domain';
 import { ActivityLogDate } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { Option } from 'effect';
 import { ClipboardList } from 'lucide-react';
 import React from 'react';
@@ -33,7 +34,7 @@ const formatDayLabel = (date: Date, now: Date): string => {
   const today = dayKey(now);
   const yesterday = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
   const key = dayKey(date);
-  const long = date.toLocaleDateString(undefined, {
+  const long = date.toLocaleDateString(getLocale(), {
     weekday: 'short',
     day: 'numeric',
     month: 'short',

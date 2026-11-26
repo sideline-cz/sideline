@@ -1,3 +1,4 @@
+import { getLocale } from '@sideline/i18n/runtime';
 import { LEVEL_META, LEVELS } from '@sideline/rules';
 import { Option, Record } from 'effect';
 import {
@@ -23,6 +24,7 @@ import { LanguageSwitcher } from '~/components/organisms/LanguageSwitcher';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
+import { eventTypeLabels } from '~/lib/event-labels.js';
 import { useTheme } from '~/lib/theme';
 import { tr } from '~/lib/translations.js';
 
@@ -104,13 +106,18 @@ function DemoStats() {
   );
 }
 
+const shortMonth = (monthIndex: number) =>
+  new Intl.DateTimeFormat(getLocale(), { month: 'short', timeZone: 'UTC' }).format(
+    Date.UTC(2026, monthIndex, 1),
+  );
+
 function DemoUpcomingEvents() {
   const events = [
     {
       day: '29',
-      month: 'Mar',
+      month: shortMonth(2),
       title: tr('hero_demo_event1_title'),
-      type: 'training',
+      type: 'training' as const,
       time: tr('hero_demo_event1_time'),
       timeDetail: '10:00',
       location: tr('hero_demo_event1_location'),
@@ -118,9 +125,9 @@ function DemoUpcomingEvents() {
     },
     {
       day: '2',
-      month: 'Apr',
+      month: shortMonth(3),
       title: tr('hero_demo_event2_title'),
-      type: 'match',
+      type: 'match' as const,
       time: tr('hero_demo_event2_time'),
       timeDetail: '18:30',
       location: tr('hero_demo_event2_location'),
@@ -155,7 +162,7 @@ function DemoUpcomingEvents() {
                 <div className='flex items-center gap-1.5 mb-0.5'>
                   <p className='font-medium truncate text-xs'>{event.title}</p>
                   <Badge variant='secondary' className='capitalize text-[10px] px-1.5 py-0'>
-                    {event.type}
+                    {eventTypeLabels[event.type]()}
                   </Badge>
                 </div>
                 <div className='flex flex-wrap items-center gap-x-2 text-[10px] text-muted-foreground'>
