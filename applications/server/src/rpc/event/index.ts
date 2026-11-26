@@ -653,6 +653,10 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                 canRsvp: counts.canRsvp,
                 isLateRsvp,
                 lateRsvpChannelId,
+                previousResponse: Option.filter(
+                  upsertResult.priorResponse,
+                  Schema.is(EventRsvp.RsvpResponse),
+                ),
                 message: upsertResult.row.message,
                 userName: member.name,
                 userNickname: member.nickname,

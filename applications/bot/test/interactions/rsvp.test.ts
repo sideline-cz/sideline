@@ -64,6 +64,7 @@ const makeCounts = (
     canRsvp: true,
     isLateRsvp: false,
     lateRsvpChannelId: Option.none(),
+    previousResponse: Option.none(),
     message: Option.none(),
     userName: Option.some('Alice'),
     userNickname: Option.none(),
@@ -185,6 +186,39 @@ describe('postRsvpDiscordUpdates', () => {
     expect(calls.getMessage).toHaveLength(0);
     expect(calls.createMessage).toHaveLength(1);
     expect(calls.createMessage[0]?.channelId).toBe(LATE_RSVP_CHANNEL_ID);
+  });
+
+  it('late RSVP change: the notice names the previous answer and the new one', async () => {
+    const calls = makeCallTracker();
+    const rest = makeRest(calls);
+    const counts = makeCounts({
+      isLateRsvp: true,
+      lateRsvpChannelId: Option.some(LATE_RSVP_CHANNEL_ID),
+      previousResponse: Option.some('no'),
+    });
+
+    await Effect.runPromise(
+      postRsvpDiscordUpdates({ ...baseParams(counts), rest }) as Effect.Effect<void, never, never>,
+    );
+
+    const payload = calls.createMessage[0]?.payload as { embeds: Array<{ description: string }> };
+    expect(payload.embeds[0]?.description).toContain('from **No** to **Yes**');
+  });
+
+  it('late RSVP from an older server (no previousResponse): falls back to the new answer only', async () => {
+    const calls = makeCallTracker();
+    const rest = makeRest(calls);
+    const counts = makeCounts({
+      isLateRsvp: true,
+      lateRsvpChannelId: Option.some(LATE_RSVP_CHANNEL_ID),
+    });
+
+    await Effect.runPromise(
+      postRsvpDiscordUpdates({ ...baseParams(counts), rest }) as Effect.Effect<void, never, never>,
+    );
+
+    const payload = calls.createMessage[0]?.payload as { embeds: Array<{ description: string }> };
+    expect(payload.embeds[0]?.description).toContain('their answer to **Yes**');
   });
 
   // Server-side contract test: the server withholds `lateRsvpChannelId` (rather than the

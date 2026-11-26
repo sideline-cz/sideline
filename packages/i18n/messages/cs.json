@@ -792,6 +792,7 @@
   "bot_info_field_server": "Server",
   "bot_info_footer": "Vyrobeno s ❤ od majksa",
   "bot_late_rsvp_notification": "{user} **změnil/a** svou odpověď na **{response}** pro {event}.",
+  "bot_late_rsvp_notification_from": "{user} **změnil/a** svou odpověď z **{previous}** na **{response}** pro {event}.",
   "bot_makanicko_leaderboard_empty": "Žádné aktivity v probíhající sezóně.",
   "bot_login_btn_open": "Otevřít Sideline",
   "bot_login_cmd_desc": "Získat jednorázový odkaz, který otevře Sideline už přihlášený",

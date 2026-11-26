@@ -41,6 +41,9 @@ export class SubmitRsvpResult extends Schema.Class<SubmitRsvpResult>('SubmitRsvp
   canRsvp: Schema.Boolean,
   isLateRsvp: Schema.Boolean,
   lateRsvpChannelId: Schema.OptionFromNullOr(Snowflake),
+  // The answer this RSVP replaced, for the late-RSVP "changed from X to Y" notice. Optional on
+  // the wire so an older server (no key) still decodes on a newer bot during the rolling deploy.
+  previousResponse: Schema.OptionFromOptionalNullOr(RsvpResponse),
   message: Schema.OptionFromNullOr(Schema.String),
   /** The RSVP'ing user's name fields, for rendering `**Name** (<@id>)` on the bot side. */
   userName: Schema.OptionFromNullOr(Schema.String),

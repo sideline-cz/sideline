@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-11-26 — Late-RSVP notifications show the previous answer
+
+When a member changes their answer after the reminder, the notification in the late-RSVP channel now says what they changed from, for example "changed their answer from **No** to **Yes**".
+
 ## 2026-11-10 — New: the AI assistant can read messages in your Discord channels
 
 Ask the AI assistant what people said in a Discord channel, for example "What did the U12 chat talk about today?". The assistant reads the messages live from Discord through the Sideline bot and answers from them.
