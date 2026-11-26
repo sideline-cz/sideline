@@ -1,6 +1,7 @@
 import type { DiscordREST } from 'dfx/DiscordREST';
 import { type DiscordGateway, runIx } from 'dfx/gateway';
 import { Cause, Effect, Metric, Schedule } from 'effect';
+import type { HttpClient } from 'effect/unstable/http';
 import { commandBuilder } from '~/commands/index.js';
 import { eventHandlers } from '~/events/index.js';
 import { interactionBuilder } from '~/interactions/index.js';
@@ -227,6 +228,9 @@ export const program = Effect.Do.pipe(
   unknown,
   | DiscordGateway
   | DiscordREST
+  // `/report` calls GitHub directly. Listed so `runMain`'s `R = never` fails
+  // the build if `run.ts` stops providing it — this cast hid exactly that.
+  | HttpClient.HttpClient
   | SyncRpc
   | RulesQuizSyncService
   | ChannelSyncService
