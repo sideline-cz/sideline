@@ -74,7 +74,8 @@ test.describe('Members', () => {
 
     test("another member's page: read-only logs, Danger Zone visible", async ({ page }) => {
       // userId differs from the mocked /auth/me user, so this is not the viewer's own profile,
-      // although listLogs succeeds (member:view lets the viewer read it).
+      // although listLogs succeeds (member:view lets the viewer read it). The server decides
+      // note visibility (team setting), so a note it sends is shown as-is.
       await page.route(`**/teams/*/members/${OTHER_ID}`, json(mockMembers[1]));
       await page.route(
         `**/teams/*/members/${OTHER_ID}/activity-logs`,
@@ -87,7 +88,7 @@ test.describe('Members', () => {
               activityTypeEmoji: null,
               loggedAt: '2026-11-01T12:00:00Z',
               durationMinutes: 30,
-              note: 'private-note',
+              note: 'shared-note',
               source: 'manual',
             },
           ],
@@ -106,7 +107,7 @@ test.describe('Members', () => {
       await expect(logCard.getByText('Sprint drills')).toBeVisible();
       await expect(logCard.getByRole('button', { name: 'Edit' })).toHaveCount(0);
       await expect(logCard.getByRole('button', { name: 'Delete' })).toHaveCount(0);
-      await expect(page.getByText('private-note')).toHaveCount(0);
+      await expect(logCard.getByText('shared-note')).toBeVisible();
       await expect(page.getByText('Danger zone', { exact: true })).toBeVisible();
     });
   });
