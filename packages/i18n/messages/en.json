@@ -792,6 +792,7 @@
   "bot_info_field_server": "Server",
   "bot_info_footer": "Made with ❤ by majksa",
   "bot_late_rsvp_notification": "{user} **changed** their answer to **{response}** for {event}.",
+  "bot_late_rsvp_notification_from": "{user} **changed** their answer from **{previous}** to **{response}** for {event}.",
   "bot_makanicko_leaderboard_empty": "No activities in a running season.",
   "bot_login_btn_open": "Open Sideline",
   "bot_login_cmd_desc": "Get a one-time link that opens Sideline already signed in",

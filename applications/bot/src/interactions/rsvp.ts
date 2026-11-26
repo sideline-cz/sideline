@@ -180,14 +180,28 @@ export const postRsvpDiscordUpdates = (params: {
           embeds: [
             {
               color: 0xe67e22,
-              description: m.bot_late_rsvp_notification(
-                {
-                  user: userDisplay,
-                  response: localizeRsvpResponse(response, embedLocale),
-                  event: eventTitle,
-                },
-                { locale: embedLocale },
-              ),
+              // `previousResponse` is None only from an older server (pre-rolling-deploy).
+              description: Option.match(counts.previousResponse, {
+                onNone: () =>
+                  m.bot_late_rsvp_notification(
+                    {
+                      user: userDisplay,
+                      response: localizeRsvpResponse(response, embedLocale),
+                      event: eventTitle,
+                    },
+                    { locale: embedLocale },
+                  ),
+                onSome: (previous) =>
+                  m.bot_late_rsvp_notification_from(
+                    {
+                      user: userDisplay,
+                      previous: localizeRsvpResponse(previous, embedLocale),
+                      response: localizeRsvpResponse(response, embedLocale),
+                      event: eventTitle,
+                    },
+                    { locale: embedLocale },
+                  ),
+              }),
             },
           ],
         })

@@ -2433,6 +2433,7 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
           Effect.sync(() => {
             expect(result.isLateRsvp).toBe(true);
             expect(Option.isNone(result.lateRsvpChannelId)).toBe(true);
+            expect(Option.isNone(result.previousResponse)).toBe(true);
           }),
         ),
         Effect.provide(RpcTestLayer),
@@ -2488,6 +2489,7 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
             expect(result.isLateRsvp).toBe(true);
             expect(Option.isSome(result.lateRsvpChannelId)).toBe(true);
             expect(Option.getOrNull(result.lateRsvpChannelId)).toBe(LATE_RSVP_CHANNEL_ID);
+            expect(Option.getOrNull(result.previousResponse)).toBe('yes');
           }),
         ),
         Effect.provide(RpcTestLayer),
