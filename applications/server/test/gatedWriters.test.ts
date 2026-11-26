@@ -64,7 +64,10 @@ const GATED_WRITERS: readonly GatedWriter[] = [
   {
     callExpression: 'upsertRsvp(',
     expectedSites: 2,
-    expectedFiles: ['api/event-rsvp.ts', 'rpc/event/index.ts'],
+    // `services/RsvpWrites.ts` is the web `submitRsvp` body, moved out unchanged so the AI
+    // assistant's `set_my_rsvp` shares it; `submitRsvpTx` reaches the upsert only after
+    // `checkRsvpSubmittable` runs `requireCompleteProfile`. Neither caller has another route.
+    expectedFiles: ['rpc/event/index.ts', 'services/RsvpWrites.ts'],
   },
   { callExpression: 'claimTraining(', expectedSites: 1, expectedFiles: ['rpc/event/index.ts'] },
   { callExpression: 'reserveSeat(', expectedSites: 2, expectedFiles: ['rpc/carpool/index.ts'] },
