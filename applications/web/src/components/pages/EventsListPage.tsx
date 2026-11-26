@@ -1,6 +1,7 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { EventApi, EventTypeApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
 import { Event, EventType, GroupModel, Team, TrainingType } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import { CalendarDays, List, Loader2, Plus, ShieldCheck } from 'lucide-react';
@@ -507,7 +508,7 @@ export function EventsListPage({
                       </span>
                       <span className='text-muted-foreground leading-none mt-0.5'>
                         {new Date(Number(DateTime.toEpochMillis(badgeAt))).toLocaleDateString(
-                          undefined,
+                          getLocale(),
                           {
                             month: 'short',
                             ...(event.allDay ? { timeZone: 'UTC' } : {}),

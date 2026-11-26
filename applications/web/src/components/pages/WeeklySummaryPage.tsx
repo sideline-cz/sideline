@@ -1,4 +1,5 @@
 import type { WeeklySummary } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { Link } from '@tanstack/react-router';
 import type { DateTime } from 'effect';
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert.js';
@@ -23,7 +24,7 @@ const formatDuration = (minutes: number): string => {
 
 const formatWeekDate = (dt: DateTime.Utc): string => {
   const date = new Date(dt.epochMilliseconds);
-  return date.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+  return date.toLocaleDateString(getLocale(), { month: 'short', day: 'numeric' });
 };
 
 const parseWeekParam = (week: string): { year: number; week: number } | null => {
@@ -229,7 +230,7 @@ export function WeeklySummaryPage({
                         <span className='text-xs text-muted-foreground'>
                           Earned{' '}
                           {new Date(achievement.earnedAt.epochMilliseconds).toLocaleDateString(
-                            'en',
+                            getLocale(),
                             {
                               month: 'short',
                               day: 'numeric',

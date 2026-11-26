@@ -1,3 +1,4 @@
+import { getLocale } from '@sideline/i18n/runtime';
 import { Link } from '@tanstack/react-router';
 import { DateTime, Option } from 'effect';
 import { AlertTriangle, Clock, CreditCard } from 'lucide-react';
@@ -154,7 +155,7 @@ export function OutstandingPaymentsBanner({ teamId, groups }: OutstandingPayment
                     {tr('finance_column_due')}:{' '}
                     {new Date(
                       Number(DateTime.toEpochMillis(assignment.effectiveDueAt.value)),
-                    ).toLocaleDateString()}
+                    ).toLocaleDateString(getLocale())}
                   </p>
                 )}
               </div>

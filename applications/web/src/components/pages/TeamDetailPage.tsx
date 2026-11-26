@@ -1,4 +1,5 @@
-import type { Auth, DashboardApi, DashboardLayoutApi, EventRsvp } from '@sideline/domain';
+import type { Auth, DashboardApi, DashboardLayoutApi, Event, EventRsvp } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { Link } from '@tanstack/react-router';
 import { DateTime, Option } from 'effect';
 import {
@@ -27,6 +28,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/com
 import { Skeleton } from '~/components/ui/skeleton';
 import { DEFAULT_LAYOUT } from '~/lib/dashboardLayout.js';
 import { formatLocalTime, formatUtcDate } from '~/lib/datetime';
+import { eventTypeLabels } from '~/lib/event-labels.js';
 import { tr } from '~/lib/translations.js';
 
 // WidgetId mirrors DashboardLayoutApi.DashboardWidgetId
@@ -75,7 +77,7 @@ const formatRelativeDate = (dt: DateTime.Utc): string => {
 
   if (diffDays === 0) return tr('dashboard_today');
   if (diffDays === 1) return tr('dashboard_tomorrow');
-  return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  return date.toLocaleDateString(getLocale(), { weekday: 'long', month: 'short', day: 'numeric' });
 };
 
 // `dateStr` is a `YYYY-MM-DD` calendar date (never an instant) — parse it as UTC
@@ -95,7 +97,7 @@ const formatAllDayRelativeDate = (startDate: string, todayLocalDate: string): st
   );
   if (diffDays === 0) return tr('dashboard_today');
   if (diffDays === 1) return tr('dashboard_tomorrow');
-  return parseDateOnly(startDate).toLocaleDateString(undefined, {
+  return parseDateOnly(startDate).toLocaleDateString(getLocale(), {
     weekday: 'long',
     month: 'short',
     day: 'numeric',
@@ -126,11 +128,11 @@ const eventBadgeDate = (
     const date = parseDateOnly(dateStr);
     return {
       day: date.getUTCDate(),
-      month: date.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' }),
+      month: date.toLocaleDateString(getLocale(), { month: 'short', timeZone: 'UTC' }),
     };
   }
   const date = toDate(event.startAt);
-  return { day: date.getDate(), month: date.toLocaleDateString(undefined, { month: 'short' }) };
+  return { day: date.getDate(), month: date.toLocaleDateString(getLocale(), { month: 'short' }) };
 };
 
 const RsvpBadge = ({ rsvp }: { rsvp: Option.Option<EventRsvp.RsvpResponse> }) => {
@@ -158,10 +160,10 @@ const RsvpBadge = ({ rsvp }: { rsvp: Option.Option<EventRsvp.RsvpResponse> }) =>
   );
 };
 
-const EventTypeBadge = ({ type }: { type: string }) => {
+const EventTypeBadge = ({ type }: { type: Event.EventType }) => {
   return (
     <Badge variant='secondary' className='capitalize'>
-      {type}
+      {eventTypeLabels[type]()}
     </Badge>
   );
 };

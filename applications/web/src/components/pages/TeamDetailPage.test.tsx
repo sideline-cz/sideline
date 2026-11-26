@@ -16,6 +16,7 @@
 //   - layout undefined → falls back to DEFAULT (all 4 visible)
 
 import type { Auth, Team } from '@sideline/domain';
+import { setLocale } from '@sideline/i18n/runtime';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DateTime, Option } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
@@ -81,6 +82,7 @@ vi.mock('~/lib/translations.js', () => ({
       finance_status_partial: 'Partial',
       finance_status_overdue: 'Overdue',
       event_allDayLabel: 'All day',
+      event_type_match: 'Zápas',
     };
     return map[key] ?? key;
   },
@@ -437,6 +439,29 @@ describe('TeamDetailPage — all-day upcoming-events card (PR 5)', () => {
     // Still an all-day card: no fabricated clock time, even without the derived date.
     expect(screen.getByText('All day')).not.toBeNull();
     expect(screen.queryByText(/\d{2}:\d{2}/)).toBeNull();
+  });
+});
+
+describe('TeamDetailPage — app locale, not browser locale', () => {
+  // QA saw "Saturday, Nov 28" and "Training" on a Czech dashboard: dates followed the browser's
+  // locale and the type badge printed the raw enum. Both must follow the app (Paraglide) locale.
+  it('formats the weekday label in the app locale and translates the event type', () => {
+    setLocale('cs', { reload: false });
+    try {
+      const dashboard = {
+        ...makeDashboard(),
+        upcomingEvents: [makeAllDayEvent({ startDate: Option.some('2026-07-22') })],
+        todayLocalDate: Option.some('2026-07-14'),
+      };
+      render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+      expect(screen.getByText(/středa/)).not.toBeNull();
+      expect(screen.queryByText(/Wednesday/)).toBeNull();
+      expect(screen.getByText('Zápas')).not.toBeNull();
+      expect(screen.queryByText('match')).toBeNull();
+    } finally {
+      setLocale('en', { reload: false });
+    }
   });
 });
 

@@ -1,4 +1,5 @@
 import type { BankSyncApi } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { DateTime, Option } from 'effect';
 import {
   AlertTriangle,
@@ -224,7 +225,9 @@ function ExpiringBanner({
     0,
     Math.ceil((expiresDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
   );
-  const dateLabel = new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(expiresDate);
+  const dateLabel = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'short' }).format(
+    expiresDate,
+  );
   const escalated = daysLeft <= 7;
 
   return (

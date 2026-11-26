@@ -1,4 +1,5 @@
 import { Fee, Team } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { useQuery } from '@tanstack/react-query';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
@@ -102,7 +103,9 @@ export function MyPaymentHistoryRow({ teamId, feeId, currency }: MyPaymentHistor
                   {formatMoney(payment.amountMinor, currency, 'en')}
                 </span>
                 <span className='text-xs text-muted-foreground'>
-                  {new Date(Number(DateTime.toEpochMillis(payment.paidAt))).toLocaleDateString()}
+                  {new Date(Number(DateTime.toEpochMillis(payment.paidAt))).toLocaleDateString(
+                    getLocale(),
+                  )}
                 </span>
                 <span className='text-xs text-muted-foreground'>
                   {paymentMethodLabel(payment.method)}

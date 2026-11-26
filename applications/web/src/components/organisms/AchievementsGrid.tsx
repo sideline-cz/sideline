@@ -1,4 +1,5 @@
 import { Achievement } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { Card } from '~/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip';
 import { tr } from '~/lib/translations.js';
@@ -95,7 +96,7 @@ export function AchievementsGrid({
             const emoji = SLUG_EMOJI[entry.slug];
 
             const formattedDate = earnedAt
-              ? earnedAt.toLocaleDateString(undefined, {
+              ? earnedAt.toLocaleDateString(getLocale(), {
                   year: 'numeric',
                   month: 'short',
                   day: 'numeric',
