@@ -403,6 +403,30 @@ describe('buildPageComponents — pagination row', () => {
     expect(label).toContain('5'); // total
   });
 
+  it.each(['detailed', 'original'] as const)(
+    "kind=%s: every custom_id fits Discord's 100-char cap on a long email",
+    (kind) => {
+      // Discord rejects the whole message (50035) when any custom_id exceeds
+      // 100 chars, so a multi-page "Original email" never loaded.
+      const rows = buildPageComponents({
+        kind,
+        teamId: TEAM_ID,
+        emailId: EMAIL_ID,
+        pageIndex: 18,
+        totalPages: 20,
+        locale: LOCALE,
+      });
+
+      const ids = rows
+        .flatMap((row) => (row as any).components ?? [])
+        .map((b: { custom_id?: string }) => b.custom_id ?? '');
+
+      expect(ids).toHaveLength(3);
+      for (const id of ids) expect(id.length).toBeLessThanOrEqual(100);
+      expect(new Set(ids).size).toBe(ids.length);
+    },
+  );
+
   it('single page (totalPages===1) — no pagination row', () => {
     const rows = buildPageComponents({
       kind: 'detailed',
