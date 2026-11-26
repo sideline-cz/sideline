@@ -1,13 +1,6 @@
-import {
-  Auth,
-  type Discord,
-  DisplayName,
-  Roster,
-  type RosterModel,
-  type Team,
-} from '@sideline/domain';
+import { Auth, type Discord, DisplayName, Roster, type RosterModel } from '@sideline/domain';
 import { LogicError, Options } from '@sideline/effect-lib';
-import { Array, DateTime, Effect, Match, Option, type ServiceMap } from 'effect';
+import { Array, DateTime, Effect, Match, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
@@ -34,8 +27,13 @@ import {
   addRosterMemberForMemberTx,
   createRosterForMemberTx,
   deriveChannelNames,
+  findTeamRoster,
   removeRosterMemberForMemberTx,
 } from '~/services/GroupRosterWrites.js';
+
+// Lives with the shared roster writes; re-exported for `event-roster.ts` and older imports.
+export { findTeamRoster };
+
 import { backfillRosterRoleMembers } from '~/utils/backfillRosterRoleMembers.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 import { reconcileRosterRoleExtras } from '~/utils/reconcileRosterRoleExtras.js';
@@ -92,16 +90,6 @@ const resolveChannelName = (
   Option.flatMap(channelId, (id) =>
     Option.fromNullishOr(allChannels.find((ch) => ch.channel_id === id)?.name),
   );
-
-/** A roster id from the URL, looked up only within `teamId` — another team's roster reads as missing (404). */
-export const findTeamRoster = (
-  rosters: ServiceMap.Service.Shape<typeof RostersRepository>,
-  teamId: Team.TeamId,
-  rosterId: RosterModel.RosterId,
-) =>
-  rosters
-    .findRosterById(rosterId)
-    .pipe(Effect.map(Option.filter((roster) => roster.team_id === teamId)));
 
 export const toRosterInfo = (
   r: RosterModel.Roster,

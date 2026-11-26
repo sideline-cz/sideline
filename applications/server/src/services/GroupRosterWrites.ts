@@ -13,7 +13,7 @@ import {
   type TeamMember,
 } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
-import { Effect, Option } from 'effect';
+import { Effect, Option, type ServiceMap } from 'effect';
 import { requirePermission } from '~/api/permissions.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -357,15 +357,23 @@ export const createRosterForMemberTx = (
     ),
   );
 
-/** The roster, only while it belongs to the team. `findRosterById` is not team-scoped. */
+/** A roster id from the URL, looked up only within `teamId` — another team's roster reads as missing (404). */
+export const findTeamRoster = (
+  rosters: ServiceMap.Service.Shape<typeof RostersRepository>,
+  teamId: Team.TeamId,
+  rosterId: RosterModel.RosterId,
+) =>
+  rosters
+    .findRosterById(rosterId)
+    .pipe(Effect.map(Option.filter((roster) => roster.team_id === teamId)));
+
 const findRosterInTeam = (teamId: Team.TeamId, rosterId: RosterModel.RosterId) =>
   RostersRepository.asEffect().pipe(
-    Effect.flatMap((rosters) => rosters.findRosterById(rosterId)),
+    Effect.flatMap((rosters) => findTeamRoster(rosters, teamId, rosterId)),
     Effect.flatMap(
       Option.match({
         onNone: () => Effect.fail(new Roster.RosterNotFound()),
-        onSome: (r) =>
-          r.team_id !== teamId ? Effect.fail(new Roster.RosterNotFound()) : Effect.succeed(r),
+        onSome: Effect.succeed,
       }),
     ),
   );
