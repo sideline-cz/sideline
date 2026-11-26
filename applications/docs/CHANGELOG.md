@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.26.0
+
+### 🚀 Features
+- AI assistant proposes group and roster changes (#833)
+- AI assistant proposes event updates, cancellations, attendance and your own RSVP (#829)
+- editable dot color on activity types (#828)
+- choose which RSVP answers feed the event roster (#834)
+- create the roster's Discord channel from the event roster card (#826)
+
+### 🐛 Fixes
+- late-RSVP notice says which answer the member changed from (#825)
+
 ## 0.25.0
 
 ### 🚀 Features
