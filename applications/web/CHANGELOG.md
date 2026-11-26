@@ -1,5 +1,12 @@
 # @sideline/web
 
+## 0.77.1
+
+### 🐛 Fixes
+- weekly workout summary 500s on any week with activity; log activity from the workout header (#841)
+- SSR in the request's locale; format dates in the app locale (#840)
+- stop the team workout page scrolling sideways with the sidebar open (#839)
+
 ## 0.77.0
 
 ### 🚀 Features
