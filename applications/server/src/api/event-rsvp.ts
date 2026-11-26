@@ -1,34 +1,26 @@
 import {
   Auth,
   DisplayName,
-  type Event,
   type EventRsvp,
   EventRsvpApi,
   type GroupModel,
   type TeamMember,
 } from '@sideline/domain';
-import { LogicError } from '@sideline/effect-lib';
-import { Array, DateTime, Effect, Metric, Option, pipe, type ServiceMap } from 'effect';
+import { Array, DateTime, Effect, Option, pipe, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
-import { rsvpSubmissionsTotal } from '~/metrics.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
-import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
+import { emitRsvpSideEffects, submitRsvpTx } from '~/services/RsvpWrites.js';
 import { eventRsvpOpen, rsvpClosesAtOf } from '~/utils/allDayRsvpWindow.js';
 import {
   attendingGenderCountsFor,
   foldAttendingGenderCounts,
 } from '~/utils/attendingGenderCounts.js';
-import { requireCompleteProfile } from '~/utils/requireCompleteProfile.js';
-import {
-  isLeavingRequiredNoteResponse,
-  isRsvpMessageRequiredAndMissing,
-} from '~/utils/rsvpMessageRequired.js';
 
 type RsvpCounts = Effect.Success<
   ReturnType<ServiceMap.Service.Shape<typeof EventRsvpsRepository>['countRsvpsByEventId']>
@@ -45,9 +37,6 @@ const countFor = (counts: RsvpCounts, response: EventRsvp.RsvpResponse): number 
 
 const forbidden = new EventRsvpApi.Forbidden();
 const notFound = new EventRsvpApi.EventNotFound();
-const deadlinePassed = new EventRsvpApi.RsvpDeadlinePassed();
-const messageRequired = new EventRsvpApi.RsvpMessageRequired();
-const profileIncomplete = new EventRsvpApi.RsvpProfileIncomplete();
 
 const checkGroupAccess = (
   groups: ServiceMap.Service.Shape<typeof GroupsRepository>,
@@ -59,18 +48,6 @@ const checkGroupAccess = (
     .getDescendantMemberIds(groupId.value)
     .pipe(Effect.map((memberIds) => Array.contains(memberIds, memberId)));
 };
-
-const markPersonalMessagesDirtyBestEffort = (
-  events: ServiceMap.Service.Shape<typeof EventsRepository>,
-  eventId: Event.EventId,
-) =>
-  events
-    .markEventPersonalMessagesDirty(eventId)
-    .pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning('Failed to mark personal messages dirty', cause),
-      ),
-    );
 
 const buildRsvpDetail = (
   rsvps: ServiceMap.Service.Shape<typeof EventRsvpsRepository>,
@@ -144,8 +121,7 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
     Effect.bind('rsvps', () => EventRsvpsRepository.asEffect()),
     Effect.bind('teamSettings', () => TeamSettingsRepository.asEffect()),
     Effect.bind('groups', () => GroupsRepository.asEffect()),
-    Effect.bind('provisioning', () => EventRosterProvisioningService.asEffect()),
-    Effect.map(({ members, events, rsvps, teamSettings, groups, provisioning }) =>
+    Effect.map(({ members, events, rsvps, teamSettings, groups }) =>
       handlers
         .handle('getRsvps', ({ params: { teamId, eventId } }) =>
           Effect.Do.pipe(
@@ -193,141 +169,25 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             ),
           ),
         )
-        .handle('submitRsvp', ({ params: { teamId, eventId }, payload }) => {
-          // This surface has no `clearMessage` flag (the bot's RPC one does), so the two intents
-          // ride on the message field itself: `null` means "leave the stored note alone" — the
-          // repository's `COALESCE(message, event_rsvps.message)` keeps it, which an idempotent
-          // button re-click relies on — while an explicitly blank string means "clear it". Without
-          // that distinction the clearing branch is unreachable over HTTP and the web UI can never
-          // remove a note. A blank clear on `coming_later` is still rejected by the guard below.
-          const clearMessage =
-            Option.isSome(payload.message) && payload.message.value.trim().length === 0;
-          const note = clearMessage ? Option.none() : payload.message;
-          return Effect.Do.pipe(
+        .handle('submitRsvp', ({ params: { teamId, eventId }, payload }) =>
+          Effect.Do.pipe(
             Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            // Task 3 (`.work-plans/discord-full-onboarding.md`) — reads off the `membership`
-            // bind's `require_complete_profile` (the per-team `LEFT JOIN team_settings`) and
-            // `currentUser.isProfileComplete` (already free on `Auth.CurrentUserContext`), before
-            // any other precondition, so an incomplete profile reports as itself.
-            Effect.tap(({ currentUser, membership }) =>
-              requireCompleteProfile({
-                requiredByTeam: Option.getOrElse(membership.require_complete_profile, () => false),
-                isProfileComplete: currentUser.isProfileComplete,
-                incomplete: profileIncomplete,
-              }),
-            ),
-            Effect.bind('event', () =>
-              events.findEventByIdWithDetails(eventId).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(notFound),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
-            ),
-            Effect.tap(({ event }) =>
-              event.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
-            ),
-            // Cancelled stays `notFound` — the pre-existing vocabulary for this
-            // surface — while every other closed case (an all-day event past its
-            // last local day, or a timed event past its deadline) is
-            // `deadlinePassed` via `eventRsvpOpen`. Only the started + all-day
-            // case newly succeeds here.
-            Effect.tap(({ event }) =>
-              event.status === 'cancelled' ? Effect.fail(notFound) : Effect.void,
-            ),
-            Effect.tap(({ event }) =>
-              !eventRsvpOpen(event, event.timezone, DateTime.nowUnsafe())
-                ? Effect.fail(deadlinePassed)
-                : Effect.void,
-            ),
-            Effect.tap(({ event, membership }) =>
-              checkGroupAccess(groups, membership.id, event.member_group_id).pipe(
-                Effect.flatMap((isMember) => (isMember ? Effect.void : Effect.fail(forbidden))),
-              ),
-            ),
-            Effect.bind('priorRsvp', ({ membership }) =>
-              rsvps.findRsvpByEventAndMember(eventId, membership.id),
-            ),
-            // Leaving a note-requiring response (`coming_later` / `maybe`) for a different one
-            // must not carry its mandatory note onto the new response. Derived here rather than
-            // alongside `clearMessage` above because it needs `priorRsvp`, which is only bound
-            // once membership is known. Mirrors the RPC `Event/SubmitRsvp` handler so both write
-            // surfaces agree on the same transition — the web client sends a blank string, but
-            // any other caller sending `message: null` would otherwise keep a stale
-            // "dorazím v 19:00" attached to its "Nevím".
-            Effect.let(
-              'effectiveClear',
-              ({ priorRsvp }) =>
-                clearMessage ||
-                isLeavingRequiredNoteResponse(
-                  payload.response,
-                  note,
-                  Option.map(priorRsvp, (r) => r.response),
-                ),
-            ),
-            // Consumes `effectiveClear`, not the raw flag — see `rsvpMessageRequired.ts`.
-            Effect.tap(({ priorRsvp, effectiveClear }) =>
-              isRsvpMessageRequiredAndMissing(
-                payload.response,
-                effectiveClear,
-                note,
-                Option.flatMap(priorRsvp, (r) => r.message),
-              )
-                ? Effect.fail(messageRequired)
-                : Effect.void,
-            ),
-            Effect.bind('upsertResult', ({ membership, effectiveClear }) =>
-              rsvps.upsertRsvp(eventId, membership.id, payload.response, note, effectiveClear).pipe(
-                Effect.catchTag(
-                  'NoSuchElementError',
-                  LogicError.withMessage(() => 'Failed upserting RSVP — no row returned'),
-                ),
-                Effect.tap(() =>
-                  Metric.update(
-                    Metric.withAttributes(rsvpSubmissionsTotal, { response: payload.response }),
-                    1,
-                  ),
-                ),
-              ),
-            ),
-            // Best-effort: reset missed RSVP streak on any response
-            Effect.tap(({ membership }) =>
-              members
-                .resetMissedRsvps(membership.id)
-                .pipe(
-                  Effect.catchCause((cause) =>
-                    Effect.logWarning('Failed to reset missed RSVPs, continuing', cause),
-                  ),
-                ),
-            ),
-            // Best-effort: trigger roster provisioning after RSVP
-            Effect.tap(({ event, membership, upsertResult }) =>
-              provisioning.onRsvp({
+            Effect.flatMap(({ currentUser, membership }) =>
+              submitRsvpTx({
                 teamId,
-                event: {
-                  id: eventId,
-                  owner_group_id: event.owner_group_id,
-                  member_group_id: event.member_group_id,
-                  title: event.title,
-                  start_at: event.start_at,
-                  all_day: event.all_day,
-                },
-                memberId: membership.id,
-                discordUserId: Option.none(),
-                priorResponse: upsertResult.priorResponse,
-                newResponse: payload.response,
-                displayName: Option.none(),
+                membership,
+                isProfileComplete: currentUser.isProfileComplete,
+                eventId,
+                response: payload.response,
+                message: payload.message,
               }),
             ),
-            Effect.tap(({ event }) => markPersonalMessagesDirtyBestEffort(events, event.id)),
-            Effect.asVoid,
-          );
-        })
+            Effect.flatMap((submitted) => emitRsvpSideEffects(teamId, submitted)),
+          ),
+        )
         .handle('getNonResponders', ({ params: { teamId, eventId } }) =>
           Effect.Do.pipe(
             Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),

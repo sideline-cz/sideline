@@ -38,6 +38,11 @@ const TR_MAP: Record<string, string> = {
   event_memberGroup: 'Member group label',
   event_location: 'Location label',
   event_description: 'Description label',
+  assistant_proposal_field_event: 'Event label',
+  assistant_proposal_field_response: 'Answer label',
+  rsvp_comingLater: 'Coming later',
+  assistant_proposal_cancelEvent_confirm: 'Cancel event',
+  assistant_proposal_cancelEvent_confirmed: 'Event cancelled.',
   // Card chrome
   assistant_proposal_createEvent_title: 'Create this event?',
   assistant_proposal_createEvent_description: 'Nothing is created until you confirm.',
@@ -208,7 +213,7 @@ function makeProposal(overrides: { summary?: AiChatApi.ProposalField[] } = {}) {
 }
 
 function makeDiscordProposal(
-  action: 'set_discord_channel_access' | 'archive_discord_channel',
+  action: AiChatApi.Proposal['action'],
   fields: ReadonlyArray<Record<string, unknown>>,
 ) {
   return new AiChatApi.Proposal({
@@ -576,6 +581,49 @@ describe('AssistantProposalCard', () => {
       expect(
         screen.queryByText(TR_MAP.assistant_proposal_archiveDiscordChannel_warning),
       ).toBeNull();
+    });
+  });
+
+  describe('event actions', () => {
+    const cancelProposal = () =>
+      makeDiscordProposal('cancel_event', [
+        { key: 'event', value: { type: 'text', value: 'Thursday Practice' } },
+        { key: 'start', value: { type: 'date', value: '2026-07-04' } },
+      ]);
+
+    it('set_my_rsvp renders the answer through the RSVP labels, not the raw literal', () => {
+      renderCard(
+        makeDiscordProposal('set_my_rsvp', [
+          { key: 'event', value: { type: 'text', value: 'Thursday Practice' } },
+          { key: 'response', value: { type: 'rsvpResponse', value: 'coming_later' } },
+        ]),
+      );
+
+      expect(ddFor(TR_MAP.assistant_proposal_field_response)?.textContent).toBe('Coming later');
+    });
+
+    it('cancel_event names the event and has a destructive confirm button', () => {
+      renderCard(cancelProposal());
+
+      expect(ddFor(TR_MAP.assistant_proposal_field_event)?.textContent).toBe('Thursday Practice');
+      const accept = screen.getByRole('button', { name: 'Cancel event' });
+      expect(accept.getAttribute('data-variant')).toBe('destructive');
+    });
+
+    it('an applied confirm shows the success alert, no result card, and invalidates once', async () => {
+      mockConfirm.mockReturnValueOnce(
+        Effect.succeed(new AiChatApi.AiActionApplied({ status: 'applied' })),
+      );
+      renderCard(cancelProposal());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel event' }));
+
+      await waitFor(() => {
+        expect(screen.getByText(TR_MAP.assistant_proposal_cancelEvent_confirmed)).not.toBeNull();
+      });
+      expect(screen.queryAllByRole('link')).toHaveLength(0);
+      expect(screen.queryAllByRole('button')).toHaveLength(0);
+      expect(mockInvalidate).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -27,7 +27,7 @@ import { Schema } from 'effect';
 import { hasPermission } from '~/api/permissions.js';
 import { ACTION_REGISTRY } from '~/services/ai/actions.js';
 import { toToolParameters } from '~/services/ai/jsonSchema.js';
-import type { ToolContext } from '~/services/ai/toolTypes.js';
+import { type ToolContext, UUID_PATTERN } from '~/services/ai/toolTypes.js';
 import type { LlmToolDefinition } from '~/services/LlmClient.js';
 
 const QUERY_MAX_LENGTH = 200;
@@ -48,7 +48,6 @@ const QueryParam = Schema.String.pipe(Schema.check(Schema.isMaxLength(QUERY_MAX_
  * Rejecting it here makes the model's own tool call fail validation instead, which it can see and
  * correct. Applied to `list_events` too — that tool shipped with the same hazard.
  */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DateParam = Schema.String.pipe(Schema.check(Schema.isPattern(DATE_PATTERN)));
 /** The row cap every list tool accepts, verbatim-identical across all five — `readTools.ts`'s
  * `applyLimit`/`filterEventRows` rely on it having been validated to 1..50 before they slice. */

@@ -335,7 +335,7 @@ Two boundary utilities keep reads/writes correct across a rolling deploy where a
    | `response IN ('yes', 'coming_later')` (SQL, three queries) | `EventRsvpsRepository.findYesRsvpMemberIds` → `services/TrainingAutoLogCron.ts` auto activity logs AND `api/player-rating.ts`'s `notRsvpYes` game-result gate; `EventRsvpsRepository.findYesAttendeesWithLimit` → the bot's "who is coming" embed (read); `TeamGenerationRepository.findYesMembersForEvent` → the team-generation pool |
 
    `EventsRepository`'s iCal query is the ONE deliberate exception: it still selects `IN ('yes', 'maybe', 'coming_later')`, because a member's own calendar feed should carry the events they are undecided about, and `api/ical.ts` prefixes them `[Maybe] ` versus `coming_later`'s `[Later] `.
-2. **Validate a partial-update upsert against the EFFECTIVE (post-COALESCE) stored value, not the raw submitted payload.** `upsertRsvp` does `COALESCE(${message}, event_rsvps.message)`, so a re-submit with `message: null` preserves the prior note. A guard that requires a non-empty message for `'coming_later'` MUST evaluate what will actually be stored after the COALESCE: fetch the prior row (`rsvps.findRsvpByEventAndMember`) and pass both the submitted message and the prior message to `src/utils/rsvpMessageRequired.ts` `isRsvpMessageRequiredAndMissing`, which fails with `RsvpMessageRequired` only when the effective message would be blank. This generalises to any COALESCE-based partial upsert — validate the effective value, not the submitted delta. Call sites: `api/event-rsvp.ts` and `rpc/event/index.ts` (the `SubmitRsvp` handlers).
+2. **Validate a partial-update upsert against the EFFECTIVE (post-COALESCE) stored value, not the raw submitted payload.** `upsertRsvp` does `COALESCE(${message}, event_rsvps.message)`, so a re-submit with `message: null` preserves the prior note. A guard that requires a non-empty message for `'coming_later'` MUST evaluate what will actually be stored after the COALESCE: fetch the prior row (`rsvps.findRsvpByEventAndMember`) and pass both the submitted message and the prior message to `src/utils/rsvpMessageRequired.ts` `isRsvpMessageRequiredAndMissing`, which fails with `RsvpMessageRequired` only when the effective message would be blank. This generalises to any COALESCE-based partial upsert — validate the effective value, not the submitted delta. Call sites: `services/RsvpWrites.ts` (the web `submitRsvp` body, shared with the AI assistant's `set_my_rsvp`) and `rpc/event/index.ts` (`Event/SubmitRsvp`).
 3. **A COALESCE-based partial upsert can never clear the column — clearing needs a SEPARATE explicit signal, and every call site MUST supply it.** `upsertRsvp(eventId, memberId, response, message, clearMessage = false)` routes to `upsertClearing` (which writes `message = NULL` unconditionally) only when the 5th argument is `true`; because that parameter has a `= false` default, a call site that omits it type-checks and silently makes the clearing branch unreachable — that is exactly how the web UI was left unable to remove an RSVP note. The two write surfaces derive `clearMessage` differently and both derivations are load-bearing:
 
    | Surface | Payload field | `clearMessage` derivation |
@@ -1148,7 +1148,7 @@ An RSVP response, a training claim, and a carpool seat/car are each written thro
 
 | Surface | Handler | Write |
 |---------|---------|-----------|
-| Web HTTP | `submitRsvp` (`src/api/event-rsvp.ts`) | `rsvps.upsertRsvp(...)` |
+| Web HTTP + AI `set_my_rsvp` | `submitRsvp` (`src/api/event-rsvp.ts`) and `services/ai/actions.ts`, both via `submitRsvpTx` (`src/services/RsvpWrites.ts`) | `rsvps.upsertRsvp(...)` |
 | Discord button | `Event/SubmitRsvp` (`src/rpc/event/index.ts`) | `svc.rsvps.upsertRsvp(...)` |
 | Discord button | `Event/ClaimTraining` (`src/rpc/event/index.ts`) | `svc.events.claimTraining(...)` |
 | Discord button | `Carpool/ReserveSeat` (`src/rpc/carpool/index.ts`) | `carpools.reserveSeat(...)` |
@@ -2625,7 +2625,8 @@ Rules:
 3. **A foreign id, or an id inside a group the caller cannot see, returns `notFoundResult`, never `forbiddenResult`** — `forbidden` would confirm the row exists.
 4. **A write action's `permissions` MUST include the mirrored HTTP endpoint's permission** (Discord actions: `group:manage`, on top of `ai:manage_discord`), so the AI is never an escalation path.
 5. **Discord actions only queue sync events.** User-facing copy says "queued", never "done" or "created".
-6. **Write tools take names, not ids**, because no read tool returns ids.
+6. **Write tools take names, not ids**, because read tools return ids only for events (`list_events` items carry `eventId`). Event write tools take that `eventId`; member names inside them are matched like channel names.
+7. **An event write action calls the HTTP handler's own body** (`services/EventWrites.ts`, shared with `api/event.ts` and `api/event-attendance.ts`), so propose and confirm apply the same row gates (owner group, coach scoping) as the event page. `set_my_rsvp` likewise calls `services/RsvpWrites.ts` (shared with `submitRsvp`); it has no permission (the web RSVP needs none) and no member parameter — never add one: answering for another member is a separate, unscoped story.
 
 ### Opaque Per-Turn Reference Tokens
 

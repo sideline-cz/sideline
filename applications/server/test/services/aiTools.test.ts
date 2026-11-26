@@ -2763,6 +2763,7 @@ describe('visibleTools', () => {
           'list_events',
           'list_membership_plans',
           'list_training_types',
+          'propose_set_my_rsvp',
           'search_docs',
         ]);
 
@@ -2781,6 +2782,7 @@ describe('visibleTools', () => {
           'list_membership_plans',
           'list_rosters',
           'list_training_types',
+          'propose_set_my_rsvp',
           'search_docs',
         ]);
       }),
@@ -2861,11 +2863,15 @@ describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3
     Effect.sync(() => {
       // 16 read tools (the original 6, plus `search_docs`, the six database read tools and the
       // three Discord read tools) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (create_event
-      // and the three Discord write actions) — built FROM the registry (`registry.ts`), so this
-      // count moves in lockstep with `AiActionName.literals`.
-      expect(ALL_TOOLS.length).toBe(20);
+      // the three Discord write actions and the three event write actions) — built FROM the
+      // registry (`registry.ts`), so this count moves in lockstep with `AiActionName.literals`.
+      expect(ALL_TOOLS.length).toBe(24);
       for (const added of [
         'propose_create_event',
+        'propose_update_event',
+        'propose_cancel_event',
+        'propose_mark_attendance',
+        'propose_set_my_rsvp',
         'propose_create_discord_channel',
         'propose_set_discord_channel_access',
         'propose_archive_discord_channel',
@@ -3022,6 +3028,9 @@ const makeDiscordWriteLayers = (guildLinked: boolean) =>
     Layer.succeed(TeamChannelAccessRepository, dieStub('TeamChannelAccessRepository')),
     Layer.succeed(TeamSettingsRepository, dieStub('TeamSettingsRepository')),
     Layer.succeed(DiscordChannelsRepository, dieStub('DiscordChannelsRepository')),
+    Layer.succeed(EventsRepository, dieStub('EventsRepository')),
+    Layer.succeed(EventAttendanceRepository, dieStub('EventAttendanceRepository')),
+    Layer.succeed(EventRsvpsRepository, dieStub('EventRsvpsRepository')),
   );
 
 const CREATOR_CTX_OVERRIDES = { permissions: ['event:create' as Role.Permission] };

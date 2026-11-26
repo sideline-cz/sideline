@@ -681,6 +681,9 @@ const dispatchProposeCall = (
   }
 
   return proposeAction(action, parsedArgs, ctx).pipe(
+    Effect.provideService(EventsRepository, deps.events),
+    Effect.provideService(EventAttendanceRepository, deps.attendance),
+    Effect.provideService(EventRsvpsRepository, deps.rsvps),
     Effect.provideService(GroupsRepository, deps.groups),
     Effect.provideService(TrainingTypesRepository, deps.trainingTypes),
     Effect.provideService(AiActionProposalsRepository, deps.proposals),

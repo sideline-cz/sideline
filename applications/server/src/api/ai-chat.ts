@@ -12,20 +12,22 @@
  *
  * `confirmProposal` serves every `ACTION_REGISTRY` action, not only events: `create_event` answers
  * 201 with the created `EventInfo`; a Discord action answers 202 `DiscordChangeQueued`, because
- * confirm only queues the change for the bot.
+ * confirm only queues the change for the bot; an update, cancel or attendance confirm answers 200
+ * `AiActionApplied`.
  */
 import { AiChatApi, Auth, EventApi, type Team } from '@sideline/domain';
 import { DateTime, Effect, Option, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
+import { markPersonalMessagesDirtyBestEffort } from '~/api/event.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
 import {
   AiActionProposalsRepository,
   type LockedProposalRow,
 } from '~/repositories/AiActionProposalsRepository.js';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
-import type { EventRow } from '~/repositories/EventsRepository.js';
+import { type EventRow, EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
@@ -37,7 +39,9 @@ import type { ChatAgentResult } from '~/services/ChatAgent.js';
 import { ChatAgent } from '~/services/ChatAgent.js';
 import { ChatRateLimiter } from '~/services/ChatRateLimiter.js';
 import { emitEventCreatedSideEffects } from '~/services/EventCreation.js';
+import { emitEventCancelledSideEffects } from '~/services/EventWrites.js';
 import { LlmClient } from '~/services/LlmClient.js';
+import { emitRsvpSideEffects } from '~/services/RsvpWrites.js';
 
 const forbidden = new AiChatApi.AiChatForbidden();
 
@@ -106,12 +110,54 @@ const toConfirmedEventInfo = (event: EventRow): EventApi.EventInfo =>
     endDate: Option.some(event.end_date),
   });
 
-const toConfirmedResponse = (
+type ConfirmedResponse =
+  | EventApi.EventInfo
+  | AiChatApi.DiscordChangeQueued
+  | AiChatApi.AiActionApplied;
+
+const toConfirmedResponse = (result: ConfirmResult): ConfirmedResponse => {
+  switch (result.kind) {
+    case 'event_created':
+      return toConfirmedEventInfo(result.event);
+    case 'discord_queued':
+      return new AiChatApi.DiscordChangeQueued({ status: 'queued' });
+    case 'event_updated':
+    case 'event_cancelled':
+    case 'attendance_confirmed':
+    case 'rsvp_submitted':
+      return new AiChatApi.AiActionApplied({ status: 'applied' });
+  }
+};
+
+/** Step 5 of confirm: the best-effort work that must run AFTER commit (see `EventCreation.ts`). A
+ *  Discord action and an attendance confirm have none: everything they write is in the
+ *  transaction. */
+const afterCommit = (
+  teamId: Team.TeamId,
   result: ConfirmResult,
-): EventApi.EventInfo | AiChatApi.DiscordChangeQueued =>
-  result.kind === 'event_created'
-    ? toConfirmedEventInfo(result.event)
-    : new AiChatApi.DiscordChangeQueued({ status: 'queued' });
+): Effect.Effect<
+  void,
+  never,
+  | Effect.Services<ReturnType<typeof emitEventCreatedSideEffects>>
+  | Effect.Services<ReturnType<typeof emitEventCancelledSideEffects>>
+  | Effect.Services<ReturnType<typeof emitRsvpSideEffects>>
+> => {
+  switch (result.kind) {
+    case 'event_created':
+      return emitEventCreatedSideEffects(teamId, result.event);
+    case 'event_updated':
+      return EventsRepository.asEffect().pipe(
+        Effect.flatMap((events) => markPersonalMessagesDirtyBestEffort(events, result.event.id)),
+      );
+    case 'event_cancelled':
+      return emitEventCancelledSideEffects(teamId, result.event);
+    case 'rsvp_submitted':
+      return emitRsvpSideEffects(teamId, result.submitted);
+    case 'discord_queued':
+    case 'attendance_confirmed':
+      return Effect.void;
+  }
+};
 
 export const AiChatApiLive = HttpApiBuilder.group(Api, 'aiChat', (handlers) =>
   Effect.Do.pipe(
@@ -282,19 +328,10 @@ export const AiChatApiLive = HttpApiBuilder.group(Api, 'aiChat', (handlers) =>
                   )
                   .pipe(catchSqlErrors),
               ),
-              // 5. AFTER commit — never inside the transaction (see `EventCreation.ts`'s doc
-              // comment: both emitters swallow failures as defects, and a failed statement
-              // inside a Postgres transaction aborts it). A Discord action has no after-commit
-              // work: its sync event was written inside the transaction.
-              Effect.tap(({ result }) =>
-                result.kind === 'event_created'
-                  ? emitEventCreatedSideEffects(teamId, result.event)
-                  : Effect.void,
-              ),
+              // 5. AFTER commit — never inside the transaction (see `afterCommit`).
+              Effect.tap(({ result }) => afterCommit(teamId, result)),
               // 6. The view model.
-              Effect.map(({ result }): EventApi.EventInfo | AiChatApi.DiscordChangeQueued =>
-                toConfirmedResponse(result),
-              ),
+              Effect.map(({ result }) => toConfirmedResponse(result)),
             ),
           )
           .handle('rejectProposal', ({ params: { teamId, proposalId } }) =>

@@ -126,6 +126,11 @@ describe('ProposalFieldKey', () => {
       'currentAccess',
       'access',
       'archiveCategory',
+      'event',
+      'present',
+      'absent',
+      'response',
+      'message',
     ]);
   });
 });

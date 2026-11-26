@@ -13,7 +13,9 @@
  * ActionDefinition>` is genuinely exhaustive — adding a literal to `AiActionName` is a compile
  * error here until this record grows a matching entry.
  *
- * Actions: `create_event`, and three Discord actions that only QUEUE a change for the bot
+ * Actions: `create_event`; `update_event`, `cancel_event` and `mark_attendance`, whose guards
+ * live in `services/EventWrites.ts` next to the HTTP handlers'; `set_my_rsvp`, the caller's own
+ * RSVP only (`services/RsvpWrites.ts`); and three Discord actions that only QUEUE a change for the bot
  * (`create_discord_channel`, `set_discord_channel_access`, `archive_discord_channel`). The
  * Discord tools take NAMES, not ids: no read tool gives the model a channel or group id.
  *
@@ -26,22 +28,32 @@ import {
   type AiActionProposal,
   AiChatApi,
   type Discord,
+  DisplayName,
   Event,
   type EventApi,
+  type EventAttendanceApi,
+  EventRsvp,
   GroupModel,
   type Role,
   type Team,
   TeamChannel,
   type TeamChannelAccess,
+  TeamMember,
   TrainingType,
 } from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
-import { DateTime, Effect, Option, type Result, Schema, type ServiceMap } from 'effect';
+import { DateTime, Effect, Option, Result, Schema, type ServiceMap } from 'effect';
 import type { SqlClient } from 'effect/unstable/sql';
 import type { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import type { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
-import type { EventRow, EventsRepository } from '~/repositories/EventsRepository.js';
+import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
+import type { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
+import type {
+  EventRow,
+  EventsRepository,
+  EventWithDetails,
+} from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
@@ -49,13 +61,22 @@ import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
-import type { ToolContext } from '~/services/ai/toolTypes.js';
+import { type ToolContext, UUID_PATTERN } from '~/services/ai/toolTypes.js';
 import { createEventForMemberTx, resolveEventGroups } from '~/services/EventCreation.js';
+import {
+  cancelEventForMemberTx,
+  checkAttendanceConfirmable,
+  checkEventCancellable,
+  checkEventUpdatable,
+  confirmAttendanceForMember,
+  updateEventForMemberTx,
+} from '~/services/EventWrites.js';
 import {
   archiveManagedChannelTx,
   createManagedChannel,
   setManagedChannelAccessTx,
 } from '~/services/ManagedChannels.js';
+import { checkRsvpSubmittable, submitRsvpTx } from '~/services/RsvpWrites.js';
 import { applyDiscordFormat, DEFAULT_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 
 // ---------------------------------------------------------------------------
@@ -817,6 +838,465 @@ const confirmArchiveDiscordChannel = (payloadJson: string, ctx: { readonly teamI
   );
 
 // ---------------------------------------------------------------------------
+// The three event actions. Every guard lives in `services/EventWrites.ts`, shared with the HTTP
+// handlers: propose runs the guards without the write, confirm runs them again with it.
+// ---------------------------------------------------------------------------
+
+const EventIdParam = Event.EventId.pipe(Schema.check(Schema.isPattern(UUID_PATTERN)));
+
+const EVENT_NOT_FOUND = 'eventId: no such event in this team';
+
+/** A propose refusal as the string the model sees. */
+const eventRefusal = (
+  e:
+    | EventApi.Forbidden
+    | EventApi.EventNotFound
+    | EventApi.EventNotActive
+    | EventAttendanceApi.Forbidden
+    | EventAttendanceApi.EventNotFound,
+): string => {
+  switch (e._tag) {
+    case 'EventNotFound':
+    case 'EventAttendanceEventNotFound':
+      return EVENT_NOT_FOUND;
+    case 'EventNotActive':
+      return 'event: it has started, ended or been cancelled, so it can no longer be changed';
+    case 'EventForbidden':
+    case 'EventAttendanceForbidden':
+      return 'forbidden: the user may not change this event; it belongs to a group or training type they do not manage';
+  }
+};
+
+/** Confirm-time: a lost permission is a 403, any other drift is `stale`. */
+const eventConfirmFailure = (
+  e:
+    | EventApi.Forbidden
+    | EventApi.EventNotFound
+    | EventApi.EventNotActive
+    | EventAttendanceApi.Forbidden
+    | EventAttendanceApi.EventNotFound
+    | EventAttendanceApi.AttendanceNotConfirmable,
+): Effect.Effect<never, AiChatApi.AiProposalNotFound | AiChatApi.AiProposalActionForbidden> =>
+  e._tag === 'EventForbidden' || e._tag === 'EventAttendanceForbidden'
+    ? Effect.fail(new AiChatApi.AiProposalActionForbidden())
+    : stale(e._tag);
+
+const eventLabel = (e: EventWithDetails): string => `${e.title} (${e.start_date})`;
+
+const eventStartField = (e: EventWithDetails): AiChatApi.ProposalField =>
+  new AiChatApi.ProposalField({
+    key: 'start',
+    value: e.all_day
+      ? { type: 'date', value: e.start_date }
+      : { type: 'instant', value: e.start_at },
+  });
+
+// --- update_event ----------------------------------------------------------
+
+const UpdateEventFields = {
+  eventId: EventIdParam,
+  title: Schema.optionalKey(ProposeCreateEventArgsStruct.fields.title),
+  description: ProposeCreateEventArgsStruct.fields.description,
+  location: ProposeCreateEventArgsStruct.fields.location,
+  // Timed events only.
+  startAt: Schema.optionalKey(Instant),
+  endAt: Schema.optionalKey(Instant),
+  // All-day events only — team-local `YYYY-MM-DD`.
+  startDate: Schema.optionalKey(DateOnly),
+  endDate: Schema.optionalKey(DateOnly),
+};
+
+const UpdateEventArgsStruct = Schema.Struct(UpdateEventFields);
+type UpdateEventArgsDecoded = Schema.Schema.Type<typeof UpdateEventArgsStruct>;
+
+const validateUpdateEventArgs = (a: UpdateEventArgsDecoded): boolean | string => {
+  const timed = a.startAt !== undefined || a.endAt !== undefined;
+  const dated = a.startDate !== undefined || a.endDate !== undefined;
+  if (timed && dated)
+    return 'use startAt/endAt for a timed event or startDate/endDate for an all-day one, not both';
+  const changes = [a.title, a.description, a.location, a.startAt, a.endAt, a.startDate, a.endDate];
+  return changes.some((v) => v !== undefined) || 'nothing to change';
+};
+
+export const UpdateEventArgs = UpdateEventArgsStruct.pipe(
+  Schema.check(Schema.makeFilter(validateUpdateEventArgs)),
+);
+
+// `allDay` is the event's kind AT PROPOSE: the stored instants mean something else for the
+// other kind, so confirm refuses if it changed since.
+const UpdateEventPayload = Schema.Struct({ ...UpdateEventFields, allDay: Schema.Boolean });
+
+export const toUpdateEventRequest = (a: UpdateEventArgsDecoded): EventApi.UpdateEventRequest => ({
+  title: Option.fromUndefinedOr(a.title),
+  eventType: Option.none(),
+  eventTypeId: Option.none(),
+  trainingTypeId: Option.none(),
+  description: Option.map(Option.fromUndefinedOr(a.description), Option.some),
+  imageUrl: Option.none(),
+  // An all-day date crosses as noon UTC, exactly like `create_event` and the web.
+  startAt:
+    a.startDate !== undefined
+      ? Option.some(dateOnlyToUtcNoon(a.startDate))
+      : Option.fromUndefinedOr(a.startAt),
+  endAt:
+    a.endDate !== undefined
+      ? Option.some(Option.some(dateOnlyToUtcNoon(a.endDate)))
+      : Option.map(Option.fromUndefinedOr(a.endAt), Option.some),
+  allDay: Option.none(),
+  location: Option.map(Option.fromUndefinedOr(a.location), Option.some),
+  locationUrl: Option.none(),
+  ownerGroupId: Option.none(),
+  memberGroupId: Option.none(),
+});
+
+/** The event's start and end after the update, or a refusal when the end would precede it. */
+const mergedSchedule = (
+  a: UpdateEventArgsDecoded,
+  e: EventWithDetails,
+): Result.Result<readonly [AiChatApi.ProposalField, AiChatApi.ProposalField], string> => {
+  if (e.all_day) {
+    const start = a.startDate ?? e.start_date;
+    const end =
+      a.endDate ?? (a.startDate !== undefined && Option.isNone(e.end_at) ? start : e.end_date);
+    return end < start
+      ? Result.fail('endDate: the event would end before it starts')
+      : Result.succeed([
+          new AiChatApi.ProposalField({ key: 'start', value: { type: 'date', value: start } }),
+          new AiChatApi.ProposalField({ key: 'end', value: { type: 'date', value: end } }),
+        ]);
+  }
+  const start = a.startAt ?? e.start_at;
+  const end = a.endAt !== undefined ? Option.some(a.endAt) : e.end_at;
+  return Option.isSome(end) && DateTime.isLessThan(end.value, start)
+    ? Result.fail('endAt: the event would end before it starts')
+    : Result.succeed([
+        new AiChatApi.ProposalField({ key: 'start', value: { type: 'instant', value: start } }),
+        Option.match(end, {
+          onNone: () => noneField('end'),
+          onSome: (v) =>
+            new AiChatApi.ProposalField({ key: 'end', value: { type: 'instant', value: v } }),
+        }),
+      ]);
+};
+
+const proposeUpdateEvent = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(UpdateEventArgs, rawArgs)),
+    Effect.bind('existing', ({ args }) =>
+      checkEventUpdatable({
+        teamId: ctx.teamId,
+        membership: ctx.membership,
+        eventId: args.eventId,
+        payload: toUpdateEventRequest(args),
+      }).pipe(Effect.mapError(eventRefusal)),
+    ),
+    Effect.tap(({ args, existing }) =>
+      existing.all_day && (args.startAt !== undefined || args.endAt !== undefined)
+        ? Effect.fail('startAt/endAt: this is an all-day event; use startDate/endDate')
+        : !existing.all_day && (args.startDate !== undefined || args.endDate !== undefined)
+          ? Effect.fail('startDate/endDate: this is a timed event; use startAt/endAt')
+          : Effect.void,
+    ),
+    Effect.bind('schedule', ({ args, existing }) =>
+      Effect.fromResult(mergedSchedule(args, existing)),
+    ),
+    Effect.map(({ args, existing, schedule }) => ({
+      payloadJson: JSON.stringify(
+        Schema.encodeSync(UpdateEventPayload)({ ...args, allDay: existing.all_day }),
+      ),
+      summary: [
+        textField('event', eventLabel(existing)),
+        textField('title', args.title ?? existing.title),
+        ...schedule,
+        optionalTextField(
+          'location',
+          Option.orElse(Option.fromUndefinedOr(args.location), () => existing.location),
+        ),
+        optionalTextField(
+          'description',
+          Option.orElse(Option.fromUndefinedOr(args.description), () => existing.description),
+        ),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmUpdateEvent = (payloadJson: string, ctx: ConfirmContext) =>
+  Effect.Do.pipe(
+    Effect.bind('payload', () => decodeStoredPayload(UpdateEventPayload, payloadJson)),
+    Effect.let('args', ({ payload: { allDay: _allDay, ...args } }) => args),
+    Effect.bind('event', ({ payload, args }) =>
+      checkEventUpdatable({
+        ...ctx,
+        eventId: args.eventId,
+        payload: toUpdateEventRequest(args),
+      }).pipe(
+        Effect.tap((existing) =>
+          existing.all_day !== payload.allDay ? stale('event switched timed/all-day') : Effect.void,
+        ),
+        Effect.andThen(
+          updateEventForMemberTx({
+            ...ctx,
+            eventId: args.eventId,
+            payload: toUpdateEventRequest(args),
+          }),
+        ),
+      ),
+    ),
+    Effect.map(({ event }): ConfirmResult => ({ kind: 'event_updated', event })),
+    Effect.catchTags({
+      EventForbidden: eventConfirmFailure,
+      EventNotFound: eventConfirmFailure,
+      EventNotActive: eventConfirmFailure,
+    }),
+  );
+
+// --- cancel_event ----------------------------------------------------------
+
+const CancelEventArgs = Schema.Struct({ eventId: EventIdParam });
+
+const proposeCancelEvent = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(CancelEventArgs, rawArgs)),
+    Effect.bind('existing', ({ args }) =>
+      checkEventCancellable({
+        teamId: ctx.teamId,
+        membership: ctx.membership,
+        eventId: args.eventId,
+      }).pipe(Effect.mapError(eventRefusal)),
+    ),
+    Effect.map(({ args, existing }) => ({
+      payloadJson: JSON.stringify(Schema.encodeSync(CancelEventArgs)(args)),
+      summary: [textField('event', existing.title), eventStartField(existing)],
+    })),
+    Effect.result,
+  );
+
+const confirmCancelEvent = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(CancelEventArgs, payloadJson).pipe(
+    Effect.flatMap((args) => cancelEventForMemberTx({ ...ctx, eventId: args.eventId })),
+    Effect.map((event): ConfirmResult => ({ kind: 'event_cancelled', event })),
+    Effect.catchTags({
+      EventForbidden: eventConfirmFailure,
+      EventNotFound: eventConfirmFailure,
+      EventNotActive: eventConfirmFailure,
+    }),
+  );
+
+// --- mark_attendance -------------------------------------------------------
+
+const NameList = Schema.Array(NameParam).pipe(Schema.check(Schema.isMaxLength(100)));
+
+const MarkAttendanceArgs = Schema.Struct({
+  eventId: EventIdParam,
+  present: Schema.optionalKey(NameList),
+  absent: Schema.optionalKey(NameList),
+}).pipe(
+  Schema.check(
+    Schema.makeFilter(
+      (a: { readonly present?: ReadonlyArray<string>; readonly absent?: ReadonlyArray<string> }) =>
+        (a.present?.length ?? 0) + (a.absent?.length ?? 0) > 0 || 'name at least one member',
+    ),
+  ),
+);
+
+/** The full list, as the attendance page sends it: confirming is all-or-nothing. */
+const MarkAttendancePayload = Schema.Struct({
+  eventId: Event.EventId,
+  entries: Schema.Array(
+    Schema.Struct({ teamMemberId: TeamMember.TeamMemberId, present: Schema.Boolean }),
+  ),
+});
+
+const namesField = (key: AiChatApi.ProposalFieldKey, names: ReadonlyArray<string>) =>
+  names.length === 0 ? noneField(key) : textField(key, names.join(', '));
+
+const proposeMarkAttendance = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(MarkAttendanceArgs, rawArgs)),
+    Effect.bind('event', ({ args }) =>
+      checkAttendanceConfirmable({
+        teamId: ctx.teamId,
+        membership: ctx.membership,
+        eventId: args.eventId,
+      }).pipe(Effect.mapError(eventRefusal)),
+    ),
+    // The same three guards the repository folds into its INSERT.
+    Effect.tap(({ event }) =>
+      event.event_type !== 'training'
+        ? Effect.fail('event: attendance is only taken for trainings')
+        : event.status === 'cancelled'
+          ? Effect.fail('event: it was cancelled')
+          : DateTime.isGreaterThan(event.start_at, DateTime.nowUnsafe())
+            ? Effect.fail(
+                'event: it has not started yet; attendance can be confirmed once it starts',
+              )
+            : Effect.void,
+    ),
+    Effect.bind('rows', ({ args }) =>
+      EventAttendanceRepository.asEffect().pipe(
+        Effect.flatMap((attendance) => attendance.findAttendanceForEvent(args.eventId)),
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            ...row,
+            name: Option.getOrElse(
+              DisplayName.pickDisplayName({
+                name: row.member_name,
+                nickname: row.nickname,
+                displayName: row.display_name,
+                username: row.username,
+              }),
+              () => '—',
+            ),
+          })),
+        ),
+      ),
+    ),
+    Effect.bind('marks', ({ args, rows }) =>
+      Effect.forEach(
+        [
+          ...(args.present ?? []).map((name) => [name, true] as const),
+          ...(args.absent ?? []).map((name) => [name, false] as const),
+        ],
+        ([name, present]) =>
+          exactlyOne(
+            matchByName(rows, name),
+            `${name}: no member with that name on this training's attendance list`,
+            `${name}: several members match that name; ask the user which one they mean`,
+          ).pipe(Effect.map((row) => [row.team_member_id, present] as const)),
+      ),
+    ),
+    Effect.bind('overrides', ({ marks }) => {
+      const overrides = new Map<TeamMember.TeamMemberId, boolean>();
+      for (const [id, present] of marks) {
+        if (overrides.get(id) === !present) {
+          return Effect.fail('present/absent: the same member is in both lists');
+        }
+        overrides.set(id, present);
+      }
+      return Effect.succeed(overrides);
+    }),
+    Effect.let('entries', ({ rows, overrides }) =>
+      rows.map((row) => ({
+        name: row.name,
+        teamMemberId: row.team_member_id,
+        present: overrides.get(row.team_member_id) ?? row.present,
+      })),
+    ),
+    Effect.map(({ args, event, entries }) => ({
+      payloadJson: JSON.stringify(
+        Schema.encodeSync(MarkAttendancePayload)({
+          eventId: args.eventId,
+          entries: entries.map(({ teamMemberId, present }) => ({ teamMemberId, present })),
+        }),
+      ),
+      summary: [
+        textField('event', eventLabel(event)),
+        namesField(
+          'present',
+          entries.filter((e) => e.present).map((e) => e.name),
+        ),
+        namesField(
+          'absent',
+          entries.filter((e) => !e.present).map((e) => e.name),
+        ),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmMarkAttendance = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(MarkAttendancePayload, payloadJson).pipe(
+    Effect.flatMap((payload) => confirmAttendanceForMember({ ...ctx, ...payload })),
+    Effect.as<ConfirmResult>({ kind: 'attendance_confirmed' }),
+    Effect.catchTags({
+      EventAttendanceForbidden: eventConfirmFailure,
+      EventAttendanceEventNotFound: eventConfirmFailure,
+      EventAttendanceNotConfirmable: eventConfirmFailure,
+    }),
+  );
+
+// --- set_my_rsvp -------------------------------------------------------------
+// The CALLER's own RSVP only — there is no member parameter, so no way to answer for anyone
+// else. Every rule (profile completeness, deadline, member group, required note) lives in
+// `services/RsvpWrites.ts`, shared with the web `submitRsvp`.
+
+const SetMyRsvpArgs = Schema.Struct({
+  eventId: EventIdParam,
+  response: EventRsvp.RsvpResponse,
+  // Empty string clears the stored note; omitted keeps it — same as the web.
+  message: Schema.optionalKey(Schema.String.pipe(Schema.check(Schema.isMaxLength(500)))),
+});
+type SetMyRsvpArgs = Schema.Schema.Type<typeof SetMyRsvpArgs>;
+
+const rsvpRefusal = (e: { readonly _tag: string }): string => {
+  switch (e._tag) {
+    case 'EventRsvpEventNotFound':
+      return 'eventId: no such event in this team, or it was cancelled';
+    case 'RsvpDeadlinePassed':
+      return 'event: RSVPs for this event are closed';
+    case 'EventRsvpForbidden':
+      return 'event: the user is not invited to this event (it is for a group they are not in)';
+    case 'EventRsvpMessageRequired':
+      return 'message: this answer needs a note (for "coming later" when they arrive, for "maybe" what it depends on); ask the user for it';
+    case 'EventRsvpProfileIncomplete':
+      return 'profile: the team requires a complete profile before answering; tell the user to complete their profile';
+    default:
+      return e._tag;
+  }
+};
+
+const rsvpArgsFor = (a: SetMyRsvpArgs, ctx: ConfirmContext) => ({
+  teamId: ctx.teamId,
+  membership: ctx.membership,
+  isProfileComplete: ctx.membership.is_profile_complete,
+  eventId: a.eventId,
+  response: a.response,
+  message: Option.fromUndefinedOr(a.message),
+});
+
+const proposeSetMyRsvp = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(SetMyRsvpArgs, rawArgs)),
+    Effect.bind('checked', ({ args }) =>
+      checkRsvpSubmittable(rsvpArgsFor(args, ctx)).pipe(Effect.mapError(rsvpRefusal)),
+    ),
+    Effect.map(({ args, checked }) => ({
+      payloadJson: JSON.stringify(Schema.encodeSync(SetMyRsvpArgs)(args)),
+      summary: [
+        textField('event', eventLabel(checked.event)),
+        new AiChatApi.ProposalField({
+          key: 'response',
+          value: { type: 'rsvpResponse', value: args.response },
+        }),
+        // The note the RSVP will carry after the write: the new one, or the kept one.
+        optionalTextField(
+          'message',
+          checked.effectiveClear
+            ? checked.note
+            : Option.orElse(checked.note, () =>
+                Option.flatMap(checked.priorRsvp, (r) => r.message),
+              ),
+        ),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmSetMyRsvp = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(SetMyRsvpArgs, payloadJson).pipe(
+    Effect.flatMap((args) => submitRsvpTx(rsvpArgsFor(args, ctx))),
+    Effect.map((submitted): ConfirmResult => ({ kind: 'rsvp_submitted', submitted })),
+    Effect.catchTags({
+      EventRsvpForbidden: () => Effect.fail(new AiChatApi.AiProposalActionForbidden()),
+      EventRsvpEventNotFound: (e) => stale(e._tag),
+      RsvpDeadlinePassed: (e) => stale(e._tag),
+      EventRsvpMessageRequired: (e) => stale(e._tag),
+      EventRsvpProfileIncomplete: (e) => stale(e._tag),
+    }),
+  );
+
+// ---------------------------------------------------------------------------
 // The registry.
 // ---------------------------------------------------------------------------
 
@@ -824,9 +1304,21 @@ const confirmArchiveDiscordChannel = (payloadJson: string, ctx: { readonly teamI
  *  response: an event needs side effects and an `EventInfo`; a Discord change is only queued. */
 export type ConfirmResult =
   | { readonly kind: 'event_created'; readonly event: EventRow }
-  | { readonly kind: 'discord_queued' };
+  | { readonly kind: 'discord_queued' }
+  | { readonly kind: 'event_updated'; readonly event: EventWithDetails }
+  | { readonly kind: 'event_cancelled'; readonly event: EventWithDetails }
+  | { readonly kind: 'attendance_confirmed' }
+  | {
+      readonly kind: 'rsvp_submitted';
+      readonly submitted: Effect.Success<ReturnType<typeof submitRsvpTx>>;
+    };
+
+type ConfirmContext = { readonly teamId: Team.TeamId; readonly membership: MembershipWithRole };
 
 export type ProposeR =
+  | EventRsvpsRepository
+  | EventsRepository
+  | EventAttendanceRepository
   | GroupsRepository
   | TrainingTypesRepository
   | TeamChannelsRepository
@@ -836,7 +1328,9 @@ export type ProposeR =
   | DiscordChannelsRepository;
 
 type ConfirmR =
+  | EventRsvpsRepository
   | EventsRepository
+  | EventAttendanceRepository
   | GroupsRepository
   | TrainingTypesRepository
   | TeamSettingsRepository
@@ -877,7 +1371,11 @@ export interface ActionDefinition {
   readonly confirm: (
     payloadJson: string,
     ctx: { readonly teamId: Team.TeamId; readonly membership: MembershipWithRole },
-  ) => Effect.Effect<ConfirmResult, EventApi.Forbidden | AiChatApi.AiProposalNotFound, ConfirmR>;
+  ) => Effect.Effect<
+    ConfirmResult,
+    EventApi.Forbidden | AiChatApi.AiProposalNotFound | AiChatApi.AiProposalActionForbidden,
+    ConfirmR
+  >;
 }
 
 const DISCORD_PERMISSIONS: ReadonlyArray<Role.Permission> = ['ai:manage_discord', 'group:manage'];
@@ -890,6 +1388,10 @@ const DISCORD_COMMON =
   'follows its group or roster and cannot be changed here. Name channels and groups exactly as ' +
   '`list_discord_channels` and `list_groups` show them; when a name matches several channels or ' +
   'groups, ask the user which one they mean. Only one may be proposed per reply.';
+
+const EVENT_COMMON =
+  'This does NOT change anything by itself — it shows the user a card they must confirm. Only ' +
+  'one may be proposed per reply.';
 
 export const ACTION_REGISTRY: Record<AiActionProposal.AiActionName, ActionDefinition> = {
   create_event: {
@@ -940,5 +1442,56 @@ export const ACTION_REGISTRY: Record<AiActionProposal.AiActionName, ActionDefini
     argsSchema: ArchiveDiscordChannelArgs,
     propose: proposeArchiveDiscordChannel,
     confirm: confirmArchiveDiscordChannel,
+  },
+  update_event: {
+    permissions: ['event:edit'],
+    requiresDiscord: false,
+    description:
+      'Proposes changing ONE existing event: its title, description, location or time. Pass ' +
+      'the `eventId` from `list_events` and only the fields that change. For a timed event set ' +
+      '`startAt`/`endAt` as ISO-8601 instants with offset; for an all-day event set ' +
+      '`startDate`/`endDate` as team-local `YYYY-MM-DD`. A recurring event changes only this ' +
+      `occurrence. ${EVENT_COMMON}`,
+    argsSchema: UpdateEventArgs,
+    propose: proposeUpdateEvent,
+    confirm: confirmUpdateEvent,
+  },
+  cancel_event: {
+    permissions: ['event:cancel'],
+    requiresDiscord: false,
+    description:
+      'Proposes cancelling ONE event, by the `eventId` from `list_events`. Members who said they ' +
+      'are coming are notified. A recurring event cancels only this occurrence. ' +
+      EVENT_COMMON,
+    argsSchema: CancelEventArgs,
+    propose: proposeCancelEvent,
+    confirm: confirmCancelEvent,
+  },
+  mark_attendance: {
+    permissions: ['event:edit'],
+    requiresDiscord: false,
+    description:
+      'Proposes confirming attendance for a training that has started, by the `eventId` from ' +
+      '`list_events`. List who was there in `present` and who was not in `absent`, by the names ' +
+      '`list_event_attendance` shows; everyone else keeps what `list_event_attendance` shows for ' +
+      'them. Confirming saves the whole list, which may charge per-training fees. ' +
+      EVENT_COMMON,
+    argsSchema: MarkAttendanceArgs,
+    propose: proposeMarkAttendance,
+    confirm: confirmMarkAttendance,
+  },
+  set_my_rsvp: {
+    // Same as the web RSVP buttons: any member, for events they are invited to.
+    permissions: [],
+    requiresDiscord: false,
+    description:
+      "Proposes setting the USER'S OWN answer to an event invitation, by the `eventId` from " +
+      '`list_events`. `response` is yes, no, maybe or coming_later; `maybe` and `coming_later` ' +
+      'need a `message` (when they arrive, or what it depends on) unless one is already saved. ' +
+      "It can never answer for another member: if the user asks to set someone else's RSVP, say " +
+      `that each member answers for themselves. ${EVENT_COMMON}`,
+    argsSchema: SetMyRsvpArgs,
+    propose: proposeSetMyRsvp,
+    confirm: confirmSetMyRsvp,
   },
 };

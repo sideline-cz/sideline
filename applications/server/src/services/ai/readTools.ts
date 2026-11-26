@@ -123,6 +123,8 @@ const toEventHit = (row: EventWithDetails): AiChatApi.SearchHit => ({
 });
 
 const toEventItem = (row: EventWithDetails): Record<string, unknown> => ({
+  // The id the event tools (`list_event_rsvps`, `propose_update_event`, …) take.
+  eventId: row.id,
   title: row.title,
   status: row.status,
   startAt: DateTime.formatIso(row.start_at),

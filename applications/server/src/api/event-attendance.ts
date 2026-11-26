@@ -2,16 +2,16 @@ import { Auth, DisplayName, EventAttendanceApi } from '@sideline/domain';
 import { Array, Effect, Layer, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
-import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
+import { hasPermission, requireMembership } from '~/api/permissions.js';
 import { checkGroupAccess } from '~/api/scoping.js';
 import { EventAttendanceRepository } from '~/repositories/EventAttendanceRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { confirmAttendanceForMember } from '~/services/EventWrites.js';
 
 const forbidden = new EventAttendanceApi.Forbidden();
 const notFound = new EventAttendanceApi.EventNotFound();
-const notConfirmable = new EventAttendanceApi.AttendanceNotConfirmable();
 
 // `event.event_type === 'training'` is trigger-owned (see AGENTS.md ownership statement) — every
 // event this endpoint is ever called for either genuinely is a training or genuinely isn't, so
@@ -115,46 +115,8 @@ export const EventAttendanceApiLive = HttpApiBuilder.group(Api, 'eventAttendance
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            Effect.tap(({ membership }) => requirePermission(membership, 'event:edit', forbidden)),
-            Effect.bind('event', () =>
-              events.findEventByIdWithDetails(eventId).pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.fail(notFound),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
-            ),
-            Effect.tap(({ event }) =>
-              event.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
-            ),
-            // Deliberately NOT `EventDetail.canEdit` — that expression is additionally gated on
-            // `eventAcceptsRsvp(...)`, which is false for every STARTED event, i.e. false for
-            // exactly the events attendance can be confirmed on. Copy of the bare permission
-            // expression at `api/event.ts`'s `getEvent` handler instead.
-            Effect.bind('isOwnerGroupMember', ({ event, membership }) =>
-              checkGroupAccess(groups, membership.id, event.owner_group_id),
-            ),
-            Effect.tap(({ membership, isOwnerGroupMember }) =>
-              hasPermission(membership, 'event:edit') &&
-              (hasPermission(membership, 'team:manage') || isOwnerGroupMember)
-                ? Effect.void
-                : Effect.fail(forbidden),
-            ),
-            Effect.bind('rowsAffected', ({ membership }) =>
-              attendance.confirmAttendance({
-                event_id: eventId,
-                team_id: teamId,
-                confirmed_by: membership.id,
-                entries: Array.map(payload.entries, (entry) => ({
-                  team_member_id: entry.teamMemberId,
-                  present: entry.present,
-                })),
-              }),
-            ),
-            Effect.flatMap(({ rowsAffected }) =>
-              rowsAffected === 0 ? Effect.fail(notConfirmable) : Effect.void,
+            Effect.flatMap(({ membership }) =>
+              confirmAttendanceForMember({ teamId, membership, eventId, entries: payload.entries }),
             ),
           ),
         ),

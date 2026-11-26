@@ -16,6 +16,7 @@ import * as Roster from '~/api/Roster.js';
 import * as TrainingTypeApi from '~/api/TrainingTypeApi.js';
 import { AiActionName, AiActionProposalId } from '~/models/AiActionProposal.js';
 import { EventType } from '~/models/Event.js';
+import { RsvpResponse } from '~/models/EventRsvp.js';
 import { ExpenseCategory, ExpenseId } from '~/models/Expense.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
@@ -173,6 +174,11 @@ export const ProposalFieldKey = Schema.Literals([
   'currentAccess',
   'access',
   'archiveCategory',
+  'event',
+  'present',
+  'absent',
+  'response',
+  'message',
 ]);
 export type ProposalFieldKey = typeof ProposalFieldKey.Type;
 
@@ -195,6 +201,7 @@ export const ProposalFieldValue = Schema.Union([
   Schema.Struct({ type: Schema.Literal('date'), value: Schema.String }), // team-local YYYY-MM-DD
   Schema.Struct({ type: Schema.Literal('eventType'), value: EventType }),
   Schema.Struct({ type: Schema.Literal('accessLevel'), value: ProposalAccessLevel }),
+  Schema.Struct({ type: Schema.Literal('rsvpResponse'), value: RsvpResponse }),
   Schema.Struct({ type: Schema.Literal('none') }),
 ]);
 export type ProposalFieldValue = Schema.Schema.Type<typeof ProposalFieldValue>;
@@ -222,6 +229,11 @@ export class DiscordChangeQueued extends Schema.Class<DiscordChangeQueued>('AiDi
     status: Schema.Literal('queued'),
   },
 ) {}
+
+/** Confirm of an action that changed an existing row in place (update, cancel, attendance). */
+export class AiActionApplied extends Schema.Class<AiActionApplied>('AiActionApplied')({
+  status: Schema.Literal('applied'),
+}) {}
 
 export class ChatResponse extends Schema.Class<ChatResponse>('AiChatResponse')({
   answer: Schema.String,
@@ -290,6 +302,7 @@ export class AiChatApiGroup extends HttpApiGroup.make('aiChat')
       success: [
         EventApi.EventInfo.pipe(HttpApiSchema.status(201)),
         DiscordChangeQueued.pipe(HttpApiSchema.status(202)),
+        AiActionApplied.pipe(HttpApiSchema.status(200)),
       ],
       error: [
         AiChatForbidden.pipe(HttpApiSchema.status(403)),
