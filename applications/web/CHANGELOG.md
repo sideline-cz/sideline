@@ -1,5 +1,13 @@
 # @sideline/web
 
+## 0.80.0
+
+### 🚀 Features
+- let a coach set another member's RSVP (web + AI assistant) (#852)
+
+### 🐛 Fixes
+- show the currency refusal when an assistant plan move hits it (#851)
+
 ## 0.79.1
 
 ### 🐛 Fixes
