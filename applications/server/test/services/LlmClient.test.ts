@@ -6,8 +6,8 @@ import { clampRating, LlmClient, LlmError } from '~/services/LlmClient.js';
 // LlmClient — unit tests
 // ---------------------------------------------------------------------------
 
-describe('LlmClient — stub provider (no LLM_API_URL)', () => {
-  // The Default layer reads env at construction time; in test env LLM_API_URL is unset
+describe('LlmClient — stub provider (no AI_SESSIONS_URL)', () => {
+  // The Default layer reads env at construction time; in test env AI_SESSIONS_URL is unset
   // so the stub is used. We provide LlmClient.Default and call through.
 
   it.effect('summarizeEmail returns {short,detailed} both containing subject and from', () =>

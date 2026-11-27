@@ -232,15 +232,13 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(AiChatEnabledConfig.Default),
   Layer.provide(ChatRateLimiter.Default),
   Layer.provide(LoginLinkRateLimiter.Default),
-  Layer.provide(
-    ChatAgent.Default.pipe(Layer.provide(Repositories), Layer.provide(LlmClient.Default)),
-  ),
+  Layer.provide(ChatAgent.Default.pipe(Layer.provide(Repositories), Layer.provide(LlmClient.Live))),
   Layer.provide(TranslationCache.Default),
   Layer.provide(
     Layer.merge(Repositories, EmailApprovalService.Default.pipe(Layer.provide(Repositories))),
   ),
   Layer.provide(DiscordOAuth.Default),
-  Layer.provide(LlmClient.Default),
+  Layer.provide(LlmClient.Live),
   Layer.provide(EmailSecretCrypto.Default),
   Layer.provide(FioSecretCrypto.Default),
   Layer.provide(FetchHttpClient.layer),

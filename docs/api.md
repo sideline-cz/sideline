@@ -7312,7 +7312,7 @@ Whether the assistant is available for this team right now, so the client can sh
 
 | Field | Type | Description |
 |---|---|---|
-| `enabled` | `boolean` | `true` only when `AI_CHAT_ENABLED` is on AND an LLM is configured (`LLM_API_URL` set) |
+| `enabled` | `boolean` | `true` only when `AI_CHAT_ENABLED` is on AND an LLM is configured (`AI_SESSIONS_URL` and its token set) |
 
 **Errors:**
 
