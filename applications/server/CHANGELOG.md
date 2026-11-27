@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.89.1
+
+### 🐛 Fixes
+- refuse plan-side changes that re-price paid members into another currency (#847)
+
 ## 0.89.0
 
 ### 🚀 Features
