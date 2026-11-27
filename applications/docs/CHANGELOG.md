@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.30.0
+
+### 🚀 Features
+- let a coach set another member's RSVP (web + AI assistant) (#852)
+
 ## 0.29.0
 
 ### 🚀 Features
