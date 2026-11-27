@@ -12,6 +12,7 @@ import { handleEventRosterApprovalCancel } from './handleEventRosterApprovalCanc
 import { handleEventRosterApprovalRequest } from './handleEventRosterApprovalRequest.js';
 import { handleEventRosterThreadDelete } from './handleEventRosterThreadDelete.js';
 import { handleRsvpReminder } from './handleRsvpReminder.js';
+import { handleRsvpSetByCoach } from './handleRsvpSetByCoach.js';
 import { handleStarted } from './handleStarted.js';
 import { handleTeamsGenerated } from './handleTeamsGenerated.js';
 import { handleTrainingClaimRequest } from './handleTrainingClaimRequest.js';
@@ -32,6 +33,7 @@ const action: (
     Match.tag('event_channel_moved', () => Effect.void),
     Match.tag('event_started', handleStarted),
     Match.tag('rsvp_reminder', handleRsvpReminder),
+    Match.tag('rsvp_set_by_coach', handleRsvpSetByCoach),
     Match.tag('training_claim_request', handleTrainingClaimRequest),
     Match.tag('training_claim_update', handleTrainingClaimUpdate),
     Match.tag('unclaimed_training_reminder', handleUnclaimedTrainingReminder),

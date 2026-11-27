@@ -28,6 +28,7 @@ const EventSyncEventType = Schema.Literals([
   'event_roster_thread_delete',
   'teams_generated',
   'event_channel_moved',
+  'rsvp_set_by_coach',
 ]);
 type EventSyncEventType = typeof EventSyncEventType.Type;
 
@@ -563,6 +564,52 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  /**
+   * DM to a member whose RSVP a coach just set. Column overloads:
+   *   claimed_by_member_id → the member (their discord id is resolved by the read JOIN)
+   *   event_description    → the response
+   *   event_location       → the coach's display name (snapshot)
+   */
+  const emitRsvpSetByCoach = (
+    teamId: Team.TeamId,
+    eventId: Event.EventId,
+    title: string,
+    startAt: DateTime.Utc,
+    allDay: boolean,
+    memberId: TeamMember.TeamMemberId,
+    response: string,
+    coachName: string,
+  ) =>
+    lookupGuildId(teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            insertEvent({
+              team_id: teamId,
+              guild_id,
+              event_type: 'rsvp_set_by_coach',
+              event_id: eventId,
+              event_title: title,
+              event_description: Option.some(response),
+              event_image_url: Option.none(),
+              event_start_at: startAt,
+              event_end_at: Option.none(),
+              event_location: Option.some(coachName),
+              event_location_url: Option.none(),
+              event_event_type: 'rsvp_set_by_coach',
+              discord_target_channel_id: Option.none(),
+              member_group_id: Option.none(),
+              discord_role_id: Option.none(),
+              claimed_by_member_id: Option.some(memberId),
+              claimed_by_display_name: Option.none(),
+              event_all_day: allDay,
+            }),
+        }),
+      ),
+      catchSqlErrors,
+    );
+
   // ---- Teams generated event --------------------------------------------------
 
   // Idempotent insert-if-not-pending: the row is only written when no unprocessed
@@ -861,6 +908,7 @@ const make = Effect.gen(function* () {
     emitEventRosterApprovalCancel,
     emitEventRosterThreadDelete,
     emitEventChannelMoved,
+    emitRsvpSetByCoach,
     findUnprocessed,
     markProcessed,
     markFailed,

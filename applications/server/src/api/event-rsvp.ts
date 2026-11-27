@@ -15,7 +15,7 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
-import { emitRsvpSideEffects, submitRsvpTx } from '~/services/RsvpWrites.js';
+import { emitRsvpSideEffects, submitMemberRsvpTx, submitRsvpTx } from '~/services/RsvpWrites.js';
 import { eventRsvpOpen, rsvpClosesAtOf } from '~/utils/allDayRsvpWindow.js';
 import {
   attendingGenderCountsFor,
@@ -64,6 +64,7 @@ const buildRsvpDetail = (
   // icon `PlayerCard.tsx` already renders. `false` omits the key entirely rather than
   // sending zeroes, which would be indistinguishable from "nobody is going".
   canViewMembers: boolean,
+  canSetMemberRsvps: boolean,
 ) =>
   Effect.Do.pipe(
     Effect.bind('allRsvps', () => rsvps.findRsvpsByEventId(eventId)),
@@ -97,6 +98,12 @@ const buildRsvpDetail = (
                   }),
                   () => '—',
                 ),
+                setByName: DisplayName.pickDisplayName({
+                  name: r.set_by_name,
+                  nickname: r.set_by_nickname,
+                  displayName: r.set_by_display_name,
+                  username: r.set_by_username,
+                }),
               }),
           ),
           yesCount: countFor(counts, 'yes'),
@@ -110,6 +117,7 @@ const buildRsvpDetail = (
             foldAttendingGenderCounts(genderRows),
             eventId,
           ),
+          canSetMemberRsvps,
         }),
     ),
   );
@@ -146,26 +154,40 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             Effect.bind('isGroupMember', ({ event, membership }) =>
               checkGroupAccess(groups, membership.id, event.member_group_id),
             ),
-            Effect.flatMap(({ event, membership, settings, isGroupMember }) =>
-              buildRsvpDetail(
-                rsvps,
-                eventId,
-                membership.id,
-                eventRsvpOpen(event, event.timezone, DateTime.nowUnsafe()) && isGroupMember,
-                // Sent whenever a lock APPLIES and the viewer is invited — NOT only when the
-                // deadline is why `canRsvp` is false. It is `Some` on an open event days out too
-                // (that is what renders "RSVP closes in 3 days"), which `test/EventRsvp.test.ts`
-                // case 8 pins. The one thing it encodes is invitation: a member outside the
-                // event's `member_group` must never be told "RSVPs closed at 18:00" — RSVPs are
-                // open for everyone else; they simply aren't invited. Narrowing a `Some` to "the
-                // deadline passed" is the CALLER's job, off `!canRsvp`.
-                isGroupMember ? rsvpClosesAtOf(event) : Option.none(),
-                Option.match(settings, {
-                  onNone: () => 0,
-                  onSome: (s) => s.min_players_threshold,
-                }),
-                hasPermission(membership, 'member:view'),
-              ),
+            Effect.let('isOpen', ({ event }) =>
+              eventRsvpOpen(event, event.timezone, DateTime.nowUnsafe()),
+            ),
+            // The `setMemberRsvp` gate (`checkMemberRsvpSettable`), so the control shows exactly
+            // when the write would be allowed.
+            Effect.bind('canSetMemberRsvps', ({ event, membership, isOpen }) =>
+              !isOpen || !hasPermission(membership, 'event:edit')
+                ? Effect.succeed(false)
+                : hasPermission(membership, 'team:manage')
+                  ? Effect.succeed(true)
+                  : checkGroupAccess(groups, membership.id, event.owner_group_id),
+            ),
+            Effect.flatMap(
+              ({ membership, settings, isGroupMember, isOpen, canSetMemberRsvps, event }) =>
+                buildRsvpDetail(
+                  rsvps,
+                  eventId,
+                  membership.id,
+                  isOpen && isGroupMember,
+                  // Sent whenever a lock APPLIES and the viewer is invited — NOT only when the
+                  // deadline is why `canRsvp` is false. It is `Some` on an open event days out too
+                  // (that is what renders "RSVP closes in 3 days"), which `test/EventRsvp.test.ts`
+                  // case 8 pins. The one thing it encodes is invitation: a member outside the
+                  // event's `member_group` must never be told "RSVPs closed at 18:00" — RSVPs are
+                  // open for everyone else; they simply aren't invited. Narrowing a `Some` to "the
+                  // deadline passed" is the CALLER's job, off `!canRsvp`.
+                  isGroupMember ? rsvpClosesAtOf(event) : Option.none(),
+                  Option.match(settings, {
+                    onNone: () => 0,
+                    onSome: (s) => s.min_players_threshold,
+                  }),
+                  hasPermission(membership, 'member:view'),
+                  canSetMemberRsvps,
+                ),
             ),
           ),
         )
@@ -180,6 +202,25 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                 teamId,
                 membership,
                 isProfileComplete: currentUser.isProfileComplete,
+                eventId,
+                response: payload.response,
+                message: payload.message,
+              }),
+            ),
+            Effect.flatMap((submitted) => emitRsvpSideEffects(teamId, submitted)),
+          ),
+        )
+        .handle('setMemberRsvp', ({ params: { teamId, eventId, memberId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('actor', ({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            Effect.flatMap(({ actor }) =>
+              submitMemberRsvpTx({
+                teamId,
+                actor,
+                memberId,
                 eventId,
                 response: payload.response,
                 message: payload.message,

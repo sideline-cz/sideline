@@ -2868,15 +2868,16 @@ describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3
       // 16 read tools (the original 6, plus `search_docs`, the six database read tools and the
       // three Discord read tools) + 1 `propose_<action>` per `ACTION_REGISTRY` entry (create_event
       // the three Discord write actions, the three event write actions, the six group / roster
-      // write actions and the three finance write actions) — built FROM the
+      // write actions, `set_member_rsvp` and the three finance write actions) — built FROM the
       // registry (`registry.ts`), so this count moves in lockstep with `AiActionName.literals`.
-      expect(ALL_TOOLS.length).toBe(33);
+      expect(ALL_TOOLS.length).toBe(34);
       for (const added of [
         'propose_create_event',
         'propose_update_event',
         'propose_cancel_event',
         'propose_mark_attendance',
         'propose_set_my_rsvp',
+        'propose_set_member_rsvp',
         'propose_create_group',
         'propose_add_group_member',
         'propose_remove_group_member',

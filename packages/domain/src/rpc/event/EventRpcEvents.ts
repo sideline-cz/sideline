@@ -3,6 +3,7 @@ import { Schema } from 'effect';
 import * as Discord from '~/models/Discord.js';
 import * as Event from '~/models/Event.js';
 import * as EventRosterModel from '~/models/EventRosterModel.js';
+import * as EventRsvp from '~/models/EventRsvp.js';
 import * as GroupModel from '~/models/GroupModel.js';
 import * as RosterModel from '~/models/RosterModel.js';
 import * as Team from '~/models/Team.js';
@@ -300,6 +301,25 @@ export class EventChannelMovedEvent extends Schema.TaggedClass<EventChannelMoved
   },
 ) {}
 
+// A coach set this member's RSVP; the bot DMs the member. `member_discord_id` is `None` when the
+// member has no linked Discord account — nothing to send.
+export class RsvpSetByCoachEvent extends Schema.TaggedClass<RsvpSetByCoachEvent>()(
+  'rsvp_set_by_coach',
+  {
+    id: Schema.String,
+    team_id: Team.TeamId,
+    guild_id: Discord.Snowflake,
+    event_id: Event.EventId,
+    title: Schema.String,
+    start_at: Schemas.DateTimeFromIsoString,
+    all_day: Schema.Boolean,
+    start_date: Schema.String,
+    member_discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    response: EventRsvp.RsvpResponse,
+    coach_name: Schema.String,
+  },
+) {}
+
 export const UnprocessedEventSyncEvent = Schema.Union([
   EventCreatedEvent,
   EventUpdatedEvent,
@@ -315,6 +335,7 @@ export const UnprocessedEventSyncEvent = Schema.Union([
   EventRosterThreadDeleteEvent,
   TeamsGeneratedEvent,
   EventChannelMovedEvent,
+  RsvpSetByCoachEvent,
 ]);
 
 export type UnprocessedEventSyncEvent = Schema.Schema.Type<typeof UnprocessedEventSyncEvent>;

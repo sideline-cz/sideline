@@ -1,10 +1,11 @@
 import type { EventApi, EventRsvpApi } from '@sideline/domain';
-import { EventRsvp, User } from '@sideline/domain';
+import { EventRsvp, type TeamMember, User } from '@sideline/domain';
 import { DateTime, type Effect, Option } from 'effect';
 import { Check, ChevronDown, CircleHelp, Clock, Loader2, Lock, Play, X } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
+import { Input } from '~/components/ui/input';
 import { Separator } from '~/components/ui/separator';
 import { Textarea } from '~/components/ui/textarea';
 import { useFormatDate } from '~/hooks/useFormatDate';
@@ -19,6 +20,12 @@ interface EventRsvpPanelProps {
   rsvpDetail: EventRsvpApi.EventRsvpDetail;
   nonResponders: ReadonlyArray<EventRsvpApi.NonResponderEntry>;
   onRsvpSubmit: (
+    response: RsvpResponse,
+    message: string,
+  ) => Effect.Effect<void, ClientError, ApiClient | ClientConfig>;
+  /** Only called when `rsvpDetail.canSetMemberRsvps`. */
+  onSetMemberRsvp?: (
+    memberId: TeamMember.TeamMemberId,
     response: RsvpResponse,
     message: string,
   ) => Effect.Effect<void, ClientError, ApiClient | ClientConfig>;
@@ -121,6 +128,96 @@ function GenderSplitLine({ counts }: { counts: User.GenderCounts }) {
     <p className='mt-2 text-sm text-muted-foreground'>
       {parts.length === 0 ? total : `${total} — ${parts.join(' · ')}`}
     </p>
+  );
+}
+
+/**
+ * A coach setting another member's answer (e.g. they said so in person). Same four answers and
+ * the same note rule as the member's own buttons; the server re-checks everything.
+ */
+function SetMemberRsvpForm({
+  members,
+  onSubmit,
+}: {
+  members: ReadonlyArray<{
+    readonly teamMemberId: TeamMember.TeamMemberId;
+    readonly displayName: string;
+  }>;
+  onSubmit: NonNullable<EventRsvpPanelProps['onSetMemberRsvp']>;
+}) {
+  const run = useRun();
+  const [memberId, setMemberId] = useState('');
+  const [response, setResponse] = useState<RsvpResponse>('yes');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const target = members.find((m) => m.teamMemberId === memberId);
+  const noteMissing = EventRsvp.rsvpResponseRequiresMessage(response) && note.trim() === '';
+
+  const handleSave = async () => {
+    if (target === undefined || noteMissing || saving) return;
+    setSaving(true);
+    // A blank note keeps whatever the member already wrote (the server's `None`).
+    await run({ success: tr('rsvp_setForMember_saved') })(
+      onSubmit(target.teamMemberId, response, note),
+    );
+    setSaving(false);
+    setNote('');
+  };
+
+  return (
+    <div className='mt-6'>
+      <h3 className='text-sm font-semibold mb-2'>{tr('rsvp_setForMember_title')}</h3>
+      <div className='flex flex-col gap-2'>
+        <label className='text-sm'>
+          <span className='mb-1 block'>{tr('rsvp_setForMember_member')}</span>
+          <select
+            value={memberId}
+            onChange={(e) => setMemberId(e.target.value)}
+            className='h-9 w-full rounded-md border bg-background px-2 text-sm'
+          >
+            <option value=''>{tr('rsvp_setForMember_choose')}</option>
+            {members.map((m) => (
+              <option key={m.teamMemberId} value={m.teamMemberId}>
+                {m.displayName}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className='text-sm'>
+          <span className='mb-1 block'>{tr('rsvp_setForMember_response')}</span>
+          <select
+            value={response}
+            onChange={(e) => setResponse(e.target.value as RsvpResponse)}
+            className='h-9 w-full rounded-md border bg-background px-2 text-sm'
+          >
+            {RESPONSES.map((r) => (
+              <option key={r} value={r}>
+                {tr(RESPONSE_LABEL_KEY[r])}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label htmlFor='set-member-rsvp-note' className='text-sm'>
+          <span className='mb-1 block'>
+            {tr('rsvp_setForMember_note')}
+            {EventRsvp.rsvpResponseRequiresMessage(response) && <span aria-hidden='true'> *</span>}
+          </span>
+          <Input
+            id='set-member-rsvp-note'
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            aria-required={EventRsvp.rsvpResponseRequiresMessage(response)}
+            maxLength={500}
+          />
+        </label>
+        <div>
+          <Button onClick={handleSave} disabled={target === undefined || noteMissing || saving}>
+            {saving && <Loader2 className='animate-spin' aria-hidden='true' />}
+            {tr('rsvp_setForMember_save')}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -242,6 +339,7 @@ export function EventRsvpPanel({
   rsvpDetail,
   nonResponders,
   onRsvpSubmit,
+  onSetMemberRsvp,
 }: EventRsvpPanelProps) {
   const currentResponse = Option.getOrNull(rsvpDetail.myResponse);
   const savedMessage = Option.getOrElse(rsvpDetail.myMessage, () => '');
@@ -485,6 +583,11 @@ export function EventRsvpPanel({
                       {Option.isSome(r.message) && (
                         <span className='text-muted-foreground'>— {r.message.value}</span>
                       )}
+                      {Option.isSome(r.setByName) && (
+                        <span className='text-xs text-muted-foreground'>
+                          ({tr('rsvp_setBy', { name: r.setByName.value })})
+                        </span>
+                      )}
                     </li>
                   ))}
               </ul>
@@ -501,6 +604,13 @@ export function EventRsvpPanel({
                   ))}
                 </ul>
               </div>
+            )}
+
+            {rsvpDetail.canSetMemberRsvps && onSetMemberRsvp !== undefined && (
+              <SetMemberRsvpForm
+                members={[...rsvpDetail.rsvps, ...nonResponders]}
+                onSubmit={onSetMemberRsvp}
+              />
             )}
           </div>
         )}

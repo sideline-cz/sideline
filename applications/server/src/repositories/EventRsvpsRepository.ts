@@ -15,6 +15,11 @@ class RsvpWithMemberName extends Schema.Class<RsvpWithMemberName>('RsvpWithMembe
   username: Schema.OptionFromNullOr(Schema.String),
   nickname: Schema.OptionFromNullOr(Schema.String),
   display_name: Schema.OptionFromNullOr(Schema.String),
+  // The coach who set this answer for the member; all `None` when the member answered.
+  set_by_name: Schema.OptionFromNullOr(Schema.String),
+  set_by_nickname: Schema.OptionFromNullOr(Schema.String),
+  set_by_display_name: Schema.OptionFromNullOr(Schema.String),
+  set_by_username: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
 class RsvpRow extends Schema.Class<RsvpRow>('RsvpRow')({
@@ -30,12 +35,14 @@ const UpsertInput = Schema.Struct({
   team_member_id: Schema.String,
   response: Schema.String,
   message: Schema.OptionFromNullOr(Schema.String),
+  set_by: Schema.OptionFromNullOr(Schema.String),
 });
 
 const UpsertClearInput = Schema.Struct({
   event_id: Schema.String,
   team_member_id: Schema.String,
   response: Schema.String,
+  set_by: Schema.OptionFromNullOr(Schema.String),
 });
 
 class RsvpWithDiscordInfo extends Schema.Class<RsvpWithDiscordInfo>('RsvpWithDiscordInfo')({
@@ -97,10 +104,14 @@ const make = Effect.gen(function* () {
     execute: (eventId) => sql`
       SELECT r.id, r.event_id, r.team_member_id, r.response, r.message,
              u.name AS member_name, u.username,
-             u.discord_nickname AS nickname, u.discord_display_name AS display_name
+             u.discord_nickname AS nickname, u.discord_display_name AS display_name,
+             su.name AS set_by_name, su.discord_nickname AS set_by_nickname,
+             su.discord_display_name AS set_by_display_name, su.username AS set_by_username
       FROM event_rsvps r
       JOIN team_members tm ON tm.id = r.team_member_id
       LEFT JOIN users u ON u.id = tm.user_id
+      LEFT JOIN team_members stm ON stm.id = r.set_by
+      LEFT JOIN users su ON su.id = stm.user_id
       WHERE r.event_id = ${eventId}
       ORDER BY r.created_at ASC
     `,
@@ -156,10 +167,10 @@ const make = Effect.gen(function* () {
         FROM event_rsvps
         WHERE event_id = ${input.event_id} AND team_member_id = ${input.team_member_id}
       )
-      INSERT INTO event_rsvps (event_id, team_member_id, response, message)
-      VALUES (${input.event_id}, ${input.team_member_id}, ${input.response}, ${input.message})
+      INSERT INTO event_rsvps (event_id, team_member_id, response, message, set_by)
+      VALUES (${input.event_id}, ${input.team_member_id}, ${input.response}, ${input.message}, ${input.set_by})
       ON CONFLICT (event_id, team_member_id)
-      DO UPDATE SET response = ${input.response}, message = COALESCE(${input.message}, event_rsvps.message), updated_at = now()
+      DO UPDATE SET response = ${input.response}, message = COALESCE(${input.message}, event_rsvps.message), set_by = ${input.set_by}, updated_at = now()
       RETURNING id, event_id, team_member_id, response, message,
                 (SELECT prior_response FROM prior) AS prior_response
     `,
@@ -174,10 +185,10 @@ const make = Effect.gen(function* () {
         FROM event_rsvps
         WHERE event_id = ${input.event_id} AND team_member_id = ${input.team_member_id}
       )
-      INSERT INTO event_rsvps (event_id, team_member_id, response, message)
-      VALUES (${input.event_id}, ${input.team_member_id}, ${input.response}, NULL)
+      INSERT INTO event_rsvps (event_id, team_member_id, response, message, set_by)
+      VALUES (${input.event_id}, ${input.team_member_id}, ${input.response}, NULL, ${input.set_by})
       ON CONFLICT (event_id, team_member_id)
-      DO UPDATE SET response = ${input.response}, message = NULL, updated_at = now()
+      DO UPDATE SET response = ${input.response}, message = NULL, set_by = ${input.set_by}, updated_at = now()
       RETURNING id, event_id, team_member_id, response, message,
                 (SELECT prior_response FROM prior) AS prior_response
     `,
@@ -435,10 +446,23 @@ const make = Effect.gen(function* () {
     response: EventRsvp.RsvpResponse,
     message: Option.Option<string>,
     clearMessage = false,
+    // The coach answering for the member. `None` (every self-answer) resets it.
+    setBy: Option.Option<TeamMember.TeamMemberId> = Option.none(),
   ) =>
     (clearMessage
-      ? upsertClearing({ event_id: eventId, team_member_id: teamMemberId, response })
-      : upsert({ event_id: eventId, team_member_id: teamMemberId, response, message })
+      ? upsertClearing({
+          event_id: eventId,
+          team_member_id: teamMemberId,
+          response,
+          set_by: setBy,
+        })
+      : upsert({
+          event_id: eventId,
+          team_member_id: teamMemberId,
+          response,
+          message,
+          set_by: setBy,
+        })
     ).pipe(
       catchSqlErrors,
       Effect.map((row) => ({

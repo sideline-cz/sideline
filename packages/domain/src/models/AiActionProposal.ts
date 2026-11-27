@@ -20,6 +20,7 @@ export const AiActionName = Schema.Literals([
   'cancel_event',
   'mark_attendance',
   'set_my_rsvp',
+  'set_member_rsvp',
   'create_group',
   'add_group_member',
   'remove_group_member',

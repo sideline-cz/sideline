@@ -3,11 +3,13 @@ import type {
   EventApi,
   EventAttendanceApi,
   EventRosterApi,
+  EventRsvp,
   EventRsvpApi,
   EventTypeApi,
   GroupApi,
   PlayerRatingApi,
   Roster as RosterDomain,
+  TeamMember,
   TrainingTypeApi,
 } from '@sideline/domain';
 import { Event, EventSeries, EventType, GroupModel, Team, TrainingType } from '@sideline/domain';
@@ -492,6 +494,37 @@ export function EventDetailPage({
     [teamIdBranded, eventIdBranded, router],
   );
 
+  const handleSetMemberRsvp = React.useCallback(
+    (memberId: TeamMember.TeamMemberId, response: EventRsvp.RsvpResponse, message: string) =>
+      ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.eventRsvp.setMemberRsvp({
+            params: { teamId: teamIdBranded, eventId: eventIdBranded, memberId },
+            // A blank note keeps the member's stored one; only a typed note replaces it.
+            payload: {
+              response,
+              message: message.trim() === '' ? Option.none() : Option.some(message),
+            },
+          }),
+        ),
+        Effect.catchTag('EventRsvpMessageRequired', () =>
+          Effect.fail(ClientError.make(tr('rsvp_messageRequired'))),
+        ),
+        Effect.catchTag('EventRsvpProfileIncomplete', () =>
+          Effect.fail(ClientError.make(tr('rsvp_profileIncomplete'))),
+        ),
+        Effect.catchTag('RsvpDeadlinePassed', () =>
+          Effect.fail(ClientError.make(tr('rsvp_lockedJustNow'))),
+        ),
+        Effect.catchTag('EventRsvpMemberNotFound', () =>
+          Effect.fail(ClientError.make(tr('rsvp_setForMember_memberNotFound'))),
+        ),
+        Effect.mapError(() => ClientError.make(tr('rsvp_submitFailed'))),
+        Effect.tap(() => Effect.sync(() => router.invalidate())),
+      ),
+    [teamIdBranded, eventIdBranded, router],
+  );
+
   return (
     <div>
       <header className='mb-4 flex items-start justify-between gap-4'>
@@ -898,6 +931,7 @@ export function EventDetailPage({
               rsvpDetail={rsvpDetail}
               nonResponders={nonResponders}
               onRsvpSubmit={handleRsvpSubmit}
+              onSetMemberRsvp={handleSetMemberRsvp}
             />
           </div>
         )}

@@ -515,7 +515,16 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
     return Effect.succeed(results);
   },
   findRsvpsByEventId: (eventId: Event.EventId) => {
-    const results = Array.from(rsvpsStore.values()).filter((r) => r.event_id === eventId);
+    const results = Array.from(rsvpsStore.values())
+      .filter((r) => r.event_id === eventId)
+      // Every answer in this harness is the member's own.
+      .map((r) => ({
+        ...r,
+        set_by_name: Option.none(),
+        set_by_nickname: Option.none(),
+        set_by_display_name: Option.none(),
+        set_by_username: Option.none(),
+      }));
     return Effect.succeed(results);
   },
   findByEventAndMember: (input: { event_id: string; team_member_id: string }) => {
