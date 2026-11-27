@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.79.1
+
+### 🐛 Fixes
+- refuse plan-side changes that re-price paid members into another currency (#847)
+
 ## 0.79.0
 
 ### 🚀 Features
