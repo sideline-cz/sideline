@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.60.0
+
+### 🚀 Features
+- let a coach set another member's RSVP (web + AI assistant) (#852)
+
+### 🐛 Fixes
+- show the currency refusal when an assistant plan move hits it (#851)
+
 ## 0.59.0
 
 ### 🚀 Features
