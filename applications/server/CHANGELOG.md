@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.91.0
+
+### 🚀 Features
+- move all LLM calls from OpenAI onto ai-sessions (#849)
+
 ## 0.90.0
 
 ### 🚀 Features
