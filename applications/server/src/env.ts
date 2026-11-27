@@ -49,11 +49,13 @@ export const env = createEnv({
     EMAIL_WEBHOOK_SIGNING_SECRET: Schema.toStandardSchemaV1(
       Schema.RedactedFromValue(Schema.NonEmptyString),
     ),
-    LLM_API_URL: Schema.String.pipe(
+    // ai-sessions (Claude behind an OpenAI-compatible API). Both unset → LlmClient uses its stub.
+    AI_SESSIONS_URL: Schema.String.pipe(
       Schemas.Optional(() => ''),
       Schema.toStandardSchemaV1,
     ),
-    LLM_API_KEY: Schema.toStandardSchemaV1(
+    // Fallback only: LlmClient reads /run/secrets/AI_SESSIONS_TOKEN first.
+    AI_SESSIONS_TOKEN: Schema.toStandardSchemaV1(
       Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
     ),
     EMAIL_IMAP_ENCRYPTION_KEY: Schema.toStandardSchemaV1(
@@ -65,10 +67,6 @@ export const env = createEnv({
     // one is a compromise of both and neither ever gets rotated independently.
     FIO_TOKEN_ENCRYPTION_KEY: Schema.toStandardSchemaV1(
       Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
-    ),
-    LLM_MODEL: Schema.String.pipe(
-      Schemas.Optional(() => 'gpt-4o-mini'),
-      Schema.toStandardSchemaV1,
     ),
     // Blocker D (whole-series review of `fix/discord-onboarding-webapp`) — the kill switch the
     // PR-9 rollout plan requires before the Discord-join enforcement redirect goes live: this

@@ -14,7 +14,7 @@
 //
 //   For the "stub provider" (no API key configured) path: we rely on
 //   `LlmClient.Default` with the real env — in test environments
-//   `LLM_API_URL` and `LLM_API_KEY` are unset, so the stub path activates.
+//   `AI_SESSIONS_URL` and `AI_SESSIONS_TOKEN` are unset, so the stub path activates.
 
 import { it as itEffect } from '@effect/vitest';
 import { Effect, Layer, Redacted } from 'effect';
@@ -89,9 +89,7 @@ const makeLlmClientRealWithHttp = (httpLayer: Layer.Layer<HttpClient.HttpClient>
   Layer.effect(
     LlmClient,
     HttpClient.HttpClient.asEffect().pipe(
-      Effect.map((client) =>
-        makeReal('https://api.test/v1', Redacted.make('test-key'), 'gpt-4o-mini', client),
-      ),
+      Effect.map((client) => makeReal('https://api.test', Redacted.make('test-key'), client)),
     ),
   ).pipe(Layer.provide(httpLayer));
 
@@ -111,7 +109,7 @@ const makeMessages = (count: number, contentPrefix = 'Message') =>
 // ---------------------------------------------------------------------------
 
 describe('LlmClient.summarizeChannel — stub provider (no API key)', () => {
-  // When LLM_API_URL / LLM_API_KEY are not set in the test environment,
+  // When AI_SESSIONS_URL / AI_SESSIONS_TOKEN are not set in the test environment,
   // LlmClient.Default activates the deterministic stub.
 
   itEffect.effect('returns generated: false when stub path is active', () =>

@@ -94,7 +94,7 @@
 //     really how `teamName` gets resolved, since nothing in the plan text
 //     says so explicitly.
 
-import { describe, expect, it } from '@effect/vitest';
+import { afterAll, beforeAll, describe, expect, it } from '@effect/vitest';
 import type {
   Discord,
   DiscordReadRequest,
@@ -144,6 +144,11 @@ import {
   type LlmToolCall,
   STUB_UNAVAILABLE_MARKER,
 } from '~/services/LlmClient.js';
+import {
+  type FakeAiSessions,
+  jsonCompletion,
+  startFakeAiSessions,
+} from '../mocks/fakeAiSessions.js';
 
 // ---------------------------------------------------------------------------
 // Pinned plan §5 constants — see header comment for why these are literals,
@@ -1898,5 +1903,53 @@ describe('ChatAgent.respond — live Discord reads', () => {
       expect(reads.inserted).toHaveLength(2);
       expect(results[2]).not.toEqual({ error: 'live_read_limit' });
     }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The real LlmClient (tool calling emulated over json_schema) against a fake ai-sessions server.
+// ---------------------------------------------------------------------------
+
+describe('ChatAgent.respond — through the ai-sessions tool-calling emulation', () => {
+  let fake: FakeAiSessions;
+  beforeAll(async () => {
+    fake = await startFakeAiSessions();
+  });
+  afterAll(() => fake.close());
+
+  it.effect(
+    'a write action still ends as a proposal awaiting confirmation: tool_calls → proposal card, then an answer',
+    () =>
+      Effect.gen(function* () {
+        fake.reset();
+        fake.script(
+          jsonCompletion({
+            type: 'tool_calls',
+            calls: [{ name: 'propose_create_event', arguments: JSON.parse(proposeCallJson()) }],
+          }),
+          jsonCompletion({ type: 'answer', content: 'Please confirm the card to create it.' }),
+        );
+        const proposals = makeProposalsLayer();
+
+        const outcome = yield* runRespond(
+          creatorCtx(),
+          [userMsg('Create a practice')],
+          fake.layer,
+          {
+            proposalsLayer: proposals.layer,
+          },
+        );
+
+        expect(outcome._tag).toBe('Success');
+        if (outcome._tag !== 'Success') return;
+        // A proposal row, not an event: the user still has to confirm the card.
+        expect(Option.isSome(outcome.success.proposal)).toBe(true);
+        expect(proposals.inserted).toHaveLength(1);
+        expect(proposals.inserted[0]?.action).toBe('create_event');
+        expect(fake.requests).toHaveLength(2);
+        const second = fake.requests[1]?.body.messages ?? [];
+        expect(second.at(-1)?.role).toBe('user');
+        expect(second.at(-1)?.content).toContain('"status":"proposed"');
+      }),
   );
 });

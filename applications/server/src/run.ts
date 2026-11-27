@@ -266,7 +266,7 @@ const EmailSummarizerCronEffect = EmailSummarizer.asEffect().pipe(
   Effect.provide(
     EmailPostSyncEventsRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
   ),
-  Effect.provide(LlmClient.Default.pipe(Layer.provide(FetchHttpClient.layer))),
+  Effect.provide(LlmClient.Live),
 );
 
 const DiscordReadSweepCronEffect = DiscordReadSweepCron.pipe(
