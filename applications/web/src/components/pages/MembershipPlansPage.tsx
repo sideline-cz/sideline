@@ -225,7 +225,15 @@ function MembershipPlanFormDialog({
                 setNameError(tr('membershipPlan_nameAlreadyTaken'));
                 return Effect.fail(new SilentClientError({ message: error._tag }));
               }
-              return Effect.fail(ClientError.make(tr('membershipPlan_updateFailed')));
+              return Effect.fail(
+                ClientError.make(
+                  tr(
+                    error._tag === 'MembershipPlanCurrencyHasPayments'
+                      ? 'membershipPlan_plan_currencyHasPayments'
+                      : 'membershipPlan_updateFailed',
+                  ),
+                ),
+              );
             }),
             run({ success: tr('membershipPlan_updated') }),
           )
@@ -696,7 +704,15 @@ export function MembershipPlansPage({
             params: { teamId: teamIdBranded, membershipPlanId: plan.membershipPlanId },
           }),
         ),
-        Effect.mapError(() => ClientError.make(tr('membershipPlan_defaultChangeFailed'))),
+        Effect.mapError((e) =>
+          ClientError.make(
+            tr(
+              e._tag === 'MembershipPlanCurrencyHasPayments'
+                ? 'membershipPlan_plan_currencyHasPayments'
+                : 'membershipPlan_defaultChangeFailed',
+            ),
+          ),
+        ),
         run({ success: tr('membershipPlan_defaultChanged') }),
       );
       if (Option.isSome(result)) {
@@ -897,7 +913,9 @@ export function MembershipPlansPage({
         Effect.mapError((e) =>
           e._tag === 'MembershipPlanIsDefault'
             ? ClientError.make(tr('membershipPlan_cantArchiveDefault'))
-            : ClientError.make(tr('membershipPlan_archiveFailed')),
+            : e._tag === 'MembershipPlanCurrencyHasPayments'
+              ? ClientError.make(tr('membershipPlan_plan_currencyHasPayments'))
+              : ClientError.make(tr('membershipPlan_archiveFailed')),
         ),
         run({ success: tr('membershipPlan_archived') }),
       );

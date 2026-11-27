@@ -336,6 +336,7 @@ export class MembershipPlanApiGroup extends HttpApiGroup.make('membershipPlan')
           Forbidden.pipe(HttpApiSchema.status(403)),
           MembershipPlanNotFound.pipe(HttpApiSchema.status(404)),
           MembershipPlanNameAlreadyTaken.pipe(HttpApiSchema.status(409)),
+          MembershipPlanCurrencyHasPayments.pipe(HttpApiSchema.status(409)),
         ],
         payload: MembershipPlanRequest,
         params: { teamId: TeamId, membershipPlanId: MembershipPlanId },
@@ -351,6 +352,7 @@ export class MembershipPlanApiGroup extends HttpApiGroup.make('membershipPlan')
         error: [
           Forbidden.pipe(HttpApiSchema.status(403)),
           MembershipPlanNotFound.pipe(HttpApiSchema.status(404)),
+          MembershipPlanCurrencyHasPayments.pipe(HttpApiSchema.status(409)),
         ],
         params: { teamId: TeamId, membershipPlanId: MembershipPlanId },
       },
@@ -367,6 +369,7 @@ export class MembershipPlanApiGroup extends HttpApiGroup.make('membershipPlan')
           Forbidden.pipe(HttpApiSchema.status(403)),
           MembershipPlanNotFound.pipe(HttpApiSchema.status(404)),
           MembershipPlanIsDefault.pipe(HttpApiSchema.status(409)),
+          MembershipPlanCurrencyHasPayments.pipe(HttpApiSchema.status(409)),
         ],
         params: { teamId: TeamId, membershipPlanId: MembershipPlanId },
       },

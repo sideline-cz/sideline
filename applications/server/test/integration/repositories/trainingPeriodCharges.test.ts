@@ -2069,6 +2069,118 @@ describe('membership_plans_pricing_recompute_trg — the widened WHEN clause', (
 });
 
 // ---------------------------------------------------------------------------
+// 1795280000 — the plan-side writes that re-price a PAID member into another currency
+//
+// 1795270000 guards `team_members.membership_plan_id`; a currency edit, a default switch and an
+// archive re-price members without touching it. `membership_plans_currency_guard_trg` refuses
+// them the same way; same-currency changes and unpaid members still go through.
+// ---------------------------------------------------------------------------
+
+describe('membership_plans_currency_guard_trg — plan-side cross-currency re-pricing', () => {
+  const pay = (
+    teamId: Team.TeamId,
+    member: { id: TeamMember.TeamMemberId },
+    captain: { user_id: unknown },
+    amountMinor: number,
+  ) =>
+    Effect.gen(function* () {
+      const fee = (yield* trainingFees(teamId))[0];
+      if (fee === undefined) throw new Error('expected a fee');
+      const assignment = yield* assignmentFor(fee.id, member.id);
+      if (assignment === undefined) throw new Error('expected an assignment');
+      const payments = yield* PaymentsRepository.asEffect();
+      yield* payments.insert({
+        feeAssignmentId: assignment.id as never,
+        teamMemberId: member.id,
+        amountMinor,
+        method: 'cash',
+        paidAt: DateTime.fromDateUnsafe(NOW),
+        note: Option.none(),
+        recordedByUserId: captain.user_id as never,
+      });
+    });
+
+  // A member on the CZK default, billed this month; `paid` decides whether they paid it.
+  const billed = (username: string, paid: boolean) =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam(username);
+      const member = yield* addBilledMember(team.id, `${username}-member`);
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK');
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      if (paid) yield* pay(team.id, member, captain, 100);
+      return { team };
+    });
+
+  const currencies = (teamId: Team.TeamId) =>
+    trainingFees(teamId).pipe(Effect.map((fees) => fees.map((f) => f.currency)));
+
+  it.effect('editing the CURRENCY of a plan a paid member is on is REFUSED', () =>
+    Effect.gen(function* () {
+      const { team } = yield* billed('xcur-plan-edit', true);
+
+      const err = yield* setDefaultPlanPrice(team.id, 100, 'EUR').pipe(Effect.flip);
+      expect(err._tag).toBe('MembershipPlanCurrencyHasPaymentsError');
+      expect(yield* currencies(team.id)).toEqual(['CZK']);
+
+      // Same currency, new price: not blocked.
+      yield* setDefaultPlanPrice(team.id, 120, 'CZK');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('switching the DEFAULT to a plan in another currency is REFUSED', () =>
+    Effect.gen(function* () {
+      const { team } = yield* billed('xcur-default', true);
+      const eurPlan = yield* createPlan(team.id, 8, 'EUR', 'Euro plan');
+      const czkPlan = yield* createPlan(team.id, 150, 'CZK', 'Premium');
+      const plans = yield* MembershipPlansRepository.asEffect();
+
+      const err = yield* plans
+        .setDefaultMembershipPlan(eurPlan.id as never, team.id)
+        .pipe(Effect.flip);
+      expect(err._tag).toBe('MembershipPlanCurrencyHasPaymentsError');
+      expect((yield* defaultPlan(team.id)).currency, 'rolled back').toBe('CZK');
+      expect(yield* currencies(team.id)).toEqual(['CZK']);
+
+      // Same currency: not blocked.
+      expect(yield* plans.setDefaultMembershipPlan(czkPlan.id as never, team.id)).toBe(1);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('ARCHIVING a plan whose paid members fall back to another currency is REFUSED', () =>
+    Effect.gen(function* () {
+      const { team, captain } = yield* seedTeam('xcur-archive');
+      const member = yield* addBilledMember(team.id, 'xcur-archive-member');
+      yield* setDefaultPlanPrice(team.id, 100, 'CZK');
+      const eurPlan = yield* createPlan(team.id, 8, 'EUR', 'Euro plan');
+      yield* selectPlanForMember(member.id, team.id, eurPlan.id);
+      const training = yield* createTraining(team.id, captain.id, TRAINING_START);
+      yield* confirm(training, team.id, captain.id, [{ team_member_id: member.id, present: true }]);
+      yield* pay(team.id, member, captain, 8);
+
+      const plans = yield* MembershipPlansRepository.asEffect();
+      const err = yield* plans
+        .archiveMembershipPlan(eurPlan.id as never, team.id)
+        .pipe(Effect.flip);
+      expect(err._tag).toBe('MembershipPlanCurrencyHasPaymentsError');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'with NO payments, a currency edit and a cross-currency default switch go through',
+    () =>
+      Effect.gen(function* () {
+        const { team } = yield* billed('xcur-unpaid', false);
+
+        yield* setDefaultPlanPrice(team.id, 100, 'EUR');
+        const usdPlan = yield* createPlan(team.id, 5, 'USD', 'Dollar plan');
+        const plans = yield* MembershipPlansRepository.asEffect();
+        expect(yield* plans.setDefaultMembershipPlan(usdPlan.id as never, team.id)).toBe(1);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // 24. The season boundary — "Give a season real dates"
 // ---------------------------------------------------------------------------
 //

@@ -3477,5 +3477,6 @@
   "finance_window_since": "Od {date}",
   "membershipPlan_currencyHasPayments": "Tento člen už má na současném typu členství platby v jiné měně. Než ho přesunete na typ členství v jiné měně, vyrovnejte nebo zrušte platby starého typu.",
   "membershipPlan_bulk_currencyHasPayments": "Nikdo nebyl přesunut: někteří z těchto členů už mají na současném typu členství platby v jiné měně. Nejdřív vyrovnejte nebo zrušte platby starého typu.",
-  "bot_membership_err_currency_has_payments": "Na současném typu členství už máš platby v jiné měně, takže na tenhle typ přejít nemůžeš. Požádej pokladníka, ať starý typ nejdřív vyrovná."
+  "bot_membership_err_currency_has_payments": "Na současném typu členství už máš platby v jiné měně, takže na tenhle typ přejít nemůžeš. Požádej pokladníka, ať starý typ nejdřív vyrovná.",
+  "membershipPlan_plan_currencyHasPayments": "Někteří dotčení členové už mají tento měsíc nebo sezónu platby v jiné měně. Než změníte měnu typu členství, výchozí typ nebo ho archivujete, vyrovnejte nebo zrušte tyto platby."
 }
