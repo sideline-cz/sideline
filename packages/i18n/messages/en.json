@@ -3477,5 +3477,6 @@
   "finance_window_since": "Since {date}",
   "membershipPlan_currencyHasPayments": "This member already has payments on their current plan in a different currency. Settle or clear the old plan's payments before moving them to a plan in another currency.",
   "membershipPlan_bulk_currencyHasPayments": "Nobody was moved: some of these members already have payments on their current plan in a different currency. Settle or clear the old plan's payments first.",
-  "bot_membership_err_currency_has_payments": "You already have payments on your current plan in a different currency, so you can't switch to this plan. Ask your treasurer to settle the old plan first."
+  "bot_membership_err_currency_has_payments": "You already have payments on your current plan in a different currency, so you can't switch to this plan. Ask your treasurer to settle the old plan first.",
+  "membershipPlan_plan_currencyHasPayments": "Some members this affects already have payments this month or season in a different currency. Settle or clear those payments before changing the plan's currency, the default plan, or archiving it."
 }

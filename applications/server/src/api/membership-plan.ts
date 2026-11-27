@@ -247,6 +247,7 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
               Effect.catchTag('MembershipPlanNameAlreadyTakenError', () =>
                 Effect.fail(new MembershipPlanApi.MembershipPlanNameAlreadyTaken()),
               ),
+              Effect.catchTag('MembershipPlanCurrencyHasPaymentsError', toCurrencyError),
               Effect.catchTag(
                 'NoSuchElementError',
                 LogicError.withMessage(() => 'Failed updating membership plan — no row returned'),
@@ -263,7 +264,9 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                 requirePermission(membership, 'finance:manage_fees', forbidden),
               ),
               Effect.bind('rowsAffected', () =>
-                plans.setDefaultMembershipPlan(membershipPlanId, teamId),
+                plans
+                  .setDefaultMembershipPlan(membershipPlanId, teamId)
+                  .pipe(Effect.catchTag('MembershipPlanCurrencyHasPaymentsError', toCurrencyError)),
               ),
               // 0 rows affected IS the tenancy + archived-plan check — `markDefaultQuery` scopes
               // by `team_id` and requires `archived_at IS NULL`, so a foreign-team id and an
@@ -294,7 +297,9 @@ export const MembershipPlanApiLive = HttpApiBuilder.group(
                 ),
               ),
               Effect.bind('rowsAffected', () =>
-                plans.archiveMembershipPlan(membershipPlanId, teamId),
+                plans
+                  .archiveMembershipPlan(membershipPlanId, teamId)
+                  .pipe(Effect.catchTag('MembershipPlanCurrencyHasPaymentsError', toCurrencyError)),
               ),
               // 0 rows affected means EITHER the `NOT is_default` predicate refused (still
               // active, still default) OR a concurrent request archived it first (already gone).

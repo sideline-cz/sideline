@@ -10,7 +10,9 @@ export class MembershipPlanNameAlreadyTakenError extends Schema.TaggedErrorClass
 ) {}
 
 // The member has payments on their current plan's open fees and the target plan bills in another
-// currency. Raised by `team_members_plan_currency_guard_trg` (1795270000) on every plan write.
+// currency. Raised by `team_members_plan_currency_guard_trg` (1795270000) on every member plan
+// write, and by `membership_plans_currency_guard_trg` (1795280000) when a plan's currency edit,
+// default switch or archive would re-price such members.
 export class MembershipPlanCurrencyHasPaymentsError extends Schema.TaggedErrorClass<MembershipPlanCurrencyHasPaymentsError>()(
   'MembershipPlanCurrencyHasPaymentsError',
   {},
@@ -702,6 +704,7 @@ const make = Effect.gen(function* () {
         'idx_membership_plans_team_name',
         () => new MembershipPlanNameAlreadyTakenError(),
       ),
+      catchCurrencyHasPayments,
       catchSqlErrors,
     );
 
@@ -726,12 +729,14 @@ const make = Effect.gen(function* () {
       )
       .pipe(
         Effect.catchTag('MarkDefaultNoOp', () => Effect.succeed(0)),
+        catchCurrencyHasPayments,
         catchSqlErrors,
       );
 
   const archiveMembershipPlan = (id: MembershipPlan.MembershipPlanId, teamId: Team.TeamId) =>
     archiveQuery({ id, team_id: teamId }).pipe(
       Effect.map((rows) => rows.length),
+      catchCurrencyHasPayments,
       catchSqlErrors,
     );
 
