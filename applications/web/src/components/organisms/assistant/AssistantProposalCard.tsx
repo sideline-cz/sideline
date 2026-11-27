@@ -50,7 +50,13 @@ interface AssistantProposalCardProps {
   readonly teamId: string;
 }
 
-type ProposalErrorReason = 'notFound' | 'alreadyUsed' | 'expired' | 'forbidden' | 'generic';
+type ProposalErrorReason =
+  | 'notFound'
+  | 'alreadyUsed'
+  | 'expired'
+  | 'forbidden'
+  | 'planCurrencyHasPayments'
+  | 'generic';
 
 // Component-local discriminated union — `_tag`, not the wire `type` ProposalFieldValue uses.
 // Different layers, no collision (AssistantTurnError's `AssistantTurnErrorReason` is the
@@ -205,6 +211,7 @@ const proposalErrorMessages: Record<ProposalErrorReason, () => string> = {
   alreadyUsed: () => tr('assistant_proposal_errorAlreadyUsed'),
   expired: () => tr('assistant_proposal_errorExpired'),
   forbidden: () => tr('assistant_proposal_errorForbidden'),
+  planCurrencyHasPayments: () => tr('membershipPlan_currencyHasPayments'),
   generic: () => tr('assistant_proposal_errorGeneric'),
 };
 
@@ -238,6 +245,8 @@ function classifyProposalFailure(squashed: unknown): ProposalErrorReason {
       return 'forbidden';
     case 'AiProposalActionForbidden':
       return 'forbidden';
+    case 'AiProposalPlanCurrencyHasPayments':
+      return 'planCurrencyHasPayments';
     default:
       return 'generic';
   }

@@ -613,6 +613,50 @@ describe('AI finance write actions on real Postgres', () => {
       }).pipe(Effect.provide(SeedLayer)),
   );
 
+  it.effect(
+    'assign_membership_plan: a paid member moved to another currency gets the specific refusal',
+    () =>
+      Effect.gen(function* () {
+        const { sql, teamA, admin, player, proPlan } = yield* setup;
+        // On a CZK plan with a payment on this month's CZK training fee: the guard trigger
+        // (1795270000) refuses any move to a plan billing in another currency.
+        yield* sql`UPDATE team_members SET membership_plan_id = ${proPlan} WHERE id = ${player.memberId}`;
+        const [fee] = yield* sql<{ id: string }>`
+          INSERT INTO fees (team_id, name, amount_minor, currency, target_scope, kind, period_start)
+          VALUES (${teamA.id}, 'Trainings', 0, 'CZK', 'custom', 'training',
+                  training_period_start(now(), ${teamA.id}))
+          RETURNING id::text AS id
+        `;
+        const [assignment] = yield* sql<{ id: string }>`
+          INSERT INTO fee_assignments (fee_id, team_member_id, amount_minor)
+          VALUES (${fee?.id}, ${player.memberId}, 10000)
+          RETURNING id::text AS id
+        `;
+        yield* sql`
+          INSERT INTO payments
+            (fee_assignment_id, team_member_id, amount_minor, method, paid_at, recorded_by_user_id)
+          VALUES (${assignment?.id}, ${player.memberId}, 10000, 'cash', now(),
+                  ${admin.ctx.membership.user_id})
+        `;
+        yield* sql`
+          INSERT INTO membership_plans (team_id, name, currency, price_minor)
+          VALUES (${teamA.id}, 'Euro', 'EUR', 10000)
+        `;
+        const { proposalId } = yield* proposeOk(
+          'assign_membership_plan',
+          { member: PLAYER, plan: 'Euro' },
+          admin.ctx,
+        );
+        const response = yield* confirm(teamA.id, proposalId, admin.token);
+        expect(response.status).toBe(409);
+        expect(yield* json(response)).toMatchObject({ _tag: 'AiProposalPlanCurrencyHasPayments' });
+        const [row] = yield* sql<{ plan: string | null }>`
+          SELECT membership_plan_id::text AS plan FROM team_members WHERE id = ${player.memberId}
+        `;
+        expect(row?.plan).toBe(proPlan);
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+
   it.effect("assign_membership_plan: another team's plan is unreachable by name and by id", () =>
     Effect.gen(function* () {
       const { sql, teamA, admin, player, bPlayer, bPlan, proPlan } = yield* setup;
