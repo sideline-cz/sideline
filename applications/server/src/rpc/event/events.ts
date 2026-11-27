@@ -2,6 +2,7 @@ import {
   Discord,
   EventRosterModel,
   EventRpcEvents,
+  EventRsvp,
   RosterModel,
   TeamMember,
 } from '@sideline/domain';
@@ -294,6 +295,26 @@ export const constructEvent = Match.type<EventSyncEventRow>().pipe(
         event_id: r.event_id,
         new_channel_id: r.discord_target_channel_id,
         old_channel_id: r.discord_role_id,
+      }),
+    ),
+  ),
+  // Column overloads documented on `emitRsvpSetByCoach` in EventSyncEventsRepository.
+  Match.when({ event_type: 'rsvp_set_by_coach' }, (r) =>
+    Effect.succeed(
+      new EventRpcEvents.RsvpSetByCoachEvent({
+        id: r.id,
+        team_id: r.team_id,
+        guild_id: r.guild_id,
+        event_id: r.event_id,
+        title: r.event_title,
+        start_at: r.event_start_at,
+        all_day: r.event_all_day,
+        start_date: r.event_start_date,
+        member_discord_id: r.claimed_by_discord_id,
+        response: Schema.decodeUnknownSync(EventRsvp.RsvpResponse)(
+          Option.getOrElse(r.event_description, () => ''),
+        ),
+        coach_name: Option.getOrElse(r.event_location, () => '—'),
       }),
     ),
   ),

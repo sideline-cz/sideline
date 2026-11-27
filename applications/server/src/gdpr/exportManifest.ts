@@ -279,6 +279,17 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
     reason:
       "The RSVP message is free text the person wrote. Attendance itself is part of other members' event history and stays.",
   }),
+  // `set_by` is the coach who answered for someone else. Separate entry on purpose: exporting or
+  // scrubbing `event_rsvps` via `set_by` would hand the coach other members' notes, or wipe them.
+  skip(
+    'event_rsvps',
+    'team_members',
+    ['set_by'],
+    "Each row is another member's answer, with their own note; the coach only set it. Exporting " +
+      "it to the coach would disclose other people's data, and the member's own export already " +
+      'carries the row.',
+    authorship,
+  ),
   own('event_attendance', 'team_members', ['team_member_id', 'confirmed_by'], {
     kind: 'keep',
     reason:

@@ -49,6 +49,10 @@ vi.mock('~/lib/translations.js', () => ({
       rsvp_saveNote: 'Save note',
       rsvp_savingNote: 'Saving...',
       event_rsvpSubmitted: 'RSVP submitted',
+      rsvp_setBy: 'set by {name}',
+      rsvp_setForMember_member: 'Member',
+      rsvp_setForMember_response: 'Answer',
+      rsvp_setForMember_save: 'Save answer',
     };
     const template = map[key] ?? key;
     if (!params) return template;
@@ -85,6 +89,7 @@ type RsvpEntryView = {
   response: RsvpResponse;
   message: Option.Option<string>;
   displayName: string;
+  setByName: Option.Option<string>;
 };
 
 type RsvpDetailView = {
@@ -96,6 +101,7 @@ type RsvpDetailView = {
   maybeCount: number;
   comingLaterCount: number;
   canRsvp: boolean;
+  canSetMemberRsvps: boolean;
   minPlayersThreshold: number;
   // T7 — `OptionFromOptionalKey` on the wire, so `None` is both "no lock
   // configured" and "an older server that has never heard of one".
@@ -118,6 +124,7 @@ function makeRsvpEntry(overrides: Partial<RsvpEntryView> = {}): RsvpEntryView {
     response: 'yes',
     message: Option.none(),
     displayName: 'Alice',
+    setByName: Option.none(),
     ...overrides,
   };
 }
@@ -132,6 +139,7 @@ function makeRsvpDetail(overrides: Partial<RsvpDetailView> = {}): RsvpDetailView
     maybeCount: 0,
     comingLaterCount: 0,
     canRsvp: true,
+    canSetMemberRsvps: false,
     minPlayersThreshold: 0,
     rsvpClosesAt: Option.none(),
     attendingGenderCounts: Option.none(),
@@ -162,6 +170,7 @@ function renderPanel({
     displayName: string;
   }>,
   onRsvpSubmit = vi.fn(() => 'mock-effect'),
+  onSetMemberRsvp = vi.fn(() => 'mock-effect'),
 } = {}) {
   render(
     <EventRsvpPanel
@@ -169,9 +178,10 @@ function renderPanel({
       rsvpDetail={rsvpDetail as never}
       nonResponders={nonResponders as never}
       onRsvpSubmit={onRsvpSubmit as never}
+      onSetMemberRsvp={onSetMemberRsvp as never}
     />,
   );
-  return { onRsvpSubmit };
+  return { onRsvpSubmit, onSetMemberRsvp };
 }
 
 // ---------------------------------------------------------------------------
@@ -611,6 +621,40 @@ describe('EventRsvpPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /Responses/ }));
 
     expect(screen.getByText('Alice')).not.toBeNull();
+  });
+
+  it("a coach sets a non-responder's answer; a coach-set answer shows who set it", async () => {
+    const { onSetMemberRsvp } = renderPanel({
+      rsvpDetail: makeRsvpDetail({
+        canSetMemberRsvps: true,
+        rsvps: [makeRsvpEntry({ setByName: Option.some('Coach Carl') })],
+      }),
+      nonResponders: [
+        {
+          teamMemberId: 'member-2',
+          memberName: Option.none(),
+          username: Option.none(),
+          displayName: 'Bob',
+        },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Responses/ }));
+    expect(screen.getByText(/set by Coach Carl/)).not.toBeNull();
+
+    const save = screen.getByRole('button', { name: 'Save answer' });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Member'), { target: { value: 'member-2' } });
+    fireEvent.change(screen.getByLabelText('Answer'), { target: { value: 'no' } });
+    fireEvent.click(save);
+    await waitFor(() => {
+      expect(onSetMemberRsvp).toHaveBeenCalledWith('member-2', 'no', '');
+    });
+  });
+
+  it('no coach form without canSetMemberRsvps', () => {
+    renderPanel({ rsvpDetail: makeRsvpDetail({ rsvps: [makeRsvpEntry()] }) });
+    fireEvent.click(screen.getByRole('button', { name: /Responses/ }));
+    expect(screen.queryByRole('button', { name: 'Save answer' })).toBeNull();
   });
 
   it('the disclosure toggle tracks its state in aria-expanded', () => {

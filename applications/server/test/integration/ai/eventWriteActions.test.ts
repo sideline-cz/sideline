@@ -48,6 +48,7 @@ import type { ToolContext } from '~/services/ai/toolTypes.js';
 import { proposeAction } from '~/services/ai/writeTools.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { LlmClient } from '~/services/LlmClient.js';
+import { submitMemberRsvpTx } from '~/services/RsvpWrites.js';
 import { MockChatAgentLayer, MockChatRateLimiterLayer } from '../../mocks/aiChatMocks.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
@@ -620,6 +621,127 @@ describe('set_my_rsvp on real Postgres', () => {
       const response = yield* confirm(teamA.id, proposalId, player.token);
       expect(response.status).toBe(404);
       expect(yield* rsvpRows(upcoming.id)).toHaveLength(0);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+describe('set_member_rsvp / submitMemberRsvpTx on real Postgres', () => {
+  const rsvpRows = (eventId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      return yield* sql<{ team_member_id: string; response: string; set_by: string | null }>`
+        SELECT team_member_id, response, set_by FROM event_rsvps WHERE event_id = ${eventId}
+      `;
+    });
+
+  const coachDms = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    return yield* sql<{ claimed_by_member_id: string; event_description: string }>`
+      SELECT claimed_by_member_id, event_description FROM event_sync_events
+      WHERE event_type = 'rsvp_set_by_coach'
+    `;
+  });
+
+  // `player-<discordId>` is the username `member()` gives, and with no profile name it is the
+  // display name `list_members` shows.
+  const playerName = 'player-910000000000000902';
+
+  it.effect('a non-coach is refused: no tool, a forbidden propose, a 403-class write', () =>
+    Effect.gen(function* () {
+      const { teamA, player, player2, upcoming } = yield* setup;
+      expect(visibleTools(player.ctx).map((t) => t.name)).not.toContain('propose_set_member_rsvp');
+      const outcome = yield* proposeAction(
+        'set_member_rsvp',
+        { eventId: upcoming.id, member: playerName, response: 'yes' },
+        player2.ctx,
+      );
+      expect(outcome.result).toMatchObject({ error: 'forbidden' });
+
+      // The HTTP endpoint's body, called directly.
+      const refused = yield* submitMemberRsvpTx({
+        teamId: teamA.id,
+        actor: player2.ctx.membership,
+        memberId: player.memberId,
+        eventId: upcoming.id,
+        response: 'yes',
+        message: Option.none(),
+      }).pipe(Effect.flip);
+      expect(refused._tag).toBe('EventRsvpForbidden');
+      expect(yield* rsvpRows(upcoming.id)).toHaveLength(0);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('the owner-group row gate: a captain outside the owning group is refused', () =>
+    Effect.gen(function* () {
+      const { teamA, captain, player, elite, coached } = yield* setup;
+      const args = (eventId: typeof elite.id) => ({
+        teamId: teamA.id,
+        actor: captain.ctx.membership,
+        memberId: player.memberId,
+        eventId,
+        response: 'no' as const,
+        message: Option.none(),
+      });
+      expect((yield* submitMemberRsvpTx(args(elite.id)).pipe(Effect.flip))._tag).toBe(
+        'EventRsvpForbidden',
+      );
+      yield* submitMemberRsvpTx(args(coached.id));
+      expect(yield* rsvpRows(coached.id)).toEqual([
+        { team_member_id: player.memberId, response: 'no', set_by: captain.memberId },
+      ]);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('propose writes nothing; confirm records the coach and queues the member DM', () =>
+    Effect.gen(function* () {
+      const { teamA, admin, player, upcoming } = yield* setup;
+      const { proposalId, summary } = yield* proposeOk(
+        'set_member_rsvp',
+        { eventId: upcoming.id, member: playerName, response: 'yes' },
+        admin.ctx,
+      );
+      expect(summaryValue(summary, 'member')).toEqual({ type: 'text', value: playerName });
+      expect(yield* rsvpRows(upcoming.id)).toHaveLength(0);
+      expect(yield* coachDms).toHaveLength(0);
+
+      const response = yield* confirm(teamA.id, proposalId, admin.token);
+      expect(response.status).toBe(200);
+      expect(yield* rsvpRows(upcoming.id)).toEqual([
+        { team_member_id: player.memberId, response: 'yes', set_by: admin.memberId },
+      ]);
+      expect(yield* coachDms).toEqual([
+        { claimed_by_member_id: player.memberId, event_description: 'yes' },
+      ]);
+
+      // The member answering for themselves clears the coach marker.
+      const own = yield* proposeOk(
+        'set_my_rsvp',
+        { eventId: upcoming.id, response: 'no' },
+        player.ctx,
+      );
+      expect((yield* confirm(teamA.id, own.proposalId, player.token)).status).toBe(200);
+      expect(yield* rsvpRows(upcoming.id)).toEqual([
+        { team_member_id: player.memberId, response: 'no', set_by: null },
+      ]);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect("the member's rules apply: a note is required, the deadline holds", () =>
+    Effect.gen(function* () {
+      const { admin, upcoming, started } = yield* setup;
+      const refusal = (args: Record<string, unknown>) =>
+        proposeAction('set_member_rsvp', args, admin.ctx).pipe(
+          Effect.map((o) => o.result as { error?: string; detail?: string }),
+        );
+      const noNote = yield* refusal({
+        eventId: upcoming.id,
+        member: playerName,
+        response: 'maybe',
+      });
+      expect(noNote.detail).toContain('message');
+      const late = yield* refusal({ eventId: started.id, member: playerName, response: 'yes' });
+      expect(late.detail).toContain('closed');
+      expect(yield* proposalCount).toBe(0);
     }).pipe(Effect.provide(SeedLayer)),
   );
 });

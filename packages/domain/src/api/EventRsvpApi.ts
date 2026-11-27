@@ -16,6 +16,9 @@ export class RsvpEntry extends Schema.Class<RsvpEntry>('RsvpEntry')({
   message: Schema.OptionFromNullOr(Schema.String),
   /** Resolved display name (profile name → Discord nickname → Discord display name → username). */
   displayName: Schema.String,
+  // The coach who set this answer for the member; `None` when the member answered themselves.
+  // `OptionFromOptionalKey`: web bundles a FROZEN copy of this schema.
+  setByName: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class EventRsvpDetail extends Schema.Class<EventRsvpDetail>('EventRsvpDetail')({
@@ -46,6 +49,9 @@ export class EventRsvpDetail extends Schema.Class<EventRsvpDetail>('EventRsvpDet
   // a required field would fail to decode against a mid-rolling-deploy server rather than
   // degrading to today's UI.
   attendingGenderCounts: Schema.OptionFromOptionalKey(GenderCounts),
+  // The viewer may set other members' answers (`setMemberRsvp`). Defaults to `false` so an
+  // older server's payload simply hides the control.
+  canSetMemberRsvps: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
 }) {}
 
 export const SubmitRsvpRequest = Schema.Struct({
@@ -80,6 +86,11 @@ export class RsvpMessageRequired extends Schema.TaggedErrorClass<RsvpMessageRequ
 // `Forbidden` family (AGENTS.md → "HTTP API Error Tags"), not 400.
 export class RsvpProfileIncomplete extends Schema.TaggedErrorClass<RsvpProfileIncomplete>()(
   'EventRsvpProfileIncomplete',
+  {},
+) {}
+
+export class RsvpMemberNotFound extends Schema.TaggedErrorClass<RsvpMemberNotFound>()(
+  'EventRsvpMemberNotFound',
   {},
 ) {}
 
@@ -120,6 +131,23 @@ export class EventRsvpApiGroup extends HttpApiGroup.make('eventRsvp')
       ],
       payload: SubmitRsvpRequest,
       params: { teamId: TeamId, eventId: EventId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    // A coach setting another member's answer. Same payload and rules as `submitRsvp`, applied
+    // to the member, behind the coach's `event:edit` + owner-group gate.
+    HttpApiEndpoint.put('setMemberRsvp', '/teams/:teamId/events/:eventId/rsvps/:memberId', {
+      success: Schema.Void.pipe(HttpApiSchema.status(204)),
+      error: [
+        Forbidden.pipe(HttpApiSchema.status(403)),
+        EventNotFound.pipe(HttpApiSchema.status(404)),
+        RsvpMemberNotFound.pipe(HttpApiSchema.status(404)),
+        RsvpDeadlinePassed.pipe(HttpApiSchema.status(400)),
+        RsvpMessageRequired.pipe(HttpApiSchema.status(400)),
+        RsvpProfileIncomplete.pipe(HttpApiSchema.status(403)),
+      ],
+      payload: SubmitRsvpRequest,
+      params: { teamId: TeamId, eventId: EventId, memberId: TeamMemberId },
     }).middleware(AuthMiddleware),
   )
   .add(

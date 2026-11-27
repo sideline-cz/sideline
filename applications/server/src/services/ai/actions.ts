@@ -109,7 +109,12 @@ import {
   createManagedChannel,
   setManagedChannelAccessTx,
 } from '~/services/ManagedChannels.js';
-import { checkRsvpSubmittable, submitRsvpTx } from '~/services/RsvpWrites.js';
+import {
+  checkMemberRsvpSettable,
+  checkRsvpSubmittable,
+  submitMemberRsvpTx,
+  submitRsvpTx,
+} from '~/services/RsvpWrites.js';
 import { applyDiscordFormat, DEFAULT_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 
 // ---------------------------------------------------------------------------
@@ -1329,6 +1334,105 @@ const confirmSetMyRsvp = (payloadJson: string, ctx: ConfirmContext) =>
     }),
   );
 
+// --- set_member_rsvp ---------------------------------------------------------
+// A coach answering for ANOTHER member, through the same write as the web (`submitMemberRsvpTx`):
+// the member's own rules plus the coach's `event:edit` + owner-group gate. The member is named
+// as `list_members` shows them and resolved to an id at propose time.
+
+const SetMemberRsvpArgs = Schema.Struct({
+  eventId: EventIdParam,
+  member: NameParam,
+  response: EventRsvp.RsvpResponse,
+  message: Schema.optionalKey(Schema.String.pipe(Schema.check(Schema.isMaxLength(500)))),
+});
+
+const SetMemberRsvpPayload = Schema.Struct({
+  eventId: Event.EventId,
+  memberId: TeamMember.TeamMemberId,
+  response: EventRsvp.RsvpResponse,
+  message: Schema.optionalKey(Schema.String),
+});
+type SetMemberRsvpPayload = Schema.Schema.Type<typeof SetMemberRsvpPayload>;
+
+const memberRsvpRefusal = (e: { readonly _tag: string }): string => {
+  switch (e._tag) {
+    case 'EventRsvpForbidden':
+      return 'event: either the user cannot manage this event (it belongs to a group they are not in), or the member is not invited to it';
+    case 'EventRsvpMemberNotFound':
+      return 'member: not an active member of this team';
+    case 'EventRsvpMessageRequired':
+      return 'message: this answer needs a note (for "coming later" when they arrive, for "maybe" what it depends on); ask the user for it';
+    case 'EventRsvpProfileIncomplete':
+      return "profile: the team requires a complete profile and this member's is incomplete; they must complete it first";
+    default:
+      return rsvpRefusal(e);
+  }
+};
+
+const memberRsvpArgsFor = (p: SetMemberRsvpPayload, ctx: ConfirmContext) => ({
+  teamId: ctx.teamId,
+  actor: ctx.membership,
+  memberId: p.memberId,
+  eventId: p.eventId,
+  response: p.response,
+  message: Option.fromUndefinedOr(p.message),
+});
+
+const proposeSetMemberRsvp = (rawArgs: unknown, ctx: ToolContext) =>
+  Effect.Do.pipe(
+    Effect.bind('args', () => decodeArgs(SetMemberRsvpArgs, rawArgs)),
+    Effect.bind('member', ({ args }) => resolveMemberByName(ctx.teamId, args.member, false)),
+    Effect.let(
+      'payload',
+      ({ args, member }): SetMemberRsvpPayload => ({
+        eventId: args.eventId,
+        memberId: member.id,
+        response: args.response,
+        ...(args.message === undefined ? {} : { message: args.message }),
+      }),
+    ),
+    Effect.bind('checked', ({ payload }) =>
+      checkMemberRsvpSettable(memberRsvpArgsFor(payload, ctx)).pipe(
+        Effect.map(({ checked }) => checked),
+        Effect.mapError(memberRsvpRefusal),
+      ),
+    ),
+    Effect.map(({ payload, member, checked }) => ({
+      payloadJson: JSON.stringify(Schema.encodeSync(SetMemberRsvpPayload)(payload)),
+      summary: [
+        textField('event', eventLabel(checked.event)),
+        textField('member', member.name),
+        new AiChatApi.ProposalField({
+          key: 'response',
+          value: { type: 'rsvpResponse', value: payload.response },
+        }),
+        optionalTextField(
+          'message',
+          checked.effectiveClear
+            ? checked.note
+            : Option.orElse(checked.note, () =>
+                Option.flatMap(checked.priorRsvp, (r) => r.message),
+              ),
+        ),
+      ],
+    })),
+    Effect.result,
+  );
+
+const confirmSetMemberRsvp = (payloadJson: string, ctx: ConfirmContext) =>
+  decodeStoredPayload(SetMemberRsvpPayload, payloadJson).pipe(
+    Effect.flatMap((payload) => submitMemberRsvpTx(memberRsvpArgsFor(payload, ctx))),
+    Effect.map((submitted): ConfirmResult => ({ kind: 'rsvp_submitted', submitted })),
+    Effect.catchTags({
+      EventRsvpForbidden: () => Effect.fail(new AiChatApi.AiProposalActionForbidden()),
+      EventRsvpEventNotFound: (e) => stale(e._tag),
+      EventRsvpMemberNotFound: (e) => stale(e._tag),
+      RsvpDeadlinePassed: (e) => stale(e._tag),
+      EventRsvpMessageRequired: (e) => stale(e._tag),
+      EventRsvpProfileIncomplete: (e) => stale(e._tag),
+    }),
+  );
+
 // ---------------------------------------------------------------------------
 // Group and roster actions. Every write lives in `services/GroupRosterWrites.ts`, shared with the
 // HTTP handlers, and queues its Discord sync event in the same transaction — so confirm answers
@@ -2130,11 +2234,27 @@ export const ACTION_REGISTRY: Record<AiActionProposal.AiActionName, ActionDefini
       "Proposes setting the USER'S OWN answer to an event invitation, by the `eventId` from " +
       '`list_events`. `response` is yes, no, maybe or coming_later; `maybe` and `coming_later` ' +
       'need a `message` (when they arrive, or what it depends on) unless one is already saved. ' +
-      "It can never answer for another member: if the user asks to set someone else's RSVP, say " +
-      `that each member answers for themselves. ${EVENT_COMMON}`,
+      'It never answers for another member: for that use `propose_set_member_rsvp`. ' +
+      EVENT_COMMON,
     argsSchema: SetMyRsvpArgs,
     propose: proposeSetMyRsvp,
     confirm: confirmSetMyRsvp,
+  },
+  set_member_rsvp: {
+    // The permission the web's "set a member's answer" control and attendance confirmation use;
+    // the owner-group row gate is checked in `checkMemberRsvpSettable`.
+    permissions: ['event:edit'],
+    requiresDiscord: false,
+    description:
+      "Proposes setting ANOTHER member's answer to an event invitation (e.g. they told the coach " +
+      'in person), by the `eventId` from `list_events` and the member name `list_members` ' +
+      'shows. `response` is yes, no, maybe or coming_later; `maybe` and `coming_later` need a ' +
+      '`message` unless one is already saved. The member gets a Discord message saying who set ' +
+      "it. For the user's own answer use `propose_set_my_rsvp`. When a name matches several " +
+      `members, ask the user which one they mean. ${EVENT_COMMON}`,
+    argsSchema: SetMemberRsvpArgs,
+    propose: proposeSetMemberRsvp,
+    confirm: confirmSetMemberRsvp,
   },
   create_group: {
     permissions: ['group:manage'],
