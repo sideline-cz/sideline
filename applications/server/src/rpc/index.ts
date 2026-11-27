@@ -1,6 +1,7 @@
 import { Layer } from 'effect';
 import { AchievementRpcLive } from './achievement/index.js';
 import { ActivityRpcLive } from './activity/index.js';
+import { AssistantRpcLive } from './assistant/index.js';
 import { BotInfoRpcLive } from './botInfo/index.js';
 import { CarpoolsRpcLive } from './carpool/index.js';
 import { ChannelsRpcLive } from './channel/index.js';
@@ -41,4 +42,5 @@ export const SyncRpcsLive = Layer.mergeAll(
   RulesQuizRpcLive,
   MembershipRpcLive,
   DiscordReadRpcLive,
+  AssistantRpcLive,
 );

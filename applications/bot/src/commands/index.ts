@@ -1,4 +1,5 @@
 import * as Ix from 'dfx/Interactions/index';
+import { AssistantCommand } from '~/commands/assistant/index.js';
 import { CarpoolCommand } from '~/commands/carpool/index.js';
 import { CompleteCommand } from '~/commands/complete/index.js';
 import { EventCommand } from '~/commands/event/index.js';
@@ -30,4 +31,5 @@ export const commandBuilder = Ix.builder
   .add(LoginCommand)
   .add(CompleteCommand)
   .add(ReportCommand)
-  .add(MembershipCommand);
+  .add(MembershipCommand)
+  .add(AssistantCommand);

@@ -144,6 +144,17 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
     ['user_id'],
     drop('A saved dashboard arrangement serves only this person.'),
   ),
+  skip(
+    'discord_assistant_threads',
+    'users',
+    ['user_id'],
+    'Routing for a Discord thread opened with /assistant: which thread belongs to whom. It holds ' +
+      'no content — the conversation lives in Discord, the record holder — so exporting it would ' +
+      'list bare thread ids as "your data".',
+    drop(
+      "Exists only to route this person's assistant threads; nobody else's records reference it.",
+    ),
+  ),
   // Same shape as `bank_transactions` above: the only tie to a person is who uploaded it.
   skip(
     'expense_attachments',

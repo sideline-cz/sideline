@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-11-27 — New: chat with the AI assistant in Discord
+
+Type **/assistant** in your team's Discord server to open a thread where you chat with the same AI assistant as on the web, as your own Sideline account. Threads are private by default; choose `visibility: public` to make one visible to the channel (only your messages reach the assistant). Proposed changes show **Confirm** and **Discard** buttons, and nothing changes until you confirm. See [AI assistant](/guides/ai-assistant/#chat-with-it-in-discord).
+
 ## 2026-11-26 — New: the AI assistant can record payments, add expenses and change membership plans (with your confirmation)
 
 Ask the AI assistant to record a payment, add an expense or move a member to another membership plan, for example "Anna paid 1 500 Kč for the spring fee in cash today" or "Add a 1 200 Kč field rent expense for March". It shows a card with the exact amount, currency, member and date, and nothing is written until you accept it. What you accept is exactly what is recorded.
