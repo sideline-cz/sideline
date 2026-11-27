@@ -527,20 +527,20 @@ export const validateJsonSchema = (
 // system message and the model answers with one JSON object (enforced via json_schema).
 // ---------------------------------------------------------------------------
 
-const TOOL_REPLY_JSON_SCHEMA = {
-  type: 'object',
-  anyOf: [
-    objectSchema({ type: { type: 'string', enum: ['answer'] }, content: STRING }),
-    objectSchema({
-      type: { type: 'string', enum: ['tool_calls'] },
-      calls: {
-        type: 'array',
-        minItems: 1,
-        items: objectSchema({ name: STRING, arguments: { type: 'object' } }),
-      },
-    }),
-  ],
-};
+// One flat object, not an anyOf of the two shapes: ai-sessions hands the schema to Claude as a
+// tool input_schema, and the Anthropic API rejects oneOf/allOf/anyOf at the top level (400).
+// ToolReply below still enforces which fields each `type` needs.
+const TOOL_REPLY_JSON_SCHEMA = objectSchema(
+  {
+    type: { type: 'string', enum: ['answer', 'tool_calls'] },
+    content: STRING,
+    calls: {
+      type: 'array',
+      items: objectSchema({ name: STRING, arguments: { type: 'object' } }),
+    },
+  },
+  ['type'],
+);
 
 const ToolReply = Schema.Union([
   Schema.Struct({ type: Schema.Literal('answer'), content: Schema.String }),

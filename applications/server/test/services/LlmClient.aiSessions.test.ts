@@ -249,6 +249,13 @@ describe('LlmClient.chatWithTools — tool calling emulated over json_schema', (
       expect(firstBody).not.toHaveProperty('tools');
       expect(firstBody).not.toHaveProperty('tool_choice');
       expect(firstBody?.response_format).toMatchObject({ type: 'json_schema' });
+      // ai-sessions hands this schema to Claude as a tool input_schema, and the Anthropic API
+      // rejects oneOf/allOf/anyOf at its top level (stable 502'd every assistant turn on it).
+      const replySchema = (
+        firstBody?.response_format as { json_schema?: { schema?: object } } | undefined
+      )?.json_schema?.schema;
+      expect(replySchema).toMatchObject({ type: 'object' });
+      for (const key of ['oneOf', 'allOf', 'anyOf']) expect(replySchema).not.toHaveProperty(key);
       // The tool definitions travel in a system message.
       expect(systemText(0)).toContain('list_events: List upcoming events.');
       expect(systemText(0)).toContain(JSON.stringify(LIST_EVENTS.parameters));
