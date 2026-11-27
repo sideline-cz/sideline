@@ -1,4 +1,5 @@
 import * as Ix from 'dfx/Interactions/index';
+import { AssistantConfirmButton, AssistantRejectButton } from './assistant.js';
 import { AttendeesButton, AttendeesPageButton } from './attendees.js';
 import {
   CarpoolAddButtonReg,
@@ -119,4 +120,6 @@ export const interactionBuilder = Ix.builder
   .add(ReportModal)
   .add(MembershipOpenButtonReg)
   .add(MembershipMineButtonReg)
-  .add(MembershipPlanButtonReg);
+  .add(MembershipPlanButtonReg)
+  .add(AssistantConfirmButton)
+  .add(AssistantRejectButton);

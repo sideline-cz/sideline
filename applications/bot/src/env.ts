@@ -16,7 +16,11 @@ export const env = createEnv({
         () =>
           Discord.GatewayIntentBits.Guilds |
           Discord.GatewayIntentBits.GuildMembers |
-          Discord.GatewayIntentBits.GuildInvites,
+          Discord.GatewayIntentBits.GuildInvites |
+          // `/assistant` threads read the owner's messages. MessageContent is privileged: it
+          // must also be enabled for the app in the Discord developer portal.
+          Discord.GatewayIntentBits.GuildMessages |
+          Discord.GatewayIntentBits.MessageContent,
       ),
       Schema.toStandardSchemaV1,
     ),

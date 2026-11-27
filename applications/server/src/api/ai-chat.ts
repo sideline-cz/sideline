@@ -16,63 +16,19 @@
  * `AiActionApplied`.
  */
 import { AiChatApi, Auth, EventApi, type Team } from '@sideline/domain';
-import { DateTime, Effect, Option, type ServiceMap } from 'effect';
+import { Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
-import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
-import { markPersonalMessagesDirtyBestEffort } from '~/api/event.js';
-import { requireMembership, requirePermission } from '~/api/permissions.js';
-import {
-  AiActionProposalsRepository,
-  type LockedProposalRow,
-} from '~/repositories/AiActionProposalsRepository.js';
-import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
-import { type EventRow, EventsRepository } from '~/repositories/EventsRepository.js';
-import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { requireMembership } from '~/api/permissions.js';
+import type { EventRow } from '~/repositories/EventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
-import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { AiChatEnabledConfig } from '~/services/AiChatEnabledConfig.js';
-import { ACTION_REGISTRY, type ConfirmResult } from '~/services/ai/actions.js';
-import type { ToolContext } from '~/services/ai/toolTypes.js';
-import { makeCanSeeGroup } from '~/services/ai/toolTypes.js';
+import type { ConfirmResult } from '~/services/ai/actions.js';
+import { chatTurn, confirmTurn, rejectTurn } from '~/services/ai/turns.js';
 import type { ChatAgentResult } from '~/services/ChatAgent.js';
-import { ChatAgent } from '~/services/ChatAgent.js';
-import { ChatRateLimiter } from '~/services/ChatRateLimiter.js';
-import { emitEventCreatedSideEffects } from '~/services/EventCreation.js';
-import { emitEventCancelledSideEffects } from '~/services/EventWrites.js';
 import { LlmClient } from '~/services/LlmClient.js';
-import { emitRsvpSideEffects } from '~/services/RsvpWrites.js';
 
 const forbidden = new AiChatApi.AiChatForbidden();
-
-// `team_settings.timezone` has no CHECK constraint (same caveat as `dashboard.ts`'s
-// `rawTeamTimezone` and `resolveZoned` in `event.ts`) — validate before it ever reaches
-// `Intl.DateTimeFormat`, which throws a `RangeError` (a defect, not a typed failure) on an
-// invalid IANA id. A team with no `team_settings` row, or an invalid stored value, falls back to
-// the same `'Europe/Prague'` default the column itself uses.
-const DEFAULT_TEAM_TIMEZONE = 'Europe/Prague';
-
-const resolveTeamTimezone = (
-  teamSettings: ServiceMap.Service.Shape<typeof TeamSettingsRepository>,
-  teamId: Team.TeamId,
-): Effect.Effect<string> =>
-  teamSettings.findByTeamId(teamId).pipe(
-    Effect.map((row) => {
-      const raw = Option.match(row, {
-        onNone: () => DEFAULT_TEAM_TIMEZONE,
-        onSome: (r) => r.timezone,
-      });
-      return Option.isSome(DateTime.zoneMakeNamed(raw)) ? raw : DEFAULT_TEAM_TIMEZONE;
-    }),
-  );
-
-const degradedResult = (reason: AiChatApi.DegradedReason): ChatAgentResult => ({
-  answer: '',
-  generated: false,
-  degradedReason: Option.some(reason),
-  references: [],
-  proposal: Option.none(),
-});
 
 const toChatResponse = (result: ChatAgentResult): AiChatApi.ChatResponse =>
   new AiChatApi.ChatResponse({
@@ -130,233 +86,47 @@ const toConfirmedResponse = (result: ConfirmResult): ConfirmedResponse => {
   }
 };
 
-/** Step 5 of confirm: the best-effort work that must run AFTER commit (see `EventCreation.ts`). A
- *  Discord action and an attendance confirm have none: everything they write is in the
- *  transaction. */
-const afterCommit = (
-  teamId: Team.TeamId,
-  result: ConfirmResult,
-): Effect.Effect<
-  void,
-  never,
-  | Effect.Services<ReturnType<typeof emitEventCreatedSideEffects>>
-  | Effect.Services<ReturnType<typeof emitEventCancelledSideEffects>>
-  | Effect.Services<ReturnType<typeof emitRsvpSideEffects>>
-> => {
-  switch (result.kind) {
-    case 'event_created':
-      return emitEventCreatedSideEffects(teamId, result.event);
-    case 'event_updated':
-      return EventsRepository.asEffect().pipe(
-        Effect.flatMap((events) => markPersonalMessagesDirtyBestEffort(events, result.event.id)),
-      );
-    case 'event_cancelled':
-      return emitEventCancelledSideEffects(teamId, result.event);
-    case 'rsvp_submitted':
-      return emitRsvpSideEffects(teamId, result.submitted);
-    case 'discord_queued':
-    case 'attendance_confirmed':
-    case 'applied':
-      return Effect.void;
-  }
-};
-
 export const AiChatApiLive = HttpApiBuilder.group(Api, 'aiChat', (handlers) =>
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
-    Effect.bind('groups', () => GroupsRepository.asEffect()),
-    Effect.bind('teamSettings', () => TeamSettingsRepository.asEffect()),
-    Effect.bind('chatAgent', () => ChatAgent.asEffect()),
-    Effect.bind('rateLimiter', () => ChatRateLimiter.asEffect()),
     Effect.bind('llm', () => LlmClient.asEffect()),
     Effect.bind('aiChatEnabledConfig', () => AiChatEnabledConfig.asEffect()),
-    Effect.bind('proposals', () => AiActionProposalsRepository.asEffect()),
-    Effect.map(
-      ({
-        members,
-        groups,
-        teamSettings,
-        chatAgent,
-        rateLimiter,
-        llm,
-        aiChatEnabledConfig,
-        proposals,
-      }) =>
-        handlers
-          .handle('getCapabilities', ({ params: { teamId } }) =>
-            Effect.Do.pipe(
-              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
-              Effect.tap(({ currentUser }) =>
-                requireMembership(members, teamId, currentUser.id, forbidden),
-              ),
-              Effect.bind('aiChatEnabled', () => aiChatEnabledConfig.asEffect),
-              Effect.map(
-                ({ aiChatEnabled }) =>
-                  new AiChatApi.Capabilities({ enabled: aiChatEnabled && llm.configured }),
-              ),
-            ),
-          )
-          .handle('chat', ({ params: { teamId }, payload }) =>
-            Effect.Do.pipe(
-              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
-              Effect.bind('membership', ({ currentUser }) =>
-                requireMembership(members, teamId, currentUser.id, forbidden),
-              ),
-              Effect.bind('aiChatEnabled', () => aiChatEnabledConfig.asEffect),
-              // `docs/deployment.md`'s `AI_CHAT_ENABLED` row promises `chat` short-circuits
-              // "before consuming any rate-limit budget or calling the LLM" when no LLM is
-              // configured, not just when the kill switch is off — this guard must check BOTH,
-              // matching `getCapabilities` (`:86` above), which already does (CONCERN 3 fix: a
-              // previous version only checked `aiChatEnabled`, so an enabled-but-unconfigured
-              // server spent rate-limit budget on every call before `ChatAgent` degraded it).
-              Effect.flatMap(({ currentUser, membership, aiChatEnabled }) =>
-                aiChatEnabled && llm.configured
-                  ? rateLimiter.check(currentUser.id).pipe(
-                      Effect.flatMap(
-                        Option.match({
-                          onSome: (retryAfterSeconds) =>
-                            Effect.fail(new AiChatApi.AiChatRateLimited({ retryAfterSeconds })),
-                          onNone: () =>
-                            Effect.Do.pipe(
-                              Effect.bind('teamTimezone', () =>
-                                resolveTeamTimezone(teamSettings, teamId),
-                              ),
-                              Effect.let(
-                                'ctx',
-                                ({ teamTimezone }): ToolContext => ({
-                                  teamId,
-                                  membership,
-                                  teamTimezone,
-                                  canSeeGroup: makeCanSeeGroup(groups, membership.id),
-                                }),
-                              ),
-                              Effect.flatMap(({ ctx }) => chatAgent.respond(ctx, payload.messages)),
-                            ),
-                        }),
-                      ),
-                    )
-                  : Effect.succeed(degradedResult(aiChatEnabled ? 'not_configured' : 'disabled')),
-              ),
-              Effect.map(toChatResponse),
-            ),
-          )
-          .handle('confirmProposal', ({ params: { teamId, proposalId } }) =>
-            Effect.Do.pipe(
-              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
-              // 1. Membership.
-              Effect.bind('membership', ({ currentUser }) =>
-                requireMembership(members, teamId, currentUser.id, forbidden),
-              ),
-              // 1b. Kill switch — gated here too, not just on `chat`: `AI_CHAT_ENABLED=false`
-              // must stop AI WRITES immediately, not leave a 15-minute tail of confirmable
-              // proposals an operator flipping the switch expects to already be inert.
-              Effect.bind('aiChatEnabled', () => aiChatEnabledConfig.asEffect),
-              Effect.tap(({ aiChatEnabled }) =>
-                aiChatEnabled ? Effect.void : Effect.fail(forbidden),
-              ),
-              Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
-              // 2 (permission) / 3 (claim) / 4 (execute) all inside ONE transaction — see
-              // `AiActionProposalsRepository`'s doc comment for why the read must happen inside
-              // it too. Permission is re-checked BEFORE the claim so a caller who lost one of the
-              // action's permissions between propose and confirm gets 403 with the row still
-              // claimable, not consumed for nothing.
-              Effect.bind('result', ({ sql, membership, currentUser }) =>
-                sql
-                  .withTransaction(
-                    proposals
-                      .lockForConfirm({ id: proposalId, team_id: teamId, user_id: currentUser.id })
-                      .pipe(
-                        Effect.flatMap(
-                          (
-                            locked,
-                          ): Effect.Effect<
-                            LockedProposalRow,
-                            | AiChatApi.AiProposalNotFound
-                            | AiChatApi.AiProposalAlreadyUsed
-                            | AiChatApi.AiProposalExpired
-                          > =>
-                            Option.match(locked, {
-                              onNone: () => Effect.fail(new AiChatApi.AiProposalNotFound()),
-                              onSome: (row) =>
-                                row.consumed
-                                  ? Effect.fail(new AiChatApi.AiProposalAlreadyUsed())
-                                  : row.expired
-                                    ? Effect.fail(new AiChatApi.AiProposalExpired())
-                                    : Effect.succeed(row),
-                            }),
-                        ),
-                        Effect.tap((row) =>
-                          Effect.forEach(
-                            ACTION_REGISTRY[row.action].permissions,
-                            (permission) =>
-                              requirePermission(
-                                membership,
-                                permission,
-                                new AiChatApi.AiProposalActionForbidden(),
-                              ),
-                            { discard: true },
-                          ),
-                        ),
-                        Effect.tap(() =>
-                          proposals
-                            .claim({ id: proposalId, team_id: teamId, user_id: currentUser.id })
-                            .pipe(
-                              Effect.flatMap(
-                                Option.match({
-                                  // Unreachable: we hold the row lock from `lockForConfirm`
-                                  // above, so `consumed_at` cannot change under us and `now()`
-                                  // (== `transaction_timestamp()`) cannot advance mid-transaction.
-                                  onNone: () =>
-                                    Effect.die(
-                                      new Error(
-                                        'ai proposal claim matched nothing under FOR UPDATE — unreachable',
-                                      ),
-                                    ),
-                                  onSome: () => Effect.void,
-                                }),
-                              ),
-                            ),
-                        ),
-                        Effect.flatMap((row) =>
-                          ACTION_REGISTRY[row.action]
-                            .confirm(row.payload, { teamId, membership })
-                            .pipe(
-                              Effect.catchTag('EventForbidden', () =>
-                                Effect.fail(new AiChatApi.AiProposalActionForbidden()),
-                              ),
-                            ),
-                        ),
-                      ),
-                  )
-                  .pipe(catchSqlErrors),
-              ),
-              // 5. AFTER commit — never inside the transaction (see `afterCommit`).
-              Effect.tap(({ result }) => afterCommit(teamId, result)),
-              // 6. The view model.
-              Effect.map(({ result }) => toConfirmedResponse(result)),
-            ),
-          )
-          .handle('rejectProposal', ({ params: { teamId, proposalId } }) =>
-            // Not kill-switch gated — discarding a proposal must always work.
-            Effect.Do.pipe(
-              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
-              Effect.bind('membership', ({ currentUser }) =>
-                requireMembership(members, teamId, currentUser.id, forbidden),
-              ),
-              Effect.bind('deleted', ({ currentUser }) =>
-                proposals.deleteForUser({
-                  id: proposalId,
-                  team_id: teamId,
-                  user_id: currentUser.id,
-                }),
-              ),
-              Effect.flatMap(({ deleted }) =>
-                Option.isNone(deleted)
-                  ? Effect.fail(new AiChatApi.AiProposalNotFound())
-                  : Effect.void,
-              ),
+    Effect.map(({ members, llm, aiChatEnabledConfig }) => {
+      // Membership runs first and short-circuits: a non-member gets 403 before the kill switch
+      // or the rate limiter are even consulted.
+      const membershipOf = (teamId: Team.TeamId) =>
+        Auth.CurrentUserContext.asEffect().pipe(
+          Effect.flatMap((currentUser) =>
+            requireMembership(members, teamId, currentUser.id, forbidden),
+          ),
+        );
+      return handlers
+        .handle('getCapabilities', ({ params: { teamId } }) =>
+          membershipOf(teamId).pipe(
+            Effect.andThen(aiChatEnabledConfig.asEffect),
+            Effect.map(
+              (aiChatEnabled) =>
+                new AiChatApi.Capabilities({ enabled: aiChatEnabled && llm.configured }),
             ),
           ),
-    ),
+        )
+        .handle('chat', ({ params: { teamId }, payload }) =>
+          membershipOf(teamId).pipe(
+            Effect.flatMap((membership) => chatTurn(teamId, membership, payload.messages)),
+            Effect.map(toChatResponse),
+          ),
+        )
+        .handle('confirmProposal', ({ params: { teamId, proposalId } }) =>
+          membershipOf(teamId).pipe(
+            Effect.flatMap((membership) => confirmTurn(teamId, membership, proposalId)),
+            Effect.map(({ result }) => toConfirmedResponse(result)),
+          ),
+        )
+        .handle('rejectProposal', ({ params: { teamId, proposalId } }) =>
+          membershipOf(teamId).pipe(
+            Effect.flatMap((membership) => rejectTurn(teamId, membership, proposalId)),
+          ),
+        );
+    }),
   ),
 );

@@ -2,6 +2,7 @@ import type { DiscordREST } from 'dfx/DiscordREST';
 import { type DiscordGateway, runIx } from 'dfx/gateway';
 import { Cause, Effect, Metric, Schedule } from 'effect';
 import type { HttpClient } from 'effect/unstable/http';
+import { assistantMessages } from '~/commands/assistant/thread.js';
 import { commandBuilder } from '~/commands/index.js';
 import { eventHandlers } from '~/events/index.js';
 import { interactionBuilder } from '~/interactions/index.js';
@@ -193,6 +194,7 @@ export const program = Effect.Do.pipe(
         [
           ixProgram,
           ...events,
+          assistantMessages,
           Effect.all(
             [
               // Scheduled quiz: the cron only enqueues on the minute, so a 5s

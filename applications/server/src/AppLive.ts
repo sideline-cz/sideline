@@ -24,6 +24,7 @@ import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDivid
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DashboardLayoutsRepository } from '~/repositories/DashboardLayoutsRepository.js';
+import { DiscordAssistantThreadsRepository } from '~/repositories/DiscordAssistantThreadsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordLoginTokensRepository } from '~/repositories/DiscordLoginTokensRepository.js';
@@ -207,6 +208,7 @@ export const Repositories = Layer.mergeAll(
   SudoSessionsRepository.Default,
   AiActionProposalsRepository.Default,
   DiscordReadRequestsRepository.Default,
+  DiscordAssistantThreadsRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(

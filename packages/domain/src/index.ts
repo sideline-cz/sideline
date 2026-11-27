@@ -562,6 +562,14 @@ export * as AchievementRpcEvents from './rpc/achievement/AchievementRpcEvents.js
 export * as AchievementRpcGroup from './rpc/achievement/AchievementRpcGroup.js';
 export * as ActivityRpcGroup from './rpc/activity/ActivityRpcGroup.js';
 export * as ActivityRpcModels from './rpc/activity/ActivityRpcModels.js';
+export * as AssistantRpcGroup from './rpc/assistant/AssistantRpcGroup.js';
+/**
+ * The Discord face of the in-app AI assistant (`AiChatApi`). The bot never runs a second
+ * assistant: it relays a thread's history to the same `ChatAgent` turn the web calls, acting as
+ * the Discord user's linked Sideline account. Proposals are the web's own `AiChatApi.Proposal`,
+ * confirmed or rejected through the same server-side path.
+ */
+export * as AssistantRpcModels from './rpc/assistant/AssistantRpcModels.js';
 export * as BotInfoRpcGroup from './rpc/botInfo/BotInfoRpcGroup.js';
 export * as CarpoolRpcGroup from './rpc/carpool/CarpoolRpcGroup.js';
 export * as CarpoolRpcModels from './rpc/carpool/CarpoolRpcModels.js';

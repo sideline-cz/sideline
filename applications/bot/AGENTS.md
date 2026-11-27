@@ -17,7 +17,7 @@ src/
 ├── env.ts           — Environment config (token, intents, health port)
 ├── run.ts           — Runtime entrypoint (config, logging, NodeRuntime)
 ├── schemas.ts       — Dfx decode schemas (DfxTextChannel, DfxSyncableChannel, DfxGuildMember, DfxUser incl. global_name)
-├── commands/        — Slash command registry (event/create, event/list, event/refresh, training/*, carpool/*, makanicko/*, finance/*, poll, info, summon, summarize, report)
+├── commands/        — Slash command registry (event/create, event/list, event/refresh, training/*, carpool/*, makanicko/*, finance/*, poll, info, summon, summarize, report, assistant)
 ├── interactions/    — Component interaction registry (buttons/selects/modals)
 ├── events/          — Gateway event handler registry (guild, member, invite, channel lifecycle)
 ├── services/        — Caches (OnboardingRoleCache, VerificationChannelCache), sync RPC client (SyncRpc), welcome helpers (InviteCache, inviteDiff, welcomeRenderer), and outbound non-Discord HTTP clients (githubIssue)
@@ -261,7 +261,7 @@ The bot attributes a joining member to a specific Sideline invite by diffing Dis
 
 ### Required Gateway Intent
 
-`DISCORD_GATEWAY_INTENTS` in `src/env.ts` defaults to `Guilds | GuildMembers | GuildInvites`. **`GuildInvites` is required** — without it, Discord does not dispatch `InviteCreate` / `InviteDelete` events and the in-memory invite cache cannot track use counts. Never remove this intent from the default.
+`DISCORD_GATEWAY_INTENTS` in `src/env.ts` defaults to `Guilds | GuildMembers | GuildInvites | GuildMessages | MessageContent`. `GuildMessages` + `MessageContent` exist only for `/assistant` threads (`src/commands/assistant/thread.ts` reads the thread owner's messages); `MessageContent` is privileged and must also be switched on for the app in the Discord developer portal, or the gateway refuses to connect. **`GuildInvites` is required** — without it, Discord does not dispatch `InviteCreate` / `InviteDelete` events and the in-memory invite cache cannot track use counts. Never remove this intent from the default.
 
 ### Components
 
