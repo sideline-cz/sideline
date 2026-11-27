@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.29.0
+
+### 🚀 Features
+- chat with the AI assistant in a Discord thread via /assistant (#848)
+
 ## 0.28.1
 
 ### 🐛 Fixes
