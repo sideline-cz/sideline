@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.91.1
+
+### 🐛 Fixes
+- flatten the assistant's json_schema reply (no top-level anyOf) (#850)
+
 ## 0.91.0
 
 ### 🚀 Features
