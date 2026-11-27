@@ -1898,7 +1898,10 @@ const confirmAssignPlan = (payloadJson: string, ctx: ConfirmContext) =>
     Effect.catchTags({
       MembershipPlanForbidden: financeConfirmFailure,
       MembershipPlanNotFound: financeConfirmFailure,
-      MembershipPlanCurrencyHasPayments: financeConfirmFailure,
+      // Not drift: the move can never apply until the old plan's payments are settled. Same
+      // refusal (and the same copy) the web's plan move shows.
+      MembershipPlanCurrencyHasPayments: () =>
+        Effect.fail(new AiChatApi.AiProposalPlanCurrencyHasPayments()),
     }),
   );
 
@@ -1995,7 +1998,10 @@ export interface ActionDefinition {
     ctx: { readonly teamId: Team.TeamId; readonly membership: MembershipWithRole },
   ) => Effect.Effect<
     ConfirmResult,
-    EventApi.Forbidden | AiChatApi.AiProposalNotFound | AiChatApi.AiProposalActionForbidden,
+    | EventApi.Forbidden
+    | AiChatApi.AiProposalNotFound
+    | AiChatApi.AiProposalActionForbidden
+    | AiChatApi.AiProposalPlanCurrencyHasPayments,
     ConfirmR
   >;
 }

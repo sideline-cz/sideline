@@ -53,6 +53,7 @@ export const AssistantRpcGroup = RpcGroup.make(
       AiChatApi.AiProposalAlreadyUsed,
       AiChatApi.AiProposalExpired,
       AiChatApi.AiProposalActionForbidden,
+      AiChatApi.AiProposalPlanCurrencyHasPayments,
     ]),
   }),
   Rpc.make('RejectProposal', {

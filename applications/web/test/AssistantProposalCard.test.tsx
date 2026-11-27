@@ -74,6 +74,7 @@ const TR_MAP: Record<string, string> = {
   assistant_proposal_errorExpired: 'Error copy: expired',
   assistant_proposal_errorForbidden: 'Error copy: forbidden',
   assistant_proposal_errorGeneric: 'Error copy: generic',
+  membershipPlan_currencyHasPayments: 'Error copy: plan currency has payments',
   // Discord write actions (plan .dev-loop/plan.md Task 7)
   assistant_proposal_field_channel: 'Channel label',
   assistant_proposal_field_group: 'Group label',
@@ -472,6 +473,13 @@ describe('AssistantProposalCard', () => {
         name: 'forbidden',
         error: new AiChatApi.AiProposalActionForbidden(),
         messageKey: 'assistant_proposal_errorForbidden',
+        hidesFieldList: false,
+        keepsConfirm: false,
+      },
+      {
+        name: 'planCurrencyHasPayments',
+        error: new AiChatApi.AiProposalPlanCurrencyHasPayments(),
+        messageKey: 'membershipPlan_currencyHasPayments',
         hidesFieldList: false,
         keepsConfirm: false,
       },

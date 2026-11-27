@@ -30,6 +30,8 @@ const proposalErrorText = (tag: string, locale: Locale): { text: string; termina
       return { text: m.assistant_proposal_errorAlreadyUsed({}, { locale }), terminal: true };
     case 'AiProposalExpired':
       return { text: m.assistant_proposal_errorExpired({}, { locale }), terminal: true };
+    case 'AiProposalPlanCurrencyHasPayments':
+      return { text: m.membershipPlan_currencyHasPayments({}, { locale }), terminal: true };
     case 'AiProposalActionForbidden':
     case 'AiChatForbidden':
     case 'AssistantNotMember':

@@ -295,6 +295,13 @@ export class AiProposalActionForbidden extends Schema.TaggedErrorClass<AiProposa
   {},
 ) {}
 
+// A plan move refused by `team_members_plan_currency_guard_trg`: the member already has payments
+// on their current plan in another currency. Its own tag so the user sees why, not "stale".
+export class AiProposalPlanCurrencyHasPayments extends Schema.TaggedErrorClass<AiProposalPlanCurrencyHasPayments>()(
+  'AiProposalPlanCurrencyHasPayments',
+  {},
+) {}
+
 export class AiChatApiGroup extends HttpApiGroup.make('aiChat')
   .add(
     HttpApiEndpoint.get('getCapabilities', '/teams/:teamId/ai/capabilities', {
@@ -330,6 +337,7 @@ export class AiChatApiGroup extends HttpApiGroup.make('aiChat')
         AiProposalAlreadyUsed.pipe(HttpApiSchema.status(409)),
         AiProposalExpired.pipe(HttpApiSchema.status(410)),
         AiProposalActionForbidden.pipe(HttpApiSchema.status(403)),
+        AiProposalPlanCurrencyHasPayments.pipe(HttpApiSchema.status(409)),
       ],
       params: { teamId: TeamId, proposalId: AiActionProposalId },
     }).middleware(AuthMiddleware),
